@@ -1923,16 +1923,22 @@ logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
 ### Task-list facets
 
-`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice to `/tasks` Sort and
-Group controls. `getValues({ taskId, workspaceId })` synchronously returns `{ value, label,
-color? }[]`; `subscribe` invalidates the loaded page. Return each value at most once for a task,
-and keep one label and color for a value across all tasks. Facet sorting uses the first value label
-after a case-insensitive alphabetical comparison. Facets are page-local: no facet selection is
-persisted or sent to the backend. The host catches callback errors and revokes registrations and
-active subscriptions when the owning plugin unloads. A task with multiple values appears in each
-matching group; a task without a value appears in the host's `Ungrouped` section. Parent/child
-indentation is preserved only within a group both tasks match, so a matching child without its
-parent is rendered at that group's root.
+`registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice after the built-in
+`/tasks` Sort and Group options. `getValues(context: TaskListFacetContext)` synchronously returns
+`{ value, label, color? }[]` for `{ taskId, workspaceId? }`; `subscribe` invalidates the loaded
+page. The facet label and value labels come from the plugin verbatim. Return each value at most
+once for a task, and keep one label and color for a value across all tasks. An entry with an
+empty label is ignored. Facet sorting orders the loaded page by each task's alphabetically first
+value label, case-insensitively, with tasks without values last. A task with multiple values
+appears in each matching group; a task without a value appears in the trailing `Unassigned`
+section. Parent/child indentation is rebuilt within each section.
+
+The host stores a facet selection as `facet:<pluginId>:<facetId>` in the existing
+`tasks_list_sort` or `tasks_list_group` user preference and the `/tasks` query. A facet identifier
+is never sent to a task-list query; ordering and grouping by values remain page-local. If the
+plugin is unavailable, the list and controls temporarily use their built-in defaults while
+the saved selection remains intact and resumes when the plugin registers again. The host
+catches callback errors and revokes registrations and active subscriptions on unload.
 
 ## Registry internals (host side)
 
@@ -1944,8 +1950,8 @@ re-render when registrations change. Every registration records the owning
 `getSettingsRoutes()`, `getSlotComponents(slot)`, `getWsHandlers(action)`,
 `getPluginName(pluginId)` (display name recorded by `forPlugin(id, name)`, used
 for derived page-chrome titles), `getTaskPanels()` / `getTaskPanel(pluginId, id)`,
-and `getTaskMenuActions(group?)`. `unregisterWsHandler(pluginId, action, handler)`
-removes exactly one WS handler (used by `host.storage.subscribe`'s returned
+and `getTaskMenuActions(group?)`, and `getTaskListFacets()` (each facet with its owning plugin id).
+`unregisterWsHandler(pluginId, action, handler)` removes exactly one WS handler (used by `host.storage.subscribe`'s returned
 unsubscribe) without disturbing the plugin's other registrations.
 
 Before `initialize`, the loader records `ActivePlugin.repositoryProviderIds` for the

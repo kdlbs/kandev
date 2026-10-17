@@ -22,8 +22,8 @@
  * (get on mount, debounced set, subscribe to pick up a write from another
  * tab/surface), task-card indicator/tag components, generic task-row metadata,
  * and task-menu actions under the "edit" and "primary" groups. It registers a
- * task-list facet (registerTaskListFacet) whose values a spec drives through
- * `window.__e2eFacetValues`, so /tasks facet sort and grouping can be exercised
+ * task-list facet (registerTaskListFacet) whose values come from a workspace
+ * user-state document, so /tasks facet sort and grouping can be exercised
  * against real plugin registrations. It also
  * registers one composer action on all three composer slots
  * (chat-input-actions, task-create-input-actions, new-session-input-actions),
@@ -38,12 +38,16 @@
 (function () {
   var moduleCount = 0;
   var listeners = new Set();
-  // Task-list facet plumbing. Values come from `window.__e2eFacetValues`
-  // (taskId -> [{value,label,color}]) so a spec can drive multi-value
-  // membership, colors, and the untagged fallback against task ids the
-  // fixture cannot know ahead of time. `window.__e2eFacetNotify()` fires
-  // the subscription so the reactive re-read path is exercised for real.
+  // Synchronous facet reads use a per-workspace cache, hydrated and refreshed
+  // through host.storage. The browser hook is only for getValues failure tests.
+  var facetByWorkspace = new Map();
   var facetListeners = new Set();
+
+  function notifyFacetListeners() {
+    facetListeners.forEach(function (fn) {
+      fn();
+    });
+  }
 
   function emit() {
     listeners.forEach(function (fn) {
@@ -1712,21 +1716,45 @@
         Component: NotesPanel,
         mobileEnabled: true,
       });
+      function ensureFacetWorkspace(workspaceId) {
+        var cached = facetByWorkspace.get(workspaceId);
+        if (cached) return cached;
+        cached = { values: {}, generation: 0 };
+        facetByWorkspace.set(workspaceId, cached);
+        function refresh() {
+          var generation = ++cached.generation;
+          host.storage.get("workspace", workspaceId, "facet-values").then(
+            function (entry) {
+              if (generation !== cached.generation) return;
+              cached.values = entry ? entry.value : {};
+              notifyFacetListeners();
+            },
+            function () {
+              // Preserve the last available document if a refresh fails.
+            },
+          );
+        }
+        host.storage.subscribe(
+          { scope: "workspace", scopeId: workspaceId, key: "facet-values" },
+          refresh,
+        );
+        refresh();
+        return cached;
+      }
+
       registry.registerTaskListFacet({
         id: "fixture-tags",
         label: "Fixture tag",
         getValues: function (context) {
-          var byTask = window.__e2eFacetValues || {};
-          if (byTask.__throwFor === context.taskId) throw new Error("fixture facet boom");
-          return byTask[context.taskId] || [];
+          if (window.__e2eFacetValues?.__throwFor === context.taskId) {
+            throw new Error("fixture facet boom");
+          }
+          if (!context.workspaceId) return [];
+          return ensureFacetWorkspace(context.workspaceId).values[context.taskId] || [];
         },
         subscribe: function (listener) {
           facetListeners.add(listener);
-          window.__e2eFacetNotify = function () {
-            facetListeners.forEach(function (fn) {
-              fn();
-            });
-          };
+          window.__e2eFacetNotify = notifyFacetListeners;
           return function () {
             facetListeners.delete(listener);
           };

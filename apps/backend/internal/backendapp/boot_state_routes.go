@@ -82,7 +82,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	repositorySets := b.repositorySetsForState(ctx, activeWorkspaceID, state)
 	repositoryBranchPolicies := b.repositoryBranchPoliciesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, usermodels.TasksListApiSort(tasksListSort))
 	routeData := map[string]any{
 		"activeWorkspaceId":        activeWorkspaceID,
 		"workflows":                workflowsToDTOs(workflows),

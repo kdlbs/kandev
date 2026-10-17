@@ -25,6 +25,9 @@ export const TASKS_LIST_GROUP_OPTIONS = [
 
 export type TasksListSort = (typeof TASKS_LIST_SORT_OPTIONS)[number]["value"];
 export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
+export type TaskListFacetOption = `facet:${string}:${string}`;
+export type TasksListSortPreference = TasksListSort | TaskListFacetOption;
+export type TasksListGroupPreference = TasksListGroup | TaskListFacetOption;
 
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
 export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "workflow_step";
@@ -32,8 +35,28 @@ export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "workflow_step";
 // i18n-exempt: internal client-only option namespace, never rendered as copy.
 export const TASK_LIST_FACET_PREFIX = "facet:";
 
-export function isTaskListFacetOption(value: string): boolean {
-  return value.startsWith(TASK_LIST_FACET_PREFIX);
+const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+const FACET_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function encodeTaskListFacetOption(facet: {
+  pluginId: string;
+  id: string;
+}): TaskListFacetOption {
+  return `${TASK_LIST_FACET_PREFIX}${facet.pluginId}:${facet.id}`;
+}
+
+export function parseTaskListFacetOption(value: string): { pluginId: string; id: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith(TASK_LIST_FACET_PREFIX)) return null;
+  const segments = trimmed.slice(TASK_LIST_FACET_PREFIX.length).split(":");
+  const [pluginId, id] = segments;
+  return segments.length === 2 && PLUGIN_ID_PATTERN.test(pluginId) && FACET_ID_PATTERN.test(id)
+    ? { pluginId, id }
+    : null;
+}
+
+export function isTaskListFacetOption(value: string): value is TaskListFacetOption {
+  return parseTaskListFacetOption(value) !== null;
 }
 
 // The only source of display copy for these options; resolved at render against
@@ -54,16 +77,23 @@ export const GROUP_OPTION_LABEL_KEYS: Record<TasksListGroup, string> = {
   none: "tasks:groupByNone",
 };
 
-export function parseTasksListSort(value: string | null | undefined): TasksListSort {
-  return TASKS_LIST_SORT_OPTIONS.some((option) => option.value === value)
-    ? (value as TasksListSort)
-    : DEFAULT_TASKS_LIST_SORT;
+export function parseTasksListSort(value: string | null | undefined): TasksListSortPreference {
+  const trimmed = value?.trim() ?? "";
+  if (TASKS_LIST_SORT_OPTIONS.some((option) => option.value === trimmed))
+    return trimmed as TasksListSort;
+  return isTaskListFacetOption(trimmed) ? trimmed : DEFAULT_TASKS_LIST_SORT;
 }
 
-export function parseTasksListGroup(value: string | null | undefined): TasksListGroup {
-  return TASKS_LIST_GROUP_OPTIONS.some((option) => option.value === value)
-    ? (value as TasksListGroup)
-    : DEFAULT_TASKS_LIST_GROUP;
+export function parseTasksListGroup(value: string | null | undefined): TasksListGroupPreference {
+  const trimmed = value?.trim() ?? "";
+  if (TASKS_LIST_GROUP_OPTIONS.some((option) => option.value === trimmed))
+    return trimmed as TasksListGroup;
+  return isTaskListFacetOption(trimmed) ? trimmed : DEFAULT_TASKS_LIST_GROUP;
+}
+
+export function resolveTasksListApiSort(value: string): TasksListSort {
+  const requested = parseTasksListSort(value);
+  return isTaskListFacetOption(requested) ? DEFAULT_TASKS_LIST_SORT : requested;
 }
 
 export function sortTasksForList(tasks: Task[], sort: TasksListSort): Task[] {
@@ -116,9 +146,14 @@ export function sortTasksByFacet(
 }
 
 export function firstFacetLabel(values: readonly TaskListFacetValue[]): string | null {
-  return (
-    values
-      .map((value) => value.label)
-      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))[0] ?? null
-  );
+  let first: string | null = null;
+  for (const { label } of values) {
+    if (
+      label &&
+      (first === null || label.localeCompare(first, undefined, { sensitivity: "base" }) < 0)
+    ) {
+      first = label;
+    }
+  }
+  return first;
 }

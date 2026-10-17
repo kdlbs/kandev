@@ -66,7 +66,10 @@ export function resolveTaskFacetValues(
         resolved[`${facet.key}:${task.id}`] = Array.isArray(values)
           ? values.filter(
               (value) =>
-                value && typeof value.value === "string" && typeof value.label === "string",
+                value &&
+                typeof value.value === "string" &&
+                typeof value.label === "string" &&
+                value.label.length > 0,
             )
           : [];
       } catch (error) {

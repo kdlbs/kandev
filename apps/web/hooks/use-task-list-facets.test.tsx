@@ -58,6 +58,27 @@ describe("resolveTaskFacetValues", () => {
       [`facet:${PLUGIN_ID}:broken:task-1`]: [],
     });
   });
+
+  // AC-PLUGINS-TASKLIST-FACETS-002.8: discard only entries without labels.
+  it("keeps a usable sibling but treats all empty labels as unassigned", () => {
+    const resolved = resolveTaskFacetValues(
+      [
+        facet({
+          getValues: ({ taskId }) =>
+            taskId === "first"
+              ? [
+                  { value: "missing", label: "" },
+                  { value: "a", label: "Alpha" },
+                ]
+              : [{ value: "missing", label: "" }],
+        }),
+      ],
+      [{ id: "first" }, { id: "second" }] as never[],
+      WORKSPACE_ID,
+    );
+    expect(resolved[`facet:${PLUGIN_ID}:tags:first`]).toEqual([{ value: "a", label: "Alpha" }]);
+    expect(resolved[`facet:${PLUGIN_ID}:tags:second`]).toEqual([]);
+  });
 });
 
 describe("useTaskListFacets", () => {
