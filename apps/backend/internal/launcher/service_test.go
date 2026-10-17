@@ -418,9 +418,9 @@ func TestBuildJournalArgs(t *testing.T) {
 	}
 }
 
-func TestQuoteForUnitEscapesSystemdSpecials(t *testing.T) {
+func TestServiceEnvLinePreservesDollarsAndEscapesSpecifiers(t *testing.T) {
 	got := serviceEnvLine("KANDEV_HOME_DIR", `/tmp/$USER/kandev%data`)
-	want := `Environment="KANDEV_HOME_DIR=/tmp/$$USER/kandev%%data"`
+	want := `Environment="KANDEV_HOME_DIR=/tmp/$USER/kandev%%data"`
 	if got != want {
 		t.Fatalf("serviceEnvLine() = %q, want %q", got, want)
 	}
@@ -428,7 +428,7 @@ func TestQuoteForUnitEscapesSystemdSpecials(t *testing.T) {
 
 func TestServiceEnvLineAllowSpecifiersPreservesSystemdSpecifiers(t *testing.T) {
 	got := serviceEnvLineAllowSpecifiers("PATH", `%h/.local/bin:$PATH`)
-	want := `Environment="PATH=%h/.local/bin:$$PATH"`
+	want := `Environment="PATH=%h/.local/bin:$PATH"`
 	if got != want {
 		t.Fatalf("serviceEnvLineAllowSpecifiers() = %q, want %q", got, want)
 	}
