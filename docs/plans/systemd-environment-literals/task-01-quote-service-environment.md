@@ -251,3 +251,14 @@ artifacts but selected zero tests and exited 1; the corrected exact-one discover
 and successful run reused those artifacts through `--no-build`. Scoped ESLint
 and Prettier checks joined exit 0. The app tsconfig excludes E2E, so its typecheck
 would not validate this spec. The already-green launcher suite was not replayed.
+
+ROOT later released actual conflict integration with main `9c24ab73ec`, whose
+independent pagination wait provides the same synchronization. Ordinary merge
+returned the expected conflict exit 1 for this test alone. Resolution selected
+the exact upstream test, preserving all assertions and unrelated upstream work.
+Because main changed production backend/web files, one fresh canonical guarded
+build preceded the focused case: one Chromium test, one worker, zero retries,
+7.3s, native 53861 joined exit 0 with its owned group absent. The test now matches
+main, so the final PR difference returns to the seven service/design/plan files.
+No launcher-suite or native-service replay was needed. Hosted checks on the
+integrated published head remain a delivery requirement.

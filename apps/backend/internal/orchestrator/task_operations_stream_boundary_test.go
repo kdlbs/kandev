@@ -96,7 +96,7 @@ func TestPromptTask_QueuedStreamBoundaryDoesNotDeadlock(t *testing.T) {
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
@@ -209,7 +209,7 @@ func TestPromptTask_PreparedDispatchRevalidatesOwnership(t *testing.T) {
 		fixture.agent.prepare = func(context.Context) error {
 			guard := fixture.svc.lockCancelInFlightGuard(fixture.sessionID)
 			defer guard.release()
-			successor = fixture.svc.markQueuedDispatchInFlightWithIdentityLocked(
+			successor = fixture.svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(),
 				fixture.identity, fixture.queued.ID+"-successor", nil,
 			)
 			activeTurn, err := fixture.turnService.GetActiveTurn(context.Background(), fixture.sessionID)
@@ -394,7 +394,7 @@ func newPreparedPromptFixture(t *testing.T, suffix string, alternateSession bool
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}

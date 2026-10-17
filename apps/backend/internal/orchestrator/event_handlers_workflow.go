@@ -5640,7 +5640,9 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return queueDrainSkipped
+	}
 	defer lock.Unlock()
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("skipping drain while cancellation is in progress",
@@ -5909,9 +5911,9 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 	// Send Now before it performs any visible prompt side effects.
 	var reservation *queuedDispatchReservation
 	if identity.SessionIncarnationID != "" {
-		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queuedMsg.ID, queuedMsg)
 	} else {
-		reservation = s.markQueuedDispatchInFlightWithSourceLocked(identity.SessionID, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, identity.SessionID, queuedMsg.ID, queuedMsg)
 	}
 	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
 		go s.executeQueuedPassthroughMessageWithReservation(identity, queuedMsg, reservation)
@@ -5957,7 +5959,7 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 		return false
 	}
-	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, queuedMsg.ID, queuedMsg)
 	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }

@@ -185,6 +185,14 @@ ESLint and Prettier checks. All commands joined with known owned groups absent.
 Task 01 records the precise scope, initial zero-test selector correction, and
 evidence limits. No product pagination or service code changed in this follow-up.
 
+Actual conflict integration: main advanced to `9c24ab73ec`, independently adding
+equivalent pagination synchronization. ROOT authorized an ordinary merge. Its
+expected exit 1 identified only the pagination spec; resolution retained the
+exact upstream version and all assertions. Upstream backend/web changes required
+a fresh guarded build. The same single-worker, zero-retry Chromium case passed
+(7.3s); native 53861 joined exit 0, owned group absent. Prior-head required CI
+passed; the integrated head requires fresh hosted checks after publication.
+
 ## Risks
 
 - A global dollar change would break the command context; the command control
