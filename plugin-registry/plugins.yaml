@@ -71,6 +71,13 @@ plugins:
   - id: nulab-backlog
     repo: khuongdo/kandev-plugin-nulab-backlog
     categories: [connector]
+  - id: step-history
+    repo: sharifndlovu123/kandev-canvas-step-history
+    kind: canvas
+    categories: [tools]
+    previews:
+      - url: https://raw.githubusercontent.com/sharifndlovu123/kandev-canvas-step-history/main/preview.png
+        alt: Step History canvas showing the workflow path, per-step visit counts, and chronological transition history for a task
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
