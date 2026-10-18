@@ -363,6 +363,87 @@ describe("resolveCustomLayoutPinnedWidths", () => {
   });
 });
 
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6, AC-UI-TASK-LAYOUT-PROFILES-001.9 */
+describe("root orientation and horizontal width preferences", () => {
+  const columns = [
+    { id: "center", width: 300, groups: [] },
+    { id: "right", pinned: true, width: 400, groups: [] },
+  ];
+
+  it("resolves no horizontal pinned widths for a VERTICAL root", () => {
+    expect(resolveCustomLayoutPinnedWidths(columns, 1400, "VERTICAL").size).toBe(0);
+  });
+
+  it.each([["HORIZONTAL" as const], [undefined]])(
+    "scales the saved right width of a %s root",
+    (orientation) => {
+      expect(resolveCustomLayoutPinnedWidths(columns, 1400, orientation).get("right")).toBe(800);
+    },
+  );
+
+  it("never records a VERTICAL row extent as the manual right width", () => {
+    const updates = collectPinnedWidthUpdates([{ id: "center" }, { id: "right" }], () => 400, {
+      rightPanelsVisible: true,
+      rootOrientation: "VERTICAL",
+    });
+
+    expect(updates.size).toBe(0);
+  });
+
+  it("applies a VERTICAL custom layout with row extents and no pinned right width", () => {
+    const fromJSON = vi.fn();
+    const api = {
+      width: 1400,
+      height: 700,
+      fromJSON,
+      getPanel: () => undefined,
+      groups: [],
+      panels: [],
+      hasMaximizedGroup: () => false,
+      layout: vi.fn(),
+    } as unknown as DockviewApi;
+    useDockviewStore.setState({ api, pinnedWidths: new Map([["right", 450]]) });
+
+    useDockviewStore.getState().applyCustomLayout({
+      id: "layout-vertical",
+      name: "Vertical",
+      isDefault: false,
+      createdAt: "2026-07-22T00:00:00.000Z",
+      layout: {
+        rootOrientation: "VERTICAL",
+        columns: [
+          {
+            id: "center",
+            width: 300,
+            groups: [
+              { id: "group-center", panels: [{ id: "chat", component: "chat", title: "Chat" }] },
+            ],
+          },
+          {
+            id: "right",
+            pinned: true,
+            width: 400,
+            groups: [
+              {
+                id: "group-right-top",
+                panels: [{ id: "files", component: "files", title: "Files" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const serialized = fromJSON.mock.calls[0]?.[0] as {
+      grid: { orientation: string; root: { size: number; data: Array<{ size: number }> } };
+    };
+    expect(serialized.grid.orientation).toBe("VERTICAL");
+    expect(serialized.grid.root.data.map((row) => row.size)).toEqual([300, 400]);
+    expect(serialized.grid.root.size).toBe(1400);
+    expect(useDockviewStore.getState().pinnedWidths.has("right")).toBe(false);
+  });
+});
+
 describe("collectPinnedWidthUpdates", () => {
   const size = (i: number) => [350, 560, 560][i]; // sidebar, center, last
 

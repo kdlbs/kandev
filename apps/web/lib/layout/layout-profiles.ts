@@ -12,6 +12,13 @@ import {
 import type { SavedLayout } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 import { filterLayoutStateByComponents } from "@/lib/state/layout-manager/sanitize-serialized-layout";
+import {
+  PLUGIN_PANEL_COMPONENT,
+  PLUGIN_PANEL_PREFIX,
+  PLUGIN_PANEL_TAB_COMPONENT,
+  parsePluginPanelId,
+  pluginPanelId,
+} from "@/lib/state/layout-manager/plugin-panels";
 
 export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
 
@@ -260,6 +267,48 @@ function groupsIn(layout: LayoutState): Array<{ group: LayoutGroup; path: string
   });
 }
 
+/** A panel that claims to be a generic plugin panel by id, component, or tab component. */
+function isPluginIntendedPanel(panel: LayoutPanel): boolean {
+  return (
+    panel.id.startsWith(PLUGIN_PANEL_PREFIX) ||
+    panel.component === PLUGIN_PANEL_COMPONENT ||
+    panel.tabComponent === PLUGIN_PANEL_TAB_COMPONENT
+  );
+}
+
+/**
+ * Structural check of the generic plugin definition. Deliberately registry-free:
+ * a plugin that is loading, disabled, or uninstalled is still a valid portable
+ * reference.
+ */
+function isCanonicalPluginPanel(panel: LayoutPanel): boolean {
+  const parsed = parsePluginPanelId(panel.id);
+  if (!parsed || pluginPanelId(parsed.pluginId, parsed.panelKey) !== panel.id) return false;
+  return (
+    panel.component === PLUGIN_PANEL_COMPONENT &&
+    panel.tabComponent === PLUGIN_PANEL_TAB_COMPONENT &&
+    panel.params?.pluginId === parsed.pluginId &&
+    panel.params?.panelKey === parsed.panelKey
+  );
+}
+
+/** Runs on the raw layout: component filtering and Agent normalization would hide these. */
+function pluginDefinitionIssues(layout: LayoutState): ReusableLayoutIssue[] {
+  return groupsIn(layout).flatMap(({ group, path }) =>
+    group.panels.flatMap((current, panelIndex) =>
+      isPluginIntendedPanel(current) && !isCanonicalPluginPanel(current)
+        ? [
+            issue(
+              "invalid-panel",
+              `${path}.panels[${panelIndex}]`,
+              `Panel ${current.id} is not a valid plugin panel`,
+            ),
+          ]
+        : [],
+    ),
+  );
+}
+
 function validateGroup(
   group: LayoutGroup,
   path: string,
@@ -277,6 +326,10 @@ function validateGroup(
   }
   group.panels.forEach((current, panelIndex) => {
     const panelPath = `${path}.panels[${panelIndex}]`;
+    if (isCanonicalPluginPanel(current)) {
+      counts.set(current.id, (counts.get(current.id) ?? 0) + 1);
+      return;
+    }
     if (!REUSABLE_PANEL_ID_SET.has(current.id)) {
       issues.push(issue("unsupported-panel", panelPath, `Panel ${current.id} is not reusable`));
       return;
@@ -327,6 +380,9 @@ export function validateReusableLayout(layout: unknown): ReusableLayoutValidatio
       issues: [issue("duplicate-panel", "layout", "Panel chat can only appear once")],
     };
   }
+
+  const pluginIssues = pluginDefinitionIssues(layout);
+  if (pluginIssues.length > 0) return { valid: false, issues: pluginIssues };
 
   const normalized = normalizeReusableSessionPanels(
     // Drop panels whose component the renderer can no longer instantiate before

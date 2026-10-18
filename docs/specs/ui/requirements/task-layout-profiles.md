@@ -40,8 +40,10 @@ own registration, availability, and runtime lifecycle.
 
 ### REQ-UI-TASK-LAYOUT-PROFILES-002: Plugin Panels in Reusable Profiles
 
-**Contract status:** Draft extension; not yet accepted or implemented. The
-active baseline REQ-UI-TASK-LAYOUT-PROFILES-001 is unchanged by this proposal.
+**Contract status:** Draft extension; implemented and verified under
+[the plugin layout-profile plan](../../../plans/plugin-task-layout-profiles/plan.md),
+with contract acceptance still pending. The active baseline
+REQ-UI-TASK-LAYOUT-PROFILES-001 is unchanged by this extension.
 
 **Intent:** Users can include installed plugin task panels in the same reusable
 profiles they use to arrange the desktop task workbench, without configuring a

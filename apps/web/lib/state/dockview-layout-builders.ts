@@ -15,7 +15,8 @@ import {
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
-import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
+import { resolveEnvRightWidth } from "./layout-manager/right-width";
+import { clearHorizontalPinnedTargets, getRootOrientation } from "./layout-manager/applier";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
 
@@ -68,16 +69,21 @@ export function applyLayoutFixups(
   /** Retained for callers restoring legacy layouts; manual width is authoritative. */
   _savedRightWidth?: number,
   manualRightWidth?: number | null,
+  /** Environment whose build owns a reusable right width; omitted for restores. */
+  ownerEnvId?: string | null,
 ): LayoutGroupIds {
   const sv = getRootSplitviewImpl(api);
-  captureSidebarTarget(api, sv);
+  // Sidebar/right targets are horizontal widths; a vertical root's children are rows.
+  const horizontalRoot = getRootOrientation(api) !== "VERTICAL";
+  if (horizontalRoot) captureSidebarTarget(api, sv);
+  else clearHorizontalPinnedTargets();
 
   const oldChanges = api.getPanel("diff-files");
   if (oldChanges) oldChanges.api.setTitle(t("task:changes"));
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle(t("common:files"));
 
-  captureRightTarget(api, sv, manualRightWidth);
+  if (horizontalRoot) captureRightTarget(api, sv, manualRightWidth, ownerEnvId);
 
   logFixupsCapture(api, sv);
 
@@ -141,8 +147,12 @@ function resolveRightTarget(
   cap: number,
   totalWidth: number | undefined,
   manualRightWidth: number | null | undefined,
+  ownerEnvId: string | null | undefined,
 ): number {
-  return Math.min(resolveResponsiveRightWidth(totalWidth, 0, manualRightWidth ?? null, cap), cap);
+  return Math.min(
+    resolveEnvRightWidth(totalWidth, 0, manualRightWidth ?? null, ownerEnvId, cap),
+    cap,
+  );
 }
 
 /** Constrain the default layout's right column groups and record the side
@@ -178,7 +188,8 @@ function captureRightTarget(
   api: DockviewApi,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sv: any,
-  manualRightWidth?: number | null,
+  manualRightWidth: number | null | undefined,
+  ownerEnvId: string | null | undefined,
 ): void {
   // Constrain the default preset's right column groups (stable well-known IDs).
   // Other presets' side columns aren't pinned and carry no max-width cap.
@@ -199,7 +210,7 @@ function captureRightTarget(
   // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
   // hidden) layouts since the right column is always at sv.length-1.
   if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
-    const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth);
+    const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth, ownerEnvId);
     const cur = sv.getViewSize(idx);
     if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
       try {

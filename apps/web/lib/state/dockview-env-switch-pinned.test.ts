@@ -33,6 +33,7 @@ vi.mock("./layout-manager", () => {
     savedLayoutMatchesLive: vi.fn(() => false),
     layoutStructuresMatch: vi.fn(() => true),
     getRootSplitview: vi.fn(),
+    getRootOrientation: vi.fn(() => "HORIZONTAL"),
     // Distinct per-column defaults so we can prove the sidebar branch ignores
     // saved per-env sizes (it routes through getPinnedWidth, which honors the
     // global pref) while the right branch keeps using saved sizes.

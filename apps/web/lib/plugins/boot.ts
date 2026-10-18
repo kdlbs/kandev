@@ -7,7 +7,13 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { BootPayload } from "@/src/boot-payload";
 import { buildHostApi } from "./host-api";
-import { installPluginGlobal, loadPlugins } from "./host";
+import { installPluginGlobal, loadPlugins, unloadPlugin } from "./host";
+
+type PluginE2EWindow = Window & {
+  __KANDEV_E2E_EXPOSE_STORE__?: boolean;
+  /** Present only when the E2E harness opted in; drives lifecycle changes without leaving the page. */
+  __KANDEV_E2E_PLUGIN_HOST__?: { unloadPlugin: typeof unloadPlugin };
+};
 
 /** Store instances that have already had `loadPlugins` triggered — boot is a one-shot per store. */
 const bootedStores = new WeakSet<StoreApi<AppState>>();
@@ -30,5 +36,8 @@ export function bootPlugins(
   bootedStores.add(storeApi);
 
   installPluginGlobal();
+  const e2eWindow = window as PluginE2EWindow;
+  if (e2eWindow.__KANDEV_E2E_EXPOSE_STORE__)
+    e2eWindow.__KANDEV_E2E_PLUGIN_HOST__ = { unloadPlugin };
   void loadPlugins(bootPayload.plugins, (pluginId) => buildHostApi(pluginId, storeApi));
 }

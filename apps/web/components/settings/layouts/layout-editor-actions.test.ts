@@ -1,5 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import {
+  disposeDockview,
+  mountDockview,
+} from "@/lib/state/layout-manager/dockview-test-host.test-helpers";
 import {
   addReusablePanel,
   mergeGroup,
@@ -143,5 +148,83 @@ describe("layout editor actions", () => {
     expect(resizeGroup(api, group.id, "height", 40)).toBe(true);
     expect(group.api.setSize).toHaveBeenNthCalledWith(1, { width: 120 });
     expect(group.api.setSize).toHaveBeenNthCalledWith(2, { height: 280 });
+  });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.3 */
+describe("addReusablePanel with plugin panels in a real Dockview", () => {
+  const PLUGIN_ID = "kandev-plugin-prompt-history";
+  const PANEL_ID = `plugin:${PLUGIN_ID}:prompt-history`;
+  let api: DockviewApi | null = null;
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    if (api) disposeDockview(api);
+    api = null;
+  });
+
+  function register(): void {
+    pluginRegistry
+      .forPlugin(PLUGIN_ID)
+      .registerTaskPanel({ id: "prompt-history", title: "Prompt History", Component: () => null });
+  }
+
+  /** Agent alone in the first group, Files alone in a second group to its right. */
+  function twoGroupEditor(): DockviewApi {
+    const dockview = mountDockview(1000, 600);
+    dockview.addPanel({ id: "chat", component: "chat", title: "Agent" });
+    dockview.addPanel({
+      id: "files",
+      component: "files",
+      title: "Files",
+      position: { direction: "right", referencePanel: "chat" },
+    });
+    api = dockview;
+    return dockview;
+  }
+
+  it("adds the registered panel once, in the selected split, with its generic identity", () => {
+    const dockview = twoGroupEditor();
+    register();
+    const filesGroup = dockview.getPanel("files")!.group;
+
+    expect(addReusablePanel(dockview, PANEL_ID, filesGroup.id)).toBe(true);
+    expect(addReusablePanel(dockview, PANEL_ID, filesGroup.id)).toBe(false);
+
+    const added = dockview.panels.filter((item) => item.id === PANEL_ID);
+    expect(added).toHaveLength(1);
+    expect(added[0].group.id).toBe(filesGroup.id);
+    expect(filesGroup.panels.map((item) => item.id)).toEqual(["files", PANEL_ID]);
+    expect(added[0].params).toEqual({ pluginId: PLUGIN_ID, panelKey: "prompt-history" });
+    expect(added[0].view.contentComponent).toBe("plugin-panel");
+    expect(added[0].view.tabComponent).toBe("pluginPanelTab");
+  });
+
+  it("falls back to the active group when no split is selected", () => {
+    const dockview = twoGroupEditor();
+    register();
+    const activeGroup = dockview.activeGroup!;
+
+    expect(addReusablePanel(dockview, PANEL_ID)).toBe(true);
+
+    expect(dockview.getPanel(PANEL_ID)!.group.id).toBe(activeGroup.id);
+  });
+
+  it("adds nothing when the registration is lost before the option is selected", () => {
+    const dockview = twoGroupEditor();
+    register();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+
+    expect(addReusablePanel(dockview, PANEL_ID)).toBe(false);
+
+    expect(dockview.panels.map((item) => item.id)).toEqual(["chat", "files"]);
+  });
+
+  it("adds nothing for an identity that is neither built-in nor registered", () => {
+    const dockview = twoGroupEditor();
+
+    expect(addReusablePanel(dockview, "not-a-panel")).toBe(false);
+
+    expect(dockview.panels.map((item) => item.id)).toEqual(["chat", "files"]);
   });
 });

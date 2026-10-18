@@ -216,6 +216,15 @@ Scope that transient geometry to the active environment/build; clear or replace
 it when switching source so a previous profile cannot leak into another task.
 No new portable setting, persistence tier, or plugin API is introduced.
 
+`layout-manager/pinned-targets.ts` owns this in-memory record as one
+`{ envId, ratio }` pair (resolved right width over the build's measured width),
+claimed by `performBuildDefault` and explicit custom-layout application, and
+released by an environment switch, preset application, or a VERTICAL root.
+`resolveEnvRightWidth` ranks manual width, owned ratio scaled to the current
+workbench, then the stock default, all under the runtime cap; final fixups
+(`applyLayoutFixups`, naming the owning environment) and the mounted automatic
+refresh both call it.
+
 Regression coverage uses actual Dockview, real default builders/fixups, both
 enforcement boundaries, and mounted automatic refresh. On a measured 1200px
 horizontal host, an in-cap saved center/right ratio of 960/240 with canonical

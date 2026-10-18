@@ -4,6 +4,8 @@ import {
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
+import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
+import { PROMPT_ID, PROMPT_TITLE, pluginPanel } from "../../helpers/plugin-layout";
 
 type SavedProfile = {
   id: string;
@@ -11,7 +13,7 @@ type SavedProfile = {
   is_default: boolean;
   layout: {
     columns: Array<{
-      groups: Array<{ panels: Array<{ id: string }> }>;
+      groups: Array<{ panels: Array<{ id: string; title?: string }> }>;
     }>;
   };
 };
@@ -174,5 +176,57 @@ test.describe("Mobile layout profiles", () => {
     await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toHaveCount(0);
     await layouts.addPanel("Todos", true);
     await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toBeVisible();
+  });
+
+  test("chooses a registered plugin panel with a separate touch tap and saves it", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(120_000);
+    try {
+      await installFixturePlugin(testPage);
+      const layouts = new LayoutSettingsPage(testPage);
+      await layouts.openFromSettingsIndex();
+      const trigger = testPage.getByTestId("layout-editor-add-panel").getByRole("button", {
+        name: "Add panel",
+      });
+
+      await trigger.tap();
+
+      const row = testPage.getByRole("menuitem", { name: PROMPT_TITLE, exact: true });
+      await expect(row).toBeVisible();
+      await testPage.evaluate(() =>
+        Promise.all(
+          document
+            .getAnimations()
+            .filter((animation) =>
+              Number.isFinite(animation.effect?.getComputedTiming().iterations ?? 1),
+            )
+            .map((animation) => animation.finished.catch(() => undefined)),
+        ),
+      );
+      expect((await row.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toHaveCount(0);
+      await assertNoDocumentHorizontalOverflow(testPage, "plugin Add panel menu");
+
+      await row.tap();
+      await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+      await layouts.save();
+
+      await layouts.openFromSettingsIndex();
+      await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+      const profile = (await apiClient.getUserSettings()).settings.saved_layouts.find(
+        (candidate) => candidate.id === "layout-override-default",
+      );
+      const savedPlugin = (profile as unknown as SavedProfile).layout.columns
+        .flatMap((column) => column.groups)
+        .flatMap((group) => group.panels)
+        .find((panel) => panel.id === PROMPT_ID);
+      expect(savedPlugin).toEqual(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+      await assertNoDocumentHorizontalOverflow(testPage, "plugin layout profile");
+      await assertNoDescendantOverflowsRight(layouts.root, "plugin layout settings");
+    } finally {
+      await uninstallFixturePlugin(apiClient);
+    }
   });
 });

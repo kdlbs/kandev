@@ -76,6 +76,36 @@ export class LayoutSettingsPage {
     await button.click();
   }
 
+  /** Save through the floating bar's primary button, independent of the active locale. */
+  async saveLocalized(): Promise<void> {
+    const response = this.page.waitForResponse(
+      (candidate) =>
+        candidate.url().includes("/api/v1/user/settings") &&
+        candidate.request().method() === "PATCH",
+    );
+    await this.page
+      .getByTestId("settings-floating-save-surface")
+      .getByRole("button")
+      .last()
+      .click();
+    expect((await response).ok()).toBe(true);
+  }
+
+  /** The Add panel menu rows, in order. */
+  async addPanelChoices(touch = false): Promise<string[]> {
+    const trigger = this.page.getByTestId("layout-editor-add-panel").getByRole("button", {
+      name: "Add panel",
+    });
+    if (touch) await trigger.tap();
+    else await trigger.click();
+    const rows = this.page.getByRole("menu").getByRole("menuitem");
+    await expect(rows.first()).toBeVisible();
+    const names = await rows.allTextContents();
+    await this.page.keyboard.press("Escape");
+    await expect(this.page.getByRole("menu")).toHaveCount(0);
+    return names;
+  }
+
   async save(): Promise<void> {
     const response = this.page.waitForResponse(
       (candidate) =>

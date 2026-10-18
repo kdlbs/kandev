@@ -1,6 +1,6 @@
 ---
 created: 2026-10-10
-status: draft
+status: implemented
 requirements:
   - REQ-UI-TASK-LAYOUT-PROFILES-001
   - REQ-UI-TASK-LAYOUT-PROFILES-002
@@ -21,9 +21,8 @@ eligibility first, because a menu-only change would leave valid additions
 rejected by the profile validator. Follow with the complete settings/runtime
 slice, including disposable real Prompt History browser proof.
 
-This is the design-package checkpoint, not implementation authorization.
-Production and permanent test files are unchanged. Work orders are pending;
-execute sequentially only after a later explicit implementation request.
+Implemented 2026-10-18 after the task owner's explicit implementation request;
+both work orders are done and carry their own RED/GREEN and gate results.
 
 ## Scope
 
@@ -340,8 +339,8 @@ is required because ownership/identity/lifecycle/storage remain unchanged.
 
 ## Work orders
 
-- [ ] [Task 01: Registry-independent profile eligibility](task-01-plugin-profile-validation.md)
-- [ ] [Task 02: Plugin add/save/reload/apply flow](task-02-plugin-layout-editor-flow.md)
+- [x] [Task 01: Registry-independent profile eligibility](task-01-plugin-profile-validation.md)
+- [x] [Task 02: Plugin add/save/reload/apply flow](task-02-plugin-layout-editor-flow.md)
 
 Task 02 depends on Task 01. The design handoff required a later explicit
 implementation request before delegation; the task owner has now authorized an
@@ -350,8 +349,16 @@ itself authorize production edits or implementation workers.
 
 ## Verification results
 
-Implementation checks and real-package smoke: pending. Do not infer GREEN from
-the prior user investigation or completed companion plans.
+Implementation results (2026-10-18): both work orders passed their acceptance
+checks; exact RED/GREEN, commands, counts and limits are in
+[Task 01](task-01-plugin-profile-validation.md#results) and
+[Task 02](task-02-plugin-layout-editor-flow.md#results). Summary: focused unit and
+integration suites pass (232 + 53 tests in the work-order sets), desktop
+Playwright 24 passed and mobile 6 passed, and the real Prompt History 1.4.1 package
+(SHA-256 `12f0ba12...c5d`) was exercised on a disposable host for add, save, reload,
+apply, disable/re-enable and a phone menu. `make test` is not green in this
+environment (shared Go cache volume full, Node 22 and missing `unzip`/Docker
+bridge); see Task 02 for the classified failures. No contract acceptance is implied.
 
 Design-package evidence (2026-10-10):
 

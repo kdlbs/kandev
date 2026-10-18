@@ -22,7 +22,9 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from "dockview-react";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import { PANEL_REGISTRY, REUSABLE_PANEL_IDS } from "@/lib/state/layout-manager";
+import { pluginPanelId, resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
 import {
   addReusablePanel,
   mergeGroup,
@@ -160,6 +162,30 @@ function MenuTrigger({
   );
 }
 
+type AddPanelChoice = { id: string; label: string };
+
+/**
+ * Panels the editor can still add: missing built-ins, then every registered
+ * plugin task panel not already placed in any split. Task-context predicates
+ * (`visible`, `mobileEnabled`) are deliberately not consulted: a reusable
+ * profile has no task, and phone users configure desktop profiles.
+ */
+function useAddPanelChoices(api: DockviewApi | null): AddPanelChoice[] {
+  const registry = usePluginRegistry();
+  const builtIns = REUSABLE_PANEL_IDS.filter((id) => !api?.getPanel(id)).map((id) => ({
+    id: id as string,
+    label: PANEL_REGISTRY[id].title,
+  }));
+  const plugins = registry
+    .getTaskPanels()
+    .map((registration) => ({
+      id: pluginPanelId(registration.pluginId, registration.id),
+      label: resolveTaskPanelTitle(registration),
+    }))
+    .filter((choice) => !api?.getPanel(choice.id));
+  return [...builtIns, ...plugins];
+}
+
 function AddPanelAction({ state }: { state: ActionState }) {
   const { t } = useTranslation();
   // Radix opens DropdownMenu on pointerdown (to support native
@@ -172,8 +198,8 @@ function AddPanelAction({ state }: { state: ActionState }) {
   // `click` event (which fires after the whole tap gesture, once
   // nothing is left to misinterpret) avoids the race entirely.
   const [open, setOpen] = useState(false);
-  const missing = REUSABLE_PANEL_IDS.filter((id) => !state.api?.getPanel(id));
-  const disabled = !state.editable || !state.api || missing.length === 0;
+  const choices = useAddPanelChoices(state.api);
+  const disabled = !state.editable || !state.api || choices.length === 0;
   return (
     <div className="absolute bottom-2 left-2 z-20" data-testid="layout-editor-add-panel">
       <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -200,16 +226,16 @@ function AddPanelAction({ state }: { state: ActionState }) {
           <TooltipContent>{t("settings:addAMissingToolTabBeside")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start">
-          {missing.map((id) => (
+          {choices.map(({ id, label }) => (
             <DropdownMenuItem
               key={id}
               className="cursor-pointer"
-              title={t("settings:addTheTabToTheSelected", { panel: PANEL_REGISTRY[id].title })}
+              title={t("settings:addTheTabToTheSelected", { panel: label })}
               onSelect={() =>
                 state.perform(() => addReusablePanel(state.api!, id, state.selected?.group.id))
               }
             >
-              {PANEL_REGISTRY[id].title}
+              {label}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

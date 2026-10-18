@@ -2,7 +2,8 @@ import { type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
-import { getBuiltInLayoutProfile } from "@/lib/layout/layout-profiles";
+import { getBuiltInLayoutProfile, upsertBuiltInLayoutOverride } from "@/lib/layout/layout-profiles";
+import type { LayoutState } from "@/lib/state/layout-manager";
 import { defaultState } from "@/lib/state/default-state";
 import type { SavedLayout, UserSettingsResponse } from "@/lib/types/http";
 import { workspaceId } from "@/lib/types/ids";
@@ -12,6 +13,7 @@ const PROFILE_ID = "profile-one";
 const SECOND_PROFILE_ID = "profile-two";
 const ORIGINAL_NAME = "Original";
 const DRAFT_NAME = "Draft name";
+const SAVE_FAILED = "save failed";
 const LEGACY_LAYOUT = { columns: "old-format" };
 
 vi.mock("@/lib/api", () => ({
@@ -315,14 +317,14 @@ describe("useLayoutSettings persistence", () => {
   });
 
   it("preserves the unsaved draft and reports a failed PATCH", async () => {
-    updateUserSettings.mockRejectedValueOnce(new Error("save failed"));
+    updateUserSettings.mockRejectedValueOnce(new Error(SAVE_FAILED));
     const original = profile();
     const { result } = renderLayoutSettings([original]);
 
     act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
     act(() => result.current.updateSelected({ name: DRAFT_NAME }));
     await act(async () => {
-      await expect(result.current.save()).rejects.toThrow("save failed");
+      await expect(result.current.save()).rejects.toThrow(SAVE_FAILED);
     });
 
     expect(result.current).toMatchObject({
@@ -330,9 +332,114 @@ describe("useLayoutSettings persistence", () => {
       baseline: [original],
       selectedName: DRAFT_NAME,
       saveStatus: "error",
-      error: "save failed",
+      error: SAVE_FAILED,
       isDirty: true,
     });
+  });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.3, AC-UI-TASK-LAYOUT-PROFILES-002.5, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("useLayoutSettings with a plugin panel", () => {
+  const PLUGIN_PANEL_ID = "plugin:kandev-plugin-prompt-history:prompt-history";
+
+  /** The built-in layout with Prompt History as a separate right-hand group of a VERTICAL root. */
+  function layoutWithPlugin(builtIn: "plan" | "default" = "plan"): LayoutState {
+    const layout = structuredClone(getBuiltInLayoutProfile(builtIn).layout);
+    layout.rootOrientation = "VERTICAL";
+    layout.columns.push({
+      id: "plugin-column",
+      width: 320,
+      groups: [
+        {
+          id: "group-plugin",
+          panels: [
+            {
+              id: PLUGIN_PANEL_ID,
+              component: "plugin-panel",
+              title: "Prompt History",
+              tabComponent: "pluginPanelTab",
+              params: { pluginId: "kandev-plugin-prompt-history", panelKey: "prompt-history" },
+            },
+          ],
+          activePanel: PLUGIN_PANEL_ID,
+        },
+      ],
+    });
+    return layout;
+  }
+
+  function persisted(profiles: SavedLayout[]): SavedLayout[] {
+    return structuredClone(profiles);
+  }
+
+  it("marks a built-in override draft dirty without any plugin registration", () => {
+    const { result } = renderLayoutSettings();
+
+    act(() => result.current.setSelection({ kind: "built-in", id: "plan" }));
+    act(() => result.current.updateLayout(layoutWithPlugin()));
+
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.selectedBuiltInOverride?.layout).toMatchObject({
+      rootOrientation: "VERTICAL",
+    });
+    expect(result.current.compatibility?.status).toBe("editable");
+  });
+
+  it("saves a plugin-bearing custom profile and adopts the response as its baseline", async () => {
+    const { result } = renderLayoutSettings([profile()]);
+    act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
+    act(() => result.current.updateLayout(layoutWithPlugin("default")));
+    const saved = persisted(result.current.profiles);
+    updateUserSettings.mockResolvedValueOnce(responseWith(saved));
+
+    await act(async () => result.current.save());
+
+    expect(updateUserSettings).toHaveBeenCalledWith({ saved_layouts: saved });
+    expect(result.current).toMatchObject({
+      baseline: saved,
+      isDirty: false,
+      saveStatus: "success",
+    });
+  });
+
+  it("keeps the plugin draft and baseline when the save fails", async () => {
+    updateUserSettings.mockRejectedValueOnce(new Error(SAVE_FAILED));
+    const original = profile();
+    const { result } = renderLayoutSettings([original]);
+    act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
+    act(() => result.current.updateLayout(layoutWithPlugin("default")));
+    const draft = persisted(result.current.profiles);
+
+    await act(async () => {
+      await expect(result.current.save()).rejects.toThrow(SAVE_FAILED);
+    });
+
+    expect(result.current).toMatchObject({ profiles: draft, baseline: [original], isDirty: true });
+  });
+
+  it("restores an editable override and custom profile from a freshly hydrated store", () => {
+    const override = upsertBuiltInLayoutOverride([], "plan", layoutWithPlugin(), {
+      createdAt: "2026-07-19T10:00:00.000Z",
+    });
+    const custom = profile({
+      id: SECOND_PROFILE_ID,
+      layout: layoutWithPlugin("default") as unknown as Record<string, unknown>,
+    });
+    const reloaded = JSON.parse(JSON.stringify([...override, custom])) as SavedLayout[];
+
+    const { result } = renderLayoutSettings(reloaded);
+    act(() => result.current.setSelection({ kind: "built-in", id: "plan" }));
+    expect(result.current.editorLayout?.rootOrientation).toBe("VERTICAL");
+    expect(result.current.editorLayout?.columns.at(-1)?.groups[0].panels[0].id).toBe(
+      PLUGIN_PANEL_ID,
+    );
+
+    act(() => result.current.setSelection({ kind: "custom", id: SECOND_PROFILE_ID }));
+    expect(result.current.compatibility?.status).toBe("editable");
+    expect(result.current.editorLayout?.columns.at(-1)?.groups[0].panels[0].id).toBe(
+      PLUGIN_PANEL_ID,
+    );
   });
 });
 

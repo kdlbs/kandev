@@ -431,6 +431,14 @@ and reset desktop tasks and scales them to the available workbench.
 
 Each desktop split's **+** menu lists a linked review only while that exact review panel is missing from the live layout. Select a missing review there to open it in the split whose **+** you used. To move an open review to another split, drag its Dockview tab. Use **Layouts** only to change the default placement for new or reset task layouts.
 
+**Plugin panels in a layout.** **Add panel** in the Layouts editor also lists every task panel from your installed and enabled [plugins](plugins.md), such as Prompt History, by its plugin-provided name. Select a split first to add the panel there; otherwise Kandev uses the active split. A panel that is already in the layout is not listed again, and **Add panel** stays available when plugin panels are the only ones left to add.
+
+- **Preview:** the editor shows a labelled placeholder for a plugin panel and never runs the plugin, so you can arrange it without opening a task.
+- **Save and apply:** a built-in override or custom profile saves the panel's placement, tab order, selected tab, nested splits, and proportions. Fresh tasks and **Reset Layout** open the real plugin panel in that place when the plugin is available.
+- **Availability:** if the plugin is disabled, uninstalled, or still loading, the profile stays editable and keeps the saved placement with its saved title. The plugin's row only disappears from **Add panel**. A task that is already open follows the plugin lifecycle and closes the panel; Kandev does not reopen it automatically. Re-enable the plugin and reselect the profile or **Reset Layout** to restore the placement.
+
+Existing task-specific layouts keep their saved panels until you reselect a profile or use **Reset Layout**. Phone settings edit the same desktop profiles; choose a row with a separate tap after opening **Add panel**.
+
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
 When the repository defines a dev script, the desktop header shows a dev server control. Starting it runs the script in the task workspace, opens the browser preview, and opens a read-only **Dev Server** panel with the script's output. While the script runs, the same control becomes **Stop dev server preview** and terminates the process and its children. Kandev also stops a running dev script when its task is archived or deleted, so a preview cannot outlive the task that started it. A script that detaches itself from Kandev, for example by daemonizing or calling `setsid`, escapes that cleanup and must be stopped by hand.

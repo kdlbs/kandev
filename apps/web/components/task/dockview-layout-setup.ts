@@ -6,6 +6,7 @@ import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import {
   computeRightMaxPx,
   getPinnedTarget,
+  getRootOrientation,
   LAYOUT_PINNED_MIN_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -17,7 +18,10 @@ import {
   setEnvLayoutProfile,
   setManualRightWidth,
 } from "@/lib/local-storage";
-import { resolveResponsiveRightWidth } from "@/lib/state/layout-manager/right-width";
+import {
+  resolveEnvRightWidth,
+  resolveResponsiveRightWidth,
+} from "@/lib/state/layout-manager/right-width";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
@@ -66,8 +70,10 @@ let sashDragging = false;
 let rightSashDragging = false;
 
 /** Return whether the layout currently shows the pinned right column (the
- *  right-top or right-bottom group). */
+ *  right-top or right-bottom group). Right-width policy is horizontal only: a
+ *  vertical root's children are rows, so those groups are never a pinned column. */
 function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
+  if (getRootOrientation(api) === "VERTICAL") return false;
   return api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
 }
 
@@ -81,7 +87,12 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
   setPinnedTarget(
     "right",
-    resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null),
+    resolveEnvRightWidth(
+      measureDockviewGridWidth(api),
+      sidebarWidth,
+      null,
+      store.currentLayoutEnvId,
+    ),
   );
 }
 

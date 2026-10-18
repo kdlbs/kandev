@@ -279,7 +279,7 @@ The public frontend contract is `apps/packages/plugin-sdk`; `docs/plans/plugins/
   `dockview-panel-content.tsx` each get exactly one `"plugin-panel"` case (lookup tables, not
   switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
-  (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
+  (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`. Reusable layout profiles (Settings > Layouts): Settings > Preferences > Layouts lists `getTaskPanels()` in Add panel (`layout-editor-toolbar.tsx`), resolved at selection time by `addReusablePanel`. The editor renders placeholders only, retains canonical plugin titles in an editor-owned map (`layout-editor-titles.ts`), and never mounts `useCloseRevokedPluginPanels`. `validateReusableLayout` checks the generic `plugin:<pluginId>:<panelKey>` shape without consulting the registry, so unavailable plugins stay valid portable placements. Plugin-bearing environment switches skip the fast path in `dockview-env-switch.ts`, and root width policy (pinned targets, sash width, caps) applies only to a HORIZONTAL root.
 - **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
   the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
   menus; declaring `items(context)` renders an action of either group as a submenu of its children

@@ -1,7 +1,7 @@
 ---
 id: "02-plugin-layout-editor-flow"
 title: "Plugin panel add, save, reload, and task application"
-status: pending
+status: done
 wave: 2
 depends_on:
   - 01-plugin-profile-validation
@@ -200,7 +200,7 @@ Final requested gates start with formatting, after RED/GREEN implementation:
 
 ```bash
 make fmt
-(cd apps/web && pnpm exec vitest run lib/layout/layout-profiles.test.ts lib/state/layout-manager/plugin-panels.test.ts lib/state/layout-manager/session-panels.test.ts lib/state/layout-manager/sizing.test.ts lib/state/layout-manager/serializer.test.ts lib/state/layout-manager/applier.test.ts lib/state/dockview-store.test.ts lib/state/dockview-layout-builders-fixups.test.ts lib/state/dockview-pinned-enforce.test.ts components/task/dockview-layout-setup.orientation.test.ts components/task/dockview-layout-setup.measurement.test.ts components/settings/layouts/layout-editor-actions.test.ts components/settings/layouts/layout-editor-toolbar.test.tsx components/settings/layouts/layout-editor.test.tsx components/settings/layouts/use-layout-settings.test.tsx components/task/use-close-revoked-plugin-panels.test.ts components/task/plugin-task-panel.test.tsx)
+(cd apps/web && pnpm exec vitest run lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts lib/state/layout-manager/plugin-panels.test.ts lib/state/layout-manager/session-panels.test.ts lib/state/layout-manager/sizing.test.ts lib/state/layout-manager/serializer.test.ts lib/state/layout-manager/applier.test.ts lib/state/dockview-store.test.ts lib/state/dockview-layout-builders-fixups.test.ts lib/state/dockview-pinned-enforce.test.ts components/task/dockview-layout-setup.orientation.test.ts components/task/dockview-layout-setup.measurement.test.ts components/settings/layouts/layout-editor-actions.test.ts components/settings/layouts/layout-editor-toolbar.test.tsx components/settings/layouts/layout-editor.test.tsx components/settings/layouts/use-layout-settings.test.tsx components/task/use-close-revoked-plugin-panels.test.ts components/task/plugin-task-panel.test.tsx)
 (cd apps/web && pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts lib/state/dockview-env-switch.test.ts lib/state/dockview-env-switch-pinned.test.ts lib/state/dockview-env-switch-right-width.test.ts)
 make typecheck test lint
 (cd apps/web && pnpm run i18n:check)
@@ -349,6 +349,164 @@ paths. This task owns the complete end-to-end delivery, not a menu-only patch.
 
 ## Results
 
-Pending. Record exact RED/GREEN, final gate results, desktop/mobile discovery and
-pass counts, real-package smoke/screenshots/teardown, public-doc changes, and
-commit SHA. No runtime or implementation verification has run during design.
+Executed 2026-10-18 after Task 01, TDD per behavior. Each RED below was run
+before the production change and failed on the named assertion.
+
+### Behavior RED/GREEN
+
+- **Add panel (actions):** `layout-editor-actions.test.ts` (real Dockview)
+  failed with `expected {} to deeply equal { pluginId, panelKey }` and
+  `expected true to be false` for a revoked or unknown identity. GREEN:
+  `addReusablePanel` resolves a built-in reusable definition or
+  `resolvePluginPanelDefinition` at selection time, keeping duplicate prevention,
+  selected/fallback group placement and the boolean result.
+- **Add panel (menu):** new `layout-editor-toolbar.test.tsx`: five new cases
+  failed (no plugin `menuitem`, trigger disabled with only plugin choices). GREEN:
+  `useAddPanelChoices` combines missing built-ins with `getTaskPanels()`,
+  canonical IDs via `pluginPanelId`, titles via `resolveTaskPanelTitle`, filtered
+  against every placed identity, subscribed through `usePluginRegistry`. A touch
+  tap that only opens the menu adds nothing (control kept).
+- **Canonical titles:** new `layout-editor.test.tsx` (replaces the static
+  `layout-editor.test.ts`; a mounted test now proves a placeholder per reusable
+  panel). Under `ja`, a revoked registration saved `"プロンプト履歴"` in both the
+  tree leaf and the flat projection and kept the localized tab. GREEN:
+  `layout-editor-titles.ts` (editor-owned canonical map seeded from the input draft,
+  refreshed from live registrations, pruned on removal, restored into tree leaves
+  and flat groups on capture) plus `useDisplayTitleReconciliation`, which re-resolves
+  tab titles under the capture guard so registry/locale changes never call
+  `onChange`. Initially-unavailable ordering and registry-only transitions are
+  covered symmetrically. `use-layout-settings.test.tsx` gained plugin dirty,
+  save-baseline, failed-save and fresh-hydration cases; they pass against Task 01
+  behavior (test-only contract coverage, no production change).
+- **Orientation guards:** RED then GREEN, in a real Dockview, for: `applyLayout`
+  (`[450, 250]` instead of rows `[300, 400]` with pinned targets/caps);
+  `resolveCustomLayoutPinnedWidths` and `collectPinnedWidthUpdates`
+  (VERTICAL returned a right width); `enforcePinnedTargets` (`resizeView` called twice
+  on a VERTICAL root); and `dockview-layout-setup.orientation.test.ts` (rows
+  forced to `[450, 250]`, a vertical sash stored manual right width 380, tracked width
+  recorded, window resize created target 420). GREEN: `getRootOrientation`;
+  guards in `applyLayout`, `applyLayoutFixups`, `enforcePinnedTargets`,
+  `hasPinnedRightColumn` (setup enforcement, loose constraints, sash
+  classification, drag-end persistence, tracking, automatic refresh) and
+  fast-path `applyPinnedColumnSizes`. VERTICAL builds and fixups clear stale
+  horizontal targets. HORIZONTAL and omitted-orientation controls kept.
+- **Environment switches:** new `dockview-env-switch.plugin-layout.test.ts` (real
+  Dockview, store, builders, fixups, comparator, capture, serialization). RED:
+  6 failures (Notes kept instead of Prompt History, saved-different-structure not
+  restored, right extent `[840, 360]` not `[960, 240]`, VERTICAL orientation kept
+  horizontal). GREEN: `canUseFastEnvSwitch` rejects either-side generic plugin
+  panels structurally; `setReusableRightTarget`/`resolveEnvRightWidth`
+  (`pinned-targets.ts`, `right-width.ts`) carry the build's resolved ratio through final
+  fixups, scheduled enforcement and the mounted refresh, scoped to one environment
+  and released on environment switch, preset apply, or a VERTICAL root.
+  Manual width, stock default, saved-environment and plugin-free fast-path controls
+  are asserted. Mutation checks failed as expected when the fast-path guard or the
+  refresh resolver was reverted. `dockview-layout-builders-fixups.test.ts` and
+  `dockview-pinned-enforce.test.ts` gained owner/manual/VERTICAL cases written
+  after that GREEN (unit-level cover for already-failing integration behavior).
+- A `__KANDEV_E2E_PLUGIN_HOST__` hook (`lib/plugins/boot.ts`, installed only when the
+  existing `__KANDEV_E2E_EXPOSE_STORE__` flag is set) lets E2E unload a plugin without
+  leaving the page. No other route unmounts the Layouts editor while revoking, so this is
+  the only way to drive the mounted-revocation ordering in a browser.
+
+### Commands and results
+
+- `make fmt`: completed; no unrelated file changed.
+- Task 02 focused set (18 files, `lib/layout/layout-profiles.test.ts` ...
+  `components/task/plugin-task-panel.test.tsx`, plus the new
+  `layout-profiles.plugin-panels.test.ts`): 18 files, 232 tests passed after the final
+  production edit. Env-switch set (`dockview-env-switch.plugin-layout`, `.test`,
+  `-pinned`, `-right-width`) plus `scripts/vitest-project-selection.test.ts`: 5 files,
+  53 tests passed.
+- `NODE_OPTIONS=--max-old-space-size=10240 make typecheck` and `tsc --noEmit`: clean
+  (the default 4 GB heap runs out of memory on this tree).
+- `make lint`: backend `golangci-lint` 0 issues (run with `GOCACHE` and
+  `GOLANGCI_LINT_CACHE` under `/tmp` because the shared Go cache volume was full);
+  web ESLint `--max-warnings 0` clean; harness lint passes after folding the AGENTS
+  note into an existing bullet (apps/web/AGENTS.md stays at 300 lines); spec lint and
+  architecture lint pass.
+- `pnpm run i18n:check`: passed (no new keys; every user-facing string reuses an
+  existing catalog entry). It ran on Node 22.
+- `make test`: not green in this environment. The backend part produced
+  `[build failed]` for about 55 packages while the shared Go cache volume and `/tmp`
+  were full, plus an `internal/common/config` test that reads this host's
+  `KANDEV` port variable (`port = 38429`); `internal/delivery` re-run alone passed.
+  The backend is untouched by this change. The full web run was 26,902 passed and
+  32 failed in 17 files: one genuine regression (the reviewed-project list still named
+  the deleted `layout-editor.test.ts`; `scripts/vitest-reviewed-projects.json` fixed and
+  `vitest-project-selection.test.ts` passes); load timeouts that pass alone
+  (7 browser files, 127 tests; 5 `scripts/lib` files); and environment gaps unrelated to
+  this change (no Docker bridge for `http-git-server`, a changed Git message in
+  `seed-repository-origin`, no `unzip` for `native-catalog`, `node:sqlite` missing on
+  Node 22 for `multi-repo-managed-clone-recovery`). `make test-cli` passed; `make test-scripts` stopped in `scripts/pr-state` because
+  `unzip` is not installed.
+- `node --test scripts/validate-public-docs.test.mjs`, `node scripts/validate-public-docs.mjs`
+  (48 pages), `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`:
+  passed.
+
+### Browser
+
+- `pnpm e2e:run --project chromium tests/settings/layout-profiles.spec.ts
+  tests/plugins/plugin-task-panel.spec.ts tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts` (managed rebuild, one worker):
+  24 passed. `pnpm e2e:run --no-build --project mobile-chrome
+  tests/settings/mobile-layout-profiles.spec.ts` (artifacts from the preceding build):
+  6 passed. Playwright discovery lists 13 desktop and 6 mobile layout-profile specs
+  with zero discovery errors.
+- Added desktop cases: add to the selected split and save a built-in override,
+  reload, then apply to a task and see fixture content in the saved group; plugin-only
+  Add panel with occupied-identity exclusion; disable/enable keeps the payload and
+  editing; mounted-editor revocation under the pseudo locale then reload unavailable
+  (canonical title in the saved payload); a VERTICAL custom profile through save,
+  fresh default, Reset Layout, reload, container resize and a vertical sash drag with
+  no manual right-width key; and an in-app Notes -> Prompt History switch and return
+  with the saved in-cap 20% right column and an actual manual width winning. Added
+  mobile case: tap opens the menu with no insertion, a 44px row, a separate tap adds,
+  save/reload, no horizontal overflow.
+
+### Real Prompt History package smoke
+
+Temporary spec `tests/settings/plugin-layout-real-package-smoke.spec.ts` (removed after
+the run) against the managed worker's disposable backend.
+
+- Package: `kandev-plugin-prompt-history-1.4.1.tar.gz`, SHA-256
+  `12f0ba1266f70074e69ef21c00cc0cae6bd02823c1c981cf864e9dc939b77c5d` (10,844,322
+  bytes), built with `make package-host` from a copy of `/home/clem/git/kandev-plugin-prompt-history`
+  at `6a1beac` (Release 1.4.1), linux/amd64 only, packed by this worktree's
+  `plugin-pack` via a symlinked `../kdlbs-kandev`. Plugin source was not edited.
+- Host: this worktree at `0294918f70` plus uncommitted changes (46 files), E2E backend
+  binary SHA-256 `affd37b3...`, ports 18094-18109 (varied per run) with data under
+  `/tmp/kandev-e2e-0-*`, never the user's `~/.kandev`; saved layouts verified empty
+  before any write.
+- Exercised: Add panel offered Prompt History; adding it into the Files group, a
+  placeholder-only preview (`ph-plugin-scroll` absent), duplicate exclusion, floating
+  Save appearing then clearing; built-in override save/reload (`files, changes,
+  prompt-history`, canonical title and params); a duplicated custom profile with the
+  plugin split below Files/Changes (nested `tree`, own group, saved and reloaded);
+  a managed task with the distinct prompt `REAL-PH-SMOKE-ALPHA distinctive prompt`
+  rendered by the real panel (`ph-plugin-row-1`) in the override group, after reload,
+  and in the custom profile's own group after selecting it and after reload; disabling
+  the package (choice gone, payload byte-identical, tab and title kept) then re-enabling
+  and Reset Layout restoring placement and content; a 393 x 851 phone settings menu
+  listing Prompt History (`04-phone-settings-menu.png`). Desktop and phone screenshots and
+  `evidence.json` are in `/tmp/ph-smoke/shots`.
+- Not covered by the real package: mounted-editor revocation (the fixture covers it, see
+  above).
+- Teardown: the package row was deleted, the worker backend stopped by the runner,
+  and the copied plugin tree, private Go caches and temporary spec removed.
+
+### Public documentation
+
+`docs/public/sessions-and-review.md` describes plugin panels in Add panel (placeholder
+preview, save/reload/apply, availability versus portable placement, existing-task
+precedence, phone behavior). `docs/public/plugins.md` is unchanged (avoids duplicate
+instructions); `CHANGELOG.md` is generated. `validateCoverage` against the final
+documents: `ok: true`, `status: covered`, no errors; accepted references:
+`task-layout-profiles.md` for REQ-001 and `task-layout-plugin-panels.md` for REQ-002.
+
+### Contract status
+
+REQ-UI-TASK-LAYOUT-PROFILES-001 stays active. REQ-002 is implemented and verified here
+but its acceptance by the contract owner is a separate decision, so the draft statuses
+of the requirement and both designs are left unchanged. Commit SHA: see `git log` for the
+`feat(ui):` commit that contains this file.

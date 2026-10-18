@@ -34,4 +34,42 @@ export function clearPinnedTarget(column: "sidebar" | "right"): void {
 
 export function clearAllPinnedTargets(): void {
   targets.clear();
+  reusableRightTarget = null;
+}
+
+/**
+ * The right column share resolved from a reusable layout's saved geometry, owned
+ * by exactly one environment's active build. It ranks between an actual manual
+ * width (always wins) and the stock responsive default, and is held as a ratio
+ * so it scales with the workbench and stays under the runtime caps. In-memory
+ * only: it is never a manual preference and never reaches portable storage.
+ */
+type ReusableRightTarget = { envId: string | null; ratio: number };
+
+let reusableRightTarget: ReusableRightTarget | null = null;
+
+/** Own the resolved right width (`rightWidth` of a `totalWidth` workbench) for `envId`. */
+export function setReusableRightTarget(
+  envId: string | null,
+  rightWidth: number,
+  totalWidth: number,
+): void {
+  const valid =
+    Number.isFinite(rightWidth) && rightWidth > 0 && Number.isFinite(totalWidth) && totalWidth > 0;
+  reusableRightTarget = valid ? { envId, ratio: rightWidth / totalWidth } : null;
+}
+
+/** The owned right width scaled to `totalWidth`, or null when `envId` is not the owner. */
+export function getReusableRightWidth(
+  envId: string | null | undefined,
+  totalWidth: number | undefined,
+): number | null {
+  const owned = reusableRightTarget;
+  if (!owned || envId === undefined || owned.envId !== envId) return null;
+  if (totalWidth === undefined || !Number.isFinite(totalWidth) || totalWidth <= 0) return null;
+  return Math.max(LAYOUT_PINNED_MIN_PX, Math.round(owned.ratio * totalWidth));
+}
+
+export function clearReusableRightTarget(): void {
+  reusableRightTarget = null;
 }

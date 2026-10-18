@@ -19,7 +19,12 @@
  * `sv.resizeView`.
  */
 import type { DockviewApi } from "dockview-react";
-import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
+import {
+  getRootOrientation,
+  getRootSplitview,
+  getPinnedTarget,
+  computeSidebarMaxPx,
+} from "./layout-manager";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -105,6 +110,8 @@ function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: 
 export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargetsCtx): void {
   if (enforcing || sashDragging) return;
   if (api.hasMaximizedGroup() || ctx.maximized) return;
+  // Pinned targets are horizontal widths; a vertical root's children are rows.
+  if (getRootOrientation(api) === "VERTICAL") return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   enforcing = true;

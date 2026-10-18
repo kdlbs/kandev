@@ -15,7 +15,8 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 import { KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
 import type { LayoutPanel } from "./types";
 
-const PLUGIN_PANEL_PREFIX = "plugin:";
+/** Prefix of every plugin-contributed panel id (`plugin:<pluginId>:<panelKey>`). */
+export const PLUGIN_PANEL_PREFIX = "plugin:";
 
 /** The dockview `component` name every plugin panel shares. */
 export const PLUGIN_PANEL_COMPONENT = "plugin-panel";

@@ -49,6 +49,7 @@ import {
   RIGHT_TOP_GROUP,
 } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
+import { clearReusableRightTarget, setReusableRightTarget } from "./layout-manager/pinned-targets";
 
 const SIDEBAR_GROUP = "group-sidebar";
 const CENTER_GROUP = "group-center";
@@ -209,5 +210,59 @@ describe("applyLayoutFixups — pinned target capture", () => {
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 441); // responsive default
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400); // not live
+  });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.9, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("applyLayoutFixups — reusable right width and root orientation", () => {
+  const FOUR_COLUMNS = [SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearReusableRightTarget();
+    vi.mocked(getGlobalSidebarWidth).mockReturnValue(null);
+    vi.mocked(getPinnedWidth).mockReturnValue(350);
+    // A 20% share of the 1470px workbench is 294px: in cap, and not the stock 441px.
+    setReusableRightTarget("env-a", 294, 1470);
+  });
+
+  it("keeps the owning environment's reusable right width instead of the stock ratio", () => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, null, "env-a");
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 294);
+    expect(mockResizeView).toHaveBeenCalledWith(2, 294);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 441);
+  });
+
+  it("lets an actual manual width win over the reusable right width", () => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, 333, "env-a");
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 333);
+  });
+
+  it.each([
+    ["another environment's build", "env-b"],
+    ["a restore that names no owner", undefined],
+  ])("ignores the reusable width for %s", (_name, ownerEnvId) => {
+    mockSplitview([350, 720, 400]);
+
+    applyLayoutFixups(makeApi(FOUR_COLUMNS), undefined, null, ownerEnvId);
+
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 441);
+  });
+
+  it("records no sidebar or right target for a VERTICAL root", () => {
+    mockSplitview([350, 720, 400]);
+    const api = makeApi(FOUR_COLUMNS) as unknown as Record<string, unknown>;
+    api.component = { gridview: { root: { orientation: "VERTICAL" } } };
+
+    applyLayoutFixups(api as unknown as DockviewApi, undefined, null, "env-a");
+
+    expect(setPinnedTarget).not.toHaveBeenCalled();
+    expect(mockResizeView).not.toHaveBeenCalled();
   });
 });

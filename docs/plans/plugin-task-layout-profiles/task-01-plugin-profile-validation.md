@@ -1,7 +1,7 @@
 ---
 id: "01-plugin-profile-validation"
 title: "Registry-independent plugin profile eligibility"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -85,7 +85,7 @@ production edits and record the specific expected assertion failure, then run
 it GREEN. Use the complete focused command after the change:
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/layout/layout-profiles.test.ts lib/state/layout-manager/plugin-panels.test.ts lib/state/layout-manager/session-panels.test.ts lib/state/layout-manager/sizing.test.ts lib/state/layout-manager/serializer.test.ts)
+(cd apps/web && pnpm exec vitest run lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts lib/state/layout-manager/plugin-panels.test.ts lib/state/layout-manager/session-panels.test.ts lib/state/layout-manager/sizing.test.ts lib/state/layout-manager/serializer.test.ts)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
@@ -97,7 +97,7 @@ runtime/browser proof or mark the plan implemented when only this order passes.
 ## Files likely touched
 
 - `apps/web/lib/layout/layout-profiles.ts`
-- `apps/web/lib/layout/layout-profiles.test.ts`
+- `apps/web/lib/layout/layout-profiles.test.ts` (unchanged) and new `layout-profiles.plugin-panels.test.ts`
 - `apps/web/lib/state/layout-manager/session-panels.ts` and `.test.ts`
 - `apps/web/lib/state/layout-manager/serializer.ts` and `.test.ts`: metadata,
   root/orthogonal-axis serialization, and capture pin inference.
@@ -143,6 +143,38 @@ None. Task 02 depends on the structural eligibility established here.
 
 ## Results
 
-Pending. No production or permanent test changes were made during design.
-Record exact RED/GREEN commands/results and every final command above before
-marking this work order done.
+Executed 2026-10-18 (TDD, one behavior at a time).
+
+- RED 1 (`vitest run lib/layout/layout-profiles.test.ts`, appended to that file at the time; the cases now live in `lib/layout/layout-profiles.plugin-panels.test.ts` to stay under the 600-line file limit): 26 new plugin
+  behavior cases failed on their assertions (`expected false to be true` for a
+  canonical plugin panel, and `valid: true`/`unsupported-panel` instead of
+  `invalid-panel` for malformed or Chat-component plugin IDs). GREEN: local
+  `isPluginIntendedPanel`/`isCanonicalPluginPanel`/`pluginDefinitionIssues` in
+  `layout-profiles.ts` run on the raw layout before component filtering and
+  Agent normalization; `validateGroup` counts canonical plugin IDs in the shared
+  duplicate map. `PLUGIN_PANEL_PREFIX` is now exported from `plugin-panels.ts`.
+- RED 2 (`session-panels.test.ts`): explicit VERTICAL/HORIZONTAL orientation
+  was `undefined` after normalization/materialization. GREEN: `rewriteReusableChatPanels`
+  returns `{ ...state, columns }`.
+- RED 3 (`serializer.test.ts`): VERTICAL root `size` was 700 not 1400, rows were
+  `[1220, 180]` (horizontal pin policy) instead of `[150, 200]`/`[300, 400]`,
+  `fromDockviewApi` inferred `pinned: true`, and `filterEphemeral` dropped the
+  orientation. GREEN: `computeRootAxisSizes` in `sizing.ts` (VERTICAL uses
+  height, orthogonal width, ignores pin overrides/caps/flags; HORIZONTAL and
+  legacy unchanged), `serializeColumn` takes axis/orthogonal extents,
+  `fromDockviewApi` only infers `pinned` for a HORIZONTAL root, and
+  `filterEphemeral` returns `{ ...state, columns }`. A real Dockview (jsdom
+  `createDockview`) round trip asserts root-axis proportions (300/400), nested
+  widths (233/467/700) and no inferred pin.
+- GREEN: `(cd apps/web && pnpm exec vitest run lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts lib/state/layout-manager/plugin-panels.test.ts lib/state/layout-manager/session-panels.test.ts lib/state/layout-manager/sizing.test.ts lib/state/layout-manager/serializer.test.ts)`:
+  6 files, 112 tests passed (rerun after the final production edit).
+- Regression: `vitest run lib/state lib/layout components/task/dockview components/settings/layouts`:
+  179 files passed; the only failure is `lib/state/slices/task-overview.test.ts`
+  "rejects expired read protection after overflow or a context change", a
+  timing test that exceeded its budget under load and exercises no touched module.
+  (`pnpm install --frozen-lockfile` was required first: `@json-render/core`
+  was missing from the worktree's `node_modules`.)
+- `python3 scripts/list-docs.py validate`: 386 decisions, 1646 specifications
+  validated. `python3 scripts/lint-spec-files.py --all`: all passed.
+- These are unit results, not browser/runtime proof; Task 02 owns runtime
+  geometry guards and browser smoke.

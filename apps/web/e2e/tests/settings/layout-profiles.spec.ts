@@ -5,6 +5,30 @@ import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 import {
+  installFixturePlugin,
+  PLUGIN_ID,
+  uninstallFixturePlugin,
+} from "../../helpers/plugin-fixture";
+import {
+  NOTES_ID,
+  NOTES_TITLE,
+  PROMPT_ID,
+  PROMPT_PSEUDO_TITLE,
+  PROMPT_TITLE,
+  dragRootSash,
+  filesGroupPluginLayout,
+  expectRatio,
+  hasManualRightWidth,
+  horizontalPluginLayout,
+  panelPlacement,
+  pluginPanel,
+  rootSizes,
+  savedProfile,
+  setLocale,
+  unloadPluginInPage,
+  verticalPluginLayout,
+} from "../../helpers/plugin-layout";
+import {
   expectApproxWidth,
   getDockviewContainerWidth,
   getDockviewGroupWidth,
@@ -588,5 +612,337 @@ test.describe("Task layout profile defaults", () => {
     await todosTab.click();
     await expect(testPage.getByTestId(/^todos-panel/)).toBeVisible();
     await session.expectLayoutHealthy();
+  });
+});
+
+type SavedPanel = { id: string; title: string; params?: Record<string, unknown> };
+type SavedLayoutPayload = {
+  rootOrientation?: string;
+  columns: Array<{
+    id: string;
+    pinned?: boolean;
+    width?: number;
+    groups: Array<{ id?: string; panels: SavedPanel[]; activePanel?: string }>;
+    tree?: unknown;
+  }>;
+};
+
+async function savedLayout(apiClient: ApiClient, id: string): Promise<SavedLayoutPayload> {
+  const profile = (await apiClient.getUserSettings()).settings.saved_layouts.find(
+    (candidate) => candidate.id === id,
+  );
+  if (!profile) throw new Error(`saved layout ${id} is missing`);
+  return profile.layout as unknown as SavedLayoutPayload;
+}
+
+function savedPanel(layout: SavedLayoutPayload, panelId: string): SavedPanel | undefined {
+  return layout.columns
+    .flatMap((column) => column.groups)
+    .flatMap((group) => group.panels)
+    .find((panel) => panel.id === panelId);
+}
+
+async function setPluginEnabled(page: Page, enabled: boolean): Promise<void> {
+  await page.goto("/settings/plugins");
+  const row = page.getByTestId(`plugin-row-${PLUGIN_ID}`);
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: enabled ? "Enable" : "Disable" }).click();
+  await expect(row.getByText(enabled ? "Active" : "Disabled", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+test.describe("Plugin task panels in reusable layout profiles", () => {
+  test.afterEach(async ({ testPage, apiClient }) => {
+    await setLocale(testPage, "en");
+    await uninstallFixturePlugin(apiClient);
+  });
+
+  test("adds a plugin panel to the selected split, saves the built-in override, and applies it to a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+
+    await layouts.selectPanel("Files");
+    await layouts.addPanel(PROMPT_TITLE);
+    const filesGroup = layouts.editor.locator(".dv-groupview", {
+      has: testPage.locator(".dv-tab", { hasText: "Files" }),
+    });
+    await expect(filesGroup.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    await layouts.save();
+
+    await testPage.reload();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    await layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+    await expect(testPage.getByTestId(`layout-placeholder-${PROMPT_ID}`)).toBeVisible();
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toHaveCount(0);
+
+    const saved = await savedLayout(apiClient, "layout-override-default");
+    expect(savedPanel(saved, PROMPT_ID)).toEqual(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    const savedGroup = saved.columns
+      .flatMap((column) => column.groups)
+      .find((group) => group.panels.some((panel) => panel.id === PROMPT_ID));
+    expect(savedGroup?.panels.map((panel) => panel.id)).toEqual(["files", "changes", PROMPT_ID]);
+
+    const task = await createTaskWithSession(apiClient, seedData, "Plugin Override Layout Task");
+    await openTask(testPage, task.id);
+    // The Todos tab is preference-gated runtime content that earlier specs in this worker can enable.
+    await expect
+      .poll(async () =>
+        (await panelPlacement(testPage, PROMPT_ID))?.groupPanelIds.filter((id) => id !== "todos"),
+      )
+      .toEqual(["files", "changes", PROMPT_ID]);
+    await testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
+  test("offers plugin-only choices and omits identities that are already placed", async ({
+    testPage,
+  }) => {
+    test.setTimeout(120_000);
+    await installFixturePlugin(testPage);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const pluginTitles = [NOTES_TITLE, PROMPT_TITLE];
+
+    let choices = await layouts.addPanelChoices();
+    expect(choices).toEqual(expect.arrayContaining(pluginTitles));
+    for (let guard = 0; guard < 12; guard += 1) {
+      const builtIn = choices.find((name) => !pluginTitles.includes(name));
+      if (!builtIn) break;
+      await layouts.addPanel(builtIn);
+      choices = await layouts.addPanelChoices();
+    }
+    expect([...choices].sort()).toEqual([...pluginTitles].sort());
+
+    await layouts.addPanel(PROMPT_TITLE);
+    expect(await layouts.addPanelChoices()).toEqual([NOTES_TITLE]);
+
+    await layouts.addPanel(NOTES_TITLE);
+    await expect(
+      testPage.getByTestId("layout-editor-add-panel").getByRole("button", { name: "Add panel" }),
+    ).toBeDisabled();
+  });
+
+  test("keeps the saved placement editable while the plugin is unavailable and offers it again on re-enable", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(150_000);
+    await installFixturePlugin(testPage);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel("Files");
+    await layouts.addPanel(PROMPT_TITLE);
+    await layouts.save();
+    const before = (await apiClient.getUserSettings()).settings.saved_layouts;
+
+    await setPluginEnabled(testPage, false);
+    await layouts.open();
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    await expect(testPage.getByText("Unavailable", { exact: true })).toHaveCount(0);
+    expect(await layouts.addPanelChoices()).not.toContain(PROMPT_TITLE);
+    expect((await apiClient.getUserSettings()).settings.saved_layouts).toEqual(before);
+    await layouts.selectPanel("Files");
+    await layouts.moveSelectedTabRight();
+    await layouts.save();
+    const edited = await savedLayout(apiClient, "layout-override-default");
+    expect(savedPanel(edited, PROMPT_ID)).toEqual(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+
+    await setPluginEnabled(testPage, true);
+    await layouts.open();
+    await layouts.selectPanel("Files");
+    expect(await layouts.addPanelChoices()).toContain(NOTES_TITLE);
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+  });
+
+  test("saves the canonical plugin title after the registration is revoked in the mounted editor", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    const layout = filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("layout-override-default", "Default", layout)],
+    });
+    await setLocale(testPage, "pseudo");
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    const pluginTab = layouts.editor.locator(".dv-tab", { hasText: PROMPT_PSEUDO_TITLE });
+    await expect(pluginTab).toBeVisible();
+
+    await unloadPluginInPage(testPage);
+
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    await expect(testPage.getByTestId("settings-floating-save")).toHaveCount(0);
+
+    const filesGroup = layouts.editor.locator(".dv-groupview", {
+      has: testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }),
+    });
+    await filesGroup.locator(".dv-tab").first().click();
+    await expect(layouts.actions).toBeVisible();
+    await layouts.actions.getByRole("button").nth(1).click();
+    await layouts.saveLocalized();
+
+    const saved = await savedLayout(apiClient, "layout-override-default");
+    expect(savedPanel(saved, PROMPT_ID)).toEqual(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    const group = saved.columns
+      .flatMap((column) => column.groups)
+      .find((candidate) => candidate.panels.some((panel) => panel.id === PROMPT_ID));
+    expect(group?.panels.map((panel) => panel.id)).toEqual(["changes", "files", PROMPT_ID]);
+
+    await apiClient.rawRequest("POST", `/api/plugins/${PLUGIN_ID}/disable`);
+    await testPage.reload();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    const unavailableGroup = layouts.editor.locator(".dv-groupview", {
+      has: testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }),
+    });
+    await unavailableGroup.locator(".dv-tab").first().click();
+    await layouts.actions.getByRole("button").nth(1).click();
+    await layouts.saveLocalized();
+    expect(savedPanel(await savedLayout(apiClient, "layout-override-default"), PROMPT_ID)).toEqual(
+      pluginPanel(PROMPT_ID, PROMPT_TITLE),
+    );
+  });
+});
+
+test.describe("Plugin panel geometry in applied profiles", () => {
+  test.afterEach(async ({ apiClient }) => uninstallFixturePlugin(apiClient));
+
+  test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+    await installFixturePlugin(testPage);
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("vertical-plugin", "Vertical plugin", verticalPluginLayout())],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await expect(
+      testPage.getByTestId("layout-profile-custom-vertical-plugin").getByText("Unavailable", {
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await layouts.selectPanel("Files");
+    await layouts.moveSelectedTabRight();
+    await layouts.save();
+
+    const saved = await savedLayout(apiClient, "vertical-plugin");
+    expect(saved.rootOrientation).toBe("VERTICAL");
+    expect(saved.columns.map((column) => column.pinned)).toEqual([undefined, undefined]);
+    expect(saved.columns[1].groups[0].panels.map((panel) => panel.id)).toEqual([
+      "changes",
+      "files",
+    ]);
+    expect(savedPanel(saved, PROMPT_ID)).toEqual(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    const [savedRow0, savedRow1] = saved.columns.map((column) => column.width ?? 0);
+    expectRatio(savedRow0, savedRow0 + savedRow1, 3 / 7, 0.05);
+
+    await testPage.setViewportSize({ width: 1400, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Vertical Plugin Layout Task");
+    await openTask(testPage, task.id);
+    const expectVerticalGeometry = async (label: string) => {
+      await expect
+        .poll(
+          async () => {
+            const [top, bottom] = await rootSizes(testPage);
+            return top / (top + bottom);
+          },
+          { message: `${label}: root rows keep their 3:4 proportion` },
+        )
+        .toBeGreaterThan(0.38);
+      const [top, bottom] = await rootSizes(testPage);
+      expectRatio(top, top + bottom, 3 / 7, 0.05);
+      const files = await panelPlacement(testPage, "files");
+      const prompt = await panelPlacement(testPage, PROMPT_ID);
+      expect(files?.groupPanelIds, label).toEqual(["changes", "files"]);
+      expect(prompt?.groupPanelIds, label).toEqual([PROMPT_ID]);
+      expectRatio(files?.width ?? 0, (files?.width ?? 0) + (prompt?.width ?? 0), 0.4, 0.05);
+      expect(await hasManualRightWidth(testPage), label).toBe(false);
+    };
+    await expectVerticalGeometry("fresh default");
+    await testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.getByTestId("layout-preset-trigger").click();
+    await testPage.getByTestId("layout-reset-item").click();
+    await expectVerticalGeometry("Reset Layout");
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForDockviewReady();
+    await expectVerticalGeometry("task reload");
+
+    await testPage.setViewportSize({ width: 1250, height: 760 });
+    await expectVerticalGeometry("container resize");
+
+    const [topRow] = await rootSizes(testPage);
+    await dragRootSash(testPage, "first", 0, topRow - 60);
+    expect((await rootSizes(testPage))[0]).toBeLessThan(topRow);
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+  });
+
+  test("keeps a horizontal profile's saved in-cap ratio through task navigation and respects a manual width", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(240_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1600, height: 900 });
+    const notesProfile = horizontalPluginLayout(pluginPanel(NOTES_ID, NOTES_TITLE));
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("horizontal-plugin", "Horizontal plugin", notesProfile)],
+    });
+    const savedEnvironment = await createTaskWithSession(apiClient, seedData, "Notes Environment");
+    await openTask(testPage, savedEnvironment.id);
+    await expect(testPage.getByTestId("e2e-notes-panel")).toBeVisible({ timeout: 15_000 });
+    await waitForPersistedLayoutWithPanel(testPage, savedEnvironment.session_id!, NOTES_ID);
+
+    const promptProfile = horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("horizontal-plugin", "Horizontal plugin", promptProfile)],
+    });
+    const freshEnvironment = await createTaskWithSession(apiClient, seedData, "Prompt Default");
+    const session = new SessionPage(testPage);
+
+    await session.sidebarTaskItem("Prompt Default").click();
+    await expect.poll(() => panelPlacement(testPage, PROMPT_ID)).not.toBeNull();
+    await expect(testPage.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    expect(await panelPlacement(testPage, NOTES_ID)).toBeNull();
+    const container = await getDockviewContainerWidth(testPage);
+    await expect
+      .poll(async () => (await rootSizes(testPage)).at(-1) ?? 0, {
+        message: "right column settles at the saved 20% share, not the stock 30%",
+      })
+      .toBeLessThan(container * 0.25);
+    const rightWidth = (await rootSizes(testPage)).at(-1) ?? 0;
+    expectRatio(rightWidth, container, 0.2, 0.03);
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+
+    await session.sidebarTaskItem("Notes Environment").click();
+    await expect(testPage.getByTestId("e2e-notes-panel")).toBeVisible({ timeout: 15_000 });
+    expect(await panelPlacement(testPage, PROMPT_ID)).toBeNull();
+    expect((await panelPlacement(testPage, NOTES_ID))?.groupPanelIds).toEqual([NOTES_ID]);
+
+    await session.sidebarTaskItem("Prompt Default").click();
+    await expect.poll(() => panelPlacement(testPage, PROMPT_ID)).not.toBeNull();
+    const [, rightBefore] = await rootSizes(testPage);
+    await dragRootSash(testPage, "last", 1, rightBefore + 80);
+    await expect.poll(() => hasManualRightWidth(testPage)).toBe(true);
+    void freshEnvironment;
   });
 });

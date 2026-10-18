@@ -17,6 +17,7 @@ import {
   savedLayoutMatchesLive,
   layoutStructuresMatch,
   getPinnedWidth,
+  getRootOrientation,
   getRootSplitview,
   isCenterCandidateGroupId,
   setPinnedTarget,
@@ -24,6 +25,7 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
+import { PLUGIN_PANEL_COMPONENT } from "./layout-manager/plugin-panels";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import {
@@ -284,11 +286,47 @@ function fastSwitchStructuresMatch(
   return layoutStructuresMatch(currentLayout, params.getDefaultLayout());
 }
 
+function layoutHasPluginPanel(layout: LayoutState): boolean {
+  return layout.columns.some((column) =>
+    column.groups.some((group) =>
+      group.panels.some((panel) => panel.component === PLUGIN_PANEL_COMPONENT),
+    ),
+  );
+}
+
+function serializedHasPluginPanel(saved: SerializedDockview): boolean {
+  return Object.values(saved.panels ?? {}).some(
+    (panel) => panel.contentComponent === PLUGIN_PANEL_COMPONENT,
+  );
+}
+
+/**
+ * True when either the live layout or the incoming one (saved, else the
+ * effective default) holds a generic plugin panel. The check is structural and
+ * registry-independent: component-only comparison cannot tell two plugins, or
+ * two placements of one plugin, apart, so reuse would keep the wrong panel.
+ */
+function switchInvolvesPluginPanel(
+  params: EnvSwitchParams,
+  currentLayout: LayoutState,
+  saved: object | null,
+): boolean {
+  if (layoutHasPluginPanel(currentLayout)) return true;
+  if (saved) return serializedHasPluginPanel(saved as SerializedDockview);
+  return layoutHasPluginPanel(params.getDefaultLayout());
+}
+
 function canUseFastEnvSwitch(
   params: EnvSwitchParams,
   currentLayout: LayoutState,
   saved: object | null,
 ): boolean {
+  if (switchInvolvesPluginPanel(params, currentLayout, saved)) {
+    debug("tryFastEnvSwitch: plugin panel involved, falling back to slow path", {
+      newEnvId: params.newEnvId,
+    });
+    return false;
+  }
   if (!fastSwitchStructuresMatch(params, currentLayout, saved)) {
     if (isDebug()) {
       debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
@@ -497,6 +535,8 @@ function applyPinnedColumnSizes(
 ): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
+  // Sidebar/right widths only exist for a horizontal root.
+  if (getRootOrientation(api) === "VERTICAL") return;
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
@@ -579,7 +619,12 @@ function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null
   if (params.oldEnvId !== null || !params.initialLayout) return null;
   params.buildDefault(params.api, params.initialLayout);
   params.api.layout(params.safeWidth, params.safeHeight);
-  return applyLayoutFixups(params.api);
+  return applyLayoutFixups(
+    params.api,
+    undefined,
+    getManualRightWidth(params.newEnvId),
+    params.newEnvId,
+  );
 }
 
 /**
@@ -695,5 +740,6 @@ export function performEnvSwitch({
       livePanelIdsAfter: api.panels.map((p) => p.id),
     });
   }
-  return applyLayoutFixups(api);
+  // This build owns the reusable default's resolved right width for `newEnvId`.
+  return applyLayoutFixups(api, undefined, getManualRightWidth(newEnvId), newEnvId);
 }
