@@ -71,6 +71,14 @@ func (r *prWorkflowFaultRepository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 
 func registerPRWorkflowFixture(t *testing.T, f *prWorkflowFixture, repo *prWorkflowFaultRepository) {
 	t.Helper()
+	// An idle live session avoids unrelated running-to-waiting reconciliation
+	// reads when asserting the session-selection retry counts below.
+	session, err := f.repo.GetTaskSession(context.Background(), prWorkflowSessionID)
+	if err == nil && session.State == models.TaskSessionStateRunning {
+		setSessionState(t, context.Background(), f.repo, prWorkflowSessionID, models.TaskSessionStateWaitingForInput)
+	} else if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatal(err)
+	}
 	f.svc.repo = repo
 	f.svc.workflowStore.repo = repo
 	f.svc.taskPRWorkflowRetryDelays = []time.Duration{0, 0}

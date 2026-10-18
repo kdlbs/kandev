@@ -13,7 +13,9 @@ test.describe("Workflow PR lifecycle events", () => {
   }) => {
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Merged Workflow");
     const acceptStep = await apiClient.createWorkflowStep(workflow.id, "Acceptance", 0);
-    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Merged Done", 1);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Merged Done", 1, {
+      complete_task_on_enter: true,
+    });
     await apiClient.updateWorkflowStep(acceptStep.id, {
       events: {
         on_pr_merged: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
@@ -70,6 +72,7 @@ test.describe("Workflow PR lifecycle events", () => {
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
       .toBe(doneStep.id);
     await expect(kanban.taskCardInColumn("Task awaiting merge", doneStep.id)).toBeVisible();
+    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("COMPLETED");
     await expect
       .poll(async () => {
         const { history } = await apiClient.listWorkflowHistory(sessionId);
@@ -121,5 +124,15 @@ test.describe("Workflow PR lifecycle events", () => {
     expect(
       afterSave.steps.find((step) => step.id === execStep.id)?.events?.on_pr_merged,
     ).toBeUndefined();
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard("PR Event Settings");
+    await page.selectStep(reloadedCard, "Acceptance");
+    await expect(reloadedCard.getByTestId(`${acceptStep.id}-pr-merged-step-select`)).toContainText(
+      "Shipped",
+    );
+    await expect(
+      reloadedCard.getByTestId(`${acceptStep.id}-pr-closed-transition-select`),
+    ).toContainText("Move to previous step");
   });
 });
