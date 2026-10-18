@@ -74,16 +74,24 @@ for (const outcome of ["merged", "closed"] as const) {
         on_pr_closed: [{ type: "move_to_previous" }],
       },
     });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
     const task = await apiClient.createTask(seedData.workspaceId, `Phone task ${outcome}`, {
       workflow_id: workflow.id,
       workflow_step_id: accept.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
+    const sessionTime = new Date().toISOString();
     const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
       state: outcome === "merged" ? "COMPLETED" : "WAITING_FOR_INPUT",
       sessionId: `phone-pr-${task.id}`,
       agentProfileId: seedData.agentProfileId,
+      startedAt: sessionTime,
+      ...(outcome === "merged" ? { completedAt: sessionTime } : {}),
     });
     const linked = {
       task_id: task.id,
@@ -100,7 +108,7 @@ for (const outcome of ["merged", "closed"] as const) {
     await apiClient.mockGitHubAssociateTaskPR({ ...linked, state: "open" });
     await testPage.goto("/tasks?group=workflow_step");
     await expect(
-      testPage.getByText(`Phone task ${outcome}`, { exact: true }).first(),
+      testPage.getByTestId("tasks-list").getByText(`Phone task ${outcome}`, { exact: true }),
     ).toBeVisible();
     const at = new Date().toISOString();
     await apiClient.mockGitHubAssociateTaskPR({
