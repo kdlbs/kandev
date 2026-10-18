@@ -1819,6 +1819,11 @@ func activateOfficeServices(
 		return false
 	}
 
+	if err := services.OfficeSvcs.Scheduler.RegisterTaskCompletionSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office completion subscriber", zap.Error(err))
+		return false
+	}
+
 	return true
 }
 

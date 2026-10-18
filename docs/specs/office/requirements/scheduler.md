@@ -88,7 +88,8 @@ It does not touch Review/Approval's separate reviewer/approver wake path.
 - **AC-OFFICE-SCHEDULER-002.7:** When the final pending blocker completes successfully, an
   otherwise eligible assigned task shall remain reachable through the existing blocker-resolution
   wake. Completing an earlier blocker while another is pending shall not wake it. A held assignment
-  shall create no queued placeholder requiring later cancellation or replay.
+  shall create no queued placeholder requiring later cancellation or replay. Valid same-workspace
+  Kanban prerequisites are included; Office isolation applies to the dependent receiving the wake.
 - **AC-OFFICE-SCHEDULER-002.8:** When blocker information cannot be read, assignment admission
   shall preserve its previous behavior and log the failed read at Warn, unless another blocker is
   positively known to be pending. An unknown blocker shall not override a known pending blocker,

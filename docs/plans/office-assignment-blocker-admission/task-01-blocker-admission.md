@@ -27,13 +27,16 @@ system_design:
 
 Extend Office's shared assignment eligibility predicate with authoritative persisted
 blocker reads. Independently reproduce the unwanted run admission, then prove the
-three affected producers hold pending work and the existing resolution path releases it.
+three affected producers hold pending work. Complete the confirmed no-stranding repair
+by connecting committed Office completion to the existing sessionless resolution cascade.
 
 ## In scope
 
 - `shared.IsAssignmentWakeEligible` and its structural lookup contract.
 - TaskCreated/TaskUpdated subscriber, recovery, and assignee mutation integrations;
   preserve their existing calling boundaries and use the single shared check.
+- The committed successful Office state-event subscriber and explicit production
+  registration described in the [plan](plan.md#corrective-completion-bridge).
 - Minimal onboarding `Repository` interface compatibility for its existing helper
   call; preserve its no-blocker creation and step/keyless policy.
 - Independent permanent real-schema/writer regressions and targeted policy controls
@@ -59,12 +62,16 @@ three affected producers hold pending work and the existing resolution path rele
 3. The complete compatibility matrix passes: step fail-open does not bypass a known
    pending blocker; previous-runner interruption, assignment writes/identity,
    rate/pause/causation, Office terminal/archive/missing policy, and onboarding remain
-   intact. No run placeholder or alternate launch path is introduced.
+   intact. No run placeholder is introduced. The success-event bridge must isolate
+   Office dependents while accepting valid same-workspace Kanban prerequisites, converge on existing digest keys, and preserve runner,
+   generation, system actor/root causation and queue policy.
 
 ## Dependencies
 
 None. ROOT explicitly released implementation to this same primary session on
-2026-10-18 after accepting the corrected design and granted the local-heavy lease.
+2026-10-18 after accepting the original design. That implementation was published;
+the correction was separately released after the corrected design checkpoint. Its
+actual remaining verification and delivery results are recorded below.
 
 ## Inputs
 
@@ -90,9 +97,12 @@ Production responsibility:
 - `apps/backend/internal/office/service/scheduler_recovery.go`
 - `apps/backend/internal/office/scheduler/reactivity.go`
 
-The last three should need no new independent blocker logic; change only necessary
-call/interface wiring and accurate gate comments. Do not modify existing resolution
-logic or repository state policy. The repository already supplies the required reads.
+The original three producer integrations need no further changes. Corrective production
+responsibility is `apps/backend/internal/office/scheduler/task_completion.go` (new,
+registered committed-success consumer) and
+`apps/backend/internal/backendapp/main.go` (`activateOfficeServices` registration and
+subscription-error propagation). Reuse existing cascade/QueueRunCtx without modifying
+other callers, terminal/approval guards or repository state policy.
 
 Permanent test responsibility:
 
@@ -108,6 +118,9 @@ actual command results together. Keep requirements/design truthful if implementa
 evidence requires a correction within scope.
 
 ## Implementation sequence
+
+The initial sequence below completed for assignment admission. The corrective
+checkpoint at the end is the remaining scope of this same work order.
 
 1. On ROOT release, preserve this primary identity and any existing long-command
    handles across interrupts. Recheck relevant base/dependency changes before editing.
@@ -143,12 +156,16 @@ evidence requires a correction within scope.
 
 ## Verification
 
+The original admission commands below are retained with their actual Results, not
+scheduled for replay. Use the corrective checkpoint commands for the remaining fix.
+
 Run from repository root in Bash after the explicit implementation/heavy release.
 Existing binary directories are pinned below. The pnpm installation directory has
 no `/bin` suffix. Do not replace/delete dependency trees or shared caches. Before
 any later pnpm command or hook in this fresh worktree, perform the one required
 `(cd apps && pnpm install --frozen-lockfile)` under the released resource budget;
-no install is part of this design turn.
+the required frozen install already completed once. Preserve it; do not repeat it
+for this correction. No package command or hook is part of this design turn.
 
 Set up once per execution shell:
 
@@ -342,7 +359,142 @@ Final scoped actual-path lint passed: handle 21049 / join 53c5c3, exit 0, zero
 issues across the complete owning packages; GOMEMLIMIT=3GiB, internal five-minute
 and outer six-minute/kill-after-10-second deadlines. Log:
 `/tmp/kandev-d16574cc-lint-fixed.brWT3n/kandev-run.office-blocker-lint.QR0CtNkH.log`.
-All local test/lint commands are terminally joined and their current-owned process
-groups are absent. Production and permanent test work is complete. Normal active
+All original local test/lint commands are terminally joined and their current-owned
+process groups are absent. Assignment admission work passed; the confirmed completion
+correction below remains pending. Normal active
 hooks, commit/push and hosted PR validation follow as delivery, with their actual
 receipts kept in the external task record.
+
+
+### Corrective design checkpoint: committed completion
+
+Greptile comment 4306356548 identified the actual MoveTask prewrite gap under AC002.7.
+The diagnostic's direct terminal-consumer -> real Dashboard/adapter/scheduler/runs
+control persisted one resolution run. Actual task-service MoveTask first persisted
+COMPLETED, after which the same terminal consumer persisted zero. The dependent had
+no session or deferred launch intent and was excluded by the real 24-hour recovery
+query at age 48 hours; the actual generic dependency consumer did not rescue it.
+No agent/provider launched.
+
+- Setup compilation failure: handle18676/join1b3686, exit1, group3395078 absent;
+  the real workflow service supplies GetNextStepByPosition, not its repository.
+- Corrected causal diagnostic: handle76226/join44b67d, exit1; started
+  2026-10-18T08:47:22.131059Z, joined 08:50:23.952617Z, group3400422 absent.
+  Package 0.569s; direct control PASS, normal MoveTask causal assertion FAIL.
+  Log `/tmp/kandev-d16574cc-move-corrected.j0MDF3/kandev-run.office-move-blocker-diagnostic.jL2fCGcR.log`.
+- Original diagnostic source and receipts remain under
+  `/tmp/kandev-d16574cc-evidence/`; the untracked orchestrator diagnostic is preserved
+  pending implementation. This supersedes the earlier source-only agent-path clearance.
+
+After a later explicit correction release, assess relevant current-main changes once
+before edits/push to avoid duplicating a landed repair; drift alone is no rebase gate.
+Implement the [chosen bridge](plan.md#corrective-completion-bridge) in this same order:
+
+1. Port `TestOfficeAssignmentBlockerCommittedCompletion` to the existing service
+   integration fixture. Register the scheduler subscriber exactly as production does.
+   Normal MoveTask must be the actual producer; retain the diagnostic's no-session,
+   no-intent and old-task controls. First assert the normal MoveTask persisted outcome against the
+   unchanged consumers, with the Dashboard positive control passing. After causal RED,
+   add the subscriber API and wire the fixture through that same production API.
+   A missing proposed API compile is setup, not RED.
+2. Add the scheduler success-event consumer and activation registration. Re-read
+   committed prerequisite state; filter dependent Office identity/workspace in the queue
+   callback; reuse unchanged cascade and QueueRunCtx. Add partial/final, duplicate,
+   canonical Dashboard/state-event convergence, runner/generation/key/actor/causation,
+   mixed-identity and invalid/stale/non-success controls from the plan. Do not rewrite
+   status, approval gates, global dispatcher, session creation or recovery.
+3. Run the focused correction GREEN, one complete race pass in the three packages
+   changed by this correction, and actual-Go-path lint. Keep earlier four-package
+   evidence; do not replay unchanged shared/onboarding or full backend/task/Node suites.
+4. Run relevant light docs/ref/coverage gates and update this work order/manifest
+   from in_progress only after the correction's actual results pass. Use normal
+   authorized delivery only after ROOT's later correction release.
+
+Use the existing pinned shell and office_test helper. The focused causal diagnostic
+above already supplies RED; no gratuitous repeat of that passing positive control.
+After porting, run the changed-consumer regression once with its concrete causal
+expectation before implementing the handler, then GREEN after the code change:
+
+```bash
+set +e
+office_test office-blocker-completion-red 5m 6m \
+  ./internal/office/service -run '^TestOfficeAssignmentBlockerCommittedCompletion$' -v
+# Expected assertion exit 1 before the consumer repair; inspect the raw causal log.
+office_completion_red_exit=$?
+set -e
+[ "$office_completion_red_exit" -eq 1 ]
+office_test office-blocker-completion-green 5m 6m \
+  ./internal/office/service -run '^TestOfficeAssignmentBlockerCommittedCompletion$' -v
+office_test office-blocker-completion-packages 10m 11m \
+  ./internal/office/service ./internal/office/scheduler ./internal/backendapp
+```
+
+Every invocation keeps local Go1.26/GOTOOLCHAIN=local/GOMAXPROCS=2/GOMEMLIMIT=512MiB,
+race/trimpath/fts5/p1/count1 and a fresh task-owned KANDEV_RUN_QUIET_DIR. Focused internal
+5m/outer GNU6m and package internal10m/outer GNU11m both use kill-after10s. Apply the
+existing lint procedure only to actual correction Go paths and their complete owning
+packages: internal5m/outer6m/kill10/GOMEMLIMIT3GiB. Include the new scheduler source,
+backendapp registration and changed service regression. Pass those actual paths
+explicitly to `scripts/lint-go-changed`; exclude the preserved untracked diagnostic
+from the delivered correction path set, keeping its source/evidence safe.
+If another owning package must change, report the concrete need before broadening.
+Retain every original native handle, actual join, exit, log and current-owned absence.
+No heavy execution, install, hooks or corrective push has occurred in this design checkpoint.
+
+
+Corrected design light checks (2026-10-18): catalog validated 386 decisions/1638
+specifications, all-spec lint passed, and doc whitespace passed (original light
+handle89457/join98c751, exit0). The independent actual-file-set coverage/reference
+check exited0 (b28cfa): correction docs-only `exempt`, actual PR/worktree snapshot
+`covered`, both `errors: []`; all four artifact roles, nine criterion IDs, one
+sequential work order, manifest/design/backlinks and 34 local references passed.
+The requirement's AC002.7 wording now explicitly includes valid same-workspace
+Kanban prerequisites; it introduces no new criterion or policy classifier. Final
+light recheck after this wording/result recording is recorded externally.
+
+
+### Corrective implementation results
+
+Completed after the separate implementation release, using the accepted subscriber,
+production activation registration and existing service fixture. Existing cascade,
+QueueRunCtx, approval/terminal guards, dispatcher, session creation and recovery were
+unchanged. Authoritative current main was checked once at
+08cc4ec8f3834cd66b972038925c58a150f54269; its relevant delta from the previously
+observed main was empty, so no already-landed correction was duplicated.
+
+- Permanent real-producer causal RED: handle32359/join88762a, exit1,
+  group3474405 absent. Normal Office and valid Kanban prerequisite MoveTask each
+  committed COMPLETED but persisted zero final-resolution runs; canonical Dashboard
+  completion passed. Partial completion held. Log
+  `/tmp/kandev-d16574cc-completion-red.NPesB9/kandev-run.office-blocker-completion-red.8dUzx35F.log`.
+- Initial GREEN handle15467/join3c4d52, exit1, group3481514 absent: actual completion
+  paths passed, but the wrong-workspace fixture's empty step removed its runner and
+  invalidated the positive control. A real other-work step fixed that fixture.
+- Corrected GREEN handle74522/joina0e568, exit0, group3486143 absent. Three completion
+  paths and ten rejection cases with their positive controls passed: partial/final,
+  Office and valid Kanban prerequisites, Dashboard plus canonical state event and
+  duplicates, current runner/generation, identical digest key, system actor/root
+  causation, generic Kanban dependent, wrong workspace, malformed/missing/failed/
+  cancelled/already-completed and reopened evidence. No dependent session or deferred
+  launch intent; actual recovery query excludes the 48-hour-old dependent. Log
+  `/tmp/kandev-d16574cc-completion-green-fixed.rhP1Kb/kandev-run.office-blocker-completion-green.18e9FM9l.log`.
+- ONE complete correction-owning race pass handle49722/joinb025f4, exit0,
+  group3488467 absent: service21.347s, scheduler2.292s, backendapp171.627s. Log
+  `/tmp/kandev-d16574cc-completion-packages.kJhJ9L/kandev-run.office-blocker-completion-packages.uPP4lW7P.log`.
+- Scoped actual-path lint handle65824/join5b6e3c, exit0, zero issues, group3513533
+  absent. Complete owning packages for the new scheduler consumer, backendapp wiring
+  and changed service regression; internal5m/GNUouter6m/kill10/GOMEMLIMIT3GiB. Log
+  `/tmp/kandev-d16574cc-completion-lint.qt7mBm/kandev-run.office-blocker-completion-lint.iP6euIMB.log`.
+
+All correction tests used localGo1.26/GOTOOLCHAINlocal/GOMAXPROCS2/GOMEMLIMIT512MiB,
+race/trimpath/fts5/p1/count1; focused internal5m/outer6m and package internal10m/outer11m,
+kill10, unique task-owned run-quiet directories. No original four-package, shared,
+onboarding, full-backend/task or Node replay, install repeat or linter unit tests.
+No actual agent/provider launched. The temporary untracked orchestrator diagnostic
+was checksum-matched to the retained child copy and removed only after its joins
+and permanent port; SHA256 ce0f9bf33b26269c005149cdc6aede266705fe284c69ff30f40e13d0fc62c2a2.
+Receipts and evidence remain under `/tmp/kandev-d16574cc-evidence/`.
+
+Final catalog/all-spec/actual-documentation-coverage/reference/whitespace checks run
+against this completed package; their actual final exits are recorded externally.
+Normal active hooks and corrective delivery receipts also remain external.

@@ -26,7 +26,7 @@ subtask-sequencing contract within its existing owner and boundaries.
 
 ## Confirmed root cause and admission evidence
 
-`shared.IsAssignmentWakeEligible` currently reads only the step auto-start policy.
+At admission, `shared.IsAssignmentWakeEligible` read only the step auto-start policy.
 The event, recovery, and assignee-reactivity producers therefore admit an assignment
 while an already-persisted prerequisite is unfinished. Task creation already writes
 its blocker edges before publishing `TaskCreated`; reordering that producer is unnecessary.
@@ -62,13 +62,15 @@ In scope:
 - Existing event-created/updated, unstarted recovery, and assignee mutation producers.
 - Known-pending precedence over step uncertainty or another unreadable blocker.
 - Existing blocker-resolution release and recovery quota/no-stranding controls.
+- A committed Office success-event bridge to the existing sessionless blocker cascade;
+  cover normal MoveTask prewrites without changing completion/approval guards.
 - Structural onboarding lookup compatibility, because it is another existing helper
   caller; its creator accepts no blocker input and needs no new behavior.
 
 Out of scope:
 
 - FAILED/CANCELLED/archive/missing-blocker policy reconciliation (including #4548),
-  #4553 and PR #4559, generic Kanban changes, and new automatic launch paths.
+  #4553 and PR #4559, generic Kanban changes, and unrelated automatic launch paths.
 - Claim-time checks, global scheduler redesign, blocker/queue transactions, schema
   changes, runtime flags, provider work, metrics projects, UI/copy, or lifecycle cleanup.
 - Delegation, extra sessions/tabs, model switches, and protected work/resource cleanup.
@@ -92,8 +94,36 @@ Keep the previous-assignee interrupt ahead of the gate. Keep runner writes,
 assignment occurrence generations, keys, rate/pause/causation behavior, and run
 admission unchanged. A held wake produces no run or placeholder. Recovery retains
 its candidate lookback and continues beyond blocked candidates without using the
-admitted quota. Do not alter either existing blocker-resolution producer or its
-workflow trigger/key semantics.
+admitted quota. Preserve both existing resolution producers and their keys. Add only the committed
+completion bridge specified below; the earlier assumption that existing wiring
+always released sessionless held work was disproved by the MoveTask diagnostic.
+
+### Corrective completion bridge
+
+Keep REQ-OFFICE-SCHEDULER-002 and its nine criterion IDs. AC002.7 already requires
+normal final completion to release held work; clarify its valid mixed-identity case. The independent diagnostic confirmed
+that MoveTask commits COMPLETED before the orchestrator terminal consumer returns
+at its existing terminal guard. The legacy Office moved-event consumer cannot infer
+completion from modern ID-only payloads. Direct canonical Office completion passed.
+
+Add `scheduler/task_completion.go`: `RegisterTaskCompletionSubscriber` and its
+successful committed-state handler. Register exactly once in
+`backendapp.activateOfficeServices`, after dependencies are wired, and fail activation
+on subscription error. Reject malformed/missing transition evidence, non-COMPLETED
+new state, already-COMPLETED old state, and a persisted source no longer COMPLETED.
+Do not require source Office identity: task-service validateDependencyPair allows
+same-workspace Kanban prerequisites for Office dependents. Office admission belongs
+to the dependent. Reuse `cascadeBlockersResolved` with a narrow callback checking
+that each selected dependent is Office-owned in the prerequisite workspace before
+`QueueRunCtx`. Existing cascade code and all other callers remain unchanged.
+
+Reuse current blocker terminal reads, runner selection, digest key, payload and
+system actor/root causation. Duplicate delivery and canonical Dashboard completion
+plus its subsequent state event must yield one persisted resolution run for the
+same dependent/runner/blocker set. No status rewrite, approval rerun, dependent
+session, deferred launch intent, recovery extension or global dispatcher change.
+Read/queue failures are reported through existing error/logging paths; this adds
+no durable retry or new failure-policy promise.
 
 Compatibility constraints come from the completed
 [step-eligibility package](../office-assignment-step-eligibility/plan.md), existing
@@ -116,8 +146,24 @@ counts, keys where applicable, and persisted runner/generation preservation.
 | 002.1-.6, .9 | `service/assignment_blocker_admission_test.go`: `TestOfficeAssignmentBlockerAdmission` drives real TaskCreated and TaskUpdated bus subscribers. Pending and completed+pending sets yield zero; no blockers/all completed yield one; Backlog remains zero. Include generation-present and stored-runner fallback cases. |
 | 002.1-.6, .8-.9 | `service/assignment_blocker_recovery_test.go`: `TestOfficeAssignmentBlockerRecovery` invokes `OfficeRecoveryHandler.Tick`; five held candidates ahead of an eligible task cannot starve it. Recheck held task after blocker completion within the existing recovery window. |
 | 002.1-.6, .9 | `service/assignment_blocker_admission_test.go`: `TestOfficeAssignmentBlockerMutation` drives `ApplyTaskMutation` and its real queue. Reassignment still interrupts the old runner while held; same-runner assignment has no interrupt; admitted positive controls retain key/actor/generation behavior. |
-| 002.7 | `service/assignment_blocker_resolution_test.go`: `TestOfficeAssignmentBlockerResolution` starts with zero assignment runs, completes two blockers through real writers/mutations, asserts zero after the first and one persisted `task_blockers_resolved` after the final. Exercise the service completion event through its actual dispatcher to real run admission as well, not just a spy callback. |
+| 002.7 (original producers) | `service/assignment_blocker_resolution_test.go`: `TestOfficeAssignmentBlockerResolution` starts with zero assignment runs, completes two blockers through real writers/mutations, asserts zero after the first and one persisted `task_blockers_resolved` after the final. Exercise the service completion event through its actual dispatcher to real run admission as well, not just a spy callback. |
 | 002.3-.6, .8-.9 | `shared/assignment_blocker_eligibility_test.go`: `TestAssignmentBlockerEligibility` covers empty/missing/error step policy, blocker-list/state errors, and both unknown/pending orders. The real bus admission matrix covers FAILED/CANCELLED, archived terminal/nonterminal, and missing-row compatibility. Use narrow fakes for error injection; real producer tests remain mandatory. |
+
+Corrective `service/assignment_blocker_resolution_test.go` test
+`TestOfficeAssignmentBlockerCommittedCompletion` reuses the existing real fixture.
+Drive actual task-service MoveTask and the registered completion subscriber into
+real queue admission, with no dependent session/intent and a 48-hour-old task
+excluded by the actual 24-hour recovery query. Complete two prerequisites: zero
+runs after the first, one after the final. Cover canonical Dashboard completion,
+its following canonical state event, duplicate delivery, same digest key/current
+runner and unchanged generation/system actor/root causation. Include a valid Kanban-prerequisite/Office-dependent positive control through
+the real dependency writer/validator, and generic Kanban dependent negative controls
+(even with a runner), wrong-workspace, malformed,
+stale/reopened and non-success events. Keep the original resolution controls.
+The earlier actual orchestrator-terminal-consumer diagnostic remains causal evidence;
+port the changed-consumer regression into the shared permanent fixture rather than
+copying its temporary setup. No synthetic named TaskMoved event substitutes for the
+normal MoveTask producer in this new regression.
 
 Existing step, rate-limit, pause/replay, causation, blocker-key convergence, and
 onboarding tests run in their complete owning packages. Extend a new test file if a
@@ -150,7 +196,7 @@ released implementation changes a public contract.
 
 ## Verification results
 
-Implementation complete. Independent causal RED exposed unwanted persisted assignment
+Assignment admission and the committed-completion correction are complete. Independent causal RED exposed unwanted persisted assignment
 admission from all three producers while positive controls passed. Focused GREEN
 passed six top-level tests and 51 subtests. One complete race pass passed shared
 (2.639s), service (18.247s), scheduler (2.299s), and onboarding (1.292s).
@@ -162,6 +208,19 @@ was not repeated. Catalog, all-spec lint and whitespace checks exited 0. Actual
 runtime documentation coverage is `covered` with `errors: []`; the earlier docs-only
 `exempt` result remains historical. [Work-order Results](task-01-blocker-admission.md#results)
 records commands, setup corrections, logs, actual handles/joins and resource budgets.
+
+Corrective diagnostic: setup-only handle18676/join1b3686 failed compilation; corrected
+handle76226/join44b67d exited 1 causally. Real MoveTask committed COMPLETED then
+produced zero resolution runs; direct terminal-consumer/Dashboard/cascade control
+produced one. Both diagnostic groups joined and are absent. Detailed receipts and
+limits are in the existing work order. Permanent real-producer RED reproduced both
+Office and valid Kanban prerequisites, while canonical Dashboard completion passed.
+The implemented subscriber passes focused completion/identity/convergence controls.
+One complete correction-owning race pass passed service (21.347s), scheduler (2.292s)
+and backendapp (171.627s). Scoped lint of the three actual correction Go paths
+passed with zero issues. The work order records actual RED/GREEN, fixture correction,
+package/lint joins, logs and checksum cleanup; original shared/onboarding evidence
+was retained without replay.
 
 No actual agent/provider execution was claimed. All local test/lint command groups
 are absent after their actual joins. Normal active hooks and hosted delivery receipts
