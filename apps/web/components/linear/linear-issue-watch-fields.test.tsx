@@ -1,12 +1,24 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProjectMultiSelect } from "./linear-issue-watch-fields";
+import { ProjectMultiSelect, useTeamsAndStates } from "./linear-issue-watch-fields";
 
 const responsive = vi.hoisted(() => ({ isFinePointer: true }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
 }));
+
+const api = vi.hoisted(() => ({
+  listLinearTeams: vi.fn(async () => ({ teams: [] })),
+  listLinearStates: vi.fn(async () => ({ states: [] })),
+  listLinearLabels: vi.fn(async () => ({ labels: [] })),
+  listLinearUsers: vi.fn(async () => ({ users: [] })),
+  listLinearProjects: vi.fn(async (_teamKey: string, opts?: { workspaceId?: string }) => ({
+    projects: [{ id: `${opts?.workspaceId}-project`, name: `${opts?.workspaceId} project` }],
+  })),
+}));
+
+vi.mock("@/lib/api/domains/linear-api", () => api);
 
 const projects = [
   { id: "p1", name: "Checkout" },
@@ -62,5 +74,26 @@ describe("ProjectMultiSelect", () => {
     expect(chip.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(chip);
     expect(onToggle).toHaveBeenCalledWith("p-archived");
+  });
+});
+
+describe("useTeamsAndStates", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
+  it("loads projects per workspace when two workspaces share a team key", async () => {
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useTeamsAndStates(workspaceId, "ENG"),
+      { initialProps: { workspaceId: "ws-a" } },
+    );
+    await waitFor(() =>
+      expect(result.current.projects).toEqual([{ id: "ws-a-project", name: "ws-a project" }]),
+    );
+
+    rerender({ workspaceId: "ws-b" });
+    expect(result.current.projects).toEqual([]);
+    await waitFor(() =>
+      expect(result.current.projects).toEqual([{ id: "ws-b-project", name: "ws-b project" }]),
+    );
+    expect(api.listLinearProjects).toHaveBeenCalledWith("ENG", { workspaceId: "ws-a" });
+    expect(api.listLinearProjects).toHaveBeenCalledWith("ENG", { workspaceId: "ws-b" });
   });
 });
