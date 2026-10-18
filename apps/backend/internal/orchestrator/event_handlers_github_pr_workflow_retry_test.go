@@ -57,12 +57,12 @@ func (r *prWorkflowFaultRepository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 		return false, errors.New("transition write unavailable")
 	}
 	if r.moveAway {
-		current, err := r.Repository.GetTask(ctx, task.ID)
+		current, err := r.GetTask(ctx, task.ID)
 		if err != nil {
 			return false, err
 		}
 		current.WorkflowStepID = "step_exec"
-		if err := r.Repository.UpdateTask(ctx, current); err != nil {
+		if err := r.UpdateTask(ctx, current); err != nil {
 			return false, err
 		}
 	}
