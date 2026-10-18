@@ -343,9 +343,10 @@ is required because ownership/identity/lifecycle/storage remain unchanged.
 - [ ] [Task 01: Registry-independent profile eligibility](task-01-plugin-profile-validation.md)
 - [ ] [Task 02: Plugin add/save/reload/apply flow](task-02-plugin-layout-editor-flow.md)
 
-Task 02 depends on Task 01. Implementation delegation is not authorized.
-The separately user-authorized read-only adversarial review loop does not
-authorize production edits or implementation workers.
+Task 02 depends on Task 01. The design handoff required a later explicit
+implementation request before delegation; the task owner has now authorized an
+Opus implementation subtask. The earlier read-only adversarial review did not
+itself authorize production edits or implementation workers.
 
 ## Verification results
 
