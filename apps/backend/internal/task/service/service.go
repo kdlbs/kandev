@@ -640,6 +640,9 @@ type Service struct {
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string
+	archiveReclaimWakeCutoff              time.Time
+	archiveReclaimWakeAfterID             string
+	archiveReclaimWakeDone                bool
 	cleanupWorkerCancel                   context.CancelFunc
 	cleanupWorkerWG                       sync.WaitGroup
 	cleanupWorkerWake                     chan struct{}

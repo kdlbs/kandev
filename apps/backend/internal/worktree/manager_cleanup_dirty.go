@@ -26,7 +26,6 @@ type DirtyWorktree struct {
 // active regardless of this option.
 type WorktreeCleanupOptions struct {
 	DiscardWorktreeChanges bool
-	RequireCleanCheckout   bool
 	ExpectedTaskID         string
 	ExpectedWorktreePath   string
 	ExpectedRepositoryPath string

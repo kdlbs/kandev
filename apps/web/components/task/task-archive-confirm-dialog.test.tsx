@@ -123,7 +123,7 @@ describe("TaskArchiveConfirmDialog presentation", () => {
     );
 
     expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
-      /Git changes stays until it is clean/i,
+      /local changes are deleted on archive/i,
     );
     expect(screen.getByTestId("task-cleanup-notes").textContent).toMatch(
       /Unpublished local branches remain available/i,
@@ -145,7 +145,7 @@ describe("TaskArchiveConfirmDialog presentation", () => {
 
     expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(/2 Git worktree tasks/);
     expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
-      /checkouts with Git changes stay until they are clean/i,
+      /worktrees and local changes are deleted on archive/i,
     );
   });
 });
@@ -293,7 +293,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
         onConfirm={() => {}}
       />,
     );
-    expect(screen.getByText(/Git changes stays until it is clean/i)).toBeTruthy();
+    expect(screen.getByText(/local changes are deleted on archive/i)).toBeTruthy();
     expect(screen.getByText(/Unpublished local branches remain available/i)).toBeTruthy();
   });
 

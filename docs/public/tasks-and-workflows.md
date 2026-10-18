@@ -973,12 +973,13 @@ to review an action and return to your list.
 - While the request is pending, the task stays visible with a spinner and an **Archiving in progress** toast. On failure, it returns to its normal state.
 - Runtime stop and cleanup run in the background with a 60-second timeout. Cleanup failure does not undo the archive. Kandev preserves a runtime or environment when it cannot stop a nonterminal session, or while another active task uses a shared environment or worktree.
 
-For Git worktrees, archive removes a worktree only when Git reports it clean.
-If it has tracked or untracked changes, Kandev keeps its directory and branch
-and records a durable recheck. The task cleanup worker checks it again after
-about 24 hours and removes it when it is clean. This task-lifecycle check runs
-even when scheduled storage cleanup is disabled. Git does not include ignored
-files in this check. Protect ignored work that must remain.
+For Git worktrees, archive deletes Kandev-owned checkouts and their local
+changes during background cleanup, including staged, unstaged, untracked, and
+ignored files. Commit and push work you need before archiving. Kandev does not
+create an automatic commit or wait for the checkout to become clean.
+Previously archived worktrees retained for local changes are also reconsidered
+after upgrade without the old 24-hour cleanliness delay. Runtime, ownership,
+and shared-workspace checks still apply; cleanup failures remain retryable.
 
 After the last worktree is reclaimed and the task environment is no longer in
 use, Kandev also removes the enclosing task folder and everything inside it,
@@ -988,7 +989,7 @@ worktree keeps that task folder until reclamation can finish.
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
-| Git worktree  | Removes clean Kandev-owned worktrees. Worktrees with tracked or untracked changes stay on disk until a later clean recheck. Kandev removes a managed local branch only when its exact head is integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
+| Git worktree  | Removes Kandev-owned worktrees and all local changes during archive cleanup. Kandev removes a managed local branch only when its exact head is integrated; unpublished, external, ambiguous, shared, or borrowed work remains. Remote branches are untouched. |
 | Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                                               |
 | Kubernetes    | Deletes only the recorded Pod and Kandev-managed PVC after exact UID and ownership checks. An existing claim is retained.                                                                                             |
 | Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                                             |
