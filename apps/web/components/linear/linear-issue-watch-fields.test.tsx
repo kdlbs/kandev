@@ -31,6 +31,8 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api/domains/linear-api", () => api);
 
+const archivedProjectId = "p-archived";
+
 const projects = [
   { id: "p1", name: "Checkout" },
   { id: "p2", name: "Search" },
@@ -57,12 +59,16 @@ describe("watch dialog filter fields", () => {
   it("keeps project-only saved selections visible and removable without a team", async () => {
     render(
       <WatchFilters
-        initial={{ projectIds: ["p-archived", "p-other"], query: "keep query", priorities: [1] }}
+        initial={{
+          projectIds: [archivedProjectId, "p-other"],
+          query: "keep query",
+          priorities: [1],
+        }}
       />,
     );
     await waitFor(() => expect(api.listLinearTeams).toHaveBeenCalled());
-    expect(screen.queryByTitle("p-archived")).not.toBeNull();
-    const chip = screen.getByTitle("p-archived");
+    expect(screen.queryByTitle(archivedProjectId)).not.toBeNull();
+    const chip = screen.getByTitle(archivedProjectId);
     expect(chip.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(chip);
     expect(JSON.parse(screen.getByTestId("filter-state").textContent!)).toMatchObject({
@@ -139,7 +145,7 @@ describe("ProjectMultiSelect", () => {
       <ProjectMultiSelect
         projects={[]}
         loading={false}
-        selected={["p-archived"]}
+        selected={[archivedProjectId]}
         onToggle={onToggle}
         disabled={false}
       />,
@@ -147,7 +153,7 @@ describe("ProjectMultiSelect", () => {
     const chip = screen.getByRole("button", { name: "Unavailable project" });
     expect(chip.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(chip);
-    expect(onToggle).toHaveBeenCalledWith("p-archived");
+    expect(onToggle).toHaveBeenCalledWith(archivedProjectId);
   });
 });
 
