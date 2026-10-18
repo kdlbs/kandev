@@ -59,8 +59,9 @@ at the first gate that does not pass:
    step. Load the current step and skip when it declares no actions for the
    trigger.
 3. List the task's attached PRs (`ListTaskPRs`, which excludes detached rows).
-   Skip when the reported PR is not among them. The reported PR's state replaces
-   the stored row's state for the decision.
+   Skip when the reported PR is not among them, or when its stored row no
+   longer reports the event's state and merge or close time (compared to the
+   second), so a delayed or retried snapshot of a reopened PR does not fire.
 4. `on_pr_merged` requires every linked PR to be merged; its outcome time is
    the latest `merged_at`. `on_pr_closed` uses the reported PR and its
    `closed_at`. A missing time counts as now.
@@ -128,8 +129,6 @@ The poller publishes an event only when PR data changes. When evaluation or the
 commit fails with an error (not a skip or a compare-and-swap miss),
 `scheduleTaskPRWorkflowRetry` re-runs the same PR snapshot after 5 s, 30 s, and
 2 min on the CI automation worker lifecycle, so service shutdown cancels it.
-Each retry reads the stored PR row and stops when it no longer reports the
-failed event's state and merge or close time, for example after a reopen.
 
 ## Step editor
 

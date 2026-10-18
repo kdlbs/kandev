@@ -126,3 +126,21 @@ func TestHandleTaskPRWorkflowEvent_RetryStopsWhenPRReopened(t *testing.T) {
 		t.Fatalf("task step = %q, want step_accept (PR was reopened)", got)
 	}
 }
+
+// TestProcessTaskPRWorkflowEvent_DelayedCloseAfterReopenIgnored pins that the
+// first delivery is checked against the stored PR too: a late closed snapshot
+// does not move the task once the stored PR is open again.
+func TestProcessTaskPRWorkflowEvent_DelayedCloseAfterReopenIgnored(t *testing.T) {
+	f := newPRWorkflowFixture(t, prMergedAcceptEvents())
+	closedAt := time.Now().UTC()
+	closed := linkedTaskPR(1, "closed")
+	closed.ClosedAt = &closedAt
+	f.github.taskPRs = []*github.TaskPR{linkedTaskPR(1, "open")}
+
+	if f.process(t, closed) {
+		t.Fatal("expected a delayed close of a reopened PR to be ignored")
+	}
+	if got := f.taskStep(t); got != "step_accept" {
+		t.Fatalf("task step = %q, want step_accept", got)
+	}
+}
