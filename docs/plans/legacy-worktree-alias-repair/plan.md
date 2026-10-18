@@ -107,7 +107,7 @@ Prefixes below expand to `AC-TASKS-WORKTREE-INVENTORY-REPAIR-`.
 | --- | --- |
 | 004.1-.2, 001.1-.2 | `alias_discovery_test.go` and `alias_preview_test.go`: task-root duplicates, cross-environment duplicates, complete group pagination, forged canonical selections, changed claims |
 | 004.3-.6, 001.3-.5 | `alias_apply_test.go` and `alias_recovery_test.go`: shared bindings, retained conversations/snapshots, mixed failed/live slot refusal, inactive consumers, exact rollback, commit/fence failpoints |
-| 004.8 | `store_alias_identity_test.go` and `task_environment_alias_identity_test.go`: session joins, active/history mixtures, concurrent claims, exact writes, no fan-out |
+| 004.8 | `store_alias_identity_test.go` and `task_environment_alias_identity_test.go`: session joins, active/history mixtures, exact writes, no fan-out. `store_alias_identity_postgres_test.go` and `task_environment_alias_identity_postgres_test.go`: mandatory real-PostgreSQL concurrent claim checks. |
 | 004.7, 002.3 | `legacy_alias_lifecycle_test.go`: archive/delete after repair and reopen, parent-only/child-only/cascade cases, dirty and borrowed workspaces, unchanged cancelled cleanup evidence |
 
 Tests must fail before their corresponding implementation. Existing version-1

@@ -51,6 +51,11 @@ Automatic repair, new UI controls, and changing immutable cleanup snapshots.
 
 ## Verification
 
+Configure `KANDEV_TEST_POSTGRES_DSN` for a disposable database before running
+the complete block. Both packages must execute their PostgreSQL cases. A skipped
+test is not concurrency evidence. Update the lint invocation for final helper
+paths and include every changed Go file.
+
 ```bash
 test -n "${KANDEV_TEST_POSTGRES_DSN:-}"
 (cd apps/backend && go test -trimpath -race ./internal/worktree -count=1)
@@ -60,11 +65,6 @@ test -n "${KANDEV_TEST_POSTGRES_DSN:-}"
 bash scripts/lint-go-changed apps/backend/internal/worktree/store.go apps/backend/internal/worktree/store_alias_identity_test.go apps/backend/internal/worktree/store_alias_identity_postgres_test.go apps/backend/internal/task/repository/sqlite/task_environment.go apps/backend/internal/task/repository/sqlite/task_environment_alias_identity_test.go apps/backend/internal/task/repository/sqlite/task_environment_alias_identity_postgres_test.go
 git diff --check
 ```
-
-Configure `KANDEV_TEST_POSTGRES_DSN` for a disposable database before running
-the complete block. Both packages must execute their PostgreSQL cases. A skipped
-test is not concurrency evidence. Update the lint invocation for final helper
-paths and include every changed Go file.
 
 ## Files likely touched
 
@@ -142,3 +142,51 @@ The remaining verification commands above passed, including PostgreSQL-enabled
 store conformance. Final lint selected `store.go`, `task_environment.go`,
 `physicalclaim/claim.go`, and `models/worktree_identity.go`; the helper checked
 all Go files in those packages. `git diff --check` passed.
+
+### PR validation follow-up
+
+CI exposed two integration gaps on head `2fe6e5b`:
+
+- A local-to-worktree launch used an empty physical branch key while environment
+  persistence used `main`. Creation now receives the same canonical branch key
+  before it writes the inventory. The primary checkout keeps its flat path.
+  `TestSingleRepoWorktreeTransitionRetainsCanonicalSlot` failed before the fix
+  for checkout, base, and default branches. All three cases now pass against
+  the real SQLite repository and worktree store.
+- The PostgreSQL recovery CAS fixture reused physical IDs across subtests in
+  one database. Its worktree IDs now include each case's suffix. The original
+  test reproduced the three CI failures before this correction.
+
+Checks completed on the corrected code:
+
+```bash
+(cd apps/backend && go test -race ./internal/orchestrator/executor -run 'Test(SingleRepoWorktreeTransition|ApplyRepositoryConfig|RepositoryCheckoutDefaultsConsumerProjection|PersistTaskEnvironment|BuildTaskEnvironmentRepos|BuildRepoSpecs)' -count=1)
+(cd apps/backend && go test -race ./internal/task/repository/sqlite ./internal/worktree -run 'Test(TaskEnvironmentAliasIdentity|PostgresAliasIdentity|StoreAliasIdentity|PersistTaskEnvironmentTransition|PostgresCommitWorkspaceRecoveryError)' -count=1)
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/executor/executor_execute.go apps/backend/internal/orchestrator/executor/executor_branch_identity_transition_test.go apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_postgres_test.go
+```
+
+The PostgreSQL command used `KANDEV_TEST_POSTGRES_DSN` for the disposable
+PostgreSQL 17 database. All listed tests passed with race detection. Scoped lint
+reported zero issues. The ownership guard was not relaxed.
+
+Browser checks used fresh managed builds and disabled retries. All four desktop
+workflow-focus cases and the mobile workflow-focus case passed. The canvas
+review case and the mobile runtime-summary reconnect case passed. The preview
+case exposed a separate fixture race: the template workflow could finish a late
+transition and select another primary session after the fixture's explicit
+selection. Its dedicated manual workflow preserves all tab assertions. The
+canvas-then-preview sequence failed before that fixture change and passed after
+it (two tests, 39.2s). Scoped ESLint passed.
+
+```bash
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --project chromium e2e/tests/workflow/workflow-session-focus.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts e2e/tests/canvas/plugin-canvas.spec.ts -- --grep 'Workflow session focus|shows all sessions as tabs|keeps the desktop release review wide' --retries=0
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build --project mobile-chrome e2e/tests/workflow/mobile-workflow-session-focus.spec.ts e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts -- --grep 'shows the new committed recipient|backend runtime summary reconnect replay' --retries=0
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --no-build --project chromium e2e/tests/canvas/plugin-canvas.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts -- --grep 'keeps the desktop release review wide|shows all sessions as tabs' --retries=0
+```
+
+The first desktop command passed five cases and exposed the preview fixture race.
+The final two commands passed after the relevant fixes. On this Nix host, the
+commands set `KANDEV_SERVER_HOST=127.0.0.1` and supplied Chromium's installed
+library directories through `LD_LIBRARY_PATH`. The initial bind-address and
+missing-library failures occurred before the tests exercised application code.
+Temporary diagnostic capture was removed. No product UI changed.

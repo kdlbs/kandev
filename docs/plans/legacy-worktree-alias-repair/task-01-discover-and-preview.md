@@ -46,6 +46,10 @@ SQL mutation, cleanup-job replacement, runtime-store changes, and live repair.
 
 ## Acceptance
 
+Criteria 004.4 and 004.6 are shared with Task 02. This work order covers preview
+refusal and blocker reporting. Task 02 covers apply-time refusal and proves that
+the refused operation changes no data.
+
 1. `TestAliasDiscovery` covers bounded complete groups, cursor continuation, oversized
    refusal, and byte-for-byte database/checkout preservation.
 2. `TestAliasPreview` accepts both incident shapes only with complete canonical proof
