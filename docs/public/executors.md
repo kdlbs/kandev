@@ -193,6 +193,14 @@ returns, it verifies the recorded execution and reconnects to the same agent.
 It replays saved output without sending another prompt. **Stop** still stops
 the selected remote agent.
 
+When workspace ACP idle suspension is enabled, a recovered settled session
+continues its recorded idle interval across a backend restart. Replayed output,
+health checks, and saved-message metadata updates do not restart that interval.
+If the earlier activity time is unavailable or invalid, Kandev gives the session
+a full interval after observing it settled. Existing focus and policy changes
+still refresh the interval. An explicit focus interval also survives a backend
+restart for that same execution.
+
 The executor needs usable disk space to retain output during a long outage.
 Provider expiration and external process termination can still stop a remote
 agent. Backend tools and credential services require connectivity to Kandev.

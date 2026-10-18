@@ -771,7 +771,7 @@ func (sm *SessionManager) initializeACPConnection(
 			err = retireInterruptedDeliverySubmission(ctx, client, execution)
 		}
 	}
-	if err == nil && execution.ForceContextContinuation {
+	if err == nil && execution.replacesPredecessorGeneration() {
 		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
 			err = retireErr
 		}
@@ -818,6 +818,12 @@ func retireUnresolvedDeliverySubmissions(
 		}
 	}
 	return nil
+}
+
+// replacesPredecessorGeneration reports whether this execution starts a new
+// native conversation that supersedes the committed harness generation.
+func (e *AgentExecution) replacesPredecessorGeneration() bool {
+	return e.ForceContextContinuation || e.ReplacesNativeConversation
 }
 
 func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
@@ -1882,6 +1888,7 @@ func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt 
 	}
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.lastLiveActivityAt = execution.lastActivityAt
 	execution.lastActivityAtMu.Unlock()
 }
 

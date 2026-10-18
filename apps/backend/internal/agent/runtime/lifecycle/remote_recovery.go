@@ -406,6 +406,7 @@ func (m *Manager) prepareRecoveredRemoteExecution(
 	if execution.TaskID == "" || execution.SessionID == "" || execution.ID == "" {
 		return nil, errors.New("remote recovery execution identity is incomplete")
 	}
+	execution.restoreIdleActivity(record.Metadata)
 	if snapshot.IsPassthrough && ri.remotePassthroughSnapshot != nil {
 		m.adoptRemotePassthrough(execution, *ri.remotePassthroughSnapshot)
 	}

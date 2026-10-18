@@ -1446,6 +1446,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
 		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
+		ReplacesNativeConversation:     reqWithWorktree.ReplaceNativeConversation,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
@@ -1895,7 +1896,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// Promote it in place so the agent subprocess can start against the
 	// existing agentctl instance.
 	if execution.AgentCommand == "" {
-		if req.ForceContextContinuation {
+		if req.startsSuccessorGeneration() {
 			value, err = m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 				return m.launchInternal(sharedCtx, req)
 			})
@@ -2089,9 +2090,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.SessionID != "" {
 		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
 			switch {
-			case req.ForceContextContinuation && existingExecution.DeliveryHarnessGeneration < req.DeliveryHarnessGeneration:
+			case req.startsSuccessorGeneration() && existingExecution.DeliveryHarnessGeneration < req.DeliveryHarnessGeneration:
 				// The retained agentctl instance owns the old generation. Replace it
-				// before explicit continuation so journal retirement uses the new one.
+				// before the successor starts so journal retirement uses the new one.
 				if err := m.cleanupStaleExecution(ctx, existingExecution); err != nil {
 					return nil, err
 				}

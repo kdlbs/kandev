@@ -79,3 +79,40 @@ describe("issueFieldsFromMetadata", () => {
     expect(issueFieldsFromMetadata(null)).toEqual({});
   });
 });
+
+// @covers AC-UI-PROVIDER-WATCHER-TYPES-001.1 through .4
+const watcherKeys: [string, boolean, boolean][] = [
+  ["issue_watch_id", true, false],
+  ["review_watch_id", false, true],
+  ["gitlab_issue_watch_id", true, false],
+  ["gitlab_review_watch_id", false, true],
+  ["jira_issue_watch_id", true, false],
+  ["linear_issue_watch_id", true, false],
+  ["sentry_issue_watch_id", true, false],
+  ["azure_devops_work_item_watch_id", true, false],
+  ["azure_devops_pr_watch_id", false, true],
+];
+it.each(watcherKeys)("recognizes only usable %s values", (key, issue, review) => {
+  expect(isIssueWatchFromMetadata({ [key]: "watch" })).toBe(issue);
+  expect(isPRReviewFromMetadata({ [key]: "watch" })).toBe(review);
+  for (const value of [null, "", "undefined", false, true, 0, 42, ["id"], { id: "watch" }]) {
+    expect(isIssueWatchFromMetadata({ [key]: value })).toBe(false);
+    expect(isPRReviewFromMetadata({ [key]: value })).toBe(false);
+  }
+});
+it("does not infer watcher keys or mask a usable ID with an empty one", () => {
+  expect(
+    isIssueWatchFromMetadata({ custom_issue_watch_id: "watch", issue_url: "https://example.test" }),
+  ).toBe(false);
+  expect(
+    isPRReviewFromMetadata({ custom_review_watch_id: "watch", pr_url: "https://example.test" }),
+  ).toBe(false);
+  expect(isIssueWatchFromMetadata({ issue_watch_id: "", gitlab_issue_watch_id: "watch" })).toBe(
+    true,
+  );
+  expect(isPRReviewFromMetadata({ review_watch_id: null, azure_devops_pr_watch_id: "watch" })).toBe(
+    true,
+  );
+  expect(isIssueWatchFromMetadata({ issue_watch_id: " " })).toBe(true);
+  expect(isPRReviewFromMetadata({ review_watch_id: "null" })).toBe(true);
+});

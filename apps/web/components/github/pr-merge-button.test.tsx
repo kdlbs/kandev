@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/toast-provider";
 import type { AppState } from "@/lib/state/store";
 import type { TaskPR } from "@/lib/types/github";
 import { PRMergeButton } from "./pr-merge-button";
+import { TaskWorkspaceProvider } from "@/components/task/task-workspace-context";
 
 const mergePRMock = vi.hoisted(() => vi.fn());
 const MERGE_BUTTON_TEST_ID = "pr-merge-button";
@@ -48,6 +49,27 @@ beforeEach(() => mergePRMock.mockReset());
 afterEach(() => cleanup());
 
 describe("PRMergeButton", () => {
+  it("merges an embedded original task using its workspace rather than active navigation", async () => {
+    mergePRMock.mockResolvedValue({ status: "merged" });
+    render(
+      <StateProvider initialState={{ workspaces: { activeId: "alpha", items: [] } }}>
+        <ToastProvider>
+          <TaskWorkspaceProvider
+            taskId={taskPR.task_id}
+            workspaceId="beta"
+            sessionId="beta-session"
+          >
+            <PRMergeButton taskPR={taskPR} />
+          </TaskWorkspaceProvider>
+        </ToastProvider>
+      </StateProvider>,
+    );
+    fireEvent.click(screen.getByTestId(MERGE_BUTTON_TEST_ID));
+    await waitFor(() =>
+      expect(mergePRMock).toHaveBeenCalledWith("beta", "acme", "site", 42, undefined),
+    );
+  });
+
   it.each([
     ["merged", "PR merged"],
     ["queued", "PR added to merge queue"],

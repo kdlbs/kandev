@@ -538,6 +538,14 @@ provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
 
+Native code review uses the same saved candidate policy for classified provider
+failures and keeps its selected candidate across prompt batches in one review
+run. Each prompt batch permits at most eight candidate dispatch attempts. Partial
+output, cancellation,
+and inference admission refusals stop automatic fallback. A request deadline
+without confirmed child termination also stops the review, even while its parent
+budget remains active; automatic recovery from that deadline is not available.
+
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a
 candidate's `policies` object, set `unclassified` to:

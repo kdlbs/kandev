@@ -47,7 +47,7 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.14:** The IANA timezone database is embedded in the distributed binary (`time/tzdata`), so a zone named by a routine trigger resolves with no system zoneinfo directory and no build-machine `GOROOT`, as on a deployed Windows host.
 - **AC-OFFICE-SCHEDULER-001.15:** A run whose launch fails validation of its built agent or continue command is not retried with backoff. It escalates at once, as after the last retry, because every attempt would build the same command and leave another failed session.
 
-### REQ-OFFICE-SCHEDULER-002: Assignment wake respects step auto-start
+### REQ-OFFICE-SCHEDULER-002: Assignment wake admission
 
 **Intent:** An Office task's current workflow step is authoritative for whether an agent should be
 running at all. A step with no `auto_start_agent` on_enter action (Backlog, `events:{}`) means the
@@ -56,9 +56,9 @@ event, or the unstarted-task recovery sweep must not launch an agent outside tha
 producer of a `task_assigned` run for an Office task's assignee (reactivity's assignee-change
 handler, the event-subscriber path, and unstarted-task recovery) applies the same eligibility
 predicate: the task's current workflow step must have an `auto_start_agent` on_enter action, or the
-task must have no workflow step at all (a task outside any workflow keeps its prior behaviour). This
-does not change how a legitimate auto-start step wakes its runner, and it does not touch Review/
-Approval's separate reviewer/approver wake path.
+task must have no workflow step at all (a task outside any workflow keeps its prior step behaviour). This
+also holds assignment wakes while any blocker remains nonterminal under Office blocker policy.
+It does not touch Review/Approval's separate reviewer/approver wake path.
 
 #### Acceptance criteria
 
@@ -68,18 +68,43 @@ Approval's separate reviewer/approver wake path.
   recovery). The previous assignee's session interrupt (when reassigning) is unaffected — only the
   new wake is gated.
 - **AC-OFFICE-SCHEDULER-002.2:** Assigning, reassigning, creating, or updating an Office task whose
-  current workflow step has an `auto_start_agent` on_enter action queues exactly one `task_assigned`
-  run per triggering event, unchanged from prior behaviour.
+  current workflow step has an `auto_start_agent` on_enter action and whose blockers permit admission
+  queues one `task_assigned` run per admitted occurrence, subject to existing queue policies.
 - **AC-OFFICE-SCHEDULER-002.3:** A task with no workflow step bound (`workflow_step_id` empty) is
-  treated as eligible, preserving behaviour for tasks outside a workflow.
+  treated as step-eligible; the blocker condition still applies.
 - **AC-OFFICE-SCHEDULER-002.4:** A step lookup failure (repository error, missing step getter, or a
-  step ID that does not resolve) fails open — the wake is queued as before, and the skip decision is
-  never silently swallowed: an eligible-vs-ineligible outcome is logged at Info, and a failed lookup
+  step ID that does not resolve) fails open for the step condition; the blocker condition still applies,
+  and the skip decision is never silently swallowed: an eligible-vs-ineligible outcome is logged at Info, and a failed lookup
   is logged at Warn.
+
+- **AC-OFFICE-SCHEDULER-002.5:** When at least one persisted blocker of an Office task is
+  nonterminal, task-created/task-updated assignment events, assignee reactivity, and unstarted-task
+  recovery shall admit zero `task_assigned` runs for that task. A mixture of completed and pending
+  blockers shall remain held, including when the task has no step or its step cannot be resolved.
+- **AC-OFFICE-SCHEDULER-002.6:** When a task has no blockers or all blockers are terminal under
+  existing Office policy, the blocker condition shall permit the existing assignment admission.
+  A refused wake shall not remove the runner, consume its assignment occurrence, or suppress the
+  previous assignee's interrupt.
+- **AC-OFFICE-SCHEDULER-002.7:** When the final pending blocker completes successfully, an
+  otherwise eligible assigned task shall remain reachable through the existing blocker-resolution
+  wake. Completing an earlier blocker while another is pending shall not wake it. A held assignment
+  shall create no queued placeholder requiring later cancellation or replay. Valid same-workspace
+  Kanban prerequisites are included; Office isolation applies to the dependent receiving the wake.
+- **AC-OFFICE-SCHEDULER-002.8:** When blocker information cannot be read, assignment admission
+  shall preserve its previous behavior and log the failed read at Warn, unless another blocker is
+  positively known to be pending. An unknown blocker shall not override a known pending blocker,
+  regardless of their order. A later recovery pass shall reconsider tasks held by pending blockers
+  under its existing candidate and quota rules.
+- **AC-OFFICE-SCHEDULER-002.9:** This repair shall retain Office's existing classification of
+  `COMPLETED`, `FAILED`, and `CANCELLED` as terminal. Archiving shall not itself change that
+  classification; a missing blocker shall follow the unknown-read rule above. Generic Kanban
+  dependency policy, assignment generation and deduplication, rate limiting, pause/replay, causation,
+  and reviewer/approver wakes shall retain their existing behavior. Failure/cancellation dependency
+  policy reconciliation is separate work.
 
 ### REQ-OFFICE-SCHEDULER-003: Create-time assignee validation and runner seat
 
-**Intent:** REQ-OFFICE-SCHEDULER-002 gates the wake on the step the task lands on; this requirement
+**Intent:** REQ-OFFICE-SCHEDULER-002 gates assignment wake admission; this requirement
 gates what the wake is for. A task-create request may name an `assignee_agent_profile_id` to seat as
 the task's runner. That name is caller-supplied and must be checked before any task row exists —
 otherwise the system either seats a runner that cannot legitimately hold the seat (a profile scoped

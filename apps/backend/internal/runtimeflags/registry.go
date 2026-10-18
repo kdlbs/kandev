@@ -62,6 +62,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.integratedControl",
+			EnvVar:          "KANDEV_FEATURES_INTEGRATED_CONTROL",
+			Kind:            KindFeature,
+			Label:           "Integrated control",
+			Description:     "Adds dedicated navigation across authorized workspaces, coordinators, and existing conversations.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Shows existing workspace and coordinator data. Conversation interaction retains native workspace permissions; navigation never starts an agent.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.IntegratedControl },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.IntegratedControl = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,

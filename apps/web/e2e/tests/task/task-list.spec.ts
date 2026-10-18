@@ -355,10 +355,20 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=none");
     await testPage.waitForLoadState("networkidle");
+    const searchApplied = waitForHttp(testPage, "GET", /\/api\/v1\/workspaces\/[^/]+\/tasks$/, {
+      timeout: 5_000,
+      predicate: (response) => {
+        const params = new URL(response.url()).searchParams;
+        return (
+          response.ok() && params.get("query") === "Paged list task" && params.get("page") === "1"
+        );
+      },
+    });
     await testPage
       .getByTestId("kanban-header-search")
       .getByPlaceholder("Search tasks...")
       .fill("Paged list task");
+    await searchApplied;
 
     const pagination = testPage.getByTestId("tasks-pagination");
     await expect(pagination).toContainText("Showing 1 to 25 of 26 results");

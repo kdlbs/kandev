@@ -1032,6 +1032,85 @@ describe("useSessionResumption skipAutomaticRecovery", () => {
   });
 });
 
+describe("inspection recovery lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = false;
+    mockSessionItems = { s1: { started_at: STARTED_AT } };
+  });
+
+  it.each(["focus", "visibilitychange"])(
+    "inspection suppresses automatic %s recovery even when idle resume is allowed",
+    async (event) => {
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+      mockRequest.mockResolvedValue({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+      });
+      try {
+        const { result } = renderHook(() =>
+          useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+        );
+        await act(async () => {
+          (event === "focus" ? window : document).dispatchEvent(new Event(event));
+        });
+        expect(mockRequest).not.toHaveBeenCalled();
+        await act(async () => result.current.retrySessionStatus());
+        expect(mockRequest).toHaveBeenCalledWith(
+          STATUS_ACTION,
+          { task_id: TASK_ID, session_id: SESSION_ID },
+          10000,
+        );
+      } finally {
+        visibility.mockRestore();
+      }
+    },
+  );
+
+  it("invalidates pending automatic recovery when the same conversation becomes inspection-only", async () => {
+    const status = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(status.promise);
+    const { result, rerender } = renderHook(
+      ({ inspection }) =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: inspection }),
+      { initialProps: { inspection: false } },
+    );
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        expect.anything(),
+        expect.any(Number),
+      ),
+    );
+    const generation = result.current.requestIdentity!.generation;
+    rerender({ inspection: true });
+    expect(result.current.requestIdentity!.generation).toBeGreaterThan(generation);
+    await act(async () =>
+      status.resolve({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+      }),
+    );
+    expect(mockRequest.mock.calls.map(([action]) => action)).toEqual([STATUS_ACTION]);
+    expect(mockSetTaskSession).not.toHaveBeenCalled();
+  });
+});
+
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("useSessionResumption monotonic terminal hydration", () => {
   beforeEach(() => {

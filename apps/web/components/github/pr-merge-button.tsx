@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useToast } from "@/components/toast-provider";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-methods";
@@ -93,7 +93,7 @@ export function PRMergeButton({
   // After GitHub accepts a direct or queued merge, stay hidden until refreshed
   // provider state catches up so a repeat click cannot submit a second request.
   const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskPR.task_id);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo);
   const { status } = useGitHubStatus(workspaceId);
   const mutationActor = getGitHubMutationActor(status);

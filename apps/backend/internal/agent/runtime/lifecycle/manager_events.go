@@ -631,7 +631,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")
 
-	execution.markAgentActivity()
+	if event.Recovered {
+		execution.markRecoveredAgentActivity(event.RecoveredActivityAt)
+	} else {
+		execution.markAgentActivity()
+	}
 
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
@@ -858,7 +862,12 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	if isTurnContent {
 		execution.lastActivityAtMu.Lock()
-		execution.lastActivityAt = time.Now()
+		if event.Recovered {
+			execution.setRecoveredActivityAtLocked(event.RecoveredActivityAt)
+		} else {
+			execution.lastActivityAt = time.Now()
+			execution.lastLiveActivityAt = execution.lastActivityAt
+		}
 		if isProviderDiagnostic {
 			execution.providerDiagnosticCandidate = true
 			if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {

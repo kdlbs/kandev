@@ -362,6 +362,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
 			}
+			execution.restoreIdleActivity(ri.Metadata)
 			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task
 			// identity is the recovery-inventory record alone, never the
 			// adopted instance (buildRecoveredInstances no longer falls
