@@ -88,6 +88,7 @@ test.describe("Workflow cycle guardrails", () => {
     apiClient,
     seedData,
   }) => {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await settings.createWorkflow("Blocked automatic draft", "Custom");
@@ -101,6 +102,7 @@ test.describe("Workflow cycle guardrails", () => {
 
     const dialog = settings.cycleGuardDialog;
     await expect(dialog.getByRole("heading", { name: "Workflow cycle blocked" })).toBeVisible();
+    await expect(dialog).toHaveClass(/sm:max-w-4xl/);
     await expect(dialog.getByText("Automatic workflow cycle")).toHaveCount(2);
     await expect(dialog.getByRole("button", { name: /anyway/i })).toHaveCount(0);
     await expect(dialog.getByRole("button", { name: "Return to workflow" })).toBeVisible();
