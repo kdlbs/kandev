@@ -1976,11 +1976,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 		deliveryProtocol:     deliveryProtocol,
 		deliverySubmissionID: deliverySubmissionID,
 		deliveryPayloadHash:  deliveryPayloadHash,
-		deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+	}
+	if !lifecyclePrompt {
+		options.deliveryClaimUpdater = func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
 			return s.messageQueue.SetPendingQueueDispatchDelivery(
 				updateCtx, queuedMsg, protocol, submissionID, payloadHash,
 			)
-		},
+		}
 	}
 	if preparedPromptContent != nil {
 		options.promptAlreadyComposed = true
