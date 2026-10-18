@@ -59,7 +59,8 @@ contains `linear.ProjectDescriptionPlaceholder`, it calls
 issues and copies each project's markdown `content` into
 `LinearIssue.ProjectDescription` before sorting and publishing. The lookup
 uses `projects(filter: { id: { in } }, includeArchived: true)` in batches of
-at most 250 IDs, so each batch fits in one page. A project that Linear does not
+25 IDs. Project content has no size limit, so small batches keep each response
+well under the client's 4 MB body limit. A project that Linear does not
 return renders an empty description. A lookup error fails the poll before any
 issue is published; dedup rows are reserved only after publication, so the
 next poll retries the same issues.

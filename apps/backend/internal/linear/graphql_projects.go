@@ -59,14 +59,17 @@ type projectContentsData struct {
 	} `json:"projects"`
 }
 
+// projectContentsBatchSize bounds one content lookup. Project content has no
+// upper size limit, so a full page of nodes could exceed maxBodySize.
+const projectContentsBatchSize = 25
+
 // GetProjectContents returns the markdown content of each requested project,
 // keyed by project ID. Projects that Linear does not return are absent from
-// the map. IDs are requested in batches no larger than one Linear page, so
-// each batch fits in a single response.
+// the map. IDs are requested in batches of projectContentsBatchSize.
 func (c *GraphQLClient) GetProjectContents(ctx context.Context, projectIDs []string) (map[string]string, error) {
 	out := make(map[string]string, len(projectIDs))
-	for start := 0; start < len(projectIDs); start += linearMaxPageSize {
-		batch := projectIDs[start:min(start+linearMaxPageSize, len(projectIDs))]
+	for start := 0; start < len(projectIDs); start += projectContentsBatchSize {
+		batch := projectIDs[start:min(start+projectContentsBatchSize, len(projectIDs))]
 		vars := map[string]interface{}{
 			"filter": map[string]interface{}{"id": map[string]interface{}{"in": batch}},
 			"first":  len(batch),

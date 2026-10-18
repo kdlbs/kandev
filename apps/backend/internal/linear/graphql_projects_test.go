@@ -123,8 +123,8 @@ func TestGraphQLClient_GetProjectContents_BatchesByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProjectContents: %v", err)
 	}
-	if len(batches) != 2 || len(batches[0]) != 250 || len(batches[1]) != 1 {
-		t.Fatalf("batches=%d sizes, want 250 then 1", len(batches))
+	if len(batches) != 11 || len(batches[0]) != projectContentsBatchSize || len(batches[10]) != 1 {
+		t.Fatalf("batches=%d, want ten of %d then one", len(batches), projectContentsBatchSize)
 	}
 	if len(got) != 250 || got["project-251"] != "brief of project-251" {
 		t.Fatalf("got %d contents, last=%q", len(got), got["project-251"])
