@@ -59,14 +59,15 @@ func (s *Service) processTaskPRWorkflowEvent(ctx context.Context, pr *github.Tas
 	if err != nil || task == nil {
 		return false, err
 	}
-	operationID, payload, ok, err := s.taskPRWorkflowOutcome(ctx, task, pr, trigger)
+	operationID, payload, arrivalID, ok, err := s.taskPRWorkflowOutcome(ctx, task, pr, trigger)
 	if err != nil || !ok {
 		return false, err
 	}
-	session, live, ok := s.taskPRWorkflowSession(ctx, task.ID)
-	if !ok {
-		return false, nil
+	session, live, err := s.taskPRWorkflowSession(ctx, task.ID)
+	if err != nil || session == nil {
+		return false, err
 	}
+	ctx = models.WithWorkflowStepTransitionGuard(ctx, task.ID, task.WorkflowStepID, arrivalID)
 
 	unlock := s.lockChildCompletionOperation(operationID)
 	defer unlock()
@@ -150,27 +151,27 @@ func stepHasPRWorkflowActions(step *wfmodels.WorkflowStep, trigger engine.Trigge
 }
 
 // taskPRWorkflowOutcome decides whether the reported PR completes the
-// trigger's outcome on the task's current step, and returns its operation id
-// and engine payload.
+// trigger's outcome on the task's current step, and returns its operation id,
+// engine payload, and immutable arrival identity for the commit fence.
 func (s *Service) taskPRWorkflowOutcome(
 	ctx context.Context, task *models.Task, pr *github.TaskPR, trigger engine.Trigger,
-) (string, any, bool, error) {
+) (string, any, int64, bool, error) {
 	linked, found, err := s.linkedTaskPRs(ctx, pr)
 	if err != nil || !found {
-		return "", nil, false, err
+		return "", nil, 0, false, err
 	}
 	operationID, payload, outcomeAt, ok := taskPRWorkflowOperation(trigger, task.ID, pr, linked)
 	if !ok {
-		return "", nil, false, nil
+		return "", nil, 0, false, nil
 	}
-	arrivedAt, err := s.taskStepArrivedAt(ctx, task)
+	arrivedAt, arrivalID, err := s.taskStepArrivedAt(ctx, task)
 	if err != nil {
-		return "", nil, false, err
+		return "", nil, 0, false, err
 	}
 	if outcomeAt.Before(arrivedAt) {
-		return "", nil, false, nil
+		return "", nil, 0, false, nil
 	}
-	return operationID, payload, true, nil
+	return operationID, payload, arrivalID, true, nil
 }
 
 // linkedTaskPRs returns the task's attached PRs with the reported PR's state
@@ -277,36 +278,35 @@ type taskStepTransitionLister interface {
 }
 
 // taskStepArrivedAt returns when the task entered its current step, from the
-// task-step transition ledger. The zero time means the arrival is unknown.
-func (s *Service) taskStepArrivedAt(ctx context.Context, task *models.Task) (time.Time, error) {
+// task-step transition ledger, together with the immutable row identity used
+// to fence its commit. The zero time means the arrival is unknown.
+func (s *Service) taskStepArrivedAt(ctx context.Context, task *models.Task) (time.Time, int64, error) {
 	lister, ok := s.repo.(taskStepTransitionLister)
 	if !ok {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
 	rows, err := lister.ListTaskStepTransitions(ctx, task.ID, 0, 1)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("load latest step transition: %w", err)
+		return time.Time{}, 0, fmt.Errorf("load latest step transition: %w", err)
 	}
 	if len(rows) == 0 || rows[0].ToWorkflowStepID == nil || *rows[0].ToWorkflowStepID != task.WorkflowStepID {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
-	return rows[0].OccurredAt.UTC(), nil
+	return rows[0].OccurredAt.UTC(), rows[0].ID, nil
 }
 
 // taskPRWorkflowSession picks the session the transition runs against. live
 // is true for a non-terminal session, which also receives the destination's
 // on_enter actions. When every session is terminal, the latest one (the
 // primary first) only records the move. A task without sessions is skipped.
-func (s *Service) taskPRWorkflowSession(ctx context.Context, taskID string) (*models.TaskSession, bool, bool) {
-	if session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID); err == nil && session != nil {
-		return session, true, true
+func (s *Service) taskPRWorkflowSession(ctx context.Context, taskID string) (*models.TaskSession, bool, error) {
+	session, activeErr := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if activeErr == nil && session != nil {
+		return session, true, nil
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
-	if err != nil || len(sessions) == 0 {
-		s.logger.Debug("PR workflow event: task has no session",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return nil, false, false
+	if err != nil {
+		return nil, false, fmt.Errorf("list task sessions: %w", err)
 	}
 	var live, terminal *models.TaskSession
 	for _, session := range sessions {
@@ -320,9 +320,16 @@ func (s *Service) taskPRWorkflowSession(ctx context.Context, taskID string) (*mo
 		}
 	}
 	if live != nil {
-		return live, true, true
+		return live, true, nil
 	}
-	return terminal, false, terminal != nil
+	if terminal != nil {
+		return terminal, false, nil
+	}
+	if activeErr != nil && !errors.Is(activeErr, models.ErrTaskSessionNotFound) {
+		return nil, false, fmt.Errorf("load active task session: %w", activeErr)
+	}
+	s.logger.Debug("PR workflow event: task has no session", zap.String("task_id", taskID))
+	return nil, false, nil
 }
 
 // preferPrimarySession keeps the first session seen (sessions arrive newest

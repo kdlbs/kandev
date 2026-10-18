@@ -1884,6 +1884,9 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if currentStepID != expectedStepID {
 		return false, nil
 	}
+	if matches, err := r.taskStepTransitionGuardMatches(ctx, tx, task.ID, expectedStepID); !matches {
+		return false, err
+	}
 	currentTask, err := r.scanSingleTask(tx.QueryRowContext(ctx, r.db.Rebind(
 		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), task.ID))
 	if err != nil {
@@ -1913,6 +1916,19 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	}
 	task.UpdatedAt = now
 	return true, nil
+}
+
+// The task row lock remains held while checking its immutable arrival identity.
+func (r *Repository) taskStepTransitionGuardMatches(ctx context.Context, tx *sql.Tx, taskID, stepID string) (bool, error) {
+	expected, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, taskID, stepID)
+	if !guarded {
+		return true, nil
+	}
+	latest, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("read task arrival for admission CAS check: %w", err)
+	}
+	return latest == expected, nil
 }
 
 // Inner descriptor keys for the one-shot MetaKeyWorkflowMovePending marker.

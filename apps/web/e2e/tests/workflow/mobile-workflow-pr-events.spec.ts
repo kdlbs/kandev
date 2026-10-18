@@ -99,7 +99,9 @@ for (const outcome of ["merged", "closed"] as const) {
     };
     await apiClient.mockGitHubAssociateTaskPR({ ...linked, state: "open" });
     await testPage.goto("/tasks?group=workflow_step");
-    await expect(testPage.getByText(`Phone task ${outcome}`, { exact: true }).first()).toBeVisible();
+    await expect(
+      testPage.getByText(`Phone task ${outcome}`, { exact: true }).first(),
+    ).toBeVisible();
     const at = new Date().toISOString();
     await apiClient.mockGitHubAssociateTaskPR({
       ...linked,
@@ -108,7 +110,9 @@ for (const outcome of ["merged", "closed"] as const) {
       ...(outcome === "merged" ? { merged_at: at } : {}),
     });
     const target = outcome === "merged" ? done : exec;
-    await expect.poll(async () => (await apiClient.getTask(task.id)).workflow_step_id).toBe(target.id);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(target.id);
     if (outcome === "merged") {
       await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("COMPLETED");
     } else {

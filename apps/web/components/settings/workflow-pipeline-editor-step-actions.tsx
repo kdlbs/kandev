@@ -438,7 +438,12 @@ export function EventTransitionSelect({
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
         <Label className="text-xs font-medium">{label}</Label>
-        <HelpTip testId={`${step.id}-${testIdSegment}-help`} ariaLabel={helpAria} text={help} />
+        <HelpTip
+          testId={`${step.id}-${testIdSegment}-help`}
+          ariaLabel={helpAria}
+          text={help}
+          mobileTouchTarget
+        />
       </div>
       <Select
         value={transitionType}

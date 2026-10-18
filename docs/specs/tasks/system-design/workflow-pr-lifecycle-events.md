@@ -74,12 +74,18 @@ at the first gate that does not pass:
 
 ## Idempotency and replay
 
-The operation id is deterministic:
+When the outcome timestamp is known, the operation id is deterministic:
 
 - merged: `on_pr_merged:<task>:<sha256 of the sorted owner/repo#number keys of
   all linked PRs>`;
 - closed: `on_pr_closed:<task>:<owner/repo#number>:<closed_at>`, so a reopened
   and closed again PR produces a new id.
+
+For a missing close timestamp, the explicit observed-now fallback also supplies
+the close key's timestamp. Such incomplete observations cannot identify a
+distinct close reliably; they do not gain the known-timestamp deduplication
+guarantee. The normal GitHub REST, CLI, and batched GraphQL reads request and
+persist close timestamps.
 
 The id is marked applied after a non-transition evaluation, after a committed
 transition, and after a compare-and-swap miss. The operation ledger is
@@ -104,15 +110,24 @@ actions run, and no session is revived, so session-bound entry actions such as
 tasks whose PRs are terminal. No session is created; a task without sessions
 is skipped with a debug log.
 
+A failed active-session read may still use a healthy session-list fallback.
+Without a usable fallback, actual read failures propagate to bounded retry.
+The repository's missing-active-session result is expected when only terminal
+sessions exist; it does not prevent that fallback or turn a genuinely empty
+task into a storage failure.
+
 ## Transition and history
 
 With a live session the transition goes through
 `applyEngineTransitionWithCommitMode` with `transitionLifecycleWithOnEnter`, the
 same lifecycle as `on_children_completed`, but with a compare-and-swap commit:
 `applyTransitionIfAtStepRaw` writes the move only while the task is still on
-the evaluated source step, inside the admission transaction. A task moved by
-someone else in the meantime keeps its newer step; the PR event reports no
-transition. The commit context carries the step-entry allocation
+the evaluated source step and its observed arrival ledger identity, inside the
+admission transaction. The task-row lock covers both comparisons. Departing
+and returning to the same step supersedes an earlier evaluation, just as moving
+to another step does. The arrival fence is scoped to that task and source step,
+so destination entry work retains its own admission rules. A superseded PR
+event reports no transition. The commit context carries the step-entry allocation
 (`transitionContext`), then the handler publishes `task.updated`, clears the
 session review status, and pulls feeder work, as `ApplyTransition` does.
 
@@ -129,6 +144,9 @@ The poller publishes an event only when PR data changes. When evaluation or the
 commit fails with an error (not a skip or a compare-and-swap miss),
 `scheduleTaskPRWorkflowRetry` re-runs the same PR snapshot after 5 s, 30 s, and
 2 min on the CI automation worker lifecycle, so service shutdown cancels it.
+The terminal-session lifecycle also propagates a failed CAS write; only a
+successful no-match CAS is an intentional skip. A storage failure is not marked
+as an applied operation.
 
 ## Step editor
 

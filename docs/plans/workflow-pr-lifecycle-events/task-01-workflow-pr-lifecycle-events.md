@@ -38,6 +38,13 @@ editor, tests, and docs.
 - `StepTransitionTriggerPRMerged` / `PRClosed` history mapping.
 - `EventTransitionSelect` in the step editor, locale keys in every locale.
 - Public docs: workflow tips events table and import/export trigger table.
+- Review corrections: session-read error propagation, terminal guarded-commit
+  errors, and an immutable task/source-step arrival fence in
+  `task/models/workflow_step_transition_guard.go` and
+  `task/repository/sqlite/task.go`.
+- Permanent registered-handler/repository retry, arrival, completion and watcher
+  capacity regressions beside the orchestrator handler; desktop and phone PR
+  settings/outcome tests, including touch help through the existing drawer.
 
 ## Out of scope
 
@@ -49,3 +56,24 @@ editor, tests, and docs.
 - Targeted Playwright: `tests/workflow/workflow-pr-merged.spec.ts`,
   `tests/workflow/workflow-settings.spec.ts`,
   `tests/workflow/workflow-children-completed.spec.ts`.
+- Review browser coverage also includes
+  `tests/workflow/mobile-workflow-pr-events.spec.ts` on `mobile-chrome`.
+
+## Delivery review evidence
+
+The initial hosted registered-seam run reached five causal assertion failures:
+three session-read recovery schedules, terminal-session commit recovery, and
+same-step departure/reentry. Live commit recovery, healthy terminal commit,
+stale-CAS, genuine no-session, unchanged-arrival and all four completion/watcher
+capacity controls passed. The healthy fallback moved correctly but its exact
+read-count assertion also saw unrelated running-to-waiting reconciliation.
+The corrected fixture starts that live session idle; assertions are retained.
+
+The four completion controls exercise actual persisted task state and the real
+watcher counter/admission consumer, including unchecked-final steps. No change
+to completion behavior is justified by those passing controls.
+
+Corrected-source baseline RED/shared controls and candidate GREEN, full final CI,
+and actual desktop/phone retry-zero browser results remain pending. Source,
+attempt, raw logs and artifacts are retained in the delivery session's evidence.
+No contributor code, compiler, dependencies, tests or hooks ran on the review host.
