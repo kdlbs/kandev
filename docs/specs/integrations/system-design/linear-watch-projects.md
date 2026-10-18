@@ -59,8 +59,11 @@ contains `linear.ProjectDescriptionPlaceholder`, it calls
 issues and copies each project's markdown `content` into
 `LinearIssue.ProjectDescription` before sorting and publishing. The lookup
 uses `projects(filter: { id: { in } }, includeArchived: true)` in batches of
-25 IDs. Project content has no size limit, so small batches keep each response
-well under the client's 4 MB body limit. A project that Linear does not
+25 IDs. This limits the number of project bodies per request, not their byte
+size. Project content has no size limit, so even one body can exceed the
+client's 4 MB response limit. An oversized response fails decoding and the
+poll; repeated polls can keep failing until upstream content or the watch
+prompt changes. A project that Linear does not
 return renders an empty description. A lookup error fails the poll before any
 issue is published; dedup rows are reserved only after publication, so the
 next poll retries the same issues.
@@ -84,9 +87,11 @@ can connect different Linear organizations with the same team key.
 `switchWatchWorkspace` clears the previous workspace's state, label, project,
 and creator IDs together with the shared workflow and repository fields. `FormState.projectIds` is read from and
 written to the filter, so saving an edited watch sends the stored project IDs
-back. `ProjectMultiSelect` renders toggle chips under Labels and is hidden
-until a team is selected. Selected IDs missing from the team's list render as
-removable "Unavailable project" chips, so they never become a hidden filter.
+back. `ProjectMultiSelect` renders toggle chips under Labels. With no team,
+only saved selected IDs render as removable "Unavailable project" chips; an
+empty selection keeps only the no-team helper. The hook never requests project
+inventory without a team. Selected IDs missing from a selected team's list
+also remain removable.
 On coarse pointers each chip button has a 44 px minimum hit area. The team selector clears `projectIds` with states and
 labels. The watch table summary adds `project:N selected`. Desktop and phone
 share the same dialog composition; chips wrap on narrow screens.
@@ -101,6 +106,14 @@ editor offers them. New copy is localized in every shipped locale.
 without the new placeholders render unchanged. The description is truncated
 to `linearProjectDescriptionMaxRunes` (4,000) runes, counted as Unicode code
 points, and then followed by a fixed truncation notice.
+
+Provider placeholders are interpolated at task creation by
+`LinearWatcherSource.BuildTaskRequest`. The content-lookup gate reads the
+literal watch prompt. Saved-prompt references expand later through
+`applyDirectPromptReferenceContext` / `expandPromptReferencesWithContext`,
+which append context without another provider-placeholder pass. Put project
+placeholders directly in the watch prompt; this preserves the existing
+cross-provider order.
 
 ## Security and compatibility
 
@@ -118,4 +131,9 @@ projection, filter mapping, project pagination, and description batching.
 Service tests cover validation and the description lookup gate and failure.
 Orchestrator tests cover rendering, empty projects, and truncation. Web unit
 tests cover the form round-trip; Playwright covers project selection and
-edit preservation on desktop and phone.
+edit preservation and project-only unavailable-chip removal on desktop and
+phone. Mock UI flows verify form persistence, not provider matching:
+`MockClient.SearchIssues` ignores filters. GraphQL request tests verify the
+real client construction against an isolated server. Follow-up hosted
+verification results are retained with the PR review evidence; they are pending
+until those exact-source runs complete.

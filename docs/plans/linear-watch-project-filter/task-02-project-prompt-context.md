@@ -68,9 +68,16 @@ Task 01.
 
 ## Results
 
-Implemented. `TestGraphQLClient_SearchIssues_DecodesProject`,
+Original author-reported verification: `TestGraphQLClient_SearchIssues_DecodesProject`,
 `TestGraphQLClient_GetProjectContents_BatchesByID`,
 `TestService_CheckIssueWatch_AttachesProjectDescriptions`,
 `TestService_CheckIssueWatch_SkipsProjectLookupWithoutPlaceholder`,
 `TestService_CheckIssueWatch_ProjectLookupFailureFailsPoll`, and the
 `TestInterpolateLinearPrompt_*` tests pass with `-race`.
+
+
+Review clarifications preserve the literal-placeholder gate and existing saved
+prompt expansion order. Content requests contain at most 25 IDs, without a byte
+size guarantee; oversized responses fail the poll. Successful omitted projects
+render empty content. Hosted focused and full-family follow-up results remain
+pending in the PR review evidence.

@@ -182,3 +182,35 @@ func TestBuildIssueFilter_Projects(t *testing.T) {
 		t.Fatal("a filter without projects must not send a project condition")
 	}
 }
+
+// @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.1, AC-INTEGRATIONS-LINEAR-PROJECTS-001.2
+func TestGraphQLClient_SearchIssues_SendsProjectFilter(t *testing.T) {
+	for _, teamKey := range []string{"", "ENG"} {
+		t.Run("team="+teamKey, func(t *testing.T) {
+			requests := 0
+			ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				req := readReq(t, r)
+				vars := req["variables"].(map[string]any)
+				want := map[string]any{
+					"project": map[string]any{"id": map[string]any{"in": []any{"p1", "p2"}}},
+				}
+				if teamKey != "" {
+					want["team"] = map[string]any{"key": map[string]any{"eq": teamKey}}
+				}
+				if !reflect.DeepEqual(vars["filter"], want) {
+					t.Errorf("request filter = %#v, want %#v", vars["filter"], want)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}`))
+			})
+			client := pointTo(NewGraphQLClient(&LinearConfig{}, "x"), ts.URL)
+			_, err := client.SearchIssues(context.Background(), SearchFilter{
+				TeamKey: teamKey, ProjectIDs: []string{"p1", "p2"},
+			}, "", 50)
+			if err != nil || requests != 1 {
+				t.Fatalf("search: requests=%d err=%v", requests, err)
+			}
+		})
+	}
+}

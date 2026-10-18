@@ -39,7 +39,8 @@ project picker in the watch dialog that keeps the stored selection on save.
 ## ASCII UI preview
 
 See `UI-01` in the [plan](plan.md#ascii-ui-preview): a Projects chip row under
-Labels, hidden until a team is selected.
+Labels. Without a team, saved selected IDs remain removable; an empty
+selection shows only the no-team helper.
 
 ## Acceptance
 
@@ -52,7 +53,7 @@ Labels, hidden until a team is selected.
 
 ```bash
 (cd apps/backend && go test -race -tags=fts5 -count=1 ./internal/linear/ -run 'Project|ListUsers|BuildIssueFilter|HTTPList')
-(cd apps/web && pnpm exec vitest run components/linear/linear-issue-watch-form.test.ts)
+(cd apps/web && pnpm exec vitest run components/linear/linear-issue-watch-form.test.ts components/linear/linear-issue-watch-fields.test.tsx)
 (cd apps/web && e2e/scripts/run-e2e.sh --host --no-build --shards 1 --project chromium -- tests/integrations/linear-watcher-project-filter.spec.ts)
 (cd apps/web && e2e/scripts/run-e2e.sh --host --no-build --shards 1 --project mobile-chrome -- tests/integrations/mobile-linear-watcher-project-filter.spec.ts)
 ```
@@ -74,9 +75,21 @@ None.
 
 ## Results
 
-Implemented. `TestBuildIssueFilter_Projects`,
+Original author-reported verification: `TestBuildIssueFilter_Projects`,
 `TestGraphQLClient_ListProjects_*`, `TestService_IssueWatch_ProjectIDsFilter`,
 `TestHTTPListProjects_*`, and the existing `ListUsers` pagination suite pass
 with `-race`. The form round-trip unit tests pass. Both Playwright specs pass
 locally on `chromium` and `mobile-chrome`, together with the existing Linear
 settings, dispatch-order, watcher-delete, and agent-profile-delete specs.
+
+
+Review remediation preserves project-only saved selections as removable chips
+through the real dialog `FilterFields` caller, without fetching unscoped
+inventory or clearing other filters. New unit controls cover no-team empty
+state, team loading, missing-ID removal, and the existing workspace/team cache.
+Desktop and phone regressions remove an unavailable ID, save, reload, and check
+the surviving project-only filter; phone coverage measures its 44 px target and
+checks actual center-point hit testing. This reuses the shipped Linear dialog's
+single-column Projects row and wrapping chips; the dialog owns scrolling and
+Update remains the primary action. Hosted follow-up RED/controls/GREEN and
+exact-built-source browser verification are pending, not a local execution claim.

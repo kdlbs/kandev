@@ -1,5 +1,6 @@
 import { test } from "../../fixtures/test-base";
 import {
+  assertProjectOnlyWatchIsRemovable,
   assertWatcherEditKeepsProjectIds,
   assertWatcherProjectSelectionPersists,
 } from "./watcher-project-filter-flow";
@@ -20,5 +21,12 @@ test.describe("Linear watcher project filter (mobile)", () => {
     seedData,
   }) => {
     await assertWatcherEditKeepsProjectIds(testPage, apiClient, seedData);
+  });
+  test("removes a saved project filter without selecting a team", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await assertProjectOnlyWatchIsRemovable(testPage, apiClient, seedData);
   });
 });

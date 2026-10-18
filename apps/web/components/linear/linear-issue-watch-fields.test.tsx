@@ -1,6 +1,9 @@
-import { cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectMultiSelect, useTeamsAndStates } from "./linear-issue-watch-fields";
+import { FilterFields } from "./linear-issue-watch-filter-fields";
+import { makeEmptyForm, type FormState } from "./linear-issue-watch-form";
 
 const responsive = vi.hoisted(() => ({ isFinePointer: true }));
 
@@ -28,6 +31,67 @@ const projects = [
 afterEach(() => {
   cleanup();
   responsive.isFinePointer = true;
+  vi.clearAllMocks();
+});
+
+function WatchFilters({ initial }: { initial: Partial<FormState> }) {
+  const [form, setForm] = useState({ ...makeEmptyForm("ws-a"), ...initial });
+  return (
+    <>
+      <FilterFields form={form} setForm={setForm} />
+      <output data-testid="filter-state">{JSON.stringify(form)}</output>
+    </>
+  );
+}
+
+describe("watch dialog filter fields", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
+  it("keeps project-only saved selections visible and removable without a team", async () => {
+    render(
+      <WatchFilters
+        initial={{ projectIds: ["p-archived", "p-other"], query: "keep query", priorities: [1] }}
+      />,
+    );
+    await waitFor(() => expect(api.listLinearTeams).toHaveBeenCalled());
+    expect(screen.queryByTitle("p-archived")).not.toBeNull();
+    const chip = screen.getByTitle("p-archived");
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(chip);
+    expect(JSON.parse(screen.getByTestId("filter-state").textContent!)).toMatchObject({
+      teamKey: "",
+      projectIds: ["p-other"],
+      query: "keep query",
+      priorities: [1],
+    });
+    fireEvent.click(screen.getByTitle("p-other"));
+    expect(JSON.parse(screen.getByTestId("filter-state").textContent!).projectIds).toEqual([]);
+    expect(screen.queryByTestId("linear-watch-projects")).toBeNull();
+    expect(api.listLinearProjects).not.toHaveBeenCalled();
+  });
+
+  it("keeps the no-team helper and hides inventory when nothing is selected", async () => {
+    render(<WatchFilters initial={{}} />);
+    await waitFor(() => expect(api.listLinearTeams).toHaveBeenCalled());
+    expect(screen.getByText("Pick a team to choose specific projects.")).toBeTruthy();
+    expect(screen.queryByTestId("linear-watch-projects")).toBeNull();
+    expect(api.listLinearProjects).not.toHaveBeenCalled();
+  });
+
+  it("shows team loading before offering the returned projects", async () => {
+    let finish!: (value: { projects: Array<{ id: string; name: string }> }) => void;
+    api.listLinearProjects.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<WatchFilters initial={{ teamKey: "ENG" }} />);
+    expect(screen.getByText("Loading projects…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Checkout" })).toBeNull();
+    await act(async () => finish({ projects: [{ id: "p1", name: "Checkout" }] }));
+    expect(screen.getByRole("button", { name: "Checkout" }).getAttribute("aria-pressed")).toBe("false");
+    expect(api.listLinearProjects).toHaveBeenCalledWith("ENG", { workspaceId: "ws-a" });
+  });
 });
 
 describe("ProjectMultiSelect", () => {

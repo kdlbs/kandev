@@ -52,7 +52,9 @@ filters.
   IDs. Changing the team shall clear the selected projects, as it clears
   states and labels, and switching the workspace shall clear them. A selected
   project that the team no longer lists shall stay visible as a removable
-  choice. Project choices shall have a hit area of at least 44 px on coarse
+  choice, including when a saved project-only watch has no team selected.
+  Without a team, the dialog shall not request project inventory. Project
+  choices shall have a hit area of at least 44 px on coarse
   pointers. Desktop and phone layouts shall behave the same.
 
 ### REQ-INTEGRATIONS-LINEAR-PROJECTS-002: Project context in watch prompts
@@ -71,8 +73,9 @@ and bounded project description.
   `{{issue.project.description}}`, the placeholder shall render the project
   description captured when the poll found the issue. A watch whose prompt
   does not contain that placeholder shall not request project descriptions. If
-  Linear fails to return the descriptions, that poll shall create no tasks and
-  the next poll shall retry.
+  the description request fails, that poll shall create no tasks and the next
+  poll shall retry. A successful response that omits a project shall render an
+  empty description for that project.
 - **AC-INTEGRATIONS-LINEAR-PROJECTS-002.3:** A project description longer than
   4,000 characters shall render as its first 4,000 characters followed by a
   notice that the description was truncated. A description of at most 4,000
@@ -81,6 +84,10 @@ and bounded project description.
   placeholders shall render exactly as before. Placeholder text inside a
   substituted value shall not be expanded again. The prompt editor shall offer
   the four project placeholders with the existing issue placeholders.
+
+Placeholders must appear literally in the watch prompt. Saved-prompt
+references expand later during prompt admission; provider placeholders inside
+that appended content are not interpolated.
 
 ## Out of scope
 

@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test";
+import { dwell } from "../../helpers/causal-waits";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -111,4 +112,73 @@ export async function assertWatcherEditKeepsProjectIds(
   await expect
     .poll(async () => (await watchFilter(apiClient, seedData, watch.id))?.projectIds)
     .toEqual(["project-search"]);
+}
+
+// A valid project-only watch must expose its saved IDs without fetching an
+// unscoped project inventory or forcing a team change that clears the filter.
+export async function assertProjectOnlyWatchIsRemovable(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+) {
+  await seedLinearWithProjects(apiClient, seedData);
+  const watch = await apiClient.createLinearIssueWatch({
+    workspaceId: seedData.workspaceId,
+    workflowId: seedData.workflowId,
+    workflowStepId: seedData.startStepId,
+    agentProfileId: seedData.agentProfileId,
+    filter: { projectIds: ["project-archived", "project-search"] },
+    prompt: "Work on {{issue.identifier}}",
+    enabled: false,
+  });
+  const projectRequests: string[] = [];
+  testPage.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/linear/projects") {
+      projectRequests.push(request.url());
+    }
+  });
+  await new LinearSettingsPage(testPage).goto();
+  await testPage.getByText("project:2 selected", { exact: true }).click();
+  const dialog = testPage.getByRole("dialog");
+  const chip = dialog.getByTitle("project-archived", { exact: true });
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await chip.scrollIntoViewIfNeeded();
+  const box = await chip.boundingBox();
+  expect(box).not.toBeNull();
+  if (testPage.viewportSize()!.width < 768) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await chip.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return element.contains(
+        document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
+      );
+    }),
+  ).toBe(true);
+  await chip.click();
+  await expect(chip).toHaveCount(0);
+  await expect(dialog.getByTitle("project-search", { exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await dialog.getByRole("button", { name: "Update", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await testPage.reload();
+  await testPage.getByText("project:1 selected", { exact: true }).click();
+  await expect(dialog.getByTitle("project-search", { exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await dwell(
+    testPage,
+    300,
+    "negative-assertion",
+    "No inventory-complete event exists when a project-only watch has no team to request",
+  );
+  expect(projectRequests).toEqual([]);
+  const filter = await watchFilter(apiClient, seedData, watch.id);
+  expect(filter?.projectIds).toEqual(["project-search"]);
+  expect(filter?.teamKey ?? "").toBe("");
 }

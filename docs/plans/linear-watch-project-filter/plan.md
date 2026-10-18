@@ -69,7 +69,9 @@ Estimate min        Estimate max
 [        ]          [        ]
 ```
 
-Without a team the row shows only "Pick a team to choose specific projects."
+Without a team the row shows "Pick a team to choose specific projects."
+Saved selected IDs remain visible as removable unavailable-project chips;
+with no selection, no chips or inventory request appear.
 While loading it shows "Loading projects…"; with no projects, "No projects
 available for this team." The phone layout is the same single column; chips
 wrap. Maps to `AC-INTEGRATIONS-LINEAR-PROJECTS-001.3`, verified by the desktop
@@ -88,12 +90,17 @@ python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --al
 
 ## Verification results
 
-Results are recorded in each work order.
+Original author-reported results are recorded in each work order. Review
+remediation adds real `FilterFields` regressions and desktop/phone removal
+flows for project-only saved watches. Assertion RED, shared controls, corrected
+GREEN, and full hosted CI are pending and must be verified against the final
+source before delivery.
 
 ## Risks
 
-- Prompts that use `{{issue.project.description}}` add one Linear request per
-  poll with unseen project issues. Watches without the placeholder are
+- Prompts that literally use `{{issue.project.description}}` add batched Linear
+  requests for distinct projects in unseen issues (at most 25 IDs per request).
+  This does not bound response bytes; an oversized body fails the whole poll. Watches without the placeholder are
   unchanged.
 - Project descriptions are captured at poll time and are not refreshed for
   running tasks.

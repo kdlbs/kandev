@@ -199,7 +199,7 @@ function ProjectRow({
         loading={loadingProjects}
         selected={form.projectIds}
         onToggle={toggleProject}
-        disabled={!form.teamKey}
+        disabled={!form.teamKey && form.projectIds.length === 0}
       />
     </div>
   );
