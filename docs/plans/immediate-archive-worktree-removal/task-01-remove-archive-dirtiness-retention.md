@@ -238,3 +238,17 @@ inventory. The complete task-service race suite passed (96.256s):
 `go test -trimpath -race -tags fts5 -timeout 10m ./internal/task/service -count=1`.
 Specification catalog/lint and whitespace checks passed. CI, final review
 resolution, and merge remain externally pending.
+
+### PR review follow-up: phone archive causal waits
+
+Both phone archive-preference scenarios now arm an HTTP wait for the exact
+task's POST archive request before the click, require a successful response,
+and assert row removal with the default render timeout. This replaces the
+arbitrary 15-second DOM budget while retaining persistence-after-reload coverage.
+The actual UI archive client uses HTTP, so no unrelated WS frame is accepted.
+
+The complete phone preference spec passed against fresh managed production
+builds with retries disabled: 2/2 tests passed (14.2s), using
+`pnpm e2e:run --project mobile-chrome tests/task/mobile-archive-confirmation-preference.spec.ts -- --retries=0`.
+Public docs and product behavior are unchanged by this test synchronization fix.
+CI and merge remain externally pending.

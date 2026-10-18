@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Archive confirmation preference on mobile", () => {
@@ -25,7 +26,7 @@ test.describe("Archive confirmation preference on mobile", () => {
       options,
     );
     const title = "Mobile worktree archive consequences";
-    await apiClient.createTask(seedData.workspaceId, title, {
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
       ...options,
       agent_profile_id: seedData.agentProfileId,
       prepare_session: true,
@@ -47,9 +48,11 @@ test.describe("Archive confirmation preference on mobile", () => {
     );
     await expect(confirmation).not.toContainText("stays until it is clean");
     await testPage.screenshot({ path: testInfo.outputPath("archive-deletion-phone.png") });
+    const archived = waitForHttp(testPage, "POST", new RegExp(`/api/v1/tasks/${task.id}/archive$`));
     await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
+    expect((await archived).ok()).toBe(true);
     await expect(confirmation).toBeHidden();
-    await expect(row).toHaveCount(0, { timeout: 15_000 });
+    await expect(row).toHaveCount(0);
     await testPage.reload();
     await session.waitForLoad();
     await testPage.getByTestId("mobile-task-picker-trigger").click();
@@ -85,7 +88,7 @@ test.describe("Archive confirmation preference on mobile", () => {
       "Mobile Archive Preference Nav",
       taskOptions,
     );
-    await apiClient.seedTask(
+    const task = await apiClient.seedTask(
       seedData.workspaceId,
       "Mobile Archive Without Confirmation",
       taskOptions,
@@ -105,9 +108,15 @@ test.describe("Archive confirmation preference on mobile", () => {
     const actions = taskRow.getByRole("button", { name: "Task actions" });
     await expect(actions).toBeVisible();
     await actions.click();
+    const archived = waitForHttp(
+      testPage,
+      "POST",
+      new RegExp(`/api/v1/tasks/${task.task_id}/archive$`),
+    );
     await testPage.getByRole("menuitem", { name: "Archive" }).click();
+    expect((await archived).ok()).toBe(true);
 
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    await expect(taskRow).toHaveCount(0, { timeout: 15_000 });
+    await expect(taskRow).toHaveCount(0);
   });
 });
