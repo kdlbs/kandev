@@ -47,6 +47,7 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { forkConversation } from "@/lib/services/session-launch-service";
+import { generateUUID } from "@/lib/uuid";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
@@ -364,7 +365,7 @@ function ForkConversationAction({ message, turn }: { message: Message; turn: Tur
 
   const handleFork = async () => {
     if (!message.session_id || !message.task_id || !turn.completed_at || pending) return;
-    requestId.current ??= crypto.randomUUID();
+    requestId.current ??= generateUUID();
     setPending(true);
     setFailed(false);
     try {
