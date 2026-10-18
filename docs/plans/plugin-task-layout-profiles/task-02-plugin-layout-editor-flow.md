@@ -508,5 +508,5 @@ documents: `ok: true`, `status: covered`, no errors; accepted references:
 
 REQ-UI-TASK-LAYOUT-PROFILES-001 stays active. REQ-002 is implemented and verified here
 but its acceptance by the contract owner is a separate decision, so the draft statuses
-of the requirement and both designs are left unchanged. Commit SHA: see `git log` for the
-`feat(ui):` commit that contains this file.
+of the requirement and both designs are left unchanged. Implementation commit: `af1485a39f`
+(`feat(ui): add plugin task panels to reusable layout profiles`). Not pushed.
