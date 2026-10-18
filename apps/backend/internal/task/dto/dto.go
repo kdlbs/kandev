@@ -1435,6 +1435,8 @@ type StepEventsDTO struct {
 	OnHeartbeat         []StepActionDTO `json:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []StepActionDTO `json:"on_budget_alert,omitempty"`
 	OnAgentError        []StepActionDTO `json:"on_agent_error,omitempty"`
+	OnPRMerged          []StepActionDTO `json:"on_pr_merged,omitempty"`
+	OnPRClosed          []StepActionDTO `json:"on_pr_closed,omitempty"`
 }
 
 // StepActionDTO represents a step action for API responses

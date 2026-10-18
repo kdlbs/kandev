@@ -400,7 +400,7 @@ func workflowEventsField(owner string) FieldDescriptor {
 	triggers := []string{
 		"on_enter", "on_turn_start", "on_turn_complete", "on_exit", "on_comment",
 		"on_blocker_resolved", "on_children_completed", "on_approval_resolved", "on_heartbeat",
-		"on_budget_alert", "on_agent_error",
+		"on_budget_alert", "on_agent_error", "on_pr_merged", "on_pr_closed",
 	}
 	properties := make(map[string]any, len(triggers))
 	for _, trigger := range triggers {

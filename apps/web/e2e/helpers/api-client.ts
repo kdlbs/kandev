@@ -1523,6 +1523,8 @@ export class ApiClient {
         on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
       auto_advance_requires_signal?: boolean;
       wip_limit?: number;

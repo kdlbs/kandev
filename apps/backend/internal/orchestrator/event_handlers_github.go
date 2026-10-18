@@ -216,6 +216,7 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 		return nil
 	}
 	s.startTaskPRCIAutomation(ctx, pr)
+	s.processTaskPRWorkflowEvent(ctx, pr)
 	return nil
 }
 

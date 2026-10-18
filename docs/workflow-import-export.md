@@ -221,7 +221,7 @@ through the conversion.
 
 ### Office / Phase-2 triggers
 
-The seven event-driven "office" triggers use the generic action shape
+The seven event-driven "office" triggers and the two PR triggers use the generic action shape
 (`GenericAction`):
 
 | Trigger | Fires when |
@@ -233,6 +233,8 @@ The seven event-driven "office" triggers use the generic action shape
 | `on_heartbeat` | A periodic heartbeat tick. |
 | `on_budget_alert` | A budget threshold is crossed. |
 | `on_agent_error` | The agent errors out. |
+| `on_pr_merged` | Every GitHub pull request linked to the task is merged (PR poller, no agent turn). |
+| `on_pr_closed` | A linked pull request is closed without merging (PR poller, no agent turn). |
 
 Each holds a list of generic actions whose `type` is one of `move_to_next`,
 `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`,
