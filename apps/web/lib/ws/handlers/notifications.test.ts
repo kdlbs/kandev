@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import {
+  NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
@@ -24,6 +25,36 @@ const MESSAGE_BODY = 'The agent asked a question on "Task one".';
 const notificationMock = vi.fn();
 const TURN_FINISHED = NOTIFICATION_EVENT_SESSION_TURN_FINISHED;
 const TURN_FINISHED_FALLBACK_TITLE = "Agent turn finished";
+const ATTENTION_CASES = [
+  {
+    name: "delivers for the visible unfocused current task",
+    visible: true,
+    focused: false,
+    active: TASK_ID,
+    delivered: true,
+  },
+  {
+    name: "suppresses for the visible focused current task",
+    visible: true,
+    focused: true,
+    active: TASK_ID,
+    delivered: false,
+  },
+  {
+    name: "delivers for a hidden current task",
+    visible: false,
+    focused: true,
+    active: TASK_ID,
+    delivered: true,
+  },
+  {
+    name: "delivers for a visible focused other task",
+    visible: true,
+    focused: true,
+    active: OTHER_TASK_ID,
+    delivered: true,
+  },
+] as const;
 type SemanticNotificationMessage =
   | BackendMessageMap["session.clarification_requested"]
   | BackendMessageMap["session.turn_finished"]
@@ -47,6 +78,7 @@ function makeMessage(
     | "office.inbox_item" = "session.clarification_requested",
   title = MESSAGE_TITLE,
   body = MESSAGE_BODY,
+  occurrenceId = "pending-1",
 ):
   | BackendMessageMap["session.clarification_requested"]
   | BackendMessageMap["session.turn_finished"]
@@ -58,7 +90,7 @@ function makeMessage(
     payload: {
       task_id: TASK_ID,
       session_id: SESSION_ID,
-      occurrence_id: "pending-1",
+      occurrence_id: occurrenceId,
       title,
       body,
     },
@@ -78,6 +110,12 @@ function getHandler(
       (message: SemanticNotificationMessage) => void
     >
   )[action]!;
+}
+
+function expectNoAttention(invoke: ReturnType<typeof vi.fn>) {
+  expect(playWaitingForInputSound).not.toHaveBeenCalled();
+  expect(notificationMock).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
 }
 
 describe("notification handler registration", () => {
@@ -140,6 +178,7 @@ describe("semantic session notification handlers", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   });
@@ -219,12 +258,123 @@ describe("semantic session notification handlers", () => {
   });
 
   it("suppresses both channels while the user is viewing the task", () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const store = makeStore({ tasks: { activeTaskId: TASK_ID } } as unknown as Partial<AppState>);
 
     getHandler(store)(makeMessage());
 
     expect(playWaitingForInputSound).not.toHaveBeenCalled();
     expect(notificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe.each(["browser", "native"] as const)("notification window attention (%s)", (target) => {
+  const invoke = vi.fn().mockResolvedValue("shown");
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(notificationMock, { permission: "granted" as NotificationPermission }),
+    );
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    if (target === "native") {
+      (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+        invoke,
+        transformCallback: vi.fn(),
+      };
+    }
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  function expectDelivery(message: SemanticNotificationMessage, count: number) {
+    if (target === "native") {
+      expect(invoke).toHaveBeenCalledTimes(count);
+      expect(invoke).toHaveBeenLastCalledWith("show_native_notification", {
+        request: {
+          eventId: `${message.action}:${message.id}`,
+          title: message.payload.title,
+          body: message.payload.body,
+          taskId: TASK_ID,
+          sessionId: SESSION_ID,
+        },
+      });
+      expect(notificationMock).not.toHaveBeenCalled();
+    } else {
+      expect(notificationMock).toHaveBeenCalledTimes(count);
+      expect(notificationMock).toHaveBeenLastCalledWith(message.payload.title, {
+        body: message.payload.body,
+      });
+      expect(invoke).not.toHaveBeenCalled();
+    }
+    expect(playWaitingForInputSound).toHaveBeenCalledTimes(count);
+  }
+
+  describe.each([TURN_FINISHED, NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED] as const)(
+    "%s",
+    (action) => {
+      it.each(ATTENTION_CASES)("$name", ({ visible, focused, active, delivered }) => {
+        vi.mocked(document.hasFocus).mockReturnValue(focused);
+        vi.spyOn(document, "visibilityState", "get").mockReturnValue(
+          visible ? "visible" : "hidden",
+        );
+        const store = makeStore({
+          tasks: { activeTaskId: active },
+        } as unknown as Partial<AppState>);
+        const message = makeMessage("attention-1", action, "Attention title", "Attention body");
+
+        getHandler(store, action)(message);
+
+        if (delivered) {
+          expectDelivery(message, 1);
+        } else {
+          expectNoAttention(invoke);
+        }
+      });
+
+      it("samples focus for each distinct occurrence", () => {
+        const store = makeStore({
+          tasks: { activeTaskId: TASK_ID },
+        } as unknown as Partial<AppState>);
+        const handler = getHandler(store, action);
+        const messages = ["focused-1", "unfocused-2", "focused-3"].map((id) =>
+          makeMessage(id, action, "Changing focus title", "Changing focus body", id),
+        );
+
+        handler(messages[0]);
+        expectNoAttention(invoke);
+
+        vi.mocked(document.hasFocus).mockReturnValue(false);
+        handler(messages[1]);
+        expectDelivery(messages[1], 1);
+
+        vi.mocked(document.hasFocus).mockReturnValue(true);
+        handler(messages[2]);
+        expectDelivery(messages[1], 1);
+      });
+    },
+  );
+
+  it.each([true, false])("preserves task-scoped Office attention with focus=%s", (focused) => {
+    vi.mocked(document.hasFocus).mockReturnValue(focused);
+    const store = makeStore({ tasks: { activeTaskId: TASK_ID } } as unknown as Partial<AppState>);
+    const message = makeMessage("office-attention", NOTIFICATION_EVENT_OFFICE_INBOX_ITEM);
+
+    getHandler(store, NOTIFICATION_EVENT_OFFICE_INBOX_ITEM)(message);
+
+    if (focused) {
+      expectNoAttention(invoke);
+    } else {
+      expectDelivery(message, 1);
+    }
   });
 });
 

@@ -595,7 +595,7 @@ function useSessionResetAndCheck({
       generation: requestGenerationRef.current,
     };
     setCommittedRequest(activeRequestRef.current);
-  }, [requestKey, preventAutoResume]);
+  }, [requestKey, preventAutoResume, skipAutomaticRecovery]);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
@@ -662,6 +662,7 @@ function useSessionResetAndCheck({
 
   useEffect(() => {
     if (
+      skipAutomaticRecovery ||
       !taskId ||
       !sessionId ||
       connectionStatus !== "connected" ||
@@ -737,6 +738,7 @@ function useSessionResetAndCheck({
     connectionStatus,
     preventAutoStart,
     preventAutoResume,
+    skipAutomaticRecovery,
     session,
     sessionId,
     setters,

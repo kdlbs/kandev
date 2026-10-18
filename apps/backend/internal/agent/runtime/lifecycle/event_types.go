@@ -152,6 +152,9 @@ type ACPSessionCreatedPayload struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
+	// succeeds the committed harness generation.
+	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.

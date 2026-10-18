@@ -23,7 +23,6 @@
   "groupByNone": "なし",
   "groupByRepository": "リポジトリ",
   "groupByWorkflow": "ワークフロー",
-  "ungrouped": "グループなし",
   "loading": "読み込み中...",
   "loadingTasks": "タスクを読み込み中...",
   "noRepository": "リポジトリなし",

@@ -27,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )

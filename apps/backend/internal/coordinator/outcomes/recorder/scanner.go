@@ -119,6 +119,10 @@ func (s *Scanner) EnqueueScan(taskID string) bool {
 func (s *Scanner) enqueue(taskID string, countDrop bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.enqueueLocked(taskID, countDrop)
+}
+
+func (s *Scanner) enqueueLocked(taskID string, countDrop bool) bool {
 	if s.stopped || s.queued[taskID] {
 		return true
 	}
@@ -348,14 +352,14 @@ func (s *Scanner) enqueueRecentTasks(ctx context.Context) {
 // reports false when the scanner stops or ctx ends first.
 func (s *Scanner) enqueueWaiting(ctx context.Context, taskID string) bool {
 	for {
-		select {
-		case <-ctx.Done():
+		s.mu.Lock()
+		if s.stopped || ctx.Err() != nil {
+			s.mu.Unlock()
 			return false
-		case <-s.stopCh:
-			return false
-		default:
 		}
-		if s.enqueue(taskID, false) {
+		queued := s.enqueueLocked(taskID, false)
+		s.mu.Unlock()
+		if queued {
 			return true
 		}
 		select {

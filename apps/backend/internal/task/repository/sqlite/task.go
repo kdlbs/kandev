@@ -4350,7 +4350,7 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	if offset < 0 {
 		offset = 0
 	}
-	sort = usermodels.NormalizeTasksListSort(sort)
+	sort = usermodels.TasksListApiSort(sort)
 
 	// Build filter conditions
 	filter := ""

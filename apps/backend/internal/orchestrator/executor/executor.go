@@ -554,6 +554,10 @@ type LaunchAgentRequest struct {
 	// conversation with the bounded prompt in TaskDescription. It is set only
 	// by the explicit continue_from_history recovery action.
 	ForceContextContinuation bool
+	// ReplaceNativeConversation marks an explicit fresh start that replaces a
+	// committed native conversation. The launch uses the next harness
+	// generation and its own delivery stream.
+	ReplaceNativeConversation bool
 	// RecoveryAction carries a server-side explicit recovery settlement through
 	// the launch boundary. It is never accepted from the client wire request.
 	RecoveryAction string

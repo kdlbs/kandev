@@ -176,7 +176,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
-	sort := usermodels.NormalizeTasksListSort(c.Query("sort"))
+	sort := usermodels.TasksListApiSort(c.Query("sort"))
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue

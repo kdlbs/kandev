@@ -116,6 +116,9 @@ type AgentExecution struct {
 	// ForceContextContinuation records that this execution was explicitly
 	// authorized to replace native context with a bounded Kandev snapshot.
 	ForceContextContinuation bool
+	// ReplacesNativeConversation records an explicit fresh start whose new
+	// native conversation succeeds the committed harness generation.
+	ReplacesNativeConversation bool
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
@@ -1588,6 +1591,9 @@ type LaunchRequest struct {
 	// ForceContextContinuation starts a new native conversation with the
 	// bounded continuation prompt instead of loading a native session.
 	ForceContextContinuation bool
+	// ReplaceNativeConversation starts a new native conversation on the
+	// harness generation after the committed one, with its own stream.
+	ReplaceNativeConversation bool
 	// RecoveryAction is a server-authorized recovery settlement. It remains
 	// internal to the lifecycle launch boundary and is never client-controlled.
 	RecoveryAction string

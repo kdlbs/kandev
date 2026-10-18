@@ -24,7 +24,6 @@
   "groupByRepository": "리포지토리",
   "groupByWorkflowStep": "워크플로 단계",
   "groupByWorkflow": "워크플로",
-  "ungrouped": "그룹 없음",
   "loading": "불러오는 중...",
   "loadingTasks": "작업 불러오는 중...",
   "noRepository": "리포지토리 없음",

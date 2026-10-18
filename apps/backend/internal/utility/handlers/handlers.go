@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/utility/controller"
@@ -65,8 +64,6 @@ type Handlers struct {
 	userSettings UserSettingsProvider
 	logger       *logger.Logger
 }
-
-const maxUtilityRouteAttempts = 8
 
 // NewHandlers creates new utility agent handlers.
 func NewHandlers(ctrl *controller.Controller, executor InferenceExecutor, hostExecutor HostUtilityExecutor, userSettings UserSettingsProvider, log *logger.Logger) *Handlers {
@@ -242,6 +239,9 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
 		return
 	}
+	ctx = agentruntime.WithInferenceIdentity(ctx, agentruntime.InferenceIdentity{
+		SessionID: req.SessionID, LogicalProfileID: prepared.AgentProfileID, CallID: callID, OwnerKind: "utility",
+	})
 
 	if sessionless {
 		h.executeSessionless(c, ctx, prepared, callID)
@@ -356,139 +356,37 @@ func (h *Handlers) executeSessionless(c *gin.Context, ctx context.Context, prepa
 	})
 }
 
-func utilityFailure(storedErr error, response string, providerID string) *routingerr.Error {
-	message := response
-	if storedErr != nil {
-		message = storedErr.Error()
-	}
-	return routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     message,
+func (h *Handlers) executeSessionProfilePrompt(ctx context.Context, executor profileInferenceExecutor, sessionID string, prepared *service.PromptRequest, callID string) (*agentctlutil.PromptResponse, error) {
+	initial := prepared.ExecutionProfileID
+	response, err := service.ExecuteProfilePrompt(ctx, h.controller, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		return executor.ExecuteInferenceProfilePrompt(attempt, sessionID, id, prepared.ResolvedPrompt)
 	})
+	if err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
+		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+			h.logger.Warn("failed to update utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
+		}
+	}
+	return response, err
 }
 
-func (h *Handlers) executeSessionProfilePrompt(
-	ctx context.Context,
-	executor profileInferenceExecutor,
-	sessionID string,
-	prepared *service.PromptRequest,
-	callID string,
-) (*agentctlutil.PromptResponse, error) {
-	currentExecutionProfileID := prepared.ExecutionProfileID
-	if currentExecutionProfileID == "" {
-		currentExecutionProfileID = prepared.AgentProfileID
-	}
-	initialExecutionProfileID := currentExecutionProfileID
-	var response *agentctlutil.PromptResponse
-	var executeErr error
-
-	for attempt := 0; attempt < maxUtilityRouteAttempts; attempt++ {
-		response, executeErr = executor.ExecuteInferenceProfilePrompt(ctx, sessionID, currentExecutionProfileID, prepared.ResolvedPrompt)
-		if executeErr == nil && response != nil && response.Success {
-			if currentExecutionProfileID != initialExecutionProfileID {
-				if err := h.controller.SetCallExecutionProfile(ctx, callID, currentExecutionProfileID); err != nil {
-					h.logger.Warn("failed to update utility route attribution", zap.Error(err), zap.String("call_id", callID))
-				}
-			}
-			return response, nil
+func (h *Handlers) executeSessionlessProfilePrompt(ctx context.Context, executor profileHostUtilityExecutor, prepared *service.PromptRequest, callID string) (*hostutility.PromptResult, error) {
+	initial := prepared.ExecutionProfileID
+	response, err := service.ExecuteProfilePrompt(ctx, h.controller, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		result, callErr := executor.ExecuteProfilePrompt(attempt, id, prepared.ResolvedPrompt)
+		if result == nil {
+			return nil, callErr
 		}
-		// A provider response with any user-visible content is already a
-		// result. Retrying it through another profile could repeat tool calls
-		// or make the caller see two incompatible answers.
-		if response != nil && strings.TrimSpace(response.Response) != "" {
-			return response, executeErr
-		}
-
-		nextProfileID, advanced := h.advanceSessionProfileRoute(
-			ctx, prepared, currentExecutionProfileID, response, executeErr,
-		)
-		if !advanced {
-			return response, executeErr
-		}
-		currentExecutionProfileID = nextProfileID
+		return &agentctlutil.PromptResponse{Success: callErr == nil, Response: result.Response, Model: result.Model, PromptTokens: result.PromptTokens, ResponseTokens: result.ResponseTokens, DurationMs: result.DurationMs}, callErr
+	})
+	if response == nil {
+		return nil, err
 	}
-	return response, executeErr
-}
-
-func (h *Handlers) advanceSessionProfileRoute(
-	ctx context.Context,
-	prepared *service.PromptRequest,
-	currentExecutionProfileID string,
-	response *agentctlutil.PromptResponse,
-	executeErr error,
-) (string, bool) {
-	responseError := ""
-	if response != nil {
-		responseError = response.Error
-	}
-	classified := utilityFailure(executeErr, responseError, prepared.AgentCLI)
-	if prepared.RouteSessionID == "" ||
-		prepared.AgentProfileID == currentExecutionProfileID ||
-		!classified.FallbackAllowed {
-		return "", false
-	}
-	next, err := h.controller.ResolveExecutionAfterFailure(
-		ctx, prepared.RouteSessionID, prepared.AgentProfileID,
-		currentExecutionProfileID, prepared.RouteGeneration, classified,
-	)
-	if err != nil || next.ExecutionProfileID == "" {
-		return "", false
-	}
-	prepared.ExecutionProfileID = next.ExecutionProfileID
-	prepared.RouteGeneration = next.Generation
-	if next.Profile != nil {
-		prepared.AgentCLI = next.Profile.AgentID
-		prepared.Model = next.Profile.Model
-	}
-	return next.ExecutionProfileID, true
-}
-
-func (h *Handlers) executeSessionlessProfilePrompt(
-	ctx context.Context,
-	executor profileHostUtilityExecutor,
-	prepared *service.PromptRequest,
-	callID string,
-) (*hostutility.PromptResult, error) {
-	currentExecutionProfileID := prepared.ExecutionProfileID
-	if currentExecutionProfileID == "" {
-		currentExecutionProfileID = prepared.AgentProfileID
-	}
-	initialExecutionProfileID := currentExecutionProfileID
-	var result *hostutility.PromptResult
-	var executeErr error
-
-	for attempt := 0; attempt < maxUtilityRouteAttempts; attempt++ {
-		result, executeErr = executor.ExecuteProfilePrompt(ctx, currentExecutionProfileID, prepared.ResolvedPrompt)
-		if executeErr == nil && result != nil {
-			if currentExecutionProfileID != initialExecutionProfileID {
-				if err := h.controller.SetCallExecutionProfile(ctx, callID, currentExecutionProfileID); err != nil {
-					h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(err), zap.String("call_id", callID))
-				}
-			}
-			return result, nil
-		}
-
-		classified := utilityFailure(executeErr, "", prepared.AgentCLI)
-		if prepared.RouteSessionID == "" || !classified.FallbackAllowed {
-			return result, executeErr
-		}
-		next, resolveErr := h.controller.ResolveExecutionAfterFailure(
-			ctx, prepared.RouteSessionID, prepared.AgentProfileID,
-			currentExecutionProfileID, prepared.RouteGeneration, classified,
-		)
-		if resolveErr != nil || next.ExecutionProfileID == "" {
-			return result, executeErr
-		}
-		currentExecutionProfileID = next.ExecutionProfileID
-		prepared.ExecutionProfileID = next.ExecutionProfileID
-		prepared.RouteGeneration = next.Generation
-		if next.Profile != nil {
-			prepared.AgentCLI = next.Profile.AgentID
-			prepared.Model = next.Profile.Model
+	if err == nil && response.Success && prepared.ExecutionProfileID != initial {
+		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+			h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
 		}
 	}
-	return result, executeErr
+	return &hostutility.PromptResult{Response: response.Response, Model: response.Model, PromptTokens: response.PromptTokens, ResponseTokens: response.ResponseTokens, DurationMs: response.DurationMs}, err
 }
 
 func (h *Handlers) httpListCalls(c *gin.Context) {

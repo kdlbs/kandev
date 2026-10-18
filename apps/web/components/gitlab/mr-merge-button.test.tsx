@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ToastProvider } from "@/components/toast-provider";
 import type { TaskMR } from "@/lib/types/gitlab";
+import { TaskWorkspaceProvider } from "@/components/task/task-workspace-context";
 
 const mergeMR = vi.hoisted(() => vi.fn());
 
@@ -15,13 +16,14 @@ vi.mock("@/lib/api/domains/gitlab-api", () => ({ mergeMR }));
 import { MRMergeButton } from "./mr-merge-button";
 
 const MERGE_BUTTON_TESTID = "mr-merge-button";
+const PROJECT_PATH = "group/project";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
     id: "id",
     task_id: "task-1",
     host: "https://gitlab.com",
-    project_path: "group/project",
+    project_path: PROJECT_PATH,
     mr_iid: 7,
     mr_url: "",
     mr_title: "Test MR",
@@ -72,6 +74,36 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("MRMergeButton", () => {
+  it("merges an embedded original task in its own workspace", async () => {
+    mergeMR.mockResolvedValue({});
+    render(
+      <ToastProvider>
+        <TaskWorkspaceProvider taskId="task-1" workspaceId="beta" sessionId="beta-session">
+          <MRMergeButton mr={readyMR()} />
+        </TaskWorkspaceProvider>
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
+    await vi.waitFor(() =>
+      expect(mergeMR).toHaveBeenCalledWith(
+        expect.objectContaining({ workspaceId: "beta", project: PROJECT_PATH, iid: 7 }),
+      ),
+    );
+  });
+
+  it("disables a mismatched task inside an embedded owner", () => {
+    render(
+      <ToastProvider>
+        <TaskWorkspaceProvider taskId="different" workspaceId="beta" sessionId="beta-session">
+          <MRMergeButton mr={readyMR()} />
+        </TaskWorkspaceProvider>
+      </ToastProvider>,
+    );
+    expect((screen.getByTestId(MERGE_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
+    expect(mergeMR).not.toHaveBeenCalled();
+  });
+
   it("renders nothing when the MR is not ready to merge", () => {
     renderButton(makeMR({ pipeline_state: "failed" }));
     expect(screen.queryByTestId(MERGE_BUTTON_TESTID)).toBeNull();
@@ -84,13 +116,13 @@ describe("MRMergeButton", () => {
 
   it("calls mergeMR with the MR's identity on click", async () => {
     mergeMR.mockResolvedValue({});
-    const mr = readyMR({ project_path: "group/project", mr_iid: 42, host: "https://gitlab.com" });
+    const mr = readyMR({ project_path: PROJECT_PATH, mr_iid: 42, host: "https://gitlab.com" });
     renderButton(mr);
     fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
     await vi.waitFor(() => expect(mergeMR).toHaveBeenCalledTimes(1));
     expect(mergeMR).toHaveBeenCalledWith({
       workspaceId: "ws-1",
-      project: "group/project",
+      project: PROJECT_PATH,
       iid: 42,
       host: "https://gitlab.com",
       squash: false,
