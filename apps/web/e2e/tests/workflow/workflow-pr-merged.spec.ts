@@ -58,7 +58,13 @@ test.describe("Workflow PR lifecycle events", () => {
     await expect(kanban.taskCardInColumn("Task awaiting merge", acceptStep.id)).toBeVisible();
     await expect(kanban.taskCardInColumn("Task awaiting merge", doneStep.id)).toHaveCount(0);
 
-    await apiClient.mockGitHubAssociateTaskPR({ ...linkedPR, state: "merged" });
+    const mergedAt = new Date().toISOString();
+    await apiClient.mockGitHubAssociateTaskPR({
+      ...linkedPR,
+      state: "merged",
+      merged_at: mergedAt,
+      closed_at: mergedAt,
+    });
 
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)

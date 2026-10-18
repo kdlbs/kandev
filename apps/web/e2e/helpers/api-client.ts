@@ -2316,6 +2316,10 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    /** RFC 3339; GitHub reports it for merged PRs. */
+    merged_at?: string;
+    /** RFC 3339; GitHub reports it for merged and closed PRs. */
+    closed_at?: string;
     head_sha?: string;
     head_repo_owner?: string;
     head_repo_name?: string;

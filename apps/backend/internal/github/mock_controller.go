@@ -726,6 +726,8 @@ type associateTaskPRRequest struct {
 	BaseBranch                            string     `json:"base_branch"`
 	AuthorLogin                           string     `json:"author_login"`
 	State                                 string     `json:"state"`
+	MergedAt                              *time.Time `json:"merged_at,omitempty"`
+	ClosedAt                              *time.Time `json:"closed_at,omitempty"`
 	HeadSHA                               string     `json:"head_sha,omitempty"`
 	HeadRepoOwner                         string     `json:"head_repo_owner,omitempty"`
 	HeadRepoName                          string     `json:"head_repo_name,omitempty"`
@@ -816,6 +818,8 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		MergeQueueLastRemovalBeforeSHA:        req.MergeQueueLastRemovalBeforeSHA,
 		Additions:                             req.Additions,
 		Deletions:                             req.Deletions,
+		MergedAt:                              req.MergedAt,
+		ClosedAt:                              req.ClosedAt,
 		CreatedAt:                             now,
 	}
 	if req.ReviewCount != nil {
