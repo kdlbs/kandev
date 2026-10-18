@@ -104,3 +104,14 @@ source before delivery.
   unchanged.
 - Project descriptions are captured at poll time and are not refreshed for
   running tasks.
+
+
+Hosted review proof: five shared controls passed with the original caller,
+then the project-only selection assertion failed because the selected chip was
+absent. Restoring the corrected caller passed all 26 selected form/component
+tests. The combined proof workflow subsequently failed its standalone typecheck
+with the default Node heap exhausted and reported required test formatting.
+The hosted formatter output was applied with only wrapping and trailing commas.
+This is behavioral RED/controls/GREEN evidence, not a successful typecheck or
+full-CI claim. Actual final full frontend typecheck and desktop/phone browser
+results remain pending in retained PR evidence.

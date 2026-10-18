@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProjectMultiSelect, useTeamsAndStates } from "./linear-issue-watch-fields";
 import { FilterFields } from "./linear-issue-watch-filter-fields";
@@ -89,7 +97,9 @@ describe("watch dialog filter fields", () => {
     expect(screen.getByText("Loading projects…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Checkout" })).toBeNull();
     await act(async () => finish({ projects: [{ id: "p1", name: "Checkout" }] }));
-    expect(screen.getByRole("button", { name: "Checkout" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Checkout" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
     expect(api.listLinearProjects).toHaveBeenCalledWith("ENG", { workspaceId: "ws-a" });
   });
 });
