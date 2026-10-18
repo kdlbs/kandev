@@ -48,16 +48,22 @@ func (s *Service) handleTaskPRWorkflowEvent(ctx context.Context, pr *github.Task
 // an earlier step is never replayed by a later poller refresh. The operation
 // id deduplicates redelivery of the same outcome.
 func (s *Service) processTaskPRWorkflowEvent(ctx context.Context, pr *github.TaskPR) (bool, error) {
+	return s.evaluateTaskPRWorkflowEvent(ctx, pr, false)
+}
+
+// evaluateTaskPRWorkflowEvent is processTaskPRWorkflowEvent. A retry sets
+// requireStored: the event's PR snapshot may be stale by then, so the stored
+// row must still report the same outcome or the retry stops.
+func (s *Service) evaluateTaskPRWorkflowEvent(ctx context.Context, pr *github.TaskPR, requireStored bool) (bool, error) {
 	trigger, ok := taskPRWorkflowTrigger(pr)
-	if !ok || s.workflowEngine == nil || s.workflowStore == nil ||
-		s.workflowStepGetter == nil || s.githubService == nil {
+	if !ok || !s.taskPRWorkflowWired() {
 		return false, nil
 	}
 	task, err := s.taskPRWorkflowTask(ctx, pr.TaskID, trigger)
 	if err != nil || task == nil {
 		return false, err
 	}
-	operationID, payload, ok, err := s.taskPRWorkflowOutcome(ctx, task, pr, trigger)
+	operationID, payload, ok, err := s.taskPRWorkflowOutcome(ctx, task, pr, trigger, requireStored)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -95,6 +101,11 @@ func (s *Service) processTaskPRWorkflowEvent(ctx context.Context, pr *github.Tas
 		}
 	}
 	return transitioned, s.workflowStore.MarkOperationApplied(ctx, operationID)
+}
+
+func (s *Service) taskPRWorkflowWired() bool {
+	return s.workflowEngine != nil && s.workflowStore != nil &&
+		s.workflowStepGetter != nil && s.githubService != nil
 }
 
 // taskPRWorkflowTrigger maps a PR state to its workflow trigger and applies
@@ -146,9 +157,9 @@ func stepHasPRWorkflowActions(step *wfmodels.WorkflowStep, trigger engine.Trigge
 // trigger's outcome on the task's current step, and returns its operation id
 // and engine payload.
 func (s *Service) taskPRWorkflowOutcome(
-	ctx context.Context, task *models.Task, pr *github.TaskPR, trigger engine.Trigger,
+	ctx context.Context, task *models.Task, pr *github.TaskPR, trigger engine.Trigger, requireStored bool,
 ) (string, any, bool, error) {
-	linked, found, err := s.linkedTaskPRs(ctx, pr)
+	linked, found, err := s.linkedTaskPRs(ctx, pr, requireStored)
 	if err != nil || !found {
 		return "", nil, false, err
 	}
@@ -168,8 +179,9 @@ func (s *Service) taskPRWorkflowOutcome(
 
 // linkedTaskPRs returns the task's attached PRs with the reported PR's state
 // taken from the event. found is false when the reported PR is not attached
-// to the task (for example, detached).
-func (s *Service) linkedTaskPRs(ctx context.Context, pr *github.TaskPR) ([]*github.TaskPR, bool, error) {
+// to the task (for example, detached), or, with requireStored, when the stored
+// row no longer reports the event's outcome (for example, reopened).
+func (s *Service) linkedTaskPRs(ctx context.Context, pr *github.TaskPR, requireStored bool) ([]*github.TaskPR, bool, error) {
 	prsByTask, err := s.githubService.ListTaskPRs(ctx, []string{pr.TaskID})
 	if err != nil {
 		return nil, false, fmt.Errorf("list task PRs: %w", err)
@@ -181,12 +193,29 @@ func (s *Service) linkedTaskPRs(ctx context.Context, pr *github.TaskPR) ([]*gith
 			continue
 		}
 		if sameTaskPR(candidate, pr) {
+			if requireStored && !sameTaskPROutcome(candidate, pr) {
+				return nil, false, nil
+			}
 			candidate = pr
 			found = true
 		}
 		linked = append(linked, candidate)
 	}
 	return linked, found, nil
+}
+
+// sameTaskPROutcome reports whether two rows of one PR report the same state
+// and merge/close time.
+func sameTaskPROutcome(a, b *github.TaskPR) bool {
+	return strings.EqualFold(strings.TrimSpace(a.State), strings.TrimSpace(b.State)) &&
+		sameOptionalTime(a.MergedAt, b.MergedAt) && sameOptionalTime(a.ClosedAt, b.ClosedAt)
+}
+
+func sameOptionalTime(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 func sameTaskPR(a, b *github.TaskPR) bool {
@@ -374,7 +403,8 @@ func (s *Service) commitTaskPRWorkflowTransition(
 
 // scheduleTaskPRWorkflowRetry re-runs a failed PR workflow event with bounded
 // backoff on the CI automation worker lifecycle, so service shutdown cancels
-// pending retries.
+// pending retries. Each retry stops when the stored PR no longer reports the
+// failed event's outcome.
 func (s *Service) scheduleTaskPRWorkflowRetry(pr *github.TaskPR, cause error) {
 	s.ciAutomationMu.Lock()
 	if s.ciAutomationStopped {
@@ -409,7 +439,7 @@ func (s *Service) scheduleTaskPRWorkflowRetry(pr *github.TaskPR, cause error) {
 				return
 			case <-timer.C:
 			}
-			if _, err = s.processTaskPRWorkflowEvent(workerCtx, &snapshot); err == nil {
+			if _, err = s.evaluateTaskPRWorkflowEvent(workerCtx, &snapshot, true); err == nil {
 				return
 			}
 		}

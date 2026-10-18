@@ -128,6 +128,8 @@ The poller publishes an event only when PR data changes. When evaluation or the
 commit fails with an error (not a skip or a compare-and-swap miss),
 `scheduleTaskPRWorkflowRetry` re-runs the same PR snapshot after 5 s, 30 s, and
 2 min on the CI automation worker lifecycle, so service shutdown cancels it.
+Each retry reads the stored PR row and stops when it no longer reports the
+failed event's state and merge or close time, for example after a reopen.
 
 ## Step editor
 

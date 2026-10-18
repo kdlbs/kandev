@@ -97,3 +97,32 @@ func TestHandleTaskPRWorkflowEvent_RetriesAfterError(t *testing.T) {
 		t.Fatalf("ListTaskPRs calls = %d, want a retry", got)
 	}
 }
+
+// TestHandleTaskPRWorkflowEvent_RetryStopsWhenPRReopened pins that a retry
+// re-checks the stored PR: a close that failed must not move the task once the
+// PR has been reopened.
+func TestHandleTaskPRWorkflowEvent_RetryStopsWhenPRReopened(t *testing.T) {
+	f := newPRWorkflowFixture(t, prMergedAcceptEvents())
+	f.svc.taskPRWorkflowRetryDelays = []time.Duration{10 * time.Millisecond}
+	closedAt := time.Now().UTC()
+	closed := linkedTaskPR(1, "closed")
+	closed.ClosedAt = &closedAt
+	reopened := linkedTaskPR(1, "open")
+	var calls atomic.Int32
+	f.github.taskPRListFunc = func(context.Context, []string) (map[string][]*github.TaskPR, error) {
+		if calls.Add(1) == 1 {
+			return nil, errors.New("database is locked")
+		}
+		return map[string][]*github.TaskPR{prWorkflowTaskID: {reopened}}, nil
+	}
+
+	f.svc.handleTaskPRWorkflowEvent(context.Background(), closed)
+	f.svc.ciAutomationWorkers.Wait()
+
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("ListTaskPRs calls = %d, want the failed attempt plus one retry", got)
+	}
+	if got := f.taskStep(t); got != "step_accept" {
+		t.Fatalf("task step = %q, want step_accept (PR was reopened)", got)
+	}
+}
