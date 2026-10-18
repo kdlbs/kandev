@@ -50,7 +50,10 @@ filters.
   that team and let the user toggle projects. Saving shall store the selected
   project IDs. Reopening and saving an existing watch shall keep its project
   IDs. Changing the team shall clear the selected projects, as it clears
-  states and labels. Desktop and phone layouts shall behave the same.
+  states and labels, and switching the workspace shall clear them. A selected
+  project that the team no longer lists shall stay visible as a removable
+  choice. Project choices shall have a hit area of at least 44 px on coarse
+  pointers. Desktop and phone layouts shall behave the same.
 
 ### REQ-INTEGRATIONS-LINEAR-PROJECTS-002: Project context in watch prompts
 

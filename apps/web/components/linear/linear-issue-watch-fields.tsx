@@ -29,6 +29,14 @@ import type {
 } from "@/lib/types/linear";
 import { useTranslation } from "react-i18next";
 import { resolveOptionLabel } from "@/lib/i18n/option-label";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+
+// teamCacheKey scopes per-team caches to the workspace: two workspaces can
+// connect different Linear organizations that both have a team with the same
+// key.
+function teamCacheKey(workspaceId: string, teamKey: string): string {
+  return JSON.stringify([workspaceId, teamKey]);
+}
 
 // useTeamsAndStates loads the team list once Linear is configured, plus the
 // states, labels, projects, and users for the currently-selected team. Each per-team
@@ -62,11 +70,13 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
     // body added to (ref.current is stable across renders, but eslint can't
     // prove that — so we assign to a local).
     const fetched = fetchedTeams.current;
-    if (!teamKey || fetched.has(teamKey)) return;
+    if (!teamKey) return;
+    const key = teamCacheKey(workspaceId, teamKey);
+    if (fetched.has(key)) return;
     // Mark in-flight so concurrent renders don't double-fetch; clear on
     // failure so a subsequent remount can retry instead of being stuck with
     // an empty cached entry.
-    fetched.add(teamKey);
+    fetched.add(key);
     let cancelled = false;
     let anyFailed = false;
     let loaded = false;
@@ -76,35 +86,35 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
     Promise.allSettled([
       listLinearStates(teamKey, { workspaceId })
         .then((res) => {
-          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
+          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [key]: res.states ?? [] }));
         })
         .catch(() => {
           markFailed();
-          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+          if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [key]: [] }));
         }),
       listLinearLabels(teamKey, { workspaceId })
         .then((res) => {
-          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: res.labels ?? [] }));
+          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [key]: res.labels ?? [] }));
         })
         .catch(() => {
           markFailed();
-          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+          if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [key]: [] }));
         }),
       listLinearUsers(teamKey, { workspaceId })
         .then((res) => {
-          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: res.users ?? [] }));
+          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [key]: res.users ?? [] }));
         })
         .catch(() => {
           markFailed();
-          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+          if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [key]: [] }));
         }),
       listLinearProjects(teamKey, { workspaceId })
         .then((res) => {
-          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [teamKey]: res.projects ?? [] }));
+          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [key]: res.projects ?? [] }));
         })
         .catch(() => {
           markFailed();
-          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [key]: [] }));
         }),
     ]).finally(() => {
       // Track full success so cleanup can keep the cache marker — otherwise
@@ -113,25 +123,26 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
       // If a fetch failed (and we didn't cancel), drop the marker so the
       // next visit to this team can retry. Success-path marker stays so
       // cached data is reused.
-      if (anyFailed) fetched.delete(teamKey);
+      if (anyFailed) fetched.delete(key);
     });
     return () => {
       cancelled = true;
       // Drop the marker on cleanup ONLY when the fetch hadn't completed
       // successfully — that handles the rapid-switch (A→B→A) case without
       // also evicting a healthy cache after a normal team change.
-      if (!loaded) fetched.delete(teamKey);
+      if (!loaded) fetched.delete(key);
     };
   }, [workspaceId, teamKey]);
 
-  const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
-  const labels = teamKey ? (labelsByTeam[teamKey] ?? []) : [];
-  const users = teamKey ? (usersByTeam[teamKey] ?? []) : [];
-  const projects = teamKey ? (projectsByTeam[teamKey] ?? []) : [];
-  const loadingStates = !!teamKey && statesByTeam[teamKey] === undefined;
-  const loadingLabels = !!teamKey && labelsByTeam[teamKey] === undefined;
-  const loadingUsers = !!teamKey && usersByTeam[teamKey] === undefined;
-  const loadingProjects = !!teamKey && projectsByTeam[teamKey] === undefined;
+  const cacheKey = teamKey ? teamCacheKey(workspaceId, teamKey) : "";
+  const states = teamKey ? (statesByTeam[cacheKey] ?? []) : [];
+  const labels = teamKey ? (labelsByTeam[cacheKey] ?? []) : [];
+  const users = teamKey ? (usersByTeam[cacheKey] ?? []) : [];
+  const projects = teamKey ? (projectsByTeam[cacheKey] ?? []) : [];
+  const loadingStates = !!teamKey && statesByTeam[cacheKey] === undefined;
+  const loadingLabels = !!teamKey && labelsByTeam[cacheKey] === undefined;
+  const loadingUsers = !!teamKey && usersByTeam[cacheKey] === undefined;
+  const loadingProjects = !!teamKey && projectsByTeam[cacheKey] === undefined;
   return {
     teams,
     states,
@@ -281,15 +292,23 @@ export function ProjectMultiSelect({
   disabled: boolean;
 }) {
   const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
   if (disabled) return null;
   if (loading) {
     return <p className="text-xs text-muted-foreground">{t("linear:loadingProjects")}</p>;
   }
-  if (projects.length === 0) {
+  // Selected projects that the team no longer lists (archived, moved, or no
+  // longer accessible) stay removable instead of becoming a hidden filter.
+  const listed = new Set(projects.map((project) => project.id));
+  const unavailable = selected.filter((id) => !listed.has(id));
+  if (projects.length === 0 && unavailable.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">{t("linear:noProjectsAvailableForThisTeam")}</p>
     );
   }
+  const chipClass = isFinePointer
+    ? "cursor-pointer"
+    : "inline-flex min-h-11 min-w-11 cursor-pointer items-center";
   return (
     <div className="flex flex-wrap gap-1.5" data-testid="linear-watch-projects">
       {projects.map((project) => {
@@ -300,13 +319,25 @@ export function ProjectMultiSelect({
             type="button"
             onClick={() => onToggle(project.id)}
             aria-pressed={active}
-            className="cursor-pointer"
+            className={chipClass}
           >
             {/* Project names come from the Linear API — user data. */}
             <Badge variant={active ? "default" : "outline"}>{project.name}</Badge>
           </button>
         );
       })}
+      {unavailable.map((id) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onToggle(id)}
+          aria-pressed
+          title={id}
+          className={chipClass}
+        >
+          <Badge variant="default">{t("linear:unavailableProject")}</Badge>
+        </button>
+      ))}
     </div>
   );
 }

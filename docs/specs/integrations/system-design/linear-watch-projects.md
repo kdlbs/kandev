@@ -78,10 +78,15 @@ E2E mock client serves projects seeded through `POST /api/v1/linear/mock/project
 ## Watch dialog
 
 `useTeamsAndStates` loads projects with states, labels, and users for the
-selected team and caches them per team. `FormState.projectIds` is read from and
+selected team and caches them per workspace and team, because two workspaces
+can connect different Linear organizations with the same team key.
+`switchWatchWorkspace` clears the previous workspace's state, label, project,
+and creator IDs together with the shared workflow and repository fields. `FormState.projectIds` is read from and
 written to the filter, so saving an edited watch sends the stored project IDs
 back. `ProjectMultiSelect` renders toggle chips under Labels and is hidden
-until a team is selected. The team selector clears `projectIds` with states and
+until a team is selected. Selected IDs missing from the team's list render as
+removable "Unavailable project" chips, so they never become a hidden filter.
+On coarse pointers each chip button has a 44 px minimum hit area. The team selector clears `projectIds` with states and
 labels. The watch table summary adds `project:N selected`. Desktop and phone
 share the same dialog composition; chips wrap on narrow screens.
 

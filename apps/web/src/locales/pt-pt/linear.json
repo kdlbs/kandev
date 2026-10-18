@@ -91,6 +91,7 @@
   "noIssuesMatchYourFilters": "Nenhuma issue corresponde aos seus filtros.",
   "noLabelsAvailableForThisTeam": "Não há etiquetas disponíveis para esta equipa.",
   "noProjectsAvailableForThisTeam": "Não há projetos disponíveis para esta equipa.",
+  "unavailableProject": "Projeto indisponível",
   "noLinearWatchersConfiguredCreateOne": "Não há vigilâncias do Linear configuradas. Crie uma para criar tarefas automaticamente a partir de issues filtradas.",
   "noNewIssuesMatched": "Nenhuma nova issue correspondeu.",
   "noResults": "Sem resultados",

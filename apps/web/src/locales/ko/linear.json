@@ -91,6 +91,7 @@
   "noIssuesMatchYourFilters": "필터와 일치하는 이슈가 없습니다.",
   "noLabelsAvailableForThisTeam": "이 팀에서 사용할 수 있는 레이블이 없습니다.",
   "noProjectsAvailableForThisTeam": "이 팀에서 사용할 수 있는 프로젝트가 없습니다.",
+  "unavailableProject": "사용할 수 없는 프로젝트",
   "noLinearWatchersConfiguredCreateOne": "구성된 Linear 감시자가 없습니다. 필터링된 이슈에서 작업을 자동 생성하려면 하나를 만드세요.",
   "noNewIssuesMatched": "일치하는 새 이슈가 없습니다.",
   "noResults": "결과 없음",

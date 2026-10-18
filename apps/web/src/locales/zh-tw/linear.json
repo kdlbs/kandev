@@ -91,6 +91,7 @@
   "noIssuesMatchYourFilters": "沒有與篩選條件匹配的議題。",
   "noLabelsAvailableForThisTeam": "此團隊沒有可用標籤。",
   "noProjectsAvailableForThisTeam": "此團隊沒有可用專案。",
+  "unavailableProject": "不可用的專案",
   "noLinearWatchersConfiguredCreateOne": "尚未設定 Linear 監控。建立一個監控後，即可根據篩選的議題自動建立任務。",
   "noNewIssuesMatched": "沒有匹配的新議題。",
   "noResults": "無結果",

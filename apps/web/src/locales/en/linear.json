@@ -91,6 +91,7 @@
   "noIssuesMatchYourFilters": "No issues match your filters.",
   "noLabelsAvailableForThisTeam": "No labels available for this team.",
   "noProjectsAvailableForThisTeam": "No projects available for this team.",
+  "unavailableProject": "Unavailable project",
   "noLinearWatchersConfiguredCreateOne": "No Linear watchers configured. Create one to auto-create tasks from filtered issues.",
   "noNewIssuesMatched": "No new issues matched.",
   "noResults": "No results",

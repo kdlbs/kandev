@@ -4,6 +4,7 @@ import type {
   LinearSearchFilter,
   LinearUser,
 } from "@/lib/types/linear";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { DEFAULT_LINEAR_ISSUE_WATCH_PROMPT } from "./linear-issue-watch-placeholders";
 
 export const ASSIGNED_ANY = "__any__";
@@ -101,6 +102,23 @@ export function makeEmptyForm(workspaceId: string): FormState {
     pollInterval: 300,
     maxInflightTasks: "5",
     sortBy: "priority",
+  };
+}
+
+/**
+ * Switches the form to another workspace. Besides the shared workflow and
+ * repository fields, it clears the Linear IDs picked from the previous
+ * workspace's organization (states, labels, projects, creator); the team key
+ * is kept because it is a human-readable key the user can re-check.
+ */
+export function switchWatchWorkspace(prev: FormState, workspaceId: string): FormState {
+  if (prev.workspaceId === workspaceId) return prev;
+  return {
+    ...clearWorkspaceScopedForm(prev, workspaceId),
+    stateIds: [],
+    labelIds: [],
+    projectIds: [],
+    creatorId: "",
   };
 }
 

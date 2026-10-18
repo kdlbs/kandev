@@ -7,6 +7,7 @@ import {
   makeEmptyForm,
   maxInflightTasksString,
   parseMaxInflightTasks,
+  switchWatchWorkspace,
   type FormState,
 } from "./linear-issue-watch-form";
 import type { LinearIssueWatch } from "@/lib/types/linear";
@@ -150,5 +151,29 @@ describe("project filter", () => {
   it("omits projectIds from the payload when none are selected", () => {
     expect(buildWatchPayload(readyForm())?.filter.projectIds).toBeUndefined();
     expect(watchForm({ filter: { teamKey: "ENG" } }).projectIds).toEqual([]);
+  });
+});
+
+describe("switchWatchWorkspace", () => {
+  it("clears the previous workspace's Linear IDs and keeps the team key", () => {
+    const form = readyForm({
+      stateIds: ["s1"],
+      labelIds: ["l1"],
+      projectIds: ["p1"],
+      creatorId: "u1",
+      repositoryId: "repo-1",
+    });
+    const next = switchWatchWorkspace(form, "ws-2");
+    expect(next).toMatchObject({
+      workspaceId: "ws-2",
+      teamKey: "ENG",
+      stateIds: [],
+      labelIds: [],
+      projectIds: [],
+      creatorId: "",
+      workflowId: "",
+      repositoryId: "",
+    });
+    expect(switchWatchWorkspace(form, "ws-1")).toBe(form);
   });
 });

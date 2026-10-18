@@ -91,6 +91,7 @@
   "noIssuesMatchYourFilters": "フィルターに一致する課題なし。",
   "noLabelsAvailableForThisTeam": "このチームで使えるラベルなし。",
   "noProjectsAvailableForThisTeam": "このチームで使えるプロジェクトなし。",
+  "unavailableProject": "利用できないプロジェクト",
   "noLinearWatchersConfiguredCreateOne": "Linear ウォッチャー未設定。1つ作成して、絞り込み済み課題からタスク自動作成。",
   "noNewIssuesMatched": "新しい課題に一致なし。",
   "noResults": "結果なし",
