@@ -198,17 +198,25 @@ func sidebarPullRequestFields(driver string, needs sidebarBaseNeeds) []string {
 func sidebarWatchFields(driver string, needs sidebarBaseNeeds) []string {
 	fields := make([]string, 0, 2)
 	if needs.reviewWatch {
-		fields = append(fields, sidebarWatchField(driver, "review_watch_id", "is_pr_review"))
+		fields = append(fields, sidebarWatchField(driver, "is_pr_review",
+			"review_watch_id", "gitlab_review_watch_id", "azure_devops_pr_watch_id"))
 	}
 	if needs.issueWatch {
-		fields = append(fields, sidebarWatchField(driver, "issue_watch_id", "is_issue_watch"))
+		fields = append(fields, sidebarWatchField(driver, "is_issue_watch",
+			"issue_watch_id", "gitlab_issue_watch_id", "jira_issue_watch_id",
+			"linear_issue_watch_id", "sentry_issue_watch_id", "azure_devops_work_item_watch_id"))
 	}
 	return fields
 }
 
-func sidebarWatchField(driver, metadataKey, alias string) string {
-	value := dialect.JSONExtract(driver, "t.metadata", metadataKey)
-	return "CASE WHEN COALESCE(NULLIF(" + value + ", ''), 'undefined') <> 'undefined' THEN 'true' ELSE 'false' END AS " + alias
+func sidebarWatchField(driver, alias string, metadataKeys ...string) string {
+	conditions := make([]string, 0, len(metadataKeys))
+	for _, key := range metadataKeys {
+		value := dialect.JSONExtract(driver, "t.metadata", key)
+		conditions = append(conditions, "("+dialect.JSONTypeIsString(driver, "t.metadata", key)+
+			" AND "+value+" NOT IN ('', 'undefined'))")
+	}
+	return "CASE WHEN " + strings.Join(conditions, " OR ") + " THEN 'true' ELSE 'false' END AS " + alias
 }
 
 // Fixed-width UTC keys make lexical MAX and ORDER BY compare valid instants consistently.

@@ -647,3 +647,24 @@ func TestHTTPBulkMoveSelectedTasksWithEmptySelectionIsANoOp(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"moved_count":0}`, rec.Body.String())
 }
+
+// @covers REQ-PLUGINS-TASKLIST-FACETS-002
+func TestHTTPListTasksByWorkspaceNeverForwardsFacetSort(t *testing.T) {
+	for _, sort := range []string{
+		"facet%3Akandev-plugin-tags%3Atags",
+		"%20facet%3Aplugin%3Atags%20",
+	} {
+		t.Run(sort, func(t *testing.T) {
+			repo := &httpTaskRepo{}
+			h := newHTTPTaskHandlers(t, repo)
+			c, rec := taskRequestAs(t, "", http.MethodGet,
+				"/api/v1/workspaces/ws-b/tasks?sort="+sort, "ws-b")
+
+			h.httpListTasksByWorkspace(c)
+
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, "updated_desc", repo.listedSort,
+				"a facet selection is page-local and must not reach the order-by input")
+		})
+	}
+}

@@ -464,6 +464,7 @@ func buildLifecycleLaunchRequest(
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
 		ForceContextContinuation:      req.ForceContextContinuation,
+		ReplaceNativeConversation:     req.ReplaceNativeConversation,
 		RecoveryAction:                req.RecoveryAction,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,

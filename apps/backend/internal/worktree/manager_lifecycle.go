@@ -1285,9 +1285,16 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	if isFetchRefusedCheckedOut(outputStr) {
 		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber, required); result != nil {
 			if required && result.Warning != "" {
+				detail := strings.TrimSpace(result.WarningDetail)
+				if detail == "" {
+					detail = strings.TrimSpace(result.Warning)
+				}
+				m.logger.Warn("required checkout branch refresh could not verify the refreshed ref",
+					zap.String("branch", branch),
+					zap.String("detail", detail))
 				return nil, fmt.Errorf(
-					"required refresh of checkout branch %q could not verify the refreshed ref: %w",
-					branch, ErrGitCommandFailed,
+					"required refresh of checkout branch %q could not verify the refreshed ref: %s: %w",
+					branch, detail, ErrGitCommandFailed,
 				)
 			}
 			return result, nil

@@ -2134,6 +2134,7 @@ func newResumeLaunchRequest(
 		OriginalWorkspacePath:        session.WorkspacePath,
 		AllowBranchReplacement:       options.AllowBranchReplacement,
 		ForceContextContinuation:     options.ForceContextContinuation,
+		ReplaceNativeConversation:    options.RecoveryAction == RecoveryActionFreshStart,
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}

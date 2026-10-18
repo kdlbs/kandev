@@ -818,7 +818,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 			v = models.TasksListSortDefault
 		}
 		if !models.IsValidTasksListSort(v) {
-			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
+			return fmt.Errorf("tasks_list_sort must be one of %s or %s", strings.Join(models.TasksListSortValues(), ", "), models.TaskListFacetFormat)
 		}
 		settings.TasksListSort = v
 	}
@@ -828,7 +828,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 			v = models.TasksListGroupDefault
 		}
 		if !models.IsValidTasksListGroup(v) {
-			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
+			return fmt.Errorf("tasks_list_group must be one of %s or %s", strings.Join(models.TasksListGroupValues(), ", "), models.TaskListFacetFormat)
 		}
 		settings.TasksListGroup = models.NormalizeTasksListGroup(v)
 	}

@@ -3782,17 +3782,19 @@ func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string
 		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions
-		SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.last_agent_error', json(?)),
-			updated_at = ?
-		WHERE id = ?
-			AND json_extract(metadata, '$.last_agent_error.message') = ?
-			AND (
-				json_extract(metadata, '$.last_agent_error.occurred_at') = ?
-				OR julianday(json_extract(metadata, '$.last_agent_error.occurred_at')) = julianday(?)
-			)
-	`), string(valueJSON), now, sessionID, expected.Message, expected.OccurredAt.UTC().Format(time.RFC3339Nano), expected.OccurredAt.UTC().Format(time.RFC3339Nano))
+	driver := r.db.DriverName()
+	message := dialect.JSONExtractPath(driver, "metadata", models.SessionMetaKeyLastAgentError, "message")
+	occurredAt := dialect.JSONExtractPath(driver, "metadata", models.SessionMetaKeyLastAgentError, "occurred_at")
+	equivalentTime := "julianday(" + occurredAt + ") = julianday(?)"
+	if dialect.IsPostgres(driver) {
+		equivalentTime = "(" + occurredAt + ")::timestamptz = ?::timestamptz"
+	}
+	query := metadataKeyUpdateQuery("task_sessions", driver) +
+		" AND " + message + " = ? AND (" + occurredAt + " = ? OR " + equivalentTime + ")"
+	args := metadataKeyUpdateArgs(driver, models.SessionMetaKeyLastAgentError, string(valueJSON), now, sessionID)
+	expectedTime := expected.OccurredAt.UTC().Format(time.RFC3339Nano)
+	args = append(args, expected.Message, expectedTime, expectedTime)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}

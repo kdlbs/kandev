@@ -232,7 +232,9 @@ describe("TasksListView facet grouping", () => {
 
     expect(screen.getAllByTestId(TASKS_LIST_SECTION)).toHaveLength(2);
   });
+});
 
+describe("TasksListView facet section rendering", () => {
   // A wrapping section label used to squeeze the flex sibling swatch down to
   // ~1px wide, which erased the plugin's colour coding exactly when the label
   // was long enough to need it.
@@ -292,6 +294,52 @@ describe("TasksListView facet grouping", () => {
     expect(titles[0]).toContain("1");
     expect(titles[1]).toContain("Beta");
     expect(titles[1]).toContain("2");
+  });
+
+  it("renders a plugin label that is also a catalog key verbatim", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:tagged": [{ value: "tagged", label: "tasks:groupByState" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId(TASKS_LIST_SECTION).textContent).toContain("tasks:groupByState");
+  });
+
+  // AC-PLUGINS-TASKLIST-FACETS-002.3 and 002.8: only carried labels form value sections.
+  it("renders a trailing Unassigned section after later-sorting labels", () => {
+    const tagged = makeTask({ id: toTaskId("tagged") });
+    const empty = makeTask({ id: toTaskId("empty") });
+    render(
+      <StateProvider initialState={{ messages: { bySession: {}, metaBySession: {} } }}>
+        <TooltipProvider>
+          <TasksListView
+            {...props([tagged, empty])}
+            tasksListGroup={PLUGIN_TAGS_FACET}
+            facetValues={{
+              "facet:plugin:tags:tagged": [{ value: "last", label: "Zulu", color: "#f00" }],
+              "facet:plugin:tags:empty": [{ value: "invalid", label: "" }],
+            }}
+          />
+        </TooltipProvider>
+      </StateProvider>,
+    );
+    const sections = screen.getAllByTestId(TASKS_LIST_SECTION);
+    expect(sections).toHaveLength(2);
+    expect(sections[0].textContent).toContain("Zulu");
+    expect(sections[1].textContent).toContain("Unassigned");
+    expect(sections[1].textContent).toContain("A task");
+    expect(sections[0].querySelector('span[style*="background-color"]')).not.toBeNull();
   });
 });
 

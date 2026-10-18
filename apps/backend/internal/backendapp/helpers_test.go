@@ -2134,6 +2134,12 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 }
 
 func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
+	return newBootStateTestHarnessWithTasks(t, nil)
+}
+
+// newBootStateTestHarnessWithTasks lets a test interpose on the task repository
+// the service calls, such as recording the sort a route forwards.
+func newBootStateTestHarnessWithTasks(t *testing.T, wrapTasks func(*sqlitetaskrepo.Repository) taskrepo.TaskRepository) bootStateTestHarness {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -2172,10 +2178,14 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
+	tasksForService := taskrepo.TaskRepository(taskRepo)
+	if wrapTasks != nil {
+		tasksForService = wrapTasks(taskRepo)
+	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:         taskRepo,
-			Tasks:              taskRepo,
+			Tasks:              tasksForService,
 			TaskRepos:          taskRepo,
 			Workflows:          taskRepo,
 			Messages:           taskRepo,
