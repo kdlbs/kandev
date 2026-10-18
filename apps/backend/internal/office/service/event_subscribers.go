@@ -1297,7 +1297,7 @@ func (s *Service) queueTaskAssignedRun(
 	if fields == nil || !fields.IsFromOffice {
 		return nil
 	}
-	// The current step must accept an auto-started run before this wake is
+	// The current step and blockers must permit assignment before this wake is
 	// queued. See shared.IsAssignmentWakeEligible for the fail-open rationale.
 	if !shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "event_subscribers.queue_task_assigned_run") {
 		return nil
