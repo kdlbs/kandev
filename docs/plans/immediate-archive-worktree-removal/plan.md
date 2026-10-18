@@ -205,3 +205,20 @@ through merge; that delivery is in progress.
 - Changing only service filtering leaves the manager's final veto in place.
 - Restart wake must not repeatedly erase in-use delays or reopen cancelled jobs.
 - Branch cleanup and directory cleanup are different permissions; keep both audits.
+
+### PR review follow-up: retained owner runtime
+
+A retained-worktree reclaim could bypass an original archive job's failed
+runtime stop because borrower counting excludes the owner. Reclaim now reads
+the owning task's runtime inventory before removing the checkout: existing
+runtime rows defer cleanup; missing or failed inventory remains retryable.
+This enforces the existing AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.3 boundary.
+Public docs already require runtime stops and need no additional wording.
+
+The real-manager regression reproduced deletion after an injected owner stop
+failure before the fix. After the fix, focused runtime tests passed under
+race (1.844s), including successful reclaim after owner exit and missing/failed
+inventory. The complete task-service race suite passed (96.256s):
+`go test -trimpath -race -tags fts5 -timeout 10m ./internal/task/service -count=1`.
+Specification catalog/lint and whitespace checks passed. CI, final review
+resolution, and merge remain externally pending.

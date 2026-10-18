@@ -1067,6 +1067,16 @@ func (s *Service) archiveReclaimWorktreeOutcome(
 	ctx context.Context,
 	wt *worktree.Worktree,
 ) (string, error) {
+	if s.executors == nil {
+		return "", errors.New("archived worktree owner runtime inventory is unavailable")
+	}
+	runtimes, err := s.executors.ListExecutorsRunningByTaskID(ctx, wt.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("list archived worktree owner runtimes: %w", err)
+	}
+	if len(runtimes) > 0 {
+		return taskArchiveReclaimOutcomeInUse, nil
+	}
 	inUse, err := s.archiveReclaimWorktreeInUse(ctx, wt.ID)
 	if err != nil {
 		return "", err

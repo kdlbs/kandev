@@ -95,7 +95,10 @@ fully eligible by cleanliness; a mixed eligible/shared set removes only the
 eligible members and protects the root.
 
 Reclaim continues loading the current task and worktree, checking the exact
-`archived_at`, owner, expected path, and active references. Manager mutation
+`archived_at`, owner, expected path, and active references. Before removing a
+checkout it also lists the owning task's runtime rows. Any retained runtime
+defers reclaim as in use, including after the original archive stop fails;
+missing or failed runtime inventory keeps the job retryable. Manager mutation
 checks retain `ExpectedTaskID`, `ExpectedWorktreePath`, and
 `ExpectedRepositoryPath`. Removing the dirty predicate must not turn inspection,
 identity, reference, or stop failures into successful cleanup.
