@@ -4,6 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TASK-LAYOUT-PROFILES-001
 created: 2026-07-19
+updated: 2026-10-11
 owners:
   - kandev
 ---
@@ -11,7 +12,11 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-UI-TASK-LAYOUT-PROFILES-001` during migration.
+UI owns reusable layout-profile presentation and persistence semantics. The
+baseline design retains its migrated source detail. The draft
+[plugin panel extension](task-layout-plugin-panels.md) defines
+`REQ-UI-TASK-LAYOUT-PROFILES-002` without changing plugin registration,
+task context, or lifecycle authority.
 
 ## Requirement mapping
 
@@ -27,11 +32,11 @@ Users can arrange and save the desktop task workbench only while a task is open,
 
 ## What
 
-- `Settings > General > Layouts` is the central manager for reusable desktop task-layout profiles and is reachable on desktop and mobile settings navigation.
+- `Settings > Preferences > Layouts` is the central manager for reusable desktop task-layout profiles and is reachable on desktop and mobile settings navigation.
 - The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as stable rows. A user edits a built-in directly; Kandev stores a hidden override while keeping the built-in row selected and marks it `Customized`. Reset removes the override and restores the code-defined layout.
 - A user can create, rename, duplicate, edit, delete, and select the default custom profile. Names must be non-empty; profile IDs must be unique.
 - Exactly one layout is effective as the user default. A saved profile, including a reserved built-in override, marked `is_default` wins; when none is marked, the built-in Default layout is effective.
-- The visual editor supports one instance of each reusable panel: Agent, Files, Changes, PR Details, Terminal, Plan, Browser, and VS Code. Agent is required and cannot be removed.
+- The visual editor supports one instance of each existing built-in reusable panel. Agent is required and cannot be removed. The draft [plugin extension](task-layout-plugin-panels.md) proposes generic task-panel eligibility separately from this baseline.
 - PR Details is the canonical reusable `pr-detail` panel. Its position in the selected layout is a placement template, not an instruction to keep an empty runtime tab open. The tab is visible only while the active task has a linked GitHub pull request or GitLab merge request, and then renders that review through the existing provider-aware review surface.
 - The code-defined Default and compact desktop layouts omit PR Details. Agent remains initially selected in the Default center group, and Files remains initially selected in the top-right Files and Changes group.
 - When the active task gains a linked GitHub pull request or GitLab merge request, Kandev adds the canonical panel as an inactive tab in the group and tab index configured by the selected custom Default. If that layout does not configure PR Details, Kandev adds it beside the live Agent panel. The user's current tab remains selected.
@@ -73,14 +78,23 @@ Layout profiles remain in the backend-owned `users.settings.saved_layouts` JSON 
 
 The built-in layouts are code-defined templates. A customization is stored in `saved_layouts` under the reserved stable ID `layout-override-<built-in-id>`, but is hidden from the Custom list and presented as the same built-in row. Reserved overrides participate in the same single-`is_default` invariant as custom profiles. A Default override replaces the code-defined Default as the effective default only when that override owns `is_default`; editing it claims the default when no saved profile currently owns it and otherwise preserves the existing custom default. If no saved profile has `is_default: true`, the code-defined Default template is the effective default. Resetting a built-in removes only its reserved override.
 
-The editor persists the existing declarative `LayoutState`: ordered columns contain ordered groups, groups contain ordered panels and an active panel, and captured tree/size data preserves split placement and proportions. New editor-created profiles use only the reusable panel registry. The canonical `pr-detail` ID is reusable; keyed panels such as `pr-detail|owner/repository/123` and `mr-detail|host/project/123` remain task-specific runtime tabs and are not accepted by the profile editor. A legacy profile with an unreadable layout remains listed for rename, duplication, deletion, or default removal, but cannot enter the visual editor or become a new default until replaced with a valid reusable layout.
+The editor persists the existing declarative `LayoutState`: ordered columns contain ordered groups, groups contain ordered panels and an active panel, and captured tree/size data preserves split placement and proportions. Editor-created profiles use built-in reusable panels; the draft [plugin extension](task-layout-plugin-panels.md) proposes structurally valid generic plugin task panels. The canonical `pr-detail` ID is reusable; keyed panels such as `pr-detail|owner/repository/123` and `mr-detail|host/project/123` remain task-specific runtime tabs and are not accepted by the profile editor. A legacy profile with an unreadable layout remains listed for rename, duplication, deletion, or default removal, but cannot enter the visual editor or become a new default until replaced with a valid reusable layout.
+
+The unchanged `LayoutState.rootOrientation` must survive panel normalization,
+Agent materialization, reusable capture, validation, and application. Explicit
+vertical-root layouts retain their outer split axis and nested-depth meaning;
+missing orientation continues to use the existing horizontal legacy default.
+The [plugin extension](task-layout-plugin-panels.md) assigns the required local
+metadata-preservation fixes and orientation regression coverage.
 
 Every application path for a reusable profile uses the same geometry resolver.
 These paths include workbench selection, fresh task setup, Reset Layout, and
-the fast environment-switch path for an unsaved task environment. The resolver
-scales complete saved column widths to the current workbench. It then applies
-the pinned-column safety caps. A code-defined built-in preset continues to use
-its responsive defaults.
+the environment-switch path for an unsaved task environment. Captured root
+extents scale along the root axis; horizontal layouts apply their existing
+pinned-column safety caps. The draft plugin extension owns vertical-axis
+serialization and the horizontal-only pinning guards required at application,
+restore, resize, and sash-persistence boundaries. A code-defined built-in
+preset continues to use its responsive defaults.
 
 Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits. The serialized Dockview layout preserves panel structure and transient geometry. Companion environment-scoped preferences store the active layout-profile identity and a raw right-column width only after a genuine user sash drag; legacy layouts without profile metadata use a shape-based compatibility fallback, and layouts without the width preference are responsive defaults rather than manual overrides.
 
