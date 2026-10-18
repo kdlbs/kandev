@@ -104,3 +104,9 @@ The hosted formatter output was applied with only wrapping and trailing commas.
 This is behavioral RED/controls/GREEN evidence, not a successful typecheck or
 full-CI claim. Actual final full frontend typecheck and desktop/phone browser
 results remain pending in retained PR evidence.
+
+
+The desktop/phone selection flow arms the shared `waitForHttp` observer before
+choosing Team and requires the projects GET to succeed before using its chips.
+This addresses the review's causal-wait finding without changing timeout or
+retry budgets; final rendered verification remains pending.

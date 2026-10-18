@@ -1,5 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -48,7 +48,9 @@ export async function assertWatcherProjectSelectionPersists(
     await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
   };
   await pick("Workspace", "E2E Workspace");
+  const projectsLoaded = waitForHttp(testPage, "GET", /^\/api\/v1\/linear\/projects$/);
   await pick("Team", /ENG/);
+  expect((await projectsLoaded).ok()).toBe(true);
   await pick("Workflow", "E2E Workflow");
   await comboboxByLabel(dialog, "Workflow Step").click();
   await testPage.getByRole("listbox").getByRole("option").first().click();
