@@ -71,8 +71,12 @@ This is explicit maintenance of selected records. It does not extend automatic
   the current state; new observations shall not be presented as historical ones.
 - **AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.3:** After repair, cleanup shall still
   require current archive identity, no active borrowers, proven path ownership,
-  a clean checkout, and the normal source-capture and branch-preservation rules.
-  A genuine change to an audited branch or checkout shall still block removal.
+  stopped owned runtimes, and the normal source-capture and branch-preservation
+  rules. Checkout dirtiness shall follow the current
+  [archive policy](dirty-worktree-archive.md), including immediate removal under
+  REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-004. An unaudited change to branch or checkout
+  identity shall still block removal. Repair itself shall preserve local files
+  until an authorized cleanup removes the checkout.
 
 ### REQ-TASKS-WORKTREE-INVENTORY-REPAIR-003: Accurate recovery diagnostics
 
@@ -93,7 +97,7 @@ This is explicit maintenance of selected records. It does not extend automatic
   maintenance tooling in this package.
 - Weakening [source evidence](archive-source-manifest.md),
   [runtime cleanup](runtime-cleanup.md), or
-  [archive preservation](dirty-worktree-archive.md) requirements.
+  [archive cleanup](dirty-worktree-archive.md) requirements.
 - New browser controls, provider conversation resets, branch deletion, force
   cleanup, or automatic restart of the user's active backend.
 

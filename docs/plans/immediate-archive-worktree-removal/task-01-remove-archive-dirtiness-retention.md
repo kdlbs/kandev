@@ -7,7 +7,9 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-004
+  - REQ-TASKS-WORKTREE-INVENTORY-REPAIR-002
 acceptance_criteria:
+  - AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.3
   - AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.1
   - AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.2
   - AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.3
@@ -17,6 +19,7 @@ acceptance_criteria:
   - AC-TASKS-DIRTY-WORKTREE-ARCHIVE-004.7
 system_design:
   - ../../specs/tasks/system-design/dirty-worktree-archive.md
+  - ../../specs/tasks/system-design/worktree-inventory-repair.md
 ---
 
 # Task 01: Remove Archive Dirtiness Retention
@@ -112,6 +115,7 @@ After implementation run:
 
 ```bash
 (cd apps/backend && go test -trimpath -race -tags fts5 -timeout 20m ./internal/task/service ./internal/worktree ./internal/task/repository/sqlite -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/task/inventoryrepair -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
 bash scripts/lint-go-changed $(git ls-files --modified --others --exclude-standard -- '*.go')
@@ -252,3 +256,22 @@ builds with retries disabled: 2/2 tests passed (14.2s), using
 `pnpm e2e:run --project mobile-chrome tests/task/mobile-archive-confirmation-preference.spec.ts -- --retries=0`.
 Public docs and product behavior are unchanged by this test synchronization fix.
 CI and merge remain externally pending.
+
+### CI follow-up: inventory-repair archive admission
+
+Backend shard 4 exposed a stale expectation in the inventory-repair admission
+test: it required archive cleanup to preserve a dirty checkout. The focused
+baseline reproduced that failure (0.928s). The test now preserves the distinct
+contracts: repair leaves local edits intact, an unaudited branch identity is
+refused, subsequent archive removes either clean or dirty repaired checkouts,
+and both existing Git refs retain their commit identities.
+
+The inventory-repair requirement/design now defer checkout dirtiness to the
+current archive policy. No repair implementation or additional production
+behavior changed, and public archive documentation already covers this policy.
+The revised focused test passed (2.014s). A deliberate temporary restoration
+of the archive dirty veto made its intended assertion fail (0.926s), proving
+that the repaired assertion detects the old policy; production source was then
+restored byte-for-byte. The complete inventory-repair race suite passed
+(18.399s). Specification/catalog validation and whitespace checks passed.
+CI collection, publication of this repair, and merge remain externally pending.

@@ -103,6 +103,11 @@ checks retain `ExpectedTaskID`, `ExpectedWorktreePath`, and
 `ExpectedRepositoryPath`. Removing the dirty predicate must not turn inspection,
 identity, reference, or stop failures into successful cleanup.
 
+Inventory-repair admission follows the same archive policy after identities
+are repaired. Repair itself preserves local files and Git refs; a later
+authorized archive removes eligible clean or dirty checkouts while retaining
+the audited branch-identity and recovery-ref checks.
+
 ## Existing retained work and restart
 
 `processArchiveReclaimJob` and `archiveReclaimWorktreeOutcome` no longer inspect

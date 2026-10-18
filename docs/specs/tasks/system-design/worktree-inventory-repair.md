@@ -177,8 +177,10 @@ remote liveness. This change does not itself repair inventory failures.
 
 Use real temporary Git repositories and SQLite databases for preview, guarded
 application, partial-move recovery, and cleanup replay tests. Prove that the old
-refs and original evidence survive, and that ownership, dirty-worktree, and
-immutable-commit refusals still work. Integrate the repaired inventory through
+refs and original evidence survive, and that ownership and immutable-commit
+refusals still work. Repair must preserve dirty files before cleanup; subsequent
+archive cleanup follows [the current archive policy](dirty-worktree-archive.md)
+and removes eligible dirty checkouts. Integrate the repaired inventory through
 the real cleanup worker and existing attach-only worktree admission boundary.
 Run the affected executor tests separately; do not launch a real agent in a repair
 fixture.
