@@ -116,10 +116,6 @@
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
-      "path": "apps/backend/internal/gateway/websocket/lsp_handler.go"
-    },
-    {
-      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
       "path": "apps/backend/internal/gateway/websocket/port_proxy.go"
     },
     {

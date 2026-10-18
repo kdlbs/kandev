@@ -1,28 +1,34 @@
+import type { editor as monacoEditor, IDisposable } from "monaco-editor";
+import { getMonacoInstance, waitForMonacoInstance } from "@/components/editors/monaco/monaco-init";
+import {
+  registerBuiltinTsSuppression,
+  withLspProviderRegistration,
+} from "@/components/editors/monaco/builtin-providers";
+import { t } from "@/lib/i18n";
+import { registerLspProviders } from "./lsp-providers";
 import { canonicalFileUri, joinFileUri } from "./file-uri";
+import { JsonRpcConnection, getWsBaseUrl, CLOSE_CODE_STATUS } from "./lsp-json-rpc";
 import type { LspStatus } from "./lsp-json-rpc";
 import {
   createManagedLspConnection,
+  type LspReadyWorkspace,
   type ManagedLspConnection,
   type OpenDocumentParams,
+  type PublishDiagnosticsParams,
 } from "./lsp-client-types";
+import { connectionDocumentUri, connectionModelUri } from "./lsp-editor-models";
 import { LspClientEditorState } from "./lsp-client-editor-state";
 import {
+  configureLspWorkspace,
   repositorySubpathsForSession,
   workspaceUriForSession,
   type WorkspaceMetadata,
 } from "./lsp-workspace";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "./lsp-progress";
-import {
-  clearLspLeaseHint,
-  clearLspEnabledState,
-  getLspLeaseHint,
-  isLspEnabledInStorage,
-  saveLspEnabledState,
-} from "./lsp-client-storage";
-import { DISABLED_LSP_STATUS, LSP_DEFAULT_CONFIGS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
+import { DISABLED_LSP_STATUS } from "./lsp-client-config";
+import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
 import { buildDocumentContentChanges, buildDocumentSaveParams } from "./lsp-document-sync";
-import { LspClientProtocol } from "./lsp-client-protocol";
-import { LspClientTransport } from "./lsp-client-transport";
+import { getLspMonacoProviderMethods } from "./lsp-provider-capabilities";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -34,8 +40,25 @@ export { toLspLanguage } from "./lsp-json-rpc";
 type ChangeListener = (key: string) => void;
 type FileOpener = (uri: string, line?: number, column?: number) => boolean | Promise<boolean>;
 
-function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
-  return progress.initializingSince !== null || progress.active.length > 0;
+const ATTACHMENT_RETRY_DELAYS_MS = [1_000, 2_000, 5_000] as const;
+
+type LspLeaseSet = {
+  key: string;
+  taskId: string;
+  lspLanguage: string;
+  sessionRefCounts: Map<string, number>;
+  configuration: Record<string, unknown>;
+  retryIndex: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+};
+
+function lspErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message || String(error);
+  if (typeof error === "object" && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return String(error);
 }
 
 function configurationForLanguage(
@@ -55,8 +78,25 @@ function configurationsMatch(
   return JSON.stringify(current) === JSON.stringify(next);
 }
 
+function registerTypeScriptModelSuppression(
+  connection: ManagedLspConnection,
+  lspLanguage: string,
+  serverCapabilities: Record<string, unknown> | null,
+): void {
+  if (lspLanguage !== "typescript") return;
+  connection.providerDisposables.push(
+    registerBuiltinTsSuppression(
+      connection.ownerId,
+      (model) => connectionDocumentUri(model as monacoEditor.ITextModel, connection) !== null,
+      getLspMonacoProviderMethods(serverCapabilities),
+    ),
+  );
+}
+
 class LSPClientManager {
   private connections = new Map<string, ManagedLspConnection>();
+  /** Editor demand survives disposable browser transport generations. */
+  private leaseSets = new Map<string, LspLeaseSet>();
   private connectionGeneration = 0;
   private statuses = new Map<string, LspStatus>();
   /** Keeps Monaco model identity stable after an LSP connection stops or crashes. */
@@ -66,26 +106,6 @@ class LSPClientManager {
   private editorState = new LspClientEditorState((connection) =>
     this.isCurrentConnection(connection),
   );
-  private protocol = new LspClientProtocol({
-    editorState: this.editorState,
-    workspaceMetadata: this.workspaceMetadata,
-    isCurrentConnection: (conn) => this.isCurrentConnection(conn),
-    isCurrentTransportConnection: (conn, generation) =>
-      this.isCurrentTransportConnection(conn, generation),
-    setStatus: (key, status) => this.setStatus(key, status),
-    handleProgressChange: (conn) => this.handleProgressChange(conn),
-    cleanupConnection: (conn) => this.cleanupConnection(conn),
-  });
-  private transport = new LspClientTransport({
-    protocol: this.protocol,
-    editorState: this.editorState,
-    isCurrentConnection: (conn) => this.isCurrentConnection(conn),
-    getStatus: (key) => this.statuses.get(key) ?? DISABLED_LSP_STATUS,
-    setStatus: (key, status) => this.setStatus(key, status),
-    removeStatus: (key) => this.statuses.delete(key),
-    notifyChange: (key) => this.notifyChange(key),
-    cleanupConnection: (conn) => this.cleanupConnection(conn),
-  });
   setFileOpener(opener: FileOpener | null): void {
     this.fileOpener = opener;
   }
@@ -94,36 +114,13 @@ class LSPClientManager {
     return this.fileOpener;
   }
 
-  // ---- localStorage persistence for manual LSP toggle ----
-
-  /** Save that LSP was manually enabled for this session+language. */
-  saveEnabledState(sessionId: string, language: string): void {
-    saveLspEnabledState(sessionId, language);
-    this.notifyChange(`${sessionId}:${language}`);
-  }
-
-  /** Clear the saved LSP state (manual stop). */
-  clearEnabledState(sessionId: string, language: string): void {
-    clearLspEnabledState(sessionId, language);
-    this.notifyChange(`${sessionId}:${language}`);
-  }
-
-  /** Check if LSP was previously enabled for this session+language. */
-  isEnabledInStorage(sessionId: string, language: string): boolean {
-    return isLspEnabledInStorage(sessionId, language);
-  }
-
-  hasLeaseHint(sessionId: string, language: string): boolean {
-    return getLspLeaseHint(sessionId, language) !== null;
-  }
-
-  getStatus(sessionId: string, lspLanguage: string): LspStatus {
-    const key = `${sessionId}:${lspLanguage}`;
+  getStatus(taskId: string, lspLanguage: string): LspStatus {
+    const key = `${taskId}:${lspLanguage}`;
     return this.statuses.get(key) ?? DISABLED_LSP_STATUS;
   }
 
-  getProgress(sessionId: string, lspLanguage: string): LspProgressSnapshot {
-    const key = `${sessionId}:${lspLanguage}`;
+  getProgress(taskId: string, lspLanguage: string): LspProgressSnapshot {
+    const key = `${taskId}:${lspLanguage}`;
     return this.connections.get(key)?.progress ?? EMPTY_LSP_PROGRESS;
   }
 
@@ -156,52 +153,139 @@ class LSPClientManager {
   // ------- Connection lifecycle -------
 
   connect(
+    taskId: string,
     sessionId: string,
     lspLanguage: string,
     userConfigs?: Record<string, Record<string, unknown>>,
-    continuityEnabled = false,
   ): () => void {
-    const key = `${sessionId}:${lspLanguage}`;
+    const key = `${taskId}:${lspLanguage}`;
     const configuration = configurationForLanguage(lspLanguage, userConfigs);
 
-    const existing = this.connections.get(key);
-    if (
-      existing &&
-      existing.continuityEnabled === continuityEnabled &&
-      (existing.ws.readyState <= WebSocket.OPEN || existing.reconnecting)
-    ) {
-      return this.acquireConnection(existing, configuration);
+    let leases = this.leaseSets.get(key);
+    if (!leases) {
+      leases = {
+        key,
+        taskId,
+        lspLanguage,
+        sessionRefCounts: new Map(),
+        configuration,
+        retryIndex: 0,
+        retryTimer: null,
+      };
+      this.leaseSets.set(key, leases);
     }
+    leases.configuration = configuration;
+    leases.sessionRefCounts.set(sessionId, (leases.sessionRefCounts.get(sessionId) ?? 0) + 1);
+    this.workspaceMetadata.get(key)?.sessionIds.add(sessionId);
+    const existing = this.connections.get(key);
+    if (existing && existing.ws.readyState <= WebSocket.OPEN) {
+      this.updateConfiguration(existing, configuration);
+    } else {
+      if (existing) this.cleanupConnection(existing);
+      this.clearReconnectTimer(leases);
+      this.createConnection(leases, sessionId);
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.releaseLease(leases, sessionId);
+    };
+  }
+
+  private createConnection(leases: LspLeaseSet, preferredSessionId?: string): void {
+    if (this.leaseSets.get(leases.key) !== leases || leases.sessionRefCounts.size === 0) return;
+    const existing = this.connections.get(leases.key);
+    if (existing && existing.ws.readyState <= WebSocket.OPEN) return;
     if (existing) this.cleanupConnection(existing);
 
-    if (!continuityEnabled) clearLspLeaseHint(sessionId, lspLanguage);
-    const leaseId = continuityEnabled ? getLspLeaseHint(sessionId, lspLanguage) : null;
-    const ws = this.transport.createSocket(sessionId, lspLanguage, continuityEnabled, leaseId);
+    const { key, taskId, lspLanguage } = leases;
+    const sessionId =
+      (preferredSessionId && leases.sessionRefCounts.has(preferredSessionId)
+        ? preferredSessionId
+        : leases.sessionRefCounts.keys().next().value) ?? "";
+
+    const wsUrl = `${getWsBaseUrl()}/lsp/tasks/${encodeURIComponent(taskId)}/${encodeURIComponent(lspLanguage)}/attach`;
+    const ws = new WebSocket(wsUrl);
+
     const conn = createManagedLspConnection({
       key,
+      taskId,
       sessionId,
       generation: ++this.connectionGeneration,
       ws,
-      configuration,
-      continuityEnabled,
-      leaseId,
-      lspLanguage,
+      configuration: leases.configuration,
+      sessionRefCounts: leases.sessionRefCounts,
     });
     this.connections.set(key, conn);
     this.setStatus(key, { state: "connecting" });
 
-    this.transport.bind(conn, ws);
-    return () => this.decrementRef(conn);
-  }
+    let attachmentReady = false;
 
-  private acquireConnection(
-    conn: ManagedLspConnection,
-    configuration: Record<string, unknown>,
-  ): () => void {
-    this.updateConfiguration(conn, configuration);
-    conn.refCount++;
-    this.clearIdleTimer(conn);
-    return () => this.decrementRef(conn);
+    ws.onopen = () => {
+      if (!this.isCurrentConnection(conn)) return;
+      this.setStatus(key, { state: "connecting" });
+    };
+
+    // The task host already owns initialize and process lifecycle. The first
+    // attachment frame is a capability/workspace handshake, not JSON-RPC.
+    const statusHandler = (event: MessageEvent) => {
+      if (attachmentReady || !this.isCurrentConnection(conn)) return;
+
+      let data: {
+        status?: string;
+        error?: string;
+        language?: string;
+        generation?: number;
+        workspaceUri?: string;
+        workspaceFolders?: Array<{ uri: string; name: string }>;
+        serverCapabilities?: Record<string, unknown>;
+      };
+      try {
+        data = JSON.parse(event.data as string);
+      } catch {
+        return;
+      }
+
+      if (data.status !== "attached") return;
+      if (data.language !== lspLanguage) {
+        this.setStatus(key, { state: "error", reason: t("lsp:connectionClosed") });
+        ws.close();
+        return;
+      }
+      ws.removeEventListener("message", statusHandler);
+      attachmentReady = true;
+      this.setStatus(key, { state: "starting" });
+      void this.activateAttachment(conn, lspLanguage, data);
+    };
+    ws.addEventListener("message", statusHandler);
+
+    ws.onclose = (event) => {
+      ws.removeEventListener("message", statusHandler);
+      const wasCurrent = this.isCurrentConnection(conn);
+      this.cleanupConnection(conn);
+      if (!wasCurrent) return;
+
+      const statusFactory = CLOSE_CODE_STATUS[event.code];
+      if (statusFactory) {
+        const status = statusFactory(event.reason);
+        this.setStatus(key, status);
+        if (status.state === "error") this.scheduleReconnect(leases);
+        else this.clearReconnectTimer(leases);
+      } else {
+        this.setStatus(key, { state: "error", reason: event.reason || t("lsp:connectionClosed") });
+        this.scheduleReconnect(leases);
+      }
+    };
+
+    ws.onerror = () => {
+      if (!this.isCurrentConnection(conn)) return;
+      const current = this.statuses.get(key);
+      if (current?.state !== "error" && current?.state !== "unavailable") {
+        this.setStatus(key, { state: "error", reason: t("lsp:webSocketError") });
+        this.scheduleReconnect(leases);
+      }
+    };
   }
 
   private updateConfiguration(
@@ -210,9 +294,118 @@ class LSPClientManager {
   ): void {
     if (configurationsMatch(conn.configuration, configuration)) return;
     conn.configuration = configuration;
-    if (!conn.protocolInitialized || !conn.rpc) return;
-    conn.rpc.sendNotification("workspace/didChangeConfiguration", {
-      settings: configuration,
+    // Effective server configuration belongs to the task controller. Keep the
+    // latest browser value only for provider-side compatibility; never mutate
+    // the shared server from an editor lease.
+  }
+
+  private async activateAttachment(
+    conn: ManagedLspConnection,
+    lspLanguage: string,
+    handshake: {
+      workspaceUri?: string;
+      workspaceFolders?: Array<{ uri: string; name: string }>;
+      serverCapabilities?: Record<string, unknown>;
+    },
+  ) {
+    if (!this.isCurrentConnection(conn)) return;
+    const { key, ws } = conn;
+
+    const workspace: LspReadyWorkspace = {
+      path: null,
+      uri: handshake.workspaceUri ?? null,
+      repositorySubpaths: (handshake.workspaceFolders ?? []).map((folder) => folder.name),
+    };
+    const workspaceMetadata = configureLspWorkspace(conn, workspace);
+    if (workspaceMetadata) this.workspaceMetadata.set(conn.key, workspaceMetadata);
+
+    try {
+      const rpc = new JsonRpcConnection(ws);
+      rpc.listen();
+      conn.rpc = rpc;
+      conn.serverCapabilities = handshake.serverCapabilities ?? null;
+      conn.protocolInitialized = true;
+
+      // Register diagnostics handler
+      rpc.onNotification("textDocument/publishDiagnostics", (params) => {
+        if (!this.isCurrentConnection(conn)) return;
+        this.editorState.handleDiagnostics(conn, params as PublishDiagnosticsParams);
+      });
+
+      // Collect callbacks for semantic token refresh
+      const semanticRefreshCallbacks: (() => void)[] = [];
+      rpc.onRequest("workspace/semanticTokens/refresh", () => {
+        for (const cb of semanticRefreshCallbacks) cb();
+        return null;
+      });
+
+      // Monaco loads asynchronously. Do not expose a ready connection until its
+      // providers can be registered; otherwise early diagnostics are dropped.
+      const monaco = await waitForMonacoInstance();
+      if (!this.isCurrentConnection(conn)) {
+        this.cleanupConnection(conn);
+        return;
+      }
+
+      conn.providerDisposables.push(
+        monaco.editor.onDidCreateModel((model: monacoEditor.ITextModel) => {
+          if (this.isCurrentConnection(conn)) {
+            this.editorState.applyCachedDiagnostics(conn, model);
+          }
+        }),
+      );
+      for (const model of monaco.editor.getModels()) {
+        this.editorState.applyCachedDiagnostics(conn, model);
+      }
+
+      registerTypeScriptModelSuppression(conn, lspLanguage, conn.serverCapabilities);
+
+      // Register Monaco providers for this language.
+      conn.providerDisposables.push(
+        ...withLspProviderRegistration(() =>
+          this.registerProviders(
+            rpc,
+            lspLanguage,
+            conn,
+            conn.serverCapabilities,
+            semanticRefreshCallbacks,
+          ),
+        ),
+      );
+      conn.initialized = true;
+
+      const leases = this.leaseSets.get(key);
+      if (leases) leases.retryIndex = 0;
+      this.setStatus(key, { state: "ready" });
+    } catch (err) {
+      const wasCurrent = this.isCurrentConnection(conn);
+      this.cleanupConnection(conn);
+      if (!wasCurrent) return;
+      console.error(`[LSP] activateAttachment error:`, err);
+      this.setStatus(key, { state: "error", reason: lspErrorMessage(err) });
+      const leases = this.leaseSets.get(key);
+      if (leases) this.scheduleReconnect(leases);
+    }
+  }
+
+  // ------- Monaco provider registration (delegated to lsp-providers.ts) -------
+
+  private registerProviders(
+    rpc: JsonRpcConnection,
+    lspLanguage: string,
+    conn: ManagedLspConnection,
+    serverCapabilities: Record<string, unknown> | null,
+    semanticRefreshCallbacks: (() => void)[],
+  ): IDisposable[] {
+    return registerLspProviders({
+      rpc,
+      lspLanguage,
+      serverCapabilities,
+      semanticRefreshCallbacks,
+      getDocumentUri: (model) => connectionDocumentUri(model, conn),
+      getModelUri: (uri) =>
+        connectionModelUri(uri, conn, getMonacoInstance()?.editor.getModels() ?? []),
+      ensureModelsExist: (uris) => this.editorState.ensureModelsExist(uris, conn),
     });
   }
 
@@ -223,50 +416,44 @@ class LSPClientManager {
 
   // ------- Document synchronization -------
 
+  private connectionForSession(
+    sessionId: string,
+    lspLanguage: string,
+  ): ManagedLspConnection | undefined {
+    for (const connection of this.connections.values()) {
+      if (
+        connection.key.endsWith(`:${lspLanguage}`) &&
+        connection.sessionRefCounts.has(sessionId)
+      ) {
+        return connection;
+      }
+    }
+    return undefined;
+  }
+
   openDocument(sessionId: string, lspLanguage: string, document: OpenDocumentParams): void {
-    const key = `${sessionId}:${lspLanguage}`;
-    const conn = this.connections.get(key);
-    if (!conn || (!conn.initialized && !conn.reconnecting)) return;
+    const conn = this.connectionForSession(sessionId, lspLanguage);
+    if (!conn?.initialized || !conn.rpc) return;
     const documentUri = canonicalFileUri(document.uri);
     if (!documentUri) return;
-    conn.closedDocuments.delete(documentUri);
     this.promoteDocumentModel(sessionId, documentUri, document.text);
     const existing = conn.openDocuments.get(documentUri);
     if (existing) {
-      if (existing.pendingClose) {
-        existing.pendingClose = false;
-        existing.refCount = 1;
-        if (existing.text !== document.text) {
-          existing.text = document.text;
-          existing.version++;
-        }
-        if (conn.rpc && conn.documentsSynced) {
-          conn.rpc.sendNotification("textDocument/didOpen", {
-            textDocument: {
-              uri: documentUri,
-              languageId: existing.languageId,
-              version: existing.version,
-              text: existing.text,
-            },
-          });
-        }
-        if (document.repo) conn.repositorySubpaths.add(document.repo);
-        return;
-      }
       existing.refCount++;
-      if (document.repo) conn.repositorySubpaths.add(document.repo);
+      existing.sessionRefCounts.set(sessionId, (existing.sessionRefCounts.get(sessionId) ?? 0) + 1);
+      if (document.repo) this.addRepositorySubpath(conn, document.repo);
       return;
     }
 
-    if (document.repo) conn.repositorySubpaths.add(document.repo);
+    if (document.repo) this.addRepositorySubpath(conn, document.repo);
+    conn.closedDocuments.delete(documentUri);
     conn.openDocuments.set(documentUri, {
       version: 1,
       languageId: document.languageId,
       refCount: 1,
+      sessionRefCounts: new Map([[sessionId, 1]]),
       text: document.text,
-      pendingClose: false,
     });
-    if (!conn.documentsSynced || !conn.rpc) return;
     conn.rpc.sendNotification("textDocument/didOpen", {
       textDocument: {
         uri: documentUri,
@@ -283,19 +470,10 @@ class LSPClientManager {
   }
 
   changeDocument(sessionId: string, lspLanguage: string, documentUri: string, text: string): void {
-    const key = `${sessionId}:${lspLanguage}`;
-    const conn = this.connections.get(key);
-    if (!conn || (!conn.initialized && !conn.reconnecting)) return;
+    const conn = this.connectionForSession(sessionId, lspLanguage);
+    if (!conn?.initialized || !conn.rpc) return;
     const canonicalUri = canonicalFileUri(documentUri);
     if (!canonicalUri) return;
-    if (!conn.documentsSynced || !conn.rpc) {
-      const document = conn.openDocuments.get(canonicalUri);
-      if (document && document.text !== text) {
-        document.text = text;
-        document.version++;
-      }
-      return;
-    }
     this.synchronizeOpenDocument(conn, canonicalUri, text);
   }
 
@@ -308,9 +486,8 @@ class LSPClientManager {
   ): void {
     for (const conn of this.connections.values()) {
       if (
-        conn.sessionId !== sessionId ||
+        !conn.sessionRefCounts.has(sessionId) ||
         !conn.initialized ||
-        !conn.documentsSynced ||
         !conn.rpc ||
         !conn.workspaceUri
       ) {
@@ -360,172 +537,136 @@ class LSPClientManager {
   }
 
   closeDocument(sessionId: string, lspLanguage: string, documentUri: string): void {
-    const key = `${sessionId}:${lspLanguage}`;
-    const conn = this.connections.get(key);
-    if (!conn || (!conn.initialized && !conn.reconnecting)) return;
+    const conn = this.connectionForSession(sessionId, lspLanguage);
+    if (!conn?.initialized || !conn.rpc) return;
     const canonicalUri = canonicalFileUri(documentUri);
     if (!canonicalUri) return;
-    const document = conn.openDocuments.get(canonicalUri);
+    this.releaseDocumentReferences(conn, sessionId, canonicalUri, 1);
+  }
+
+  private releaseDocumentReferences(
+    conn: ManagedLspConnection,
+    sessionId: string,
+    documentUri: string,
+    requestedCount: number,
+  ): void {
+    if (!conn.rpc) return;
+    const document = conn.openDocuments.get(documentUri);
     if (!document) return;
-    document.refCount = Math.max(0, document.refCount - 1);
+    const sessionRefCount = document.sessionRefCounts.get(sessionId) ?? 0;
+    if (sessionRefCount === 0) return;
+    const releasedCount = Math.min(requestedCount, sessionRefCount);
+    if (releasedCount === sessionRefCount) document.sessionRefCounts.delete(sessionId);
+    else document.sessionRefCounts.set(sessionId, sessionRefCount - releasedCount);
+    document.refCount -= releasedCount;
     if (document.refCount > 0) return;
-    this.editorState.clearDocumentDiagnostics(conn, canonicalUri);
-    conn.closedDocuments.add(canonicalUri);
 
-    if (conn.continuityEnabled && conn.reconnecting && !conn.documentsSynced) {
-      document.pendingClose = true;
-      return;
-    }
-
-    conn.openDocuments.delete(canonicalUri);
-    if (!conn.documentsSynced || !conn.rpc) return;
+    conn.openDocuments.delete(documentUri);
+    conn.closedDocuments.add(documentUri);
+    this.editorState.clearDocumentDiagnostics(conn, documentUri);
     conn.rpc.sendNotification("textDocument/didClose", {
-      textDocument: { uri: canonicalUri },
+      textDocument: { uri: documentUri },
     });
   }
 
-  // ------- Stop / cleanup -------
+  private releaseSessionDocuments(conn: ManagedLspConnection, sessionId: string): void {
+    if (!conn.initialized || !conn.rpc) return;
+    for (const [documentUri, document] of conn.openDocuments) {
+      const sessionRefCount = document.sessionRefCounts.get(sessionId) ?? 0;
+      if (sessionRefCount > 0) {
+        this.releaseDocumentReferences(conn, sessionId, documentUri, sessionRefCount);
+      }
+    }
+  }
 
-  stop(sessionId: string, lspLanguage: string): void {
-    const key = `${sessionId}:${lspLanguage}`;
+  private addRepositorySubpath(conn: ManagedLspConnection, repository: string): void {
+    conn.repositorySubpaths.add(repository);
+    this.workspaceMetadata.get(conn.key)?.repositorySubpaths.add(repository);
+  }
+
+  // ------- Attachment cleanup -------
+
+  detach(taskId: string, lspLanguage: string): void {
+    const key = `${taskId}:${lspLanguage}`;
+    const leases = this.leaseSets.get(key);
+    if (leases) {
+      this.clearReconnectTimer(leases);
+      this.leaseSets.delete(key);
+    }
     const conn = this.connections.get(key);
-    if (!conn) {
-      this.statuses.delete(key);
-      this.setStatus(key, { state: "disabled" });
-      return;
-    }
-
-    this.setStatus(key, { state: "stopping" });
-    if (conn.idleTimer) clearTimeout(conn.idleTimer);
-
-    if (conn.continuityEnabled) {
-      conn.explicitlyStopped = true;
-      conn.releaseAfterConnect = "stop";
-      if (conn.reconnectTimer) {
-        clearTimeout(conn.reconnectTimer);
-        conn.reconnectTimer = null;
-      }
-      clearLspLeaseHint(sessionId, lspLanguage);
-      if (conn.ws.readyState === WebSocket.OPEN) {
-        void this.transport.release(conn, "stop");
-      } else if (conn.ws.readyState === WebSocket.CLOSED) {
-        conn.reconnecting = true;
-        this.transport.open(conn);
-      }
-      return;
-    }
-
-    // Send shutdown/exit before closing
-    if (conn.rpc && conn.initialized) {
-      try {
-        conn.rpc
-          .sendRequest("shutdown", null)
-          .then(() => {
-            conn.rpc?.sendNotification("exit", null);
-          })
-          .catch(() => {});
-      } catch {
-        // ignore
-      }
-    }
-
-    this.cleanupConnection(conn);
+    if (conn) this.cleanupConnection(conn);
     this.statuses.delete(key);
     this.notifyChange(key);
   }
 
   disconnectAll(): void {
+    for (const leases of this.leaseSets.values()) this.clearReconnectTimer(leases);
+    this.leaseSets.clear();
     for (const conn of this.connections.values()) {
-      if (conn.idleTimer) clearTimeout(conn.idleTimer);
       this.cleanupConnection(conn);
     }
     this.statuses.clear();
     this.workspaceMetadata.clear();
   }
 
-  private decrementRef(conn: ManagedLspConnection) {
-    if (!this.isCurrentConnection(conn)) return;
-    conn.refCount--;
-    if (conn.refCount <= 0) this.scheduleIdleCleanup(conn);
-  }
-
-  private handleProgressChange(conn: ManagedLspConnection): void {
-    if (!this.isCurrentConnection(conn)) return;
-    this.notifyChange(conn.key);
-    if (conn.refCount > 0) return;
-    if (hasActiveLspWork(conn.progress)) {
-      this.clearIdleTimer(conn);
-      return;
+  private releaseLease(leases: LspLeaseSet, sessionId: string): void {
+    if (this.leaseSets.get(leases.key) !== leases) return;
+    const sessionRefs = (leases.sessionRefCounts.get(sessionId) ?? 0) - 1;
+    const conn = this.connections.get(leases.key);
+    if (sessionRefs <= 0) {
+      if (conn) this.releaseSessionDocuments(conn, sessionId);
+      leases.sessionRefCounts.delete(sessionId);
+    } else leases.sessionRefCounts.set(sessionId, sessionRefs);
+    if (conn?.sessionId === sessionId && !leases.sessionRefCounts.has(sessionId)) {
+      conn.sessionId = leases.sessionRefCounts.keys().next().value ?? sessionId;
     }
-    this.scheduleIdleCleanup(conn);
+    if (leases.sessionRefCounts.size !== 0) return;
+    this.clearReconnectTimer(leases);
+    this.leaseSets.delete(leases.key);
+    if (conn) this.cleanupConnection(conn);
+    this.statuses.delete(leases.key);
+    this.notifyChange(leases.key);
   }
 
-  private scheduleIdleCleanup(conn: ManagedLspConnection): void {
+  private scheduleReconnect(leases: LspLeaseSet): void {
     if (
-      !this.isCurrentConnection(conn) ||
-      conn.refCount > 0 ||
-      hasActiveLspWork(conn.progress) ||
-      conn.idleTimer
+      this.leaseSets.get(leases.key) !== leases ||
+      leases.sessionRefCounts.size === 0 ||
+      leases.retryTimer !== null
     ) {
       return;
     }
-    conn.idleTimer = setTimeout(() => {
-      conn.idleTimer = null;
-      if (!this.isCurrentConnection(conn) || conn.refCount > 0 || hasActiveLspWork(conn.progress)) {
-        return;
-      }
-      if (conn.continuityEnabled) {
-        conn.releaseAfterConnect = "editor_idle";
-        if (conn.ws.readyState === WebSocket.OPEN) {
-          void this.transport.release(conn, "editor_idle");
-        } else if (conn.ws.readyState === WebSocket.CLOSED) {
-          if (conn.reconnectTimer) {
-            clearTimeout(conn.reconnectTimer);
-            conn.reconnectTimer = null;
-          }
-          conn.reconnecting = true;
-          this.transport.open(conn);
-        }
-        return;
-      }
-      this.cleanupConnection(conn);
-      this.statuses.delete(conn.key);
-      this.notifyChange(conn.key);
-    }, LSP_IDLE_TIMEOUT);
+    const delayIndex = Math.min(leases.retryIndex, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
+    const delay = ATTACHMENT_RETRY_DELAYS_MS[delayIndex] ?? 5_000;
+    leases.retryIndex = Math.min(delayIndex + 1, ATTACHMENT_RETRY_DELAYS_MS.length - 1);
+    leases.retryTimer = setTimeout(() => {
+      leases.retryTimer = null;
+      if (this.leaseSets.get(leases.key) !== leases || leases.sessionRefCounts.size === 0) return;
+      const current = this.connections.get(leases.key);
+      if (current) this.cleanupConnection(current);
+      this.createConnection(leases);
+    }, delay);
   }
 
-  private clearIdleTimer(conn: ManagedLspConnection): void {
-    if (!conn.idleTimer) return;
-    clearTimeout(conn.idleTimer);
-    conn.idleTimer = null;
+  private clearReconnectTimer(leases: LspLeaseSet): void {
+    if (leases.retryTimer === null) return;
+    clearTimeout(leases.retryTimer);
+    leases.retryTimer = null;
   }
 
   private isCurrentConnection(conn: ManagedLspConnection): boolean {
     return this.connections.get(conn.key) === conn;
   }
 
-  private isCurrentTransportConnection(conn: ManagedLspConnection, generation: number): boolean {
-    return this.isCurrentConnection(conn) && conn.transportGeneration === generation;
-  }
-
   private cleanupConnection(conn: ManagedLspConnection) {
-    this.clearIdleTimer(conn);
-    if (conn.reconnectTimer) {
-      clearTimeout(conn.reconnectTimer);
-      conn.reconnectTimer = null;
-    }
     for (const d of conn.providerDisposables) d.dispose();
     conn.providerDisposables = [];
     conn.rpc?.dispose();
     conn.rpc = null;
     conn.initialized = false;
     conn.protocolInitialized = false;
-    conn.documentsSynced = false;
     conn.openDocuments.clear();
     conn.diagnosticsByUri.clear();
-    conn.providersReady = false;
-    conn.diagnosticsReady = false;
-    conn.reconnecting = false;
     conn.progress = EMPTY_LSP_PROGRESS;
     conn.registeredProgressTokens.clear();
     try {

@@ -295,6 +295,7 @@ func TestPollOneRemoteStatusAtomicallyRefreshesRestartedKubernetesAgentctl(t *te
 		}))
 	}
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	writer := &captureExecutorRunningWriter{}
 	mgr.SetExecutorRunningWriter(writer)
 	execution := &AgentExecution{
@@ -520,6 +521,7 @@ func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *
 		}))
 	}
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
 	execution := &AgentExecution{
 		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
@@ -555,6 +557,7 @@ func TestPersistActiveKubernetesRefreshOutlivesCanceledPollContext(t *testing.T)
 	store.rejectCanceledCalls = true
 	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(&captureExecutorRunningWriter{})
 	execution := &AgentExecution{
 		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
@@ -633,6 +636,7 @@ func TestStopAgentSerializesWithActiveKubernetesRefresh(t *testing.T) {
 		}))
 	}
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	mgr.SetExecutorRunningWriter(writer)
 	execution := &AgentExecution{
 		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",

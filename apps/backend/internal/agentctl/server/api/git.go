@@ -887,7 +887,7 @@ func (s *Server) runGitLogForRepo(
 		return nil, comparisonErr
 	}
 	if comparison.Explicit {
-		if comparison.Status != lspStatusReady || comparison.Ref == "" {
+		if !comparison.Ready() {
 			return comparisonUnavailableLogResult(comparison.ErrorCode), nil
 		}
 		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)
@@ -1175,7 +1175,7 @@ func (s *Server) runGitCumulativeDiffForRepoResolved(
 	comparison process.ComparisonResolution,
 ) (*process.CumulativeDiffResult, int, error) {
 	if comparison.Explicit {
-		if comparison.Status != lspStatusReady || comparison.Ref == "" {
+		if !comparison.Ready() {
 			return comparisonUnavailableDiffResult(comparison.ErrorCode), http.StatusOK, nil
 		}
 		mergeBase, err := gitOp.GetMergeBase(ctx, "HEAD", comparison.Ref)

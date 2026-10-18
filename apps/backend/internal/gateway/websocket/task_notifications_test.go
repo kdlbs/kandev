@@ -253,7 +253,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 78
+	const wantSubscriptions = 79
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -302,6 +302,31 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 				t.Errorf("counter handler fired %d times, want 1", count)
 			}
 		})
+	}
+}
+
+func TestTaskEventBroadcaster_TaskLSPStateIsTaskScoped(t *testing.T) {
+	h := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(h, first)
+	registerTestClient(h, second)
+	h.SubscribeToTask(first, "task-1")
+	h.SubscribeToTask(second, "task-2")
+
+	payload := map[string]any{
+		"task_id": "task-1", "language": "kotlin", "phase": "ready",
+	}
+	msg, err := ws.NewNotification(ws.ActionTaskLSPChanged, payload)
+	require.NoError(t, err)
+	b := &TaskEventBroadcaster{hub: h, logger: testLogger()}
+	require.NoError(t, b.routeBroadcast(ws.ActionTaskLSPChanged, payload, "", "", msg))
+
+	if !clientReceived(first) {
+		t.Fatal("task subscriber did not receive LSP notification")
+	}
+	if clientReceived(second) {
+		t.Fatal("LSP notification crossed task boundary")
 	}
 }
 

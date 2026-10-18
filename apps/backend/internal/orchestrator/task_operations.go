@@ -5379,25 +5379,29 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 
-	// Stop all agents for this task
-	if s.lspLeases != nil {
-		s.lspLeases.StopLSPLeasesForTask(taskID)
-	}
 	var stoppedSessions []*models.TaskSession
 	if s.repo != nil {
 		stoppedSessions, _ = s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
 	}
-	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
-		if !errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
-			return err
-		}
-		// Every session that could be reached did stop; only a registry-only
-		// orphan's row failed to load. Log it and still transition to REVIEW
-		// rather than surfacing a false "failed to stop task" to the user.
+	// Stop all agents for this task. Task-owned cleanup still runs when no
+	// session execution exists (or session teardown fails), because the LSP
+	// host is intentionally independent from session runtime ownership.
+	stopErr := s.executor.StopByTaskID(ctx, taskID, reason, force)
+	if errors.Is(stopErr, executor.ErrOrphanRecoveryIncomplete) {
 		s.logger.Warn("task stop reached REVIEW with an orphan recovery load failure",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+			zap.String("task_id", taskID), zap.Error(stopErr))
+		stopErr = nil
 	}
+	var cleanupErr error
+	if s.taskStopCleanup != nil {
+		if err := s.taskStopCleanup(ctx, taskID, reason); err != nil {
+			cleanupErr = fmt.Errorf("clean up task-owned runtimes: %w", err)
+		}
+	}
+	if err := errors.Join(stopErr, cleanupErr); err != nil {
+		return err
+	}
+
 	for _, session := range stoppedSessions {
 		if session != nil {
 			s.clearDynamicUnclassifiedStreakForStop(ctx, session.ID)
@@ -5487,7 +5491,19 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 			accepted++
 		}
 	}
-	if accepted > 0 {
+	cleanupSucceeded := true
+	if s.taskStopCleanup != nil {
+		blockingSessionID, sessionsKnown := s.otherWorkingSessionID(ctx, taskID, "")
+		if !sessionsKnown || blockingSessionID != "" {
+			cleanupSucceeded = false
+		} else {
+			if cleanupErr := s.taskStopCleanup(ctx, taskID, coordinatorMCPStopReason); cleanupErr != nil {
+				failures = append(failures, fmt.Errorf("coordinator stop: clean up task-owned runtimes: %w", cleanupErr))
+				cleanupSucceeded = false
+			}
+		}
+	}
+	if accepted > 0 && cleanupSucceeded {
 		// This helper owns Office/archive/active-state guards and publishes
 		// through the task-service adapter. Remaining working sessions still
 		// block REVIEW on a partial stop.

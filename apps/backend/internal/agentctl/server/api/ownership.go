@@ -106,7 +106,7 @@ func (m *ControlServer) handleOwnershipClaim(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{errKey: shuttingDownMessage})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{lspStatusKey: "claimed"})
+	c.JSON(http.StatusOK, gin.H{"status": "claimed"})
 }
 
 // handleOwnershipShutdown is the ownership-shutdown operation of
@@ -124,5 +124,5 @@ func (m *ControlServer) handleOwnershipClaim(c *gin.Context) {
 func (m *ControlServer) handleOwnershipShutdown(c *gin.Context) {
 	m.ownership.BeginShutdown()
 	m.requestShutdown()
-	c.JSON(http.StatusOK, gin.H{lspStatusKey: "shutting_down"})
+	c.JSON(http.StatusOK, gin.H{"status": "shutting_down"})
 }

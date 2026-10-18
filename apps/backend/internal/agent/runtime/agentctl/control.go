@@ -22,6 +22,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// ErrInstanceNotFound identifies an already-removed agentctl instance. Runtime
+// teardown treats this as an idempotent success after a lost response or retry.
+var ErrInstanceNotFound = errors.New("agentctl instance not found")
+
 // ControlClient is a client for the agentctl control server API.
 // It manages creation and deletion of agent instances.
 // Used by both Docker and standalone runtimes.
@@ -382,7 +386,18 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 			Error string `json:"error"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("instance %q: %w", instanceID, ErrInstanceNotFound)
+			}
 			return fmt.Errorf("failed to decode error response: %w", err)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf(
+				"failed to delete instance: %s (status %d): %w",
+				errResp.Error,
+				resp.StatusCode,
+				ErrInstanceNotFound,
+			)
 		}
 		return fmt.Errorf("failed to delete instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
@@ -390,9 +405,6 @@ func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) e
 	c.logger.Info("deleted agent instance", zap.String("instance_id", instanceID))
 	return nil
 }
-
-// ErrInstanceNotFound identifies an absent agentctl instance.
-var ErrInstanceNotFound = errors.New("instance not found")
 
 // GetInstance gets information about a specific instance.
 func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*InstanceInfo, error) {
@@ -408,7 +420,7 @@ func (c *ControlClient) GetInstance(ctx context.Context, instanceID string) (*In
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("%w: %q", ErrInstanceNotFound, instanceID)
+		return nil, fmt.Errorf("instance %q not found: %w", instanceID, ErrInstanceNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to get instance: status %d", resp.StatusCode)

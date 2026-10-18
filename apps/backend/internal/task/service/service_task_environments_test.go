@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -80,10 +82,18 @@ type stubDestroyer struct {
 	pluginCalls              []string
 	pluginErr                error
 	pluginCleanupJob         recoveryclaim.TaskCleanupJob
+	containerEntered         chan struct{}
+	containerRelease         chan struct{}
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, env *models.TaskEnvironment) error {
 	s.containerCalls = append(s.containerCalls, env.ContainerID)
+	if s.containerEntered != nil {
+		close(s.containerEntered)
+	}
+	if s.containerRelease != nil {
+		<-s.containerRelease
+	}
 	if s.cancelAfterContainer != nil {
 		s.cancelAfterContainer()
 	}
@@ -149,6 +159,59 @@ func TestCleanupTaskEnvironmentSkipsStaleOwnershipGeneration(t *testing.T) {
 	}
 }
 
+type stubSharedEnvironmentSessions struct {
+	repository.SessionRepository
+	shared bool
+	err    error
+}
+
+func (s *stubSharedEnvironmentSessions) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(
+	context.Context,
+	string,
+	string,
+) (bool, error) {
+	return s.shared, s.err
+}
+
+func (s *stubSharedEnvironmentSessions) HasLiveTaskSessionsByTaskEnvironmentExcludingTask(
+	context.Context,
+	string,
+	string,
+) (bool, error) {
+	return s.shared, s.err
+}
+
+type stubRuntimeSecretDeleter struct {
+	calls    []string
+	requests []runtimeSecretDeleteRequest
+	err      error
+}
+
+type runtimeSecretDeleteRequest struct {
+	environmentID     string
+	authSecretID      string
+	bootstrapSecretID string
+}
+
+type stubTaskEnvironmentResetGuard struct {
+	err error
+}
+
+func (g stubTaskEnvironmentResetGuard) ValidateTaskEnvironmentReset(context.Context, string, string) error {
+	return g.err
+}
+
+func (s *stubRuntimeSecretDeleter) DeleteTaskEnvironmentRuntimeSecrets(
+	_ context.Context,
+	environmentID, authSecretID, bootstrapSecretID string,
+) error {
+	s.calls = append(s.calls, environmentID)
+	s.requests = append(s.requests, runtimeSecretDeleteRequest{
+		environmentID: environmentID, authSecretID: authSecretID, bootstrapSecretID: bootstrapSecretID,
+	})
+	return s.err
+}
+
 func (s *stubRunningChecker) IsAnySessionRunningForTask(context.Context, string) (bool, error) {
 	return s.running, s.err
 }
@@ -185,6 +248,47 @@ func TestResetTaskEnvironment_SessionRunningBlocks(t *testing.T) {
 	}
 	if repo.deleted {
 		t.Error("expected environment row to be preserved when session is running")
+	}
+}
+
+func TestResetTaskEnvironment_SharedBorrowerBlocks(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.sessions = &stubSharedEnvironmentSessions{shared: true}
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if !errors.Is(err, ErrEnvironmentShared) {
+		t.Fatalf("expected ErrEnvironmentShared, got %v", err)
+	}
+	if len(destroyer.containerCalls) != 0 {
+		t.Fatalf("shared environment was destroyed: %v", destroyer.containerCalls)
+	}
+	if repo.deleted {
+		t.Fatal("shared environment row was deleted")
+	}
+}
+
+func TestResetTaskEnvironment_WorkspaceGroupReferenceBlocks(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskEnvironmentResetGuard(stubTaskEnvironmentResetGuard{err: ErrEnvironmentShared})
+
+	err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	if !errors.Is(err, ErrEnvironmentShared) {
+		t.Fatalf("workspace-group reset error = %v, want ErrEnvironmentShared", err)
+	}
+	if len(destroyer.containerCalls) != 0 || repo.deleted {
+		t.Fatalf("group-referenced environment mutated: destroy=%v deleted=%v", destroyer.containerCalls, repo.deleted)
 	}
 }
 
@@ -259,6 +363,150 @@ func TestResetTaskEnvironmentDestroysPluginExecutorUnderResetClaim(t *testing.T)
 	}
 	if !repo.deleted || repo.resetReleased != models.TaskResourceCleanupStateSucceeded {
 		t.Fatalf("reset completion deleted=%v state=%q", repo.deleted, repo.resetReleased)
+	}
+}
+
+func TestResetTaskEnvironmentDeletesRuntimeSecretsBeforeEnvironmentRow(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", AgentctlAuthSecretID: "runtime-auth",
+		AgentctlBootstrapSecretID: "runtime-bootstrap",
+	}}
+	deleter := &stubRuntimeSecretDeleter{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(deleter)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(deleter.calls) != 1 || deleter.calls[0] != "env-1" {
+		t.Fatalf("runtime secret cleanup calls = %v, want env-1", deleter.calls)
+	}
+	if !repo.deleted {
+		t.Fatal("environment row was not deleted after runtime secrets")
+	}
+}
+
+func TestResetTaskEnvironmentDeletesContainerAndTaskHostRuntimeSecrets(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		AgentctlAuthSecretID:              "task-host-auth",
+		AgentctlBootstrapSecretID:         "task-host-bootstrap",
+		ContainerControlAuthTokenSecretID: "container-control",
+		ContainerBootstrapNonceSecretID:   "container-bootstrap",
+	}}
+	deleter := &stubRuntimeSecretDeleter{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(deleter)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	want := []runtimeSecretDeleteRequest{
+		{environmentID: "env-1", authSecretID: "task-host-auth", bootstrapSecretID: "task-host-bootstrap"},
+		{environmentID: "env-1", authSecretID: "container-control", bootstrapSecretID: "container-bootstrap"},
+	}
+	if !reflect.DeepEqual(deleter.requests, want) {
+		t.Fatalf("runtime secret cleanup requests = %#v, want %#v", deleter.requests, want)
+	}
+}
+
+func TestResetTaskEnvironmentRuntimeSecretFailurePreservesEnvironmentRow(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", AgentctlAuthSecretID: "runtime-auth",
+	}}
+	deleter := &stubRuntimeSecretDeleter{err: errors.New("secret store unavailable")}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(deleter)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err == nil {
+		t.Fatal("ResetTaskEnvironment unexpectedly succeeded")
+	}
+	if repo.deleted {
+		t.Fatal("environment row deleted after runtime secret cleanup failure")
+	}
+}
+
+func TestResetTaskEnvironment_StopsTaskLSPBeforeTeardown(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	lifecycle := &recordingTaskLSPLifecycle{}
+	lifecycle.onCleanup = func(_ context.Context, _ string) {
+		if len(destroyer.containerCalls) != 0 {
+			t.Fatal("container teardown ran before task LSP cleanup")
+		}
+	}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(lifecycle)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "task-1:task_environment_reset" {
+		t.Fatalf("cleanup calls = %v", got)
+	}
+}
+
+func TestResetTaskEnvironmentBlocksLSPAdmissionThroughRowDeletion(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{
+		containerEntered: make(chan struct{}), containerRelease: make(chan struct{}),
+	}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{})
+
+	resetDone := make(chan error, 1)
+	go func() {
+		resetDone <- svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{})
+	}()
+	<-destroyer.containerEntered
+
+	if release, err := svc.AcquireTaskLSPAdmission(context.Background(), "task-1"); !errors.Is(err, ErrTaskLSPAdmissionBlocked) {
+		if release != nil {
+			release()
+		}
+		t.Fatalf("LSP admission during reset = %v, want blocked", err)
+	}
+
+	close(destroyer.containerRelease)
+	if err := <-resetDone; err != nil {
+		t.Fatal(err)
+	}
+	if !repo.deleted {
+		t.Fatal("environment row was not deleted before reset admission released")
+	}
+	release, err := svc.AcquireTaskLSPAdmission(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("LSP admission did not reopen after environment reset: %v", err)
+	}
+	release()
+}
+
+func TestResetTaskEnvironment_LSPCleanupFailurePreservesEnvironment(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{cleanupErr: errors.New("stop failed")})
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err == nil {
+		t.Fatal("reset succeeded despite task LSP cleanup failure")
+	}
+	if repo.deleted || len(destroyer.containerCalls) != 0 {
+		t.Fatalf("environment mutated after LSP cleanup failure: deleted=%v calls=%v", repo.deleted, destroyer.containerCalls)
 	}
 }
 
@@ -507,14 +755,15 @@ func TestResetTaskEnvironment_PushBranchFailureAbortsResetBeforeTeardown(t *test
 
 func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) {
 	env := &models.TaskEnvironment{
-		ID:          "env-1",
-		TaskID:      "task-1",
-		ContainerID: "container-abc",
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-abc",
+		AgentctlAuthSecretID: "runtime-auth",
 	}
 	repo := &stubEnvRepo{env: env}
 	destroyer := &stubDestroyer{}
+	secretDeleter := &stubRuntimeSecretDeleter{}
 	svc := newResetTestService(t, repo)
 	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(secretDeleter)
 
 	errs := svc.performTaskCleanup(context.Background(), "task-1", nil, nil, nil, taskEnvironmentCleanup{
 		env:       env,
@@ -529,6 +778,34 @@ func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) 
 	}
 	if !repo.deleted {
 		t.Fatal("expected task environment row to be deleted")
+	}
+	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != "env-1" {
+		t.Fatalf("runtime secret cleanup calls = %v, want env-1", secretDeleter.calls)
+	}
+}
+
+func TestPerformTaskCleanup_DeletesRuntimeSecretsAfterTaskRowCascade(t *testing.T) {
+	env := &models.TaskEnvironment{
+		ID: "env-cascaded", TaskID: "task-deleted", ExecutorType: string(models.ExecutorTypeLocalDocker),
+		AgentctlAuthSecretID: "legacy-runtime-auth",
+	}
+	repo := &stubEnvRepo{env: env}
+	secretDeleter := &stubRuntimeSecretDeleter{}
+	svc := newResetTestService(t, repo)
+	svc.SetTaskEnvironmentRuntimeSecretDeleter(secretDeleter)
+
+	errs := svc.performTaskCleanup(context.Background(), "task-deleted", nil, nil, nil, taskEnvironmentCleanup{
+		env: env, deleteSecrets: true,
+	}, nil)
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected cleanup errors: %v", errs)
+	}
+	if len(secretDeleter.calls) != 1 || secretDeleter.calls[0] != "env-cascaded" {
+		t.Fatalf("runtime secret cleanup calls = %v, want env-cascaded", secretDeleter.calls)
+	}
+	if repo.deleted {
+		t.Fatal("cleanup attempted to delete an environment row already removed by task cascade")
 	}
 }
 

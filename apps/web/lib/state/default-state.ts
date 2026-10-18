@@ -1,3 +1,4 @@
+import { defaultLspState, mergeTaskLspState } from "./slices/lsp/lsp-slice";
 import { mapSidebarWorkspaces } from "./slices/ui/sidebar-workspace-state";
 import {
   defaultKanbanState,
@@ -100,6 +101,7 @@ export const defaultState = {
   failedInbox: defaultFailedInboxState.failedInbox,
   previewFeedback: defaultPreviewFeedbackState.previewFeedback,
   inboxHistory: defaultInboxHistoryState.inboxHistory,
+  taskLsp: defaultLspState.taskLsp,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -530,6 +532,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     ...mergeAgentReviewArtifacts(initialState),
+    taskLsp: mergeTaskLspState(initialState.taskLsp),
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },

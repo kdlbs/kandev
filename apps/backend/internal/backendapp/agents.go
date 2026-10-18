@@ -24,6 +24,22 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// agentSecretStores keeps user-selected credentials behind the public filter
+// while allowing the lifecycle owner to persist deterministic runtime-only
+// control credentials. Mixing these stores makes Docker startup fail because
+// the user-visible wrapper deliberately treats runtime:* IDs as nonexistent.
+type agentSecretStores struct {
+	userVisible secrets.SecretStore
+	runtime     secrets.SecretStore
+}
+
+func newAgentSecretStores(runtime secrets.SecretStore) agentSecretStores {
+	return agentSecretStores{
+		userVisible: secrets.NewUserVisibleStore(runtime),
+		runtime:     runtime,
+	}
+}
+
 func provideLifecycleManager(
 	cfg *config.Config,
 	runtimeOwner *agentctl.RuntimeOwner,
@@ -170,6 +186,7 @@ func provideLifecycleManager(
 	registerKubernetesPreparer(preparerRegistry, log)
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStores.runtime)
+	lifecycleMgr.SetRuntimeSecretStore(secretStores.runtime)
 	if err := lifecycleMgr.SetAgentctlStartupConfig(cfg.ManagedAgentctlStartupConfig()); err != nil {
 		return nil, fmt.Errorf("configure managed agentctl startup: %w", err)
 	}

@@ -342,6 +342,9 @@ func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
+	releaseWorkspace := s.acquireWorkspaceTaskDeletion(workspace.ID)
+	defer releaseWorkspace()
+
 	var releaseAttachmentAdmission func()
 	if s.attachmentSvc != nil {
 		releaseAttachmentAdmission = s.attachmentSvc.beginWorkspaceDeletion(workspace.ID)
@@ -351,21 +354,58 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return err
 	}
+	taskIDs := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && task.ID != "" {
+			taskIDs = append(taskIDs, task.ID)
+		}
+	}
+	releaseTaskMutations := s.acquireTaskLSPMutations(taskIDs)
+	defer releaseTaskMutations()
+	// A terminal task mutation may have completed while this delete waited
+	// for its task lock. With task creation now frozen, this second read is the
+	// authoritative membership set for cleanup and cascade deletion.
+	tasks, err = s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
+	if err != nil {
+		return err
+	}
+	taskIDs = taskIDs[:0]
+	for _, task := range tasks {
+		if task != nil && task.ID != "" {
+			taskIDs = append(taskIDs, task.ID)
+		}
+	}
+	// Reserve every task barrier before any environment/session/worktree read.
+	// This makes the task set an atomic cleanup boundary even when resolving a
+	// shared physical environment itself needs session-backed inventory.
+	cleanups, err := s.reserveWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		return err
+	}
 	// Runtime cleanup needs task rows before the cascade removes them.
 	workspaceAttachmentCleanup, err := s.prepareWorkspaceAttachmentCleanup(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
-	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
 	if workspaceAttachmentCleanup != nil {
 		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
 	}
-	taskCleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	releaseEnvironmentMutations, err := s.acquireTaskLSPEnvironmentMutations(ctx, taskIDs)
 	if err != nil {
-		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-		return errors.Join(err, cancelErr)
+		return errors.Join(err, s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
 	}
-	cleanups = append(cleanups, taskCleanups...)
+	defer releaseEnvironmentMutations()
+	if err := s.captureWorkspaceDeleteTaskCleanups(ctx, cleanups); err != nil {
+		return errors.Join(err, s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
+	}
+	if s.taskLSP != nil {
+		for _, taskID := range taskIDs {
+			if err := s.taskLSP.CleanupTask(ctx, taskID, "task_deleted"); err != nil {
+				return errors.Join(fmt.Errorf("stop task language servers before workspace delete: %w", err),
+					s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
+			}
+		}
+	}
 
 	// Record canvas artifact cleanup before the workspace cascade removes its
 	// task and workspace rows. This keeps the release ownership boundary
@@ -412,8 +452,8 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-		return s.mapWorkspaceDeleteError(workspace.ID, errors.Join(err, cancelErr))
+		s.resolveWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
 	var postCommitErr error
 	if s.attachmentSvc != nil {
@@ -425,9 +465,6 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
-	var lateCleanupErr error
-	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
-	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
@@ -438,72 +475,57 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	return nil
 
 }
-func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
+
+func (s *Service) reserveWorkspaceDeleteTaskCleanups(
+	ctx context.Context,
+	tasks []*models.Task,
+) ([]workspaceDeleteTaskCleanup, error) {
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil || task.ID == "" {
 			continue
 		}
-		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+		job, err := s.reservePreparedTaskResourceCleanup(
+			ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
+			newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
+		)
 		if err != nil {
 			cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			return nil, errors.Join(err, cancelErr)
 		}
-		cleanups = append(cleanups, cleanup)
+		cleanups = append(cleanups, workspaceDeleteTaskCleanup{task: task, cleanupJob: job})
 	}
 	return cleanups, nil
 }
 
-func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
+func (s *Service) captureWorkspaceDeleteTaskCleanups(
 	ctx context.Context,
 	cleanups []workspaceDeleteTaskCleanup,
-	deletedTasks []*models.Task,
-) ([]workspaceDeleteTaskCleanup, error) {
-	prepared := make(map[string]struct{}, len(cleanups))
-	for _, cleanup := range cleanups {
-		if cleanup.task != nil && cleanup.task.ID != "" {
-			prepared[cleanup.task.ID] = struct{}{}
+) error {
+	for index := range cleanups {
+		if cleanups[index].task == nil {
+			continue
+		}
+		if err := s.captureWorkspaceDeleteTaskCleanup(ctx, &cleanups[index]); err != nil {
+			return err
 		}
 	}
-	var errs []error
-	for _, task := range deletedTasks {
-		if task == nil || task.ID == "" {
-			continue
-		}
-		if _, ok := prepared[task.ID]; ok {
-			continue
-		}
-		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
-		if err != nil {
-			s.logger.Error("failed to prepare late workspace task cleanup",
-				zap.String("task_id", task.ID),
-				zap.Error(err))
-			errs = append(errs, fmt.Errorf("prepare late workspace task cleanup %q: %w", task.ID, err))
-			if job, persistErr := s.persistTaskResourceCleanup(
-				ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
-				newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
-				nil, nil, nil, nil, taskEnvironmentCleanup{}, false, false, "",
-			); persistErr != nil {
-				errs = append(errs, fmt.Errorf("persist late workspace task cleanup %q: %w", task.ID, persistErr))
-			} else if job != nil {
-				cleanups = append(cleanups, workspaceDeleteTaskCleanup{task: task, cleanupJob: job})
-			}
-			continue
-		}
-		cleanups = append(cleanups, cleanup)
-		prepared[task.ID] = struct{}{}
-	}
-	return cleanups, errors.Join(errs...)
+	return nil
 }
 
-func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
+func (s *Service) captureWorkspaceDeleteTaskCleanup(
+	ctx context.Context,
+	cleanup *workspaceDeleteTaskCleanup,
+) error {
+	task := cleanup.task
 	worktrees, err := s.gatherWorktreesForDelete(ctx, task.ID)
 	if err != nil {
-		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list worktrees for workspace delete task %q: %w", task.ID, err)
+		return fmt.Errorf("list worktrees for workspace delete task %q: %w", task.ID, err)
 	}
+	cleanup.worktrees = worktrees
 	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, task.ID)
 	if err != nil {
-		return workspaceDeleteTaskCleanup{}, fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
+		return fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
 	}
 	var attachments []*models.TaskMessageAttachment
 	attachmentRepo := s.attachments
@@ -513,31 +535,30 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	if attachmentRepo != nil {
 		attachments, err = attachmentRepo.ListMessageAttachmentsByTask(ctx, task.ID)
 		if err != nil {
-			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list attachments for workspace delete task %q: %w", task.ID, err)
+			return fmt.Errorf("list attachments for workspace delete task %q: %w", task.ID, err)
 		}
 	}
-	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv, attachments: attachments}
+	cleanup.taskEnv = taskEnv
+	cleanup.attachments = attachments
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
-		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
+		return fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
 	}
 	if s.executionStopper != nil {
 		activeSessions, listErr := s.sessions.ListActiveTaskSessionsByTaskID(ctx, task.ID)
 		if listErr != nil {
-			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list active sessions for workspace delete task %q: %w", task.ID, listErr)
+			return fmt.Errorf("list active sessions for workspace delete task %q: %w", task.ID, listErr)
 		}
 		cleanup.stopTargets, err = s.buildStopTargets(ctx, task.ID, activeSessions)
 		if err != nil {
-			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list runtime cleanup inventory: %w", err)
+			return fmt.Errorf("list runtime cleanup inventory: %w", err)
 		}
 	}
-	cleanup.cleanupJob, err = s.persistTaskResourceCleanup(
-		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
-		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
-		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, task.WorkspaceID,
+	err = s.updatePreparedTaskResourceCleanupSnapshot(
+		ctx, cleanup.cleanupJob, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteSecrets: true}, cleanup.attachments,
 	)
-	return cleanup, err
+	return err
 }
 func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) error {
 	jobIDs := make([]string, 0, len(cleanups))
@@ -574,6 +595,19 @@ func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, clea
 		return errors.Join(cancellationErrs...)
 	}
 	return nil
+}
+
+func (s *Service) resolveWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+	for _, cleanup := range cleanups {
+		if cleanup.cleanupJob == nil {
+			continue
+		}
+		if err := s.ResolvePreparedTaskResourceCleanup(ctx, cleanup.cleanupJob.OperationID); err != nil {
+			s.logger.Warn("resolve workspace delete task cleanup",
+				zap.String("job_id", cleanup.cleanupJob.ID),
+				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		}
+	}
 }
 
 func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
@@ -618,6 +652,10 @@ func (s *Service) workspaceDeleteTaskCleanupJobs(
 			continue
 		}
 		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
+			continue
+		}
+		if cleanup.cleanupJob != nil {
+			jobs = append(jobs, cleanup)
 			continue
 		}
 		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
@@ -667,7 +705,7 @@ func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskClean
 		}
 		return
 	}
-	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
+	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false, deleteSecrets: true}
 	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup, true,
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")
 }

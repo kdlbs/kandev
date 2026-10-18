@@ -40,7 +40,7 @@ func (m *Manager) wireKubernetesEnvironmentStore() {
 		return
 	}
 	runtime.environmentStore, _ = m.runningWriter.(KubernetesEnvironmentStore)
-	runtime.secretStore = m.secretStore
+	runtime.secretStore = m.runtimeSecretStore
 }
 
 func (r *KubernetesExecutor) createTaskInstance(ctx context.Context, original *ExecutorCreateRequest) (_ *ExecutorInstance, returnedErr error) {

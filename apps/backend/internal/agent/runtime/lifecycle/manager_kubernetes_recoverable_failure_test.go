@@ -41,6 +41,7 @@ func TestKubernetesRecoverableFailurePreservesRuntimeAndSecrets(t *testing.T) {
 		}))
 	}
 	mgr.SetSecretStore(secretStore)
+	mgr.SetRuntimeSecretStore(secretStore)
 	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 		ID: "execution-1", TaskID: "task-1", SessionID: "session-1",
 		RuntimeName: executor.NameKubernetes, isResumedSession: false,
@@ -97,6 +98,7 @@ func TestKubernetesRecoverableFailureStopPolicy(t *testing.T) {
 			cleanupManagerStopCh(t, mgr)
 			store := newInMemorySecretStore()
 			mgr.SetSecretStore(store)
+			mgr.SetRuntimeSecretStore(store)
 			metadata := map[string]interface{}{
 				MetadataKeyAuthTokenSecret: "retained-auth", MetadataKeyBootstrapNonceSecret: "retained-bootstrap",
 			}
@@ -110,7 +112,7 @@ func TestKubernetesRecoverableFailureStopPolicy(t *testing.T) {
 			require.Equal(t, []bool{!tc.preserve}, backend.forces)
 			for _, id := range []string{"retained-auth", "retained-bootstrap"} {
 				value, err := store.Reveal(ctx, id)
-				if tc.preserve || tc.runtime != executor.NameKubernetes {
+				if tc.preserve {
 					require.NoError(t, err)
 					require.Equal(t, id+"-value", value)
 				} else {
@@ -135,6 +137,7 @@ func TestKubernetesRecoverableFailureCleanupCannotStopReplacement(t *testing.T) 
 	cleanupManagerStopCh(t, mgr)
 	store := newInMemorySecretStore()
 	mgr.SetSecretStore(store)
+	mgr.SetRuntimeSecretStore(store)
 	require.NoError(t, store.Create(ctx, &secrets.SecretWithValue{
 		Secret: secrets.Secret{ID: "shared-runtime-auth", Name: "auth"}, Value: "retained-token",
 	}))

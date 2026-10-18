@@ -142,7 +142,7 @@ func TestManagerReopensStoppedPluginExecutorByAttachingRetainedEnvironment(t *te
 	mgr.SetExecutorRunningWriter(store)
 	secretStore := newInMemorySecretStore()
 	secretStore.store[authSecretID] = &secrets.SecretWithValue{Value: "agentctl-secret"}
-	mgr.secretStore = secretStore
+	mgr.runtimeSecretStore = secretStore
 	cleanupManagerStopCh(t, mgr)
 
 	execution, err := mgr.GetOrEnsureExecution(context.Background(), sessionID)

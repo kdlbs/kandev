@@ -95,10 +95,14 @@ func TestWorkspaceDeleteCleanupSnapshotsAttachments(t *testing.T) {
 	if err := attachmentSvc.Claim(ctx, "owner", "ws-1", taskResult.Task.ID, "", []string{attachment.ID}); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
-	cleanup, err := taskSvc.prepareWorkspaceDeleteTaskCleanup(ctx, taskResult.Task)
+	cleanups, err := taskSvc.reserveWorkspaceDeleteTaskCleanups(ctx, []*models.Task{taskResult.Task})
+	if err == nil {
+		err = taskSvc.captureWorkspaceDeleteTaskCleanups(ctx, cleanups)
+	}
 	if err != nil {
 		t.Fatalf("prepareWorkspaceDeleteTaskCleanup: %v", err)
 	}
+	cleanup := cleanups[0]
 	var snapshot taskResourceCleanupSnapshot
 	if err := json.Unmarshal([]byte(cleanup.cleanupJob.ResourceSnapshot), &snapshot); err != nil {
 		t.Fatalf("decode cleanup snapshot: %v", err)

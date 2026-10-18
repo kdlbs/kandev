@@ -122,7 +122,8 @@ func (s *Service) reconcileManagedDeletionFailure(ctx context.Context, native ma
 
 func (s *Service) preserveTaskEnvironmentForManagedDeletion(ctx context.Context, taskID string, env *models.TaskEnvironment, claim *managed.DeleteClaim) (bool, error) {
 	if claim == nil {
-		return s.preserveTaskEnvironmentForActiveBorrower(ctx, taskID, env)
+		transfer, err := s.preserveTaskEnvironmentForLiveBorrower(ctx, taskID, env)
+		return transfer != nil, err
 	}
 	if env == nil || env.ID == "" || s.sessions == nil {
 		return false, nil

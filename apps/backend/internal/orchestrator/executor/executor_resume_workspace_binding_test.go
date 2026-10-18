@@ -28,10 +28,7 @@ func TestMockRepositoryMissingWorkspaceBindingSessionReturnsNoChange(t *testing.
 }
 
 func TestResumeSessionPersistsMaterializedWorkspaceBinding(t *testing.T) {
-	const (
-		workspacePath = "/tasks/task-1/materialized"
-		environmentID = "env-task-1"
-	)
+	const workspacePath = "/tasks/task-1/materialized"
 
 	for _, startAgent := range []bool{true, false} {
 		name := "workspace-only"
@@ -42,8 +39,13 @@ func TestResumeSessionPersistsMaterializedWorkspaceBinding(t *testing.T) {
 			repo := newMockRepository()
 			setupLiveResumeTestFixture(repo)
 			processStart := make(chan error, 1)
+			var environmentID string
 			agentManager := &mockAgentManager{
-				launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					environmentID = req.TaskEnvironmentID
+					if environmentID == "" {
+						t.Fatal("resume launch has no reserved environment identity")
+					}
 					return &LaunchAgentResponse{
 						AgentExecutionID: "exec-resumed",
 						WorkspacePath:    workspacePath,

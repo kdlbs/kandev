@@ -61,8 +61,8 @@ func (g *Gateway) SetTerminalService(terminals *terminalservice.Service) {
 }
 
 // SetLSPHandler enables the LSP WebSocket handler.
-func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, configuredMax ...int) {
-	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger, configuredMax...)
+func (g *Gateway) SetLSPHandler(controller LSPAttachmentResolver) {
+	g.LSPHandler = NewLSPHandler(controller, g.logger)
 }
 
 // SetVscodeProxy enables the VS Code reverse proxy handler.
@@ -96,7 +96,7 @@ func (g *Gateway) SetupRoutes(router *gin.Engine) {
 
 	// Add LSP routes if LSP handler is configured
 	if g.LSPHandler != nil {
-		router.GET("/lsp/:sessionId", connectionAuth, g.LSPHandler.HandleLSPConnection)
+		router.GET("/lsp/tasks/:taskId/:language/attach", connectionAuth, g.LSPHandler.HandleLSPConnection)
 	}
 
 	// Add VS Code reverse proxy routes if configured

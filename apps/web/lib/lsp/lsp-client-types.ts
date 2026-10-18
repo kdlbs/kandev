@@ -1,5 +1,4 @@
 import type { LSPConnection, LspRange } from "./lsp-json-rpc";
-import type { LspDynamicRegistration } from "./lsp-dynamic-capabilities";
 import {
   EMPTY_LSP_PROGRESS,
   type LspProgressSnapshot,
@@ -19,28 +18,16 @@ export type PublishDiagnosticsParams = {
 
 export type ManagedLspConnection = LSPConnection & {
   key: string;
+  taskId: string;
   sessionId: string;
+  sessionRefCounts: Map<string, number>;
   ownerId: string;
   configuration: Record<string, unknown>;
   protocolInitialized: boolean;
-  diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
   closedDocuments: Set<string>;
+  diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
   progress: LspProgressSnapshot;
   registeredProgressTokens: Set<LspProgressToken>;
-  continuityEnabled: boolean;
-  leaseId: string | null;
-  transportGeneration: number;
-  reconnectAttempts: number;
-  reconnectTimer: ReturnType<typeof setTimeout> | null;
-  reconnecting: boolean;
-  explicitlyStopped: boolean;
-  releaseAfterConnect: "stop" | "editor_idle" | null;
-  diagnosticsReady: boolean;
-  documentsSynced: boolean;
-  providersReady: boolean;
-  dynamicRegistrations: Map<string, LspDynamicRegistration>;
-  semanticRefreshCallbacks: (() => void)[];
-  lspLanguage: string;
 };
 
 export type OpenDocumentParams = {
@@ -56,60 +43,41 @@ export type LspReadyWorkspace = {
   repositorySubpaths: string[];
 };
 
-export type ManagedLspConnectionOptions = {
+type ManagedLspConnectionOptions = {
   key: string;
+  taskId: string;
   sessionId: string;
   generation: number;
   ws: WebSocket;
   configuration: Record<string, unknown>;
-  continuityEnabled?: boolean;
-  leaseId?: string | null;
-  lspLanguage?: string;
+  sessionRefCounts: Map<string, number>;
 };
 
-export function createManagedLspConnection(
-  options: ManagedLspConnectionOptions,
-): ManagedLspConnection {
-  const {
-    key,
-    sessionId,
-    generation,
-    ws,
-    configuration,
-    continuityEnabled = false,
-    leaseId = null,
-    lspLanguage = "",
-  } = options;
+export function createManagedLspConnection({
+  key,
+  taskId,
+  sessionId,
+  generation,
+  ws,
+  configuration,
+  sessionRefCounts,
+}: ManagedLspConnectionOptions): ManagedLspConnection {
   return {
     key,
+    taskId,
     sessionId,
+    sessionRefCounts,
     ownerId: `${key}:${generation}`,
     configuration,
     protocolInitialized: false,
     ws,
     rpc: null,
     initialized: false,
-    refCount: 1,
-    idleTimer: null,
     openDocuments: new Map(),
-    diagnosticsByUri: new Map(),
     closedDocuments: new Set(),
+    diagnosticsByUri: new Map(),
     progress: EMPTY_LSP_PROGRESS,
     registeredProgressTokens: new Set(),
-    continuityEnabled,
-    leaseId,
-    transportGeneration: 0,
-    reconnectAttempts: 0,
-    reconnectTimer: null,
-    reconnecting: false,
-    explicitlyStopped: false,
-    releaseAfterConnect: null,
-    diagnosticsReady: false,
-    documentsSynced: false,
-    providersReady: false,
-    dynamicRegistrations: new Map(),
-    semanticRefreshCallbacks: [],
-    lspLanguage,
     providerDisposables: [],
     serverCapabilities: null,
     workspaceUri: null,

@@ -23,6 +23,8 @@ import (
 const (
 	taskResourceCleanupRetryDelay       = time.Minute
 	preparedCleanupTransitionRetryDelay = 50 * time.Millisecond
+	preparedCleanupAbandonmentDelay     = 5 * time.Minute
+	preparedCleanupHeartbeatInterval    = time.Minute
 	taskResourceCleanupMaxAttempts      = 8
 	archiveReclaimRecheckDelay          = 24 * time.Hour
 	archiveReclaimBackfillBatchSize     = 100
@@ -32,7 +34,10 @@ const (
 	taskArchiveReclaimOutcomeStale      = "stale"
 )
 
-const taskResourceCleanupMutationOutcomeUnknown = "task mutation outcome requires reconciliation"
+const (
+	taskResourceCleanupMutationOutcomeUnknown = "task mutation outcome requires reconciliation"
+	taskResourceCleanupPreparationInProgress  = "task cleanup inventory capture in progress"
+)
 
 var ErrCleanupCancellationRace = errors.New("cleanup cancellation lost lifecycle race")
 var ErrTaskSourceManifestNotFound = errors.New("task source manifest not found")
@@ -108,24 +113,34 @@ type persistedWorktreeBranchMetadata struct {
 	RecoveryHeadSHA   string     `json:"recovery_head_sha,omitempty"`
 }
 
+type taskResourceCleanupPreparationLease struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
 type taskResourceCleanupSnapshot struct {
 	TaskDirectory *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
 	ManagedDelete *managed.DeleteClaim           `json:"managed_delete,omitempty"`
 	// InventoryRepair retains the successor's provenance through progress saves.
-	InventoryRepair        json.RawMessage                             `json:"inventory_repair,omitempty"`
-	Sessions               []*models.TaskSession                       `json:"sessions,omitempty"`
-	Worktrees              []*worktree.Worktree                        `json:"worktrees,omitempty"`
-	WorktreeHeadOIDs       map[string]string                           `json:"worktree_head_oids,omitempty"`
-	WorktreeTaskDirNames   map[string]string                           `json:"worktree_task_dir_names,omitempty"`
-	WorktreeBranchMetadata map[string]persistedWorktreeBranchMetadata  `json:"worktree_branch_metadata,omitempty"`
-	WorktreeAdoptions      map[string]*models.WorkspaceAdoptionReceipt `json:"worktree_adoptions,omitempty"`
-	DiscardWorktreeChanges bool                                        `json:"discard_worktree_changes,omitempty"`
-	StopTargets            []persistedTaskStopTarget                   `json:"stop_targets,omitempty"`
-	TaskEnvironment        *models.TaskEnvironment                     `json:"task_environment,omitempty"`
-	Attachments            []persistedTaskAttachment                   `json:"attachments,omitempty"`
-	WorkspaceID            string                                      `json:"workspace_id,omitempty"`
-	DeleteEnvironmentRow   bool                                        `json:"delete_environment_row,omitempty"`
-	LegacyWorktreeCleanup  bool                                        `json:"legacy_worktree_cleanup,omitempty"`
+	InventoryRepair                           json.RawMessage                             `json:"inventory_repair,omitempty"`
+	Sessions                                  []*models.TaskSession                       `json:"sessions,omitempty"`
+	Worktrees                                 []*worktree.Worktree                        `json:"worktrees,omitempty"`
+	WorktreeHeadOIDs                          map[string]string                           `json:"worktree_head_oids,omitempty"`
+	WorktreeTaskDirNames                      map[string]string                           `json:"worktree_task_dir_names,omitempty"`
+	WorktreeBranchMetadata                    map[string]persistedWorktreeBranchMetadata  `json:"worktree_branch_metadata,omitempty"`
+	WorktreeAdoptions                         map[string]*models.WorkspaceAdoptionReceipt `json:"worktree_adoptions,omitempty"`
+	DiscardWorktreeChanges                    bool                                        `json:"discard_worktree_changes,omitempty"`
+	StopTargets                               []persistedTaskStopTarget                   `json:"stop_targets,omitempty"`
+	TaskEnvironment                           *models.TaskEnvironment                     `json:"task_environment,omitempty"`
+	Attachments                               []persistedTaskAttachment                   `json:"attachments,omitempty"`
+	WorkspaceID                               string                                      `json:"workspace_id,omitempty"`
+	DeleteEnvironmentRow                      bool                                        `json:"delete_environment_row,omitempty"`
+	LegacyWorktreeCleanup                     bool                                        `json:"legacy_worktree_cleanup,omitempty"`
+	TaskEnvironmentAuthSecretID               string                                      `json:"task_environment_auth_secret_id,omitempty"`
+	TaskEnvironmentBootstrapSecretID          string                                      `json:"task_environment_bootstrap_secret_id,omitempty"`
+	DeleteEnvironmentSecrets                  bool                                        `json:"delete_environment_secrets,omitempty"`
+	TaskEnvironmentContainerControlSecretID   string                                      `json:"task_environment_container_control_secret_id,omitempty"`
+	TaskEnvironmentContainerBootstrapSecretID string                                      `json:"task_environment_container_bootstrap_secret_id,omitempty"`
 	// SSHTaskDirs records the remote task directories this task launched into.
 	// Additive and absent-tolerant: a job row written by an older backend
 	// decodes with an empty list and reclaims nothing.
@@ -186,7 +201,7 @@ func (s *Service) persistTaskResourceCleanup(
 	collectSSH bool,
 	workspaceID string,
 ) (*models.TaskResourceCleanupJob, error) {
-	return s.persistTaskResourceCleanupWithManagedClaim(ctx, taskID, trigger, operationID, sessions, worktrees, stopTargets, attachments, envCleanup, prepared, collectSSH, workspaceID, nil)
+	return s.persistTaskResourceCleanupWithManagedClaim(ctx, taskID, trigger, operationID, sessions, worktrees, stopTargets, attachments, envCleanup, prepared, collectSSH, workspaceID, nil, "", nil)
 }
 
 func (s *Service) persistTaskResourceCleanupWithManagedClaim(
@@ -203,6 +218,8 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 	collectSSH bool,
 	workspaceID string,
 	claim *managed.DeleteClaim,
+	lastError string,
+	reservation *models.TaskResourceCleanupJob,
 ) (*models.TaskResourceCleanupJob, error) {
 	if s.resourceCleanups == nil {
 		if claim != nil {
@@ -225,22 +242,14 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 	if err != nil {
 		return nil, err
 	}
-	snapshot := taskResourceCleanupSnapshot{
-		Sessions:               sessions,
-		Worktrees:              worktrees,
-		WorktreeHeadOIDs:       worktreeHeadOIDs,
-		WorktreeTaskDirNames:   worktreeTaskDirNames,
-		WorktreeBranchMetadata: worktreeBranchMetadata,
-		WorktreeAdoptions:      worktreeAdoptions,
-		DiscardWorktreeChanges: envCleanup.discardWorktreeChanges,
-		StopTargets:            persistStopTargets(stopTargets),
-		Attachments:            persistedAttachments,
-		WorkspaceID:            workspaceID,
-		TaskEnvironment:        envCleanup.env,
-		DeleteEnvironmentRow:   envCleanup.deleteRow,
-		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
-		AgentHistory:           envCleanup.agentHistory,
-	}
+	snapshot := s.buildTaskResourceCleanupSnapshot(sessions, worktrees, stopTargets, envCleanup)
+	snapshot.WorktreeHeadOIDs = worktreeHeadOIDs
+	snapshot.WorktreeTaskDirNames = worktreeTaskDirNames
+	snapshot.WorktreeBranchMetadata = worktreeBranchMetadata
+	snapshot.WorktreeAdoptions = worktreeAdoptions
+	snapshot.DiscardWorktreeChanges = envCleanup.discardWorktreeChanges
+	snapshot.Attachments = persistedAttachments
+	snapshot.WorkspaceID = workspaceID
 	if collectSSH {
 		sshTaskDirs, err := s.gatherSSHReclaimTargets(ctx, taskID)
 		if err != nil {
@@ -265,7 +274,13 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 	}
 	job := &models.TaskResourceCleanupJob{
 		ID: jobID, OperationID: operationID, TaskID: taskID, Trigger: trigger,
-		State: state, ResourceSnapshot: string(encoded),
+		State: state, ResourceSnapshot: string(encoded), LastError: lastError,
+	}
+	if reservation != nil {
+		if err := s.resourceCleanups.UpdateTaskResourceCleanupSnapshot(ctx, reservation.OperationID, string(encoded)); err != nil {
+			return nil, err
+		}
+		return s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(ctx, reservation.OperationID)
 	}
 	if err := s.resourceCleanups.CreateTaskResourceCleanupJob(ctx, job); err != nil {
 		return nil, fmt.Errorf("persist task resource cleanup intent: %w", err)
@@ -441,6 +456,181 @@ func captureWorktreeBranchMetadata(worktrees []*worktree.Worktree) map[string]pe
 	return metadata
 }
 
+func (s *Service) buildTaskResourceCleanupSnapshot(
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
+) taskResourceCleanupSnapshot {
+	snapshot := taskResourceCleanupSnapshot{
+		Sessions: sessions, Worktrees: worktrees,
+		StopTargets:              persistStopTargets(stopTargets),
+		TaskEnvironment:          envCleanup.env,
+		DeleteEnvironmentRow:     envCleanup.deleteRow,
+		DeleteEnvironmentSecrets: envCleanup.deleteSecrets,
+		AgentHistory:             envCleanup.agentHistory,
+		LegacyWorktreeCleanup:    s.hasLegacyWorktreeCleanup(),
+	}
+	if envCleanup.env != nil {
+		snapshot.TaskEnvironmentAuthSecretID = envCleanup.env.AgentctlAuthSecretID
+		snapshot.TaskEnvironmentBootstrapSecretID = envCleanup.env.AgentctlBootstrapSecretID
+		snapshot.TaskEnvironmentContainerControlSecretID = envCleanup.env.ContainerControlAuthTokenSecretID
+		snapshot.TaskEnvironmentContainerBootstrapSecretID = envCleanup.env.ContainerBootstrapNonceSecretID
+	}
+	return snapshot
+}
+
+func (s *Service) persistTaskResourceCleanupWithLastError(
+	ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger,
+	operationID string, sessions []*models.TaskSession, worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget, envCleanup taskEnvironmentCleanup, prepared bool, lastError string,
+) (*models.TaskResourceCleanupJob, error) {
+	return s.persistTaskResourceCleanupWithManagedClaim(ctx, taskID, trigger, operationID,
+		sessions, worktrees, stopTargets, nil, envCleanup, prepared, false, "", nil, lastError, nil)
+}
+
+func (s *Service) reservePreparedTaskResourceCleanup(
+	ctx context.Context,
+	taskID string,
+	trigger models.TaskResourceCleanupTrigger,
+	operationID string,
+) (*models.TaskResourceCleanupJob, error) {
+	job, err := s.persistTaskResourceCleanupWithLastError(
+		ctx, taskID, trigger, operationID,
+		nil, nil, nil, taskEnvironmentCleanup{}, true,
+		taskResourceCleanupPreparationInProgress,
+	)
+	if err == nil && job != nil && job.State == models.TaskResourceCleanupStatePrepared {
+		s.startTaskResourceCleanupPreparationLease(job.OperationID)
+	}
+	return job, err
+}
+
+func (s *Service) startTaskResourceCleanupPreparationLease(operationID string) {
+	if operationID == "" || s.resourceCleanups == nil {
+		return
+	}
+	s.cleanupPrepMu.Lock()
+	if s.cleanupPrepClosed {
+		s.cleanupPrepMu.Unlock()
+		return
+	}
+	if s.cleanupPreparations == nil {
+		s.cleanupPreparations = make(map[string]*taskResourceCleanupPreparationLease)
+	}
+	if _, exists := s.cleanupPreparations[operationID]; exists {
+		s.cleanupPrepMu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	lease := &taskResourceCleanupPreparationLease{cancel: cancel, done: make(chan struct{})}
+	resourceCleanups := s.resourceCleanups
+	s.cleanupPreparations[operationID] = lease
+	s.cleanupPrepWG.Add(1)
+	s.cleanupPrepMu.Unlock()
+
+	go func() {
+		defer s.cleanupPrepWG.Done()
+		defer close(lease.done)
+		ticker := time.NewTicker(preparedCleanupHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				touchCtx, touchCancel := context.WithTimeout(ctx, 5*time.Second)
+				err := resourceCleanups.TouchPreparedTaskResourceCleanupJob(touchCtx, operationID)
+				touchCancel()
+				if err != nil && ctx.Err() == nil {
+					s.logger.Warn("renew task cleanup preparation lease",
+						zap.String("operation_id", operationID), zap.Error(err))
+				}
+			}
+		}
+	}()
+}
+
+func (s *Service) hasTaskResourceCleanupPreparationLease(operationID string) bool {
+	s.cleanupPrepMu.Lock()
+	defer s.cleanupPrepMu.Unlock()
+	_, ok := s.cleanupPreparations[operationID]
+	return ok
+}
+
+func (s *Service) stopTaskResourceCleanupPreparationLease(operationID string) {
+	s.cleanupPrepMu.Lock()
+	lease := s.cleanupPreparations[operationID]
+	delete(s.cleanupPreparations, operationID)
+	s.cleanupPrepMu.Unlock()
+	if lease == nil {
+		return
+	}
+	lease.cancel()
+	<-lease.done
+}
+
+func (s *Service) stopAllTaskResourceCleanupPreparationLeases() {
+	s.cleanupPrepMu.Lock()
+	s.cleanupPrepClosed = true
+	leases := s.cleanupPreparations
+	s.cleanupPreparations = nil
+	s.cleanupPrepMu.Unlock()
+	for _, lease := range leases {
+		lease.cancel()
+	}
+	s.cleanupPrepWG.Wait()
+}
+
+func (s *Service) openTaskResourceCleanupPreparationLeases() {
+	s.cleanupPrepMu.Lock()
+	s.cleanupPrepClosed = false
+	s.cleanupPrepMu.Unlock()
+}
+
+func (s *Service) updatePreparedTaskResourceCleanupSnapshot(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
+	attachments []*models.TaskMessageAttachment,
+) error {
+	if job == nil || s.resourceCleanups == nil {
+		return nil
+	}
+	task, err := s.tasks.GetTask(ctx, job.TaskID)
+	if err != nil {
+		return fmt.Errorf("lookup task for cleanup snapshot: %w", err)
+	}
+	updated, err := s.persistTaskResourceCleanupWithManagedClaim(
+		ctx, job.TaskID, job.Trigger, job.OperationID, sessions, worktrees, stopTargets,
+		attachments, envCleanup, true, true, task.WorkspaceID, nil, "", job,
+	)
+	if err == nil && updated != nil {
+		*job = *updated
+	}
+	return err
+}
+
+func (s *Service) cancelFailedTaskResourceCleanupPreparation(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+) error {
+	if job == nil || s.resourceCleanups == nil {
+		return nil
+	}
+	err := s.CancelPreparedTaskResourceCleanup(ctx, job.OperationID)
+	if err != nil {
+		s.stopTaskResourceCleanupPreparationLease(job.OperationID)
+		// The durable in-progress marker lets periodic reconciliation finish
+		// cancellation after the immediate retry window is exhausted.
+		s.startTaskResourceCleanup(job)
+	}
+	return err
+}
+
 func persistStopTargets(targets []taskStopTarget) []persistedTaskStopTarget {
 	result := make([]persistedTaskStopTarget, 0, len(targets))
 	for _, target := range targets {
@@ -496,6 +686,18 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}
+	s.cleanupWorkerMu.Lock()
+	alreadyRunning := s.cleanupWorkerCancel != nil
+	s.cleanupWorkerMu.Unlock()
+	if alreadyRunning {
+		return nil
+	}
+	// Starting a worker represents a fresh ownership epoch. Any preparation
+	// leases left on this Service while its worker was stopped cannot still be
+	// trusted as live owners; new preparations registered after startup remain
+	// protected through later resume retries.
+	s.stopAllTaskResourceCleanupPreparationLeases()
+	s.openTaskResourceCleanupPreparationLeases()
 	startupPreparedCutoff := time.Now().UTC()
 	s.cleanupWorkerMu.Lock()
 	if s.cleanupWorkerCancel != nil {
@@ -562,6 +764,7 @@ func (s *Service) StopTaskResourceCleanupWorker() {
 		cancel()
 		s.cleanupWorkerWG.Wait()
 	}
+	s.stopAllTaskResourceCleanupPreparationLeases()
 }
 
 // ResumeTaskResourceCleanupJobs reconstructs interrupted task cleanup after a
@@ -710,6 +913,7 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 		return fmt.Errorf("list prepared task cleanup jobs: %w", err)
 	}
 	var errs []error
+	now := time.Now().UTC()
 	for _, job := range jobs {
 		claim, decodeErr := managed.DeletionEnvelope(job.ResourceSnapshot)
 		if decodeErr != nil {
@@ -725,7 +929,15 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 			continue
 		}
 		if !committed {
-			shouldCancel := job.LastError == taskResourceCleanupMutationOutcomeUnknown
+			if s.hasTaskResourceCleanupPreparationLease(job.OperationID) {
+				continue
+			}
+			// A prepared row that has not changed for the full abandonment
+			// window cannot still own a bounded inventory/transition attempt.
+			// Cancel it even if an earlier repository failure prevented the
+			// in-progress or ambiguous marker from being persisted.
+			shouldCancel := job.LastError == taskResourceCleanupMutationOutcomeUnknown ||
+				!job.UpdatedAt.Add(preparedCleanupAbandonmentDelay).After(now)
 			if cancelUncommittedBefore != nil && job.CreatedAt.Before(*cancelUncommittedBefore) {
 				shouldCancel = true
 			}
@@ -748,7 +960,9 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 				ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
 			); err != nil {
 				errs = append(errs, fmt.Errorf("cancel uncommitted prepared cleanup %s: %w", job.ID, err))
+				continue
 			}
+			s.stopTaskResourceCleanupPreparationLease(job.OperationID)
 			continue
 		}
 		if err := s.activatePreparedTaskResourceCleanupJob(ctx, job); err != nil {
@@ -1258,6 +1472,10 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if snapshot == nil {
 		return errors.New("resource cleanup snapshot is nil")
 	}
+	releaseEnvironmentMutations := s.acquireTaskLSPEnvironmentMutationIDs(
+		taskCleanupEnvironmentIDs(snapshot.Sessions, snapshot.TaskEnvironment),
+	)
+	defer releaseEnvironmentMutations()
 	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: job.Attempts})
 	var (
 		targets []taskStopTarget
@@ -1325,13 +1543,12 @@ func (s *Service) executeTaskResourceCleanupJob(
 	reapRootCandidates := s.gatherOrphanReapRootCandidates(
 		snapshot, cleanupSessionIDs(snapshot.Sessions, targets),
 	)
+	environmentCleanup := restoreTaskEnvironmentCleanup(*snapshot)
+	environmentCleanup.preserveBranches = job.IsArchive()
+	environmentCleanup.discardWorktreeChanges = snapshot.DiscardWorktreeChanges
+	environmentCleanup.agentHistory = snapshot.AgentHistory
 	errs = append(errs, s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
-		taskEnvironmentCleanup{
-			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
-			preserveBranches:       job.IsArchive(),
-			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
-			agentHistory:           snapshot.AgentHistory,
-		},
+		environmentCleanup,
 		taskCleanupPreserveRows(stopOutcome))...)
 	s.removeQuickChatAgentHistory(ctx, job.TaskID, snapshot.AgentHistory, stopOutcome.failed)
 	if job.IsArchive() && len(failedStops) == 0 && len(errs) == 0 {
@@ -1423,6 +1640,27 @@ func (s *Service) captureAndPersistTaskSourceManifest(
 	return nil
 }
 
+func restoreTaskEnvironmentCleanup(snapshot taskResourceCleanupSnapshot) taskEnvironmentCleanup {
+	environment := snapshot.TaskEnvironment
+	if environment != nil {
+		copy := *environment
+		copy.AgentctlAuthSecretID = snapshot.TaskEnvironmentAuthSecretID
+		copy.AgentctlBootstrapSecretID = snapshot.TaskEnvironmentBootstrapSecretID
+		copy.ContainerControlAuthTokenSecretID = snapshot.TaskEnvironmentContainerControlSecretID
+		copy.ContainerBootstrapNonceSecretID = snapshot.TaskEnvironmentContainerBootstrapSecretID
+		environment = &copy
+	}
+	return taskEnvironmentCleanup{
+		env:       environment,
+		deleteRow: snapshot.DeleteEnvironmentRow,
+		// Older durable snapshots only recorded row deletion. Preserve their
+		// cleanup semantics while letting task/workspace delete jobs remove
+		// credentials after the task FK already removed the environment row.
+		deleteSecrets: snapshot.DeleteEnvironmentSecrets || snapshot.DeleteEnvironmentRow,
+		agentHistory:  snapshot.AgentHistory,
+	}
+}
+
 func (s *Service) hasLegacyWorktreeCleanup() bool {
 	if s.worktreeCleanup == nil {
 		return false
@@ -1495,6 +1733,7 @@ func (s *Service) resolveTaskResourceCleanupAfterMutationError(ctx context.Conte
 	defer cancel()
 	committed, err := s.preparedTaskCleanupMutationCommitted(transitionCtx, job)
 	if err != nil {
+		s.stopTaskResourceCleanupPreparationLease(job.OperationID)
 		if markErr := s.resourceCleanups.CompleteTaskResourceCleanupJob(
 			transitionCtx, job.ID, models.TaskResourceCleanupStatePrepared,
 			taskResourceCleanupMutationOutcomeUnknown, nil,
@@ -1519,7 +1758,30 @@ func (s *Service) resolveTaskResourceCleanupAfterMutationError(ctx context.Conte
 	); err != nil {
 		s.logger.Warn("cancel task resource cleanup job failed",
 			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+		s.stopTaskResourceCleanupPreparationLease(job.OperationID)
+		s.startTaskResourceCleanup(job)
+		return
 	}
+	s.stopTaskResourceCleanupPreparationLease(job.OperationID)
+}
+
+// ResolvePreparedTaskResourceCleanup determines a cascade mutation's durable
+// outcome instead of assuming that a returned database error means rollback.
+// Confirmed commits activate cleanup, confirmed non-commits cancel it, and an
+// unreadable outcome remains prepared for periodic reconciliation.
+func (s *Service) ResolvePreparedTaskResourceCleanup(ctx context.Context, operationID string) error {
+	if s.resourceCleanups == nil || operationID == "" {
+		return nil
+	}
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
+	if err != nil {
+		s.stopTaskResourceCleanupPreparationLease(operationID)
+		return err
+	}
+	s.resolveTaskResourceCleanupAfterMutationError(transitionCtx, job)
+	return nil
 }
 
 func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob, cleanupErr error) error {
@@ -1695,8 +1957,7 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	// Session and worktree creation serialize against the owning task row and
 	// reject new ownership while this prepared barrier is active, so the
 	// snapshot below cannot miss a resource admitted mid-preparation.
-	job, err := s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
-		nil, nil, nil, nil, taskEnvironmentCleanup{discardWorktreeChanges: discardWorktreeChanges}, true, false, "")
+	job, err := s.reservePreparedTaskResourceCleanup(ctx, taskID, trigger, operationID)
 	if err != nil {
 		return err
 	}
@@ -1755,20 +2016,22 @@ func (s *Service) PrepareTaskResourceCleanupWithOptions(
 	if err != nil {
 		return cancelPrepared(fmt.Errorf("list remote task directories for cleanup snapshot: %w", err))
 	}
-	snapshot := taskResourceCleanupSnapshot{
-		Sessions:               sessions,
-		Worktrees:              worktrees,
-		WorktreeHeadOIDs:       worktreeHeadOIDs,
-		WorktreeTaskDirNames:   worktreeTaskDirNames,
-		WorktreeBranchMetadata: worktreeBranchMetadata,
-		StopTargets:            persistStopTargets(stopTargets),
-		TaskEnvironment:        taskEnv,
-		DeleteEnvironmentRow:   deleteEnvironmentRow,
-		DiscardWorktreeChanges: discardWorktreeChanges,
-		LegacyWorktreeCleanup:  s.hasLegacyWorktreeCleanup(),
-		SSHTaskDirs:            sshTaskDirs,
-		WorkspaceID:            task.WorkspaceID,
-	}
+	snapshot := s.buildTaskResourceCleanupSnapshot(
+		sessions,
+		worktrees,
+		stopTargets,
+		taskEnvironmentCleanup{
+			env:           taskEnv,
+			deleteRow:     deleteEnvironmentRow,
+			deleteSecrets: deleteEnvironmentRow,
+		},
+	)
+	snapshot.WorktreeHeadOIDs = worktreeHeadOIDs
+	snapshot.SSHTaskDirs = sshTaskDirs
+	snapshot.WorktreeTaskDirNames = worktreeTaskDirNames
+	snapshot.WorktreeBranchMetadata = worktreeBranchMetadata
+	snapshot.DiscardWorktreeChanges = discardWorktreeChanges
+	snapshot.WorkspaceID = task.WorkspaceID
 	if taskResourceCleanupDeletesTask(trigger) {
 		snapshot.AgentHistory = s.captureQuickChatAgentHistory(ctx, task, sessions)
 	}
@@ -1820,6 +2083,7 @@ func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operatio
 		select {
 		case <-transitionCtx.Done():
 			timer.Stop()
+			s.stopTaskResourceCleanupPreparationLease(operationID)
 			return errors.Join(lastErr, transitionCtx.Err())
 		case <-timer.C:
 		}
@@ -1831,14 +2095,38 @@ func (s *Service) activatePreparedTaskResourceCleanupJob(
 	job *models.TaskResourceCleanupJob,
 ) error {
 	started, err := s.resourceCleanups.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
-	if err != nil || !started {
+	if err != nil {
+		s.stopTaskResourceCleanupPreparationLease(job.OperationID)
 		return err
+	}
+	s.stopTaskResourceCleanupPreparationLease(job.OperationID)
+	if !started {
+		return nil
 	}
 	job.State = models.TaskResourceCleanupStatePending
 	s.startTaskResourceCleanup(job)
 	return nil
 }
 func (s *Service) CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	for {
+		err := s.cancelPreparedTaskResourceCleanupOnce(transitionCtx, operationID)
+		if err == nil || errors.Is(err, ErrCleanupCancellationRace) {
+			s.stopTaskResourceCleanupPreparationLease(operationID)
+			return err
+		}
+		timer := time.NewTimer(preparedCleanupTransitionRetryDelay)
+		select {
+		case <-transitionCtx.Done():
+			timer.Stop()
+			return errors.Join(err, transitionCtx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *Service) cancelPreparedTaskResourceCleanupOnce(ctx context.Context, operationID string) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}

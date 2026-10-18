@@ -59,6 +59,12 @@ type ComparisonResolution struct {
 	ErrorCode string
 }
 
+// Ready reports whether an explicit comparison target has been fully
+// materialized and is safe for Git consumers to use.
+func (r ComparisonResolution) Ready() bool {
+	return r.Explicit && r.Status == comparisonTargetStatusReady && r.Ref != ""
+}
+
 // SetComparisonTarget installs the desired target before tracker polling
 // begins. It starts unavailable so an unmaterialized target cannot fall back
 // to a same-named origin branch.

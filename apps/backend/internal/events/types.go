@@ -18,6 +18,7 @@ const (
 	// step's non-hidden tasks in both bands. Deliberately not task.moved
 	// (.21) and not one task.updated per task.
 	TaskReordered                  = "task.reordered"
+	TaskLSPStateChanged            = "task.lsp_state_changed"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency
 	// completes successfully. Payload: {task_id, resolved_by_task_id}.

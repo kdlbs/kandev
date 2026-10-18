@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,8 +49,10 @@ func (e *Executor) repairReuseEnvironmentInventory(ctx context.Context, task *v1
 	if _, err = e.workspaceInventoryRepairer(task, session, req, env, key); err != nil {
 		return nil, err
 	}
-	// Serialize local retries; the durable claim supplies cross-task exclusion.
-	writerLock := e.taskEnvLock(task.ID)
+	// Launch and resume can hold the environment lock while repairing inventory.
+	// Use a separate lock for repair retries; the durable claim excludes borrowers.
+	lock, _ := e.inventoryRepairLocks.LoadOrStore(task.ID, &sync.Mutex{})
+	writerLock := lock.(*sync.Mutex)
 	writerLock.Lock()
 	defer writerLock.Unlock()
 	claimedCtx, release, err := e.claimInventoryEnvironment(ctx, env, session.ID)

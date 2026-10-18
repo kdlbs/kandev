@@ -304,6 +304,7 @@ interface MonacoEditorToolbarProps {
   lspStatus: LspStatus;
   lspProgress: LspProgressSnapshot;
   lspLanguage: string | null;
+  lspTaskId: string | null;
   showLspStatus?: boolean;
   onToggleLsp: () => void;
   onToggleWrap: () => void;
@@ -331,6 +332,7 @@ type MonacoToolbarActionsProps = Pick<
   | "lspStatus"
   | "lspProgress"
   | "lspLanguage"
+  | "lspTaskId"
   | "showLspStatus"
   | "onToggleLsp"
   | "onToggleWrap"
@@ -362,6 +364,7 @@ function MonacoToolbarActions({
   lspStatus,
   lspProgress,
   lspLanguage,
+  lspTaskId,
   showLspStatus = true,
   onToggleLsp,
   onToggleWrap,
@@ -388,6 +391,7 @@ function MonacoToolbarActions({
       />
       {showLspStatus ? (
         <LspStatusButton
+          taskId={lspTaskId}
           status={lspStatus}
           progress={lspProgress}
           lspLanguage={lspLanguage}
@@ -427,6 +431,7 @@ function MonacoToolbarActions({
 }
 
 function MonacoToolbarOverflowPrimaryActions({
+  lspTaskId,
   showLspStatus,
   lspStatus,
   lspProgress,
@@ -441,6 +446,7 @@ function MonacoToolbarOverflowPrimaryActions({
   | "lspStatus"
   | "lspProgress"
   | "lspLanguage"
+  | "lspTaskId"
   | "onToggleLsp"
   | "isDirty"
   | "isSaving"
@@ -450,6 +456,7 @@ function MonacoToolbarOverflowPrimaryActions({
     <div className="flex shrink-0 items-center gap-1">
       {showLspStatus !== false ? (
         <LspStatusButton
+          taskId={lspTaskId}
           status={lspStatus}
           progress={lspProgress}
           lspLanguage={lspLanguage}
@@ -507,6 +514,7 @@ export function MonacoEditorToolbar(props: MonacoEditorToolbarProps) {
         <MonacoToolbarOverflowPrimaryActions
           showLspStatus={props.showLspStatus}
           lspStatus={props.lspStatus}
+          lspTaskId={props.lspTaskId}
           lspProgress={props.lspProgress}
           lspLanguage={props.lspLanguage}
           onToggleLsp={props.onToggleLsp}

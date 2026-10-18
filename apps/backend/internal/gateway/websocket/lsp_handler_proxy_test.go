@@ -4,44 +4,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/agentruntime"
+	sharedlsp "github.com/kandev/kandev/internal/lsp"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
-
-// dialLSPHandler serves handler.HandleLSPConnection over a real HTTP server and
-// dials it. The returned channel closes once the handler has returned, which is
-// what lets a test assert on post-handler state (capacity release) without
-// polling.
-func dialLSPHandler(t *testing.T, handler *LSPHandler, target string) (*gorillaws.Conn, <-chan struct{}) {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
-
-	served := make(chan struct{})
-	router := gin.New()
-	router.GET("/lsp/:sessionId", func(c *gin.Context) {
-		defer close(served)
-		handler.HandleLSPConnection(c)
-	})
-	server := httptest.NewServer(router)
-	t.Cleanup(server.Close)
-
-	conn, resp, err := gorillaws.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+target, nil)
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	if err != nil {
-		t.Fatalf("dial %s: %v", target, err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn, served
-}
 
 // expectLSPCloseCode reads from conn and asserts the peer closed with wantCode.
 func expectLSPCloseCode(t *testing.T, conn *gorillaws.Conn, wantCode int, wantText string) {
@@ -62,121 +33,122 @@ func expectLSPCloseCode(t *testing.T, conn *gorillaws.Conn, wantCode int, wantTe
 	}
 }
 
-func TestNewLSPHandlerInitializesCapacityAndLogger(t *testing.T) {
-	handler := NewLSPHandler(nil, nil, testLogger())
-	if handler.capacity == nil {
-		t.Fatal("capacity limiter was not initialized")
+func TestNewLSPHandlerInitializesTaskControllerAndLogger(t *testing.T) {
+	resolver := &gatewayFakeAttachmentResolver{}
+	handler := NewLSPHandler(resolver, testLogger())
+	if handler.controller != resolver {
+		t.Fatal("task attachment resolver was not retained")
 	}
 	if handler.logger == nil {
 		t.Fatal("logger was not initialized")
 	}
-	if !handler.capacity.TryAcquire() {
-		t.Fatal("a freshly built handler must have capacity available")
-	}
-	handler.capacity.Release()
 }
 
-func TestHandleLSPConnectionRejectsInvalidRequests(t *testing.T) {
+func TestHandleLSPConnectionMapsControllerErrorsBeforeUpgrade(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tests := []struct {
-		name      string
-		sessionID string
-		query     string
-		wantError string
+		name       string
+		err        error
+		wantStatus int
+		wantError  string
 	}{
-		{name: "missing session", sessionID: "", query: "?language=go", wantError: "sessionId is required"},
-		{name: "missing language", sessionID: "s-1", query: "", wantError: "language query parameter is required"},
 		{
-			name:      "unsupported language",
-			sessionID: "s-1",
-			query:     "?language=cobol",
-			wantError: "unsupported language: cobol",
+			name: "unsupported language", err: sharedlsp.ErrUnsupportedLanguage,
+			wantStatus: http.StatusBadRequest, wantError: sharedlsp.ErrUnsupportedLanguage.Error(),
+		},
+		{
+			name: "server not ready", err: sharedlsp.ErrAttachmentNotReady,
+			wantStatus: http.StatusConflict, wantError: sharedlsp.ErrAttachmentNotReady.Error(),
+		},
+		{
+			name: "task not ready", err: sharedlsp.ErrTaskNotReady,
+			wantStatus: http.StatusUnprocessableEntity, wantError: sharedlsp.ErrTaskNotReady.Error(),
+		},
+		{
+			name: "unsupported executor", err: sharedlsp.ErrExecutorUnsupported,
+			wantStatus: http.StatusUnprocessableEntity, wantError: sharedlsp.ErrExecutorUnsupported.Error(),
+		},
+		{
+			name: "hidden task", err: repoerrors.ErrTaskNotFound,
+			wantStatus: http.StatusNotFound, wantError: lspUnavailableText,
+		},
+		{
+			name: "internal", err: errors.New("private runtime failure"),
+			wantStatus: http.StatusInternalServerError,
+			wantError:  lspUnavailableText,
 		},
 	}
-	handler := &LSPHandler{logger: testLogger(), capacity: newLSPCapacityLimiter(1)}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			resolver := &gatewayFakeAttachmentResolver{err: tt.err}
+			handler := NewLSPHandler(resolver, testLogger())
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
-			c.Request = httptest.NewRequest(http.MethodGet, "/lsp/"+tt.sessionID+tt.query, nil)
-			c.Params = gin.Params{{Key: "sessionId", Value: tt.sessionID}}
+			c.Request = httptest.NewRequest(
+				http.MethodGet, "/lsp/tasks/task-1/kotlin/attach", nil,
+			)
+			c.Params = gin.Params{
+				{Key: "taskId", Value: "task-1"},
+				{Key: "language", Value: "kotlin"},
+			}
 			handler.HandleLSPConnection(c)
 
-			if recorder.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
 			}
 			if got := decodeErrorBody(t, recorder.Body.Bytes()); got != tt.wantError {
 				t.Fatalf("error = %q, want %q", got, tt.wantError)
 			}
-			if !handler.capacity.TryAcquire() {
-				t.Fatal("a rejected request must not consume a capacity slot")
+			if resolver.taskID != "task-1" || resolver.language != "kotlin" {
+				t.Fatalf("resolver called with task=%q language=%q", resolver.taskID, resolver.language)
 			}
-			handler.capacity.Release()
 		})
 	}
 }
 
-func TestHandleLSPConnectionClosesWithSessionNotFoundCode(t *testing.T) {
-	manager := &recordingLSPLifecycleManager{resolveErr: errors.New("no such session")}
-	handler := &LSPHandler{
-		lifecycleMgr: manager,
-		capacity:     newLSPCapacityLimiter(1),
-		logger:       testLogger(),
+func TestHandleLSPConnectionReturnsSafeErrorWhenTaskHostAttachFails(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		response *http.Response
+		status   int
+	}{
+		{name: "transport failure", status: http.StatusBadGateway},
+		{
+			name: "task-host status", response: &http.Response{StatusCode: http.StatusConflict},
+			status: http.StatusConflict,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gatewayHost := &gatewayFakeTaskHost{
+				dialErr: errors.New("task host unavailable"), dialResponse: test.response,
+			}
+			resolver := &gatewayFakeAttachmentResolver{target: &sharedlsp.AttachmentTarget{
+				Host: gatewayHost, Language: "go", Generation: 3,
+			}}
+			handler := NewLSPHandler(resolver, testLogger())
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/lsp/tasks/task-1/go/attach", nil)
+			c.Params = gin.Params{
+				{Key: "taskId", Value: "task-1"},
+				{Key: "language", Value: "go"},
+			}
+
+			handler.HandleLSPConnection(c)
+
+			if recorder.Code != test.status {
+				t.Fatalf("status = %d, want %d", recorder.Code, test.status)
+			}
+			if got := decodeErrorBody(t, recorder.Body.Bytes()); got != lspHostUnavailableText {
+				t.Fatalf("error = %q", got)
+			}
+		})
 	}
-
-	conn, served := dialLSPHandler(t, handler, "/lsp/ghost?language=go")
-	expectLSPCloseCode(t, conn, lspCloseSessionNotFound, "session not found")
-	joinWithin(t, served, "HandleLSPConnection")
-
-	if !handler.capacity.TryAcquire() {
-		t.Fatal("capacity was not released after a failed resolve")
-	}
-	handler.capacity.Release()
-}
-
-func TestHandleLSPConnectionClosesWithUnsupportedExecutorCode(t *testing.T) {
-	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeSSH}
-	handler := &LSPHandler{
-		lifecycleMgr: manager,
-		capacity:     newLSPCapacityLimiter(1),
-		logger:       testLogger(),
-	}
-
-	conn, served := dialLSPHandler(t, handler, "/lsp/remote?language=go")
-	expectLSPCloseCode(t, conn, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText)
-	joinWithin(t, served, "HandleLSPConnection")
-
-	if manager.ensureCalls != 0 {
-		t.Fatalf("GetOrEnsureExecution calls = %d, want 0 for an unsupported runtime", manager.ensureCalls)
-	}
-}
-
-// The capacity slot is acquired inside resolveLSPExecution; a later failure
-// (here: an execution with no agentctl client) must still give it back.
-func TestHandleLSPConnectionReleasesCapacityWhenAgentctlIsMissing(t *testing.T) {
-	manager := &recordingLSPLifecycleManager{
-		runtimeName: agentruntime.RuntimeStandalone,
-		execution:   &lifecycle.AgentExecution{RuntimeName: agentruntime.RuntimeStandalone},
-	}
-	handler := &LSPHandler{
-		lifecycleMgr: manager,
-		capacity:     newLSPCapacityLimiter(1),
-		logger:       testLogger(),
-	}
-
-	conn, served := dialLSPHandler(t, handler, "/lsp/no-agentctl?language=go")
-	expectLSPCloseCode(t, conn, lspCloseSessionNotFound, "agentctl unavailable")
-	joinWithin(t, served, "HandleLSPConnection")
-
-	if !handler.capacity.TryAcquire() {
-		t.Fatal("capacity was not released after the agentctl client was found missing")
-	}
-	handler.capacity.Release()
 }
 
 func TestProxyLSPConnectionsForwardsMessagesInBothDirections(t *testing.T) {
-	handler := &LSPHandler{logger: testLogger(), capacity: newLSPCapacityLimiter(1)}
+	handler := &LSPHandler{logger: testLogger()}
 
 	browser, handlerBrowserSide := newTerminalWSPair(t)
 	handlerUpstreamSide, upstream := newTerminalWSPair(t)
@@ -232,7 +204,7 @@ func TestProxyLSPConnectionsForwardsMessagesInBothDirections(t *testing.T) {
 // A task-host LSP crash carries an application close code; the browser needs
 // that exact code to decide whether to retry or surface an install prompt.
 func TestProxyLSPConnectionsPropagatesUpstreamCloseCode(t *testing.T) {
-	handler := &LSPHandler{logger: testLogger(), capacity: newLSPCapacityLimiter(1)}
+	handler := &LSPHandler{logger: testLogger()}
 
 	browser, handlerBrowserSide := newTerminalWSPair(t)
 	handlerUpstreamSide, upstream := newTerminalWSPair(t)
@@ -241,13 +213,14 @@ func TestProxyLSPConnectionsPropagatesUpstreamCloseCode(t *testing.T) {
 		handler.proxyLSPConnections(handlerBrowserSide, handlerUpstreamSide, "sess-lsp", "go")
 	})
 
-	closeFrame := gorillaws.FormatCloseMessage(lspCloseInstallFailed, "install failed")
+	const taskHostCloseCode = 4007
+	closeFrame := gorillaws.FormatCloseMessage(taskHostCloseCode, "task-host failure")
 	if err := upstream.WriteControl(
 		gorillaws.CloseMessage, closeFrame, time.Now().Add(wsTestTimeout),
 	); err != nil {
 		t.Fatalf("upstream close: %v", err)
 	}
 
-	expectLSPCloseCode(t, browser, lspCloseInstallFailed, "install failed")
+	expectLSPCloseCode(t, browser, taskHostCloseCode, "task-host failure")
 	joinWithin(t, done, "proxyLSPConnections")
 }

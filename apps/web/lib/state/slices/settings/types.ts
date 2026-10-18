@@ -450,6 +450,7 @@ export type UserSettingsState = {
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
+  lspStatusHiddenLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
