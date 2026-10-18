@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // @covers AC-TASKS-WORKFLOW-PR-EVENTS-001.5, AC-TASKS-WORKFLOW-PR-EVENTS-001.6
@@ -38,16 +40,7 @@ func TestRegisteredPRWorkflowPreservesNewerStepArrival(t *testing.T) {
 			}
 			ctx := context.Background()
 			if reenter {
-				for _, step := range []string{"step_exec", "step_accept"} {
-					task, err := f.repo.GetTask(ctx, prWorkflowTaskID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					task.WorkflowStepID = step
-					if err := f.repo.UpdateTask(ctx, task); err != nil {
-						t.Fatal(err)
-					}
-				}
+				movePRWorkflowAwayAndBack(t, f)
 			}
 			before, err := f.repo.ListTaskStepTransitions(ctx, prWorkflowTaskID, 0, 10)
 			if err != nil {
@@ -73,13 +66,35 @@ func TestRegisteredPRWorkflowPreservesNewerStepArrival(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if reenter && (len(before) != 3 || len(after) != len(before) || after[0].ID != before[0].ID) {
-				t.Errorf("newer arrival ledger changed: before=%+v after=%+v", before, after)
+			if reenter {
+				assertPRWorkflowReentryLedger(t, before, after)
 			}
 			// On the unfixed source the stale move also starts entry work; join it.
 			if f.taskStep(t) == "step_done" {
 				f.waitOnEnter(t)
 			}
 		})
+	}
+}
+
+func movePRWorkflowAwayAndBack(t *testing.T, f *prWorkflowFixture) {
+	t.Helper()
+	ctx := context.Background()
+	for _, step := range []string{"step_exec", "step_accept"} {
+		task, err := f.repo.GetTask(ctx, prWorkflowTaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task.WorkflowStepID = step
+		if err := f.repo.UpdateTask(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertPRWorkflowReentryLedger(t *testing.T, before, after []models.StepTransition) {
+	t.Helper()
+	if len(before) != 3 || len(after) != len(before) || after[0].ID != before[0].ID {
+		t.Errorf("newer arrival ledger changed: before=%+v after=%+v", before, after)
 	}
 }
