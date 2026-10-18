@@ -63,6 +63,10 @@ type fakeClient struct {
 	searchIssuesFn func(filter SearchFilter, pageToken string, max int) (*SearchResult, error)
 	listLabelsFn   func(teamKey string) ([]LinearLabel, error)
 	listUsersFn    func(teamKey string) ([]LinearUser, error)
+	// listProjectsFn / projectContentsFn back the project filter and the
+	// project description placeholder.
+	listProjectsFn    func(teamKey string) ([]LinearProject, error)
+	projectContentsFn func(ids []string) (map[string]string, error)
 }
 
 func (c *fakeClient) TestAuth(_ context.Context) (*TestConnectionResult, error) {
@@ -120,6 +124,20 @@ func (c *fakeClient) ListUsers(_ context.Context, teamKey string) ([]LinearUser,
 		return c.listUsersFn(teamKey)
 	}
 	return nil, nil
+}
+
+func (c *fakeClient) ListProjects(_ context.Context, teamKey string) ([]LinearProject, error) {
+	if c.listProjectsFn != nil {
+		return c.listProjectsFn(teamKey)
+	}
+	return nil, nil
+}
+
+func (c *fakeClient) GetProjectContents(_ context.Context, ids []string) (map[string]string, error) {
+	if c.projectContentsFn != nil {
+		return c.projectContentsFn(ids)
+	}
+	return map[string]string{}, nil
 }
 
 type svcFixture struct {

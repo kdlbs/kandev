@@ -151,7 +151,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
-		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, projectIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
 	if err := validateFilterBounds(w.Filter); err != nil {
 		return nil, err
@@ -308,9 +308,46 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		pageToken = res.NextPageToken
 	}
+	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
+		if err := attachProjectDescriptions(ctx, client, out); err != nil {
+			return nil, err
+		}
+	}
 	// Order dispatch so the most important issues win the in-flight slots.
 	sortIssues(out, w.SortBy)
 	return out, nil
+}
+
+// attachProjectDescriptions fills ProjectDescription on every issue that
+// belongs to a project, with one content lookup per distinct project. A
+// failed lookup fails the poll so no task starts without the brief its
+// prompt asks for; the next poll retries.
+func attachProjectDescriptions(ctx context.Context, client Client, issues []*LinearIssue) error {
+	var ids []string
+	seen := map[string]struct{}{}
+	for _, issue := range issues {
+		if issue.ProjectID == "" {
+			continue
+		}
+		if _, ok := seen[issue.ProjectID]; ok {
+			continue
+		}
+		seen[issue.ProjectID] = struct{}{}
+		ids = append(ids, issue.ProjectID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	contents, err := client.GetProjectContents(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("linear: fetch project descriptions: %w", err)
+	}
+	for _, issue := range issues {
+		if issue.ProjectID != "" {
+			issue.ProjectDescription = contents[issue.ProjectID]
+		}
+	}
+	return nil
 }
 
 // stampWatchLastPolled writes the current timestamp using a fresh background
@@ -417,7 +454,7 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 		return fmt.Errorf("%w: workflowId and workflowStepId required", ErrInvalidConfig)
 	}
 	if filterIsEmpty(normalizeFilter(req.Filter)) {
-		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
+		return fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, projectIds, creatorId, or estimate range", ErrInvalidConfig)
 	}
 	if err := validateFilterBounds(req.Filter); err != nil {
 		return err
@@ -513,18 +550,9 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 		EstimateMin: f.EstimateMin,
 		EstimateMax: f.EstimateMax,
 	}
-	for _, id := range f.StateIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			out.StateIDs = append(out.StateIDs, id)
-		}
-	}
-	for _, id := range f.LabelIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			out.LabelIDs = append(out.LabelIDs, id)
-		}
-	}
+	out.StateIDs = trimIDs(f.StateIDs)
+	out.LabelIDs = trimIDs(f.LabelIDs)
+	out.ProjectIDs = trimIDs(f.ProjectIDs)
 	seenPriority := map[int]bool{}
 	for _, p := range f.Priorities {
 		if seenPriority[p] {
@@ -536,6 +564,18 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 	return out
 }
 
+// trimIDs trims each ID and drops empty entries; nil when none remain.
+func trimIDs(ids []string) []string {
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func filterIsEmpty(f SearchFilter) bool {
 	return f.Query == "" &&
 		f.TeamKey == "" &&
@@ -543,6 +583,7 @@ func filterIsEmpty(f SearchFilter) bool {
 		len(f.StateIDs) == 0 &&
 		len(f.Priorities) == 0 &&
 		len(f.LabelIDs) == 0 &&
+		len(f.ProjectIDs) == 0 &&
 		f.CreatorID == "" &&
 		f.EstimateMin == nil &&
 		f.EstimateMax == nil

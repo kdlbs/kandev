@@ -132,3 +132,23 @@ describe("sortBy form mapping", () => {
     expect(watchForm({}).sortBy).toBe("");
   });
 });
+
+describe("project filter", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.3
+  it("round-trips stored projectIds through the form into the payload", () => {
+    const form = watchForm({ filter: { teamKey: "ENG", projectIds: ["p1", "p2"] } });
+    expect(form.projectIds).toEqual(["p1", "p2"]);
+    expect(buildWatchPayload(form)?.filter.projectIds).toEqual(["p1", "p2"]);
+  });
+
+  // @covers AC-INTEGRATIONS-LINEAR-PROJECTS-001.2
+  it("treats projects alone as a non-empty filter", () => {
+    expect(isWatchFormReady(readyForm({ teamKey: "", projectIds: ["p1"] }))).toBe(true);
+    expect(isWatchFormReady(readyForm({ teamKey: "", projectIds: [] }))).toBe(false);
+  });
+
+  it("omits projectIds from the payload when none are selected", () => {
+    expect(buildWatchPayload(readyForm())?.filter.projectIds).toBeUndefined();
+    expect(watchForm({ filter: { teamKey: "ENG" } }).projectIds).toEqual([]);
+  });
+});

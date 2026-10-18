@@ -51,6 +51,7 @@ export interface FormState {
   assigned: string;
   priorities: LinearPriority[];
   labelIds: string[];
+  projectIds: string[];
   creatorId: string;
   estimateMin: string;
   estimateMax: string;
@@ -85,6 +86,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     assigned: "",
     priorities: [],
     labelIds: [],
+    projectIds: [],
     creatorId: "",
     estimateMin: "",
     estimateMax: "",
@@ -116,6 +118,7 @@ export function formStateFromWatch(w: LinearIssueWatch): FormState {
     assigned: f.assigned ?? "",
     priorities: f.priorities ?? [],
     labelIds: f.labelIds ?? [],
+    projectIds: f.projectIds ?? [],
     creatorId: f.creatorId ?? "",
     estimateMin: estimateString(f.estimateMin),
     estimateMax: estimateString(f.estimateMax),
@@ -232,6 +235,7 @@ export function filterIsEmpty(form: FormState): boolean {
     form.stateIds.length === 0 &&
     form.priorities.length === 0 &&
     form.labelIds.length === 0 &&
+    form.projectIds.length === 0 &&
     form.creatorId.trim() === "" &&
     parseEstimate(form.estimateMin) === undefined &&
     parseEstimate(form.estimateMax) === undefined
@@ -246,6 +250,7 @@ export function buildFilterPayload(form: FormState): LinearSearchFilter {
     assigned: form.assigned.trim() || undefined,
     priorities: form.priorities.length > 0 ? form.priorities : undefined,
     labelIds: form.labelIds.length > 0 ? form.labelIds : undefined,
+    projectIds: form.projectIds.length > 0 ? form.projectIds : undefined,
     creatorId: form.creatorId.trim() || undefined,
     estimateMin: parseEstimate(form.estimateMin),
     estimateMax: parseEstimate(form.estimateMax),

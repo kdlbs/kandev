@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import {
   listLinearLabels,
+  listLinearProjects,
   listLinearStates,
   listLinearTeams,
   listLinearUsers,
@@ -19,12 +20,18 @@ import {
   type FormState,
   type LinearPriority,
 } from "./linear-issue-watch-form";
-import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@/lib/types/linear";
+import type {
+  LinearLabel,
+  LinearProject,
+  LinearTeam,
+  LinearUser,
+  LinearWorkflowState,
+} from "@/lib/types/linear";
 import { useTranslation } from "react-i18next";
 import { resolveOptionLabel } from "@/lib/i18n/option-label";
 
 // useTeamsAndStates loads the team list once Linear is configured, plus the
-// states, labels, and users for the currently-selected team. Each per-team
+// states, labels, projects, and users for the currently-selected team. Each per-team
 // dataset is cached so switching teams renders an empty list (or the cached
 // list) without us having to setState in an effect — only the lookup
 // expression changes.
@@ -33,6 +40,7 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
   const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
   const [labelsByTeam, setLabelsByTeam] = useState<Record<string, LinearLabel[]>>({});
   const [usersByTeam, setUsersByTeam] = useState<Record<string, LinearUser[]>>({});
+  const [projectsByTeam, setProjectsByTeam] = useState<Record<string, LinearProject[]>>({});
   const fetchedTeams = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -90,6 +98,14 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
           markFailed();
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
+      listLinearProjects(teamKey, { workspaceId })
+        .then((res) => {
+          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [teamKey]: res.projects ?? [] }));
+        })
+        .catch(() => {
+          markFailed();
+          if (!cancelled) setProjectsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
+        }),
     ]).finally(() => {
       // Track full success so cleanup can keep the cache marker — otherwise
       // every cleanup wipes it and the next visit refetches.
@@ -111,10 +127,22 @@ export function useTeamsAndStates(workspaceId: string, teamKey: string) {
   const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
   const labels = teamKey ? (labelsByTeam[teamKey] ?? []) : [];
   const users = teamKey ? (usersByTeam[teamKey] ?? []) : [];
+  const projects = teamKey ? (projectsByTeam[teamKey] ?? []) : [];
   const loadingStates = !!teamKey && statesByTeam[teamKey] === undefined;
   const loadingLabels = !!teamKey && labelsByTeam[teamKey] === undefined;
   const loadingUsers = !!teamKey && usersByTeam[teamKey] === undefined;
-  return { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers };
+  const loadingProjects = !!teamKey && projectsByTeam[teamKey] === undefined;
+  return {
+    teams,
+    states,
+    labels,
+    users,
+    projects,
+    loadingStates,
+    loadingLabels,
+    loadingUsers,
+    loadingProjects,
+  };
 }
 
 export function StateMultiSelect({
@@ -232,6 +260,50 @@ export function LabelMultiSelect({
           >
             {/* Label names come from the Linear API — user data. */}
             <Badge variant={active ? "default" : "outline"}>{l.name}</Badge>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function ProjectMultiSelect({
+  projects,
+  loading,
+  selected,
+  onToggle,
+  disabled,
+}: {
+  projects: LinearProject[];
+  loading: boolean;
+  selected: string[];
+  onToggle: (id: string) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  if (disabled) return null;
+  if (loading) {
+    return <p className="text-xs text-muted-foreground">{t("linear:loadingProjects")}</p>;
+  }
+  if (projects.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">{t("linear:noProjectsAvailableForThisTeam")}</p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5" data-testid="linear-watch-projects">
+      {projects.map((project) => {
+        const active = selected.includes(project.id);
+        return (
+          <button
+            key={project.id}
+            type="button"
+            onClick={() => onToggle(project.id)}
+            aria-pressed={active}
+            className="cursor-pointer"
+          >
+            {/* Project names come from the Linear API — user data. */}
+            <Badge variant={active ? "default" : "outline"}>{project.name}</Badge>
           </button>
         );
       })}

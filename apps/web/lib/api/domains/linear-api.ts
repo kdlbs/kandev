@@ -5,6 +5,7 @@ import type {
   LinearIssue,
   LinearIssueWatch,
   LinearLabel,
+  LinearProject,
   LinearSearchFilter,
   LinearSearchResult,
   LinearTeam,
@@ -112,6 +113,13 @@ export async function listLinearLabels(teamKey: string, options?: WorkspaceApiOp
 export async function listLinearUsers(teamKey: string, options?: WorkspaceApiOptions) {
   return fetchJson<{ users: LinearUser[] }>(
     withWorkspace(`/api/v1/linear/users?team_key=${encodeURIComponent(teamKey)}`, options),
+    requestOptions(options),
+  );
+}
+
+export async function listLinearProjects(teamKey: string, options?: WorkspaceApiOptions) {
+  return fetchJson<{ projects: LinearProject[] }>(
+    withWorkspace(`/api/v1/linear/projects?team_key=${encodeURIComponent(teamKey)}`, options),
     requestOptions(options),
   );
 }
