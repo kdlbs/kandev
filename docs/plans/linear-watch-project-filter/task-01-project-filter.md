@@ -91,8 +91,8 @@ Desktop and phone regressions remove an unavailable ID, save, reload, and check
 the surviving project-only filter; phone coverage measures its 44 px target and
 checks actual center-point hit testing. This reuses the shipped Linear dialog's
 single-column Projects row and wrapping chips; the dialog owns scrolling and
-Update remains the primary action. Hosted follow-up RED/controls/GREEN and
-exact-built-source browser verification are pending, not a local execution claim.
+Update remains the primary action. Hosted caller RED/controls/GREEN is recorded
+below; exact-built-source browser verification is pending.
 
 
 Hosted review proof: five shared controls passed with the original caller,
@@ -110,3 +110,12 @@ The desktop/phone selection flow arms the shared `waitForHttp` observer before
 choosing Team and requires the projects GET to succeed before using its chips.
 This addresses the review's causal-wait finding without changing timeout or
 retry budgets; final rendered verification remains pending.
+
+The full frontend workflow `39155688189` and owning Linear backend package in
+`39155688188` passed at hosted merge source `5d27bfe0da` for head `0e89cdce29`.
+The phone project-only case in `39155688165` stopped before opening the dialog:
+the API fixture supplies team `ENG` when `teamKey` is omitted. This was a fixture
+setup failure, not assertion RED for the product defect. The regression now
+supplies an explicit empty team and reads the saved filter back before opening
+the dialog, verifying both the empty team and the two project IDs. Final browser
+and full-family verification of this correction remains pending in PR evidence.

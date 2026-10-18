@@ -92,9 +92,9 @@ python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --al
 
 Original author-reported results are recorded in each work order. Review
 remediation adds real `FilterFields` regressions and desktop/phone removal
-flows for project-only saved watches. Assertion RED, shared controls, corrected
-GREEN, and full hosted CI are pending and must be verified against the final
-source before delivery.
+flows for project-only saved watches. Hosted caller assertion RED, shared
+controls, and corrected GREEN are recorded below. Full hosted CI and browser
+results must be verified against the final source before delivery.
 
 ## Risks
 
@@ -115,3 +115,12 @@ The hosted formatter output was applied with only wrapping and trailing commas.
 This is behavioral RED/controls/GREEN evidence, not a successful typecheck or
 full-CI claim. Actual final full frontend typecheck and desktop/phone browser
 results remain pending in retained PR evidence.
+
+For head `0e89cdce29`, the full frontend workflow `39155688189` and owning Linear
+backend package in `39155688188` passed at hosted merge source `5d27bfe0da`.
+The phone run exposed a fixture setup error: omitting `teamKey` allowed the API
+helper to supply `ENG`, so the project-only case never opened its intended
+dialog. The corrected fixture explicitly supplies an empty team and verifies
+the persisted team and project IDs before UI interaction. This timeout is not
+product assertion RED; final browser and full-family verification remains
+pending for the corrected source.

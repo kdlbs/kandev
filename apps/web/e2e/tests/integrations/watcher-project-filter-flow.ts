@@ -124,15 +124,19 @@ export async function assertProjectOnlyWatchIsRemovable(
   seedData: SeedData,
 ) {
   await seedLinearWithProjects(apiClient, seedData);
+  const projectIds = ["project-archived", "project-search"];
   const watch = await apiClient.createLinearIssueWatch({
     workspaceId: seedData.workspaceId,
     workflowId: seedData.workflowId,
     workflowStepId: seedData.startStepId,
     agentProfileId: seedData.agentProfileId,
-    filter: { projectIds: ["project-archived", "project-search"] },
+    filter: { teamKey: "", projectIds },
     prompt: "Work on {{issue.identifier}}",
     enabled: false,
   });
+  const savedFilter = await watchFilter(apiClient, seedData, watch.id);
+  expect(savedFilter?.teamKey ?? "").toBe("");
+  expect(savedFilter?.projectIds).toEqual(projectIds);
   const projectRequests: string[] = [];
   testPage.on("request", (request) => {
     if (new URL(request.url()).pathname === "/api/v1/linear/projects") {
