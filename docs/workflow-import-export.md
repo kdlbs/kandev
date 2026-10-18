@@ -262,9 +262,9 @@ events:
         step_position: 3
 ```
 
-These seven triggers round-trip through export and import (fixed by
+These nine triggers round-trip through export and import (fixed by
 [#1109](https://github.com/kdlbs/kandev/issues/1109); the portable conversion
-in `export.go` now carries all eleven `StepEvents` fields, not just
+in `export.go` now carries all thirteen `StepEvents` fields, not just
 `on_enter`/`on_turn_start`/`on_turn_complete`/`on_exit`). What still does not
 round-trip is Office step *metadata* with no portable representation:
 `stage_type`, step participants (reviewers/approvers), recorded decisions,

@@ -21,10 +21,10 @@ path. No new table, route, WebSocket action, or MCP tool is introduced.
 | Acceptance criteria | Design sections |
 | --- | --- |
 | `AC-TASKS-WORKFLOW-PR-EVENTS-001.1` | Step event model |
-| `AC-TASKS-WORKFLOW-PR-EVENTS-001.2` | Evaluation; Idempotency |
-| `AC-TASKS-WORKFLOW-PR-EVENTS-001.3` | Evaluation; Idempotency |
-| `AC-TASKS-WORKFLOW-PR-EVENTS-001.4` | Session selection |
-| `AC-TASKS-WORKFLOW-PR-EVENTS-001.5` | Evaluation |
+| `AC-TASKS-WORKFLOW-PR-EVENTS-001.2` | Evaluation; Idempotency and replay |
+| `AC-TASKS-WORKFLOW-PR-EVENTS-001.3` | Evaluation; Idempotency and replay |
+| `AC-TASKS-WORKFLOW-PR-EVENTS-001.4` | Session selection; Retries |
+| `AC-TASKS-WORKFLOW-PR-EVENTS-001.5` | Evaluation; Idempotency and replay |
 | `AC-TASKS-WORKFLOW-PR-EVENTS-001.6` | Transition and history |
 | `AC-TASKS-WORKFLOW-PR-EVENTS-001.7` | Step editor |
 | `AC-TASKS-WORKFLOW-PR-EVENTS-001.8` | Compatibility |
@@ -48,62 +48,86 @@ Payloads are `engine.OnPRMergedPayload{PRs []LinkedPR}` and
 
 ## Evaluation
 
-`Service.handleTaskPRUpdated` calls `processTaskPRWorkflowEvent` after starting
-CI automation. Evaluation is synchronous and stops at the first failed gate:
+`Service.handleTaskPRUpdated` calls `handleTaskPRWorkflowEvent` after starting
+CI automation. `processTaskPRWorkflowEvent` evaluates synchronously and stops
+at the first gate that does not pass:
 
 1. Map the PR state: `merged` to `on_pr_merged`, `closed` to `on_pr_closed`,
    anything else ignored. Require a task ID, owner, repository, and a positive
    PR number, matching the `github_pr_merged` automation subscriber.
 2. Load the task. Skip archived and ephemeral tasks and tasks without a workflow
    step. Load the current step and skip when it declares no actions for the
-   trigger. This is where a merge on another step is ignored.
+   trigger.
 3. List the task's attached PRs (`ListTaskPRs`, which excludes detached rows).
    Skip when the reported PR is not among them. The reported PR's state replaces
    the stored row's state for the decision.
-4. `on_pr_merged` requires every linked PR to be merged. `on_pr_closed` uses the
-   reported PR only.
-5. Select a session, take the per-operation lock, check the operation ledger,
+4. `on_pr_merged` requires every linked PR to be merged; its outcome time is
+   the latest `merged_at`. `on_pr_closed` uses the reported PR and its
+   `closed_at`. A missing time counts as now.
+5. Step arrival: read the newest `task_step_transitions` row. When it is the
+   entry into the current step, skip outcomes older than its `occurred_at`. A
+   missing or older-schema row means the arrival is unknown and does not skip.
+6. Select a session, take the per-operation lock, check the operation ledger,
    and call `Engine.HandleTrigger` with `EvaluateOnly` and
    `DeferOperationMark`, as `processOnChildrenCompleted` does.
 
-## Idempotency
+## Idempotency and replay
 
 The operation id is deterministic:
 
 - merged: `on_pr_merged:<task>:<sha256 of the sorted owner/repo#number keys of
-  all linked PRs>`. A merged PR cannot be reopened, so one id per merged set is
-  enough.
-- closed: `on_pr_closed:<task>:<owner/repo#number>:<closed_at>`. A reopened and
-  closed again PR produces a new id.
+  all linked PRs>`;
+- closed: `on_pr_closed:<task>:<owner/repo#number>:<closed_at>`, so a reopened
+  and closed again PR produces a new id.
 
-The id is marked applied after a non-transition evaluation and after a
-committed transition, so poller redelivery of an unchanged PR does not repeat
-the actions. The engine ledger survives restarts; bus events missed while the
-backend is down are not replayed.
+The id is marked applied after a non-transition evaluation, after a committed
+transition, and after a compare-and-swap miss. The operation ledger is
+in-memory, so it only deduplicates redelivery within one process. Durable
+protection comes from step 5: the poller republishes a merged or closed PR
+whenever other tracked fields change, and after a restart such a refresh can
+fire only while the task is still on the step it occupied when the outcome
+happened. GitHub timestamps and the local ledger clock are compared directly;
+clock skew of a few seconds around a step entry can misclassify an outcome.
 
 ## Session selection
 
 Engine state and step history are keyed by session. The handler uses the
 active session (`CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`) when one
-exists. Otherwise it uses the primary session, then the most recent session in
-any state, so an idle, parked, or completed agent does not block the move. No
-session is created. A task without sessions is skipped with a debug log. No
-message is queued and no agent turn is started by the handler itself; the
-target step's own `on_enter` actions still run.
+exists, otherwise the newest non-terminal session (the primary first). Such a
+live session gets the full lifecycle. When every session is terminal, the
+newest one (the primary first) is used only to record the move, through the
+session-independent guarded lifecycle (`applyGuardedTransitionLifecycle`): the
+compare-and-swap commit, history, task completion, and engine-owned entry
+actions run, and no session is revived, so session-bound entry actions such as
+`auto_start_agent` do not run. Agent auto-start is also skipped elsewhere for
+tasks whose PRs are terminal. No session is created; a task without sessions
+is skipped with a debug log.
 
 ## Transition and history
 
-A transition goes through `applyEngineTransitionWithMode` with
-`transitionLifecycleWithOnEnter`, the same lifecycle as `on_children_completed`:
-target validation, credential preflight, `on_exit`, committed step change,
-history row, data patch, terminal-step completion, then asynchronous
-`on_enter`. The history mapping adds `StepTransitionTriggerPRMerged`
-(`on_pr_merged`) and `StepTransitionTriggerPRClosed` (`on_pr_closed`). The row
-is written through `recordAutoStepTransition` with a nil actor id, so it is a
-system move.
+With a live session the transition goes through
+`applyEngineTransitionWithCommitMode` with `transitionLifecycleWithOnEnter`, the
+same lifecycle as `on_children_completed`, but with a compare-and-swap commit:
+`applyTransitionIfAtStepRaw` writes the move only while the task is still on
+the evaluated source step, inside the admission transaction. A task moved by
+someone else in the meantime keeps its newer step; the PR event reports no
+transition. The commit context carries the step-entry allocation
+(`transitionContext`), then the handler publishes `task.updated`, clears the
+session review status, and pulls feeder work, as `ApplyTransition` does.
 
-As with `on_children_completed`, a session that is still `RUNNING` when the
-transition commits is set to `WAITING_FOR_INPUT`.
+The history mapping adds `StepTransitionTriggerPRMerged` (`on_pr_merged`) and
+`StepTransitionTriggerPRClosed` (`on_pr_closed`). The row is written with a nil
+actor id, so it is a system move. The task-step transition ledger records the
+move as `engine_transition` with a system actor, like `on_children_completed`.
+As with `on_children_completed`, a live session that is still `RUNNING` when
+the transition commits is set to `WAITING_FOR_INPUT`.
+
+## Retries
+
+The poller publishes an event only when PR data changes. When evaluation or the
+commit fails with an error (not a skip or a compare-and-swap miss),
+`scheduleTaskPRWorkflowRetry` re-runs the same PR snapshot after 5 s, 30 s, and
+2 min on the CI automation worker lifecycle, so service shutdown cancels it.
 
 ## Step editor
 

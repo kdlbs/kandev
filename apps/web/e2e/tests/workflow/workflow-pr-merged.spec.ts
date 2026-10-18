@@ -55,16 +55,15 @@ test.describe("Workflow PR lifecycle events", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("Task awaiting merge", acceptStep.id)).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(kanban.taskCardInColumn("Task awaiting merge", acceptStep.id)).toBeVisible();
     await expect(kanban.taskCardInColumn("Task awaiting merge", doneStep.id)).toHaveCount(0);
 
     await apiClient.mockGitHubAssociateTaskPR({ ...linkedPR, state: "merged" });
 
-    await expect(kanban.taskCardInColumn("Task awaiting merge", doneStep.id)).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
+      .toBe(doneStep.id);
+    await expect(kanban.taskCardInColumn("Task awaiting merge", doneStep.id)).toBeVisible();
     await expect
       .poll(async () => {
         const { history } = await apiClient.listWorkflowHistory(sessionId);

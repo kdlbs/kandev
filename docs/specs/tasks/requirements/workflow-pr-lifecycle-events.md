@@ -59,18 +59,23 @@ closed, independent of agent turns and message delivery.
   run once for that close.
 - **AC-TASKS-WORKFLOW-PR-EVENTS-001.4:** The event shall run without an agent
   turn and without a queued message, including when the task's agent session is
-  waiting for input, idle, completed, or has queued messages. A task with no
-  session at all shall be skipped and logged.
+  waiting for input, idle, completed, or has queued messages. When every session
+  of the task is terminal, the move shall still apply without reviving a
+  session; session-bound entry actions of the destination do not run. A task
+  with no session at all shall be skipped and logged. A failed evaluation or
+  commit shall be retried a bounded number of times.
 - **AC-TASKS-WORKFLOW-PR-EVENTS-001.5:** A PR reported for a task whose current
   step does not declare the event, a PR that is not linked to the task, an
   archived or ephemeral task, and a PR state other than merged or closed shall
-  not change the task. A merge or close reported while the task is on a step
-  without the event shall not run later actions when the task enters a PR event
-  step.
+  not change the task. The event shall fire only when the merge (the latest
+  merge of the linked set) or close happened at or after the task entered its
+  current step, so an outcome from an earlier step is never replayed by a later
+  poller refresh.
 - **AC-TASKS-WORKFLOW-PR-EVENTS-001.6:** A transition caused by these events
   shall apply the normal transition lifecycle (`on_exit`, persisted step change,
   `on_enter`, and task completion when the target step completes tasks on
-  entry). Its step-transition history row shall use trigger `on_pr_merged` or
+  entry). The move shall commit only while the task is still on the evaluated
+  step; a newer move wins. Its step-transition history row shall use trigger `on_pr_merged` or
   `on_pr_closed` with no human actor identifier.
 - **AC-TASKS-WORKFLOW-PR-EVENTS-001.7:** The workflow step editor shall offer
   **When PR Merged** and **When PR Closed** transition selectors with Do nothing,
@@ -87,8 +92,8 @@ closed, independent of agent turns and message delivery.
   automation.
 - Evaluating PR state when a task enters a step; only poller-reported changes
   run the events.
-- Exactly-once delivery beyond the workflow engine's operation ledger, and
-  replay of bus events missed while the backend was down.
+- Exactly-once delivery: redelivery is deduplicated in process; across restarts
+  the step-arrival rule prevents replays of outcomes from earlier steps.
 - Per-repository or per-branch filters on the events.
 
 ## Implementation plans

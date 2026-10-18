@@ -77,6 +77,15 @@ func linkedTaskPR(number int, state string) *github.TaskPR {
 	}
 }
 
+func (f *prWorkflowFixture) process(t *testing.T, pr *github.TaskPR) bool {
+	t.Helper()
+	transitioned, err := f.svc.processTaskPRWorkflowEvent(context.Background(), pr)
+	if err != nil {
+		t.Fatalf("processTaskPRWorkflowEvent: %v", err)
+	}
+	return transitioned
+}
+
 func (f *prWorkflowFixture) taskStep(t *testing.T) string {
 	t.Helper()
 	task, err := f.repo.GetTask(context.Background(), prWorkflowTaskID)
@@ -100,7 +109,7 @@ func TestProcessTaskPRWorkflowEvent_MergedMovesTaskOnceAndRecordsTrigger(t *test
 	merged := linkedTaskPR(1, "merged")
 	f.github.taskPRs = []*github.TaskPR{merged}
 
-	if !f.svc.processTaskPRWorkflowEvent(context.Background(), merged) {
+	if !f.process(t, merged) {
 		t.Fatal("expected merged PR to transition the task")
 	}
 	f.waitOnEnter(t)
@@ -123,7 +132,7 @@ func TestProcessTaskPRWorkflowEvent_MergedMovesTaskOnceAndRecordsTrigger(t *test
 		t.Errorf("history move = %s -> %s, want step_accept -> step_done", call.fromStepID, call.toStepID)
 	}
 
-	if f.svc.processTaskPRWorkflowEvent(context.Background(), merged) {
+	if f.process(t, merged) {
 		t.Fatal("expected a repeated merged event not to transition again")
 	}
 	if got := len(f.recorder.Calls()); got != 1 {
@@ -137,7 +146,7 @@ func TestProcessTaskPRWorkflowEvent_MergedWaitsForEveryLinkedPR(t *testing.T) {
 	second := linkedTaskPR(2, "open")
 	f.github.taskPRs = []*github.TaskPR{first, second}
 
-	if f.svc.processTaskPRWorkflowEvent(context.Background(), first) {
+	if f.process(t, first) {
 		t.Fatal("expected no transition while another linked PR is open")
 	}
 	if got := f.taskStep(t); got != "step_accept" {
@@ -145,7 +154,7 @@ func TestProcessTaskPRWorkflowEvent_MergedWaitsForEveryLinkedPR(t *testing.T) {
 	}
 
 	second.State = "merged"
-	if !f.svc.processTaskPRWorkflowEvent(context.Background(), second) {
+	if !f.process(t, second) {
 		t.Fatal("expected transition once every linked PR is merged")
 	}
 	f.waitOnEnter(t)
@@ -161,7 +170,7 @@ func TestProcessTaskPRWorkflowEvent_ClosedRunsOnPRClosed(t *testing.T) {
 	closed.ClosedAt = &closedAt
 	f.github.taskPRs = []*github.TaskPR{closed}
 
-	if !f.svc.processTaskPRWorkflowEvent(context.Background(), closed) {
+	if !f.process(t, closed) {
 		t.Fatal("expected closed PR to run on_pr_closed")
 	}
 	f.waitOnEnter(t)
@@ -179,7 +188,7 @@ func TestProcessTaskPRWorkflowEvent_IgnoredWithoutStepEvent(t *testing.T) {
 	merged := linkedTaskPR(1, "merged")
 	f.github.taskPRs = []*github.TaskPR{merged}
 
-	if f.svc.processTaskPRWorkflowEvent(context.Background(), merged) {
+	if f.process(t, merged) {
 		t.Fatal("expected a step without on_pr_merged to ignore the merge")
 	}
 	if got := f.taskStep(t); got != "step_accept" {
@@ -194,7 +203,7 @@ func TestProcessTaskPRWorkflowEvent_IgnoresPRNotLinkedToTask(t *testing.T) {
 	f := newPRWorkflowFixture(t, prMergedAcceptEvents())
 	f.github.taskPRs = []*github.TaskPR{linkedTaskPR(1, "open")}
 
-	if f.svc.processTaskPRWorkflowEvent(context.Background(), linkedTaskPR(99, "merged")) {
+	if f.process(t, linkedTaskPR(99, "merged")) {
 		t.Fatal("expected a PR that is not linked to the task to be ignored")
 	}
 	if got := f.taskStep(t); got != "step_accept" {
@@ -202,7 +211,7 @@ func TestProcessTaskPRWorkflowEvent_IgnoresPRNotLinkedToTask(t *testing.T) {
 	}
 }
 
-func TestProcessTaskPRWorkflowEvent_MovesTaskWithIdleSession(t *testing.T) {
+func TestProcessTaskPRWorkflowEvent_MovesTaskWithCompletedSessionWithoutReviving(t *testing.T) {
 	f := newPRWorkflowFixture(t, prMergedAcceptEvents())
 	ctx := context.Background()
 	if err := f.repo.UpdateTaskSessionState(ctx, prWorkflowSessionID, models.TaskSessionStateCompleted, ""); err != nil {
@@ -211,12 +220,22 @@ func TestProcessTaskPRWorkflowEvent_MovesTaskWithIdleSession(t *testing.T) {
 	merged := linkedTaskPR(1, "merged")
 	f.github.taskPRs = []*github.TaskPR{merged}
 
-	if !f.svc.processTaskPRWorkflowEvent(ctx, merged) {
-		t.Fatal("expected the merge to move a task whose session is not active")
+	if !f.process(t, merged) {
+		t.Fatal("expected the merge to move a task whose only session is completed")
 	}
-	f.waitOnEnter(t)
 	if got := f.taskStep(t); got != "step_done" {
 		t.Fatalf("task step = %q, want step_done", got)
+	}
+	session, err := f.repo.GetTaskSession(ctx, prWorkflowSessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if session.State != models.TaskSessionStateCompleted {
+		t.Fatalf("session state = %q, want COMPLETED (not revived)", session.State)
+	}
+	calls := f.recorder.Calls()
+	if len(calls) != 1 || calls[0].trigger != wfmodels.StepTransitionTriggerPRMerged {
+		t.Fatalf("history calls = %#v, want one on_pr_merged row", calls)
 	}
 }
 

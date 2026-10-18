@@ -1591,11 +1591,13 @@ type Service struct {
 	// ciAutomationWorkers owns the asynchronous per-PR automation loops. The
 	// service-owned context lets Stop cancel in-flight evaluations and prevents
 	// workers from outliving the orchestrator across a restart.
-	ciAutomationMu      sync.Mutex
-	ciAutomationCtx     context.Context
-	ciAutomationCancel  context.CancelFunc
-	ciAutomationStopped bool
-	ciAutomationWorkers sync.WaitGroup
+	ciAutomationMu  sync.Mutex
+	ciAutomationCtx context.Context
+	// taskPRWorkflowRetryDelays overrides defaultTaskPRWorkflowRetryDelays in tests.
+	taskPRWorkflowRetryDelays []time.Duration
+	ciAutomationCancel        context.CancelFunc
+	ciAutomationStopped       bool
+	ciAutomationWorkers       sync.WaitGroup
 
 	// dynamicSuccessorWorkers owns detached dynamic launches and failure recovery. The
 	// launch has to leave the agent.failed dispatch to avoid the prompt

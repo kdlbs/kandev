@@ -37,8 +37,9 @@ covers the model, the orchestrator consumer, the step editor, tests, and docs.
 
 - Go: engine trigger dispatch, portable export/YAML round trip and validation,
   step reference cleanup, template loader, and orchestrator consumer tests
-  (merge, all-linked-PRs rule, close, unlinked PR, step without event, inactive
-  session, redelivery).
+  (merge, all-linked-PRs rule, close, unlinked PR, step without event,
+  completed-only session, redelivery, outcome before step arrival,
+  compare-and-swap against a newer move, retry after an error).
 - Web: helper, hook, and selector unit tests.
 - Playwright: a merged mock PR moves the task card to the target column and
   records `on_pr_merged` history; the step editor saves both events.
