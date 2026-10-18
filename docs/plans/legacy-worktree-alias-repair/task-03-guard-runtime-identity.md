@@ -190,3 +190,26 @@ commands set `KANDEV_SERVER_HOST=127.0.0.1` and supplied Chromium's installed
 library directories through `LD_LIBRARY_PATH`. The initial bind-address and
 missing-library failures occurred before the tests exercised application code.
 Temporary diagnostic capture was removed. No product UI changed.
+
+PR review follow-up (2026-10-18): retained deleted rows no longer block a unique
+live owner during transition or inventory retirement. Revival and ambiguous
+history remain blocked. SQLite and disposable PostgreSQL tests cover transition,
+update, slot deletion, environment deletion, task-environment deletion, revival,
+and history-only ambiguity. Six healthy cases failed before the fix. `go test
+-race ./internal/task/repository/sqlite -run
+'Test(TaskEnvironmentAliasIdentity|PostgresAliasIdentity)' -count=1` passed with
+`KANDEV_TEST_POSTGRES_DSN` set to the disposable PostgreSQL fixture.
+
+Current-base integration exposed transient HTTP 409 move responses in the
+workflow-focus fixtures. The setup only excluded `CREATED`, so it could admit a
+secondary session that was still `STARTING` or `RUNNING`. It now waits for
+`WAITING_FOR_INPUT`, as the move precondition requires. A complete six-case
+canvas/preview/workflow sequence passed on the combined branch before this
+readiness refinement; focused post-change results are recorded below.
+
+The four desktop workflow-focus tests passed after the readiness refinement
+(1.3 minutes, retries disabled) on the synthetic merge with base
+`70c884c84b8e16e3fb2f71736a791e93016ba00a`. Scoped ESLint passed. The command was
+`pnpm --dir apps/web e2e:run --no-build --project chromium
+e2e/tests/workflow/workflow-session-focus.spec.ts -- --retries=0`, with the same
+host and Chromium library settings described above.

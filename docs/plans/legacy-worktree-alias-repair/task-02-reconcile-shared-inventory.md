@@ -113,3 +113,31 @@ Passed on disposable fixtures:
 An environment interruption invalidated two earlier test runs. Both full runs
 above were restarted and completed with recorded exit status zero. No live
 installation data changed.
+
+PR review follow-up (2026-10-18): preview now records existing foreign-key
+violations in the affected inventory tables. It refuses an invalid selected row
+before creating a fence. Publication rejects new violations; unrelated legacy
+violations no longer block application or rollback. SQLite enforcement stays on.
+A regression with 1,100 unrelated violations reproduced the fenced recovery
+failure before this fix. Coverage includes an unrelated violation in an affected
+table, rollback from a journal without the new baseline, and refusal of an
+invalid selected row. The existing complete-session selection guard also gained
+empty, partial, and complete workspace-correction tests; its refusals passed
+before production changes and required no extra guard.
+
+Final focused race validation passed:
+
+```bash
+go -C apps/backend test -race ./internal/task/inventoryrepair -run 'TestAlias(Repair|Workspace|Recovery)|TestRecovery' -count=1
+go -C apps/backend test -race ./cmd/worktree-inventory-repair -count=1
+go -C apps/backend run ./cmd/sqlguard ./internal
+bash scripts/lint-go-changed apps/backend/internal/task/inventoryrepair/alias_foreign_keys.go apps/backend/internal/task/repository/sqlite/task_environment_identity.go
+```
+
+The repair tests passed in 87.834s and the CLI tests in 1.223s. SQL guard and
+scoped lint passed with zero issues. Specification validation and lint passed.
+All database corruption and recovery checks used disposable fixtures.
+
+The full `inventoryrepair` race package also passed (522.743s). That invocation
+included a misspelled CLI package path and therefore exited 1 overall; the
+correct CLI package was run separately and passed as recorded above.

@@ -28,6 +28,9 @@ func inspectAliases(ctx context.Context, p Plan, db queryer) (*inspection, error
 	if err := in.validateAliasWorkspacePaths(ctx); err != nil {
 		return nil, err
 	}
+	if err := in.inspectAliasForeignKeys(ctx); err != nil {
+		return nil, err
+	}
 	if p.ExpectedRows != nil && !reflect.DeepEqual(p.ExpectedRows, in.rows) {
 		return nil, errors.New("repair database observations changed; prepare and review a new plan")
 	}

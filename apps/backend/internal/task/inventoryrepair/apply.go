@@ -194,15 +194,12 @@ func (j *journal) reconcile(ctx context.Context, db *sql.DB, forward bool, audit
 	if err = j.publishDirection(ctx, tx, forward, before, after, audit); err != nil {
 		return err
 	}
-	if j.Plan.Version == 2 {
-		violations, checkErr := queryRows(ctx, tx, `PRAGMA foreign_key_check`)
-		if checkErr != nil {
-			return checkErr
-		}
-		if len(violations) > 0 {
-			return errors.New("repair violates foreign-key integrity")
+	if j.Plan.Version == 2 && forward {
+		if err = j.checkNewAliasForeignKeyViolations(ctx, tx); err != nil {
+			return err
 		}
 	}
+
 	if err = tx.Commit(); err != nil {
 		return err
 	}

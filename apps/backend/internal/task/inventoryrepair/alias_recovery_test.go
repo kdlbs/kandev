@@ -10,14 +10,14 @@ import (
 
 // @covers AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.5
 func TestAliasRecoveryInterruptedGraph(t *testing.T) {
-	for _, phase := range []string{"prepared", "committed", "complete-fenced"} {
+	for _, phase := range []string{phasePrepared, "committed", "complete-fenced"} {
 		for _, mode := range []string{"apply", "rollback"} {
 			t.Run(phase+"/"+mode, func(t *testing.T) {
 				f := sharedAliasFixture(t)
 				addAliasSnapshot(t, &f)
 				before := aliasFixtureRows(t, f)
 				j := stagedRepair(t, f)
-				if phase != "prepared" {
+				if phase != phasePrepared {
 					tx, err := f.db.BeginTx(context.Background(), nil)
 					if err != nil {
 						t.Fatal(err)

@@ -21,7 +21,9 @@ func guardTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.Tx, row *models.Ta
 		return err
 	}
 	var currentID string
-	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT COALESCE(worktree_id,'') FROM task_environment_repos WHERE id = ?`), row.ID).Scan(&currentID)
+	var currentLive bool
+	err = tx.QueryRowContext(ctx, tx.Rebind(`SELECT COALESCE(worktree_id,''),
+ deleted_at IS NULL AND status <> 'deleted' FROM task_environment_repos WHERE id = ?`), row.ID).Scan(&currentID, &currentLive)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -29,8 +31,19 @@ func guardTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.Tx, row *models.Ta
 		return models.ErrWorkspaceReuseUnsafe
 	}
 	slot := physicalclaim.Slot{ID: row.ID, EnvironmentID: row.TaskEnvironmentID, RepositoryID: row.RepositoryID, BranchSlug: row.BranchSlug}
-	if err := physicalclaim.Check(ctx, tx, oldID, slot); err != nil {
+	historical := err == nil && !currentLive
+	if historical {
+		// A unique live owner outranks retained history. Resolve still rejects
+		// multiple live owners and groups that contain only competing history.
+		_, err = physicalclaim.Resolve(ctx, tx, oldID)
+	} else {
+		err = physicalclaim.Check(ctx, tx, oldID, slot)
+	}
+	if err != nil {
 		return err
+	}
+	if historical && row.WorktreeID == oldID && (row.DeletedAt != nil || row.Status == worktreeRepoStatusDeleted) {
+		return nil
 	}
 	return physicalclaim.Check(ctx, tx, row.WorktreeID, slot)
 }

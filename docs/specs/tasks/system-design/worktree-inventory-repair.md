@@ -209,7 +209,13 @@ Under the existing offline ownership lock, revalidate it in the write transactio
 before publication. Journal exact original row values, including raw timestamp
 text. Publish all alias removals, session/snapshot rebindings, workspace-path
 corrections, and redundant-environment retirement atomically. Verify foreign
-keys and the complete selected graph before commit. Preserve unrelated records.
+keys and the complete selected graph before commit. Before fencing, record existing
+foreign-key violations in the affected inventory tables. Refuse a selected row
+with an existing violation because rollback cannot safely restore that row.
+Forward publication must not introduce a new violation. Unrelated legacy
+violations must not prevent apply or rollback, including recovery from journals
+that predate this baseline. Keep SQLite foreign-key enforcement enabled.
+Preserve unrelated records.
 Perform no Git or filesystem mutation in version 2. Content, index, refs, and
 markers must match before and after application and rollback.
 

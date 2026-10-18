@@ -64,38 +64,58 @@ func Discover(ctx context.Context, opts DiscoveryOptions) (*DiscoveryReport, err
 	return discoverPage(ctx, tx, opts, ids)
 }
 
+const discoveryByteLimit = 1 << 20
+
 func discoverPage(ctx context.Context, tx queryer, opts DiscoveryOptions, ids []row) (*DiscoveryReport, error) {
 	report := &DiscoveryReport{Groups: []AliasGroup{}}
 	count := 0
 	for i, id := range ids {
 		if i == opts.Limit {
-			report.Next = report.Groups[len(report.Groups)-1].WorktreeID
 			break
 		}
 		group, err := discoverGroup(ctx, tx, stringValue(id, "worktree_id"))
 		if err != nil {
 			return nil, err
 		}
-		if count+len(group.Claims) > 1000 {
-			report.Next = report.Groups[len(report.Groups)-1].WorktreeID
-			break
+		next := ""
+		if i+1 < len(ids) {
+			next = group.WorktreeID
 		}
-		report.Groups = append(report.Groups, group)
-		data, err := json.Marshal(report)
+		single := &DiscoveryReport{Groups: []AliasGroup{group}, Next: next}
+		fits, err := discoveryReportFits(single)
 		if err != nil {
 			return nil, err
 		}
-		if len(data) > (1<<20)-2048 {
-			report.Groups = report.Groups[:len(report.Groups)-1]
-			if len(report.Groups) == 0 {
-				return nil, errors.New("discovery group exceeds response byte limit")
+		if !fits {
+			group.Claims = nil
+			group.Oversized = true
+			single.Groups[0] = group
+			fits, err = discoveryReportFits(single)
+			if err != nil {
+				return nil, err
 			}
-			report.Next = report.Groups[len(report.Groups)-1].WorktreeID
+			if !fits {
+				return nil, errors.New("discovery identity exceeds response byte limit")
+			}
+		}
+		candidate := &DiscoveryReport{Groups: append(report.Groups, group), Next: next}
+		fits, err = discoveryReportFits(candidate)
+		if err != nil {
+			return nil, err
+		}
+		if count+len(group.Claims) > 1000 || !fits {
 			break
 		}
+		report = candidate
 		count += len(group.Claims)
 	}
 	return report, nil
+}
+
+// The command uses two-space indentation and a trailing newline.
+func discoveryReportFits(report *DiscoveryReport) (bool, error) {
+	data, err := json.MarshalIndent(report, "", "  ")
+	return len(data)+1 <= discoveryByteLimit, err
 }
 
 func discoverGroup(ctx context.Context, db queryer, id string) (AliasGroup, error) {

@@ -117,3 +117,9 @@ Completed 2026-10-16.
 Additional implementation files are `alias_plan.go`, `alias_shared.go`,
 `alias_dependencies.go`, and `inspect.go`. Version-2 command mutation remains
 blocked until Task 02.
+
+PR review follow-up (2026-10-18): discovery now measures the actual two-space
+JSON encoding, trailing newline, and continuation cursor against the 1 MiB cap.
+A byte-oversized group returns an oversized placeholder so later groups remain
+reachable. Both regressions failed before the fix. `go test -race
+./internal/task/inventoryrepair -run TestAliasDiscovery -count=1` passed.
