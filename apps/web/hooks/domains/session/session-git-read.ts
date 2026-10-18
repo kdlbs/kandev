@@ -16,7 +16,7 @@ export function withSessionGitReadRetry<T>(
         (error instanceof WebSocketRequestError &&
           (error.code === "INTERNAL_ERROR" || error.code === "UNAVAILABLE"))
       ) {
-        // The coordinator retains data and owns one retry timer per shared read.
+        // The coordinator checks isCurrent before scheduling the shared retry timer.
         return { retryAfter: 5000 };
       }
       throw error;

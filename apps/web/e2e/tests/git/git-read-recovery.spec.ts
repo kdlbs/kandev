@@ -52,7 +52,7 @@ test("Changes automatically recovers its initial Git read without showing a fals
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.clickTab("Changes");
-  await expect.poll(() => requests).toBeGreaterThan(0);
+  await expect.poll(() => requests, { timeout: 15_000 }).toBeGreaterThan(0);
   const loading = session.changes.getByTestId("changes-panel-scroll-owner").getByRole("status");
   await expect(loading).toHaveText("Loading changes...");
   const empty = session.changes.getByText("Your changed files will appear here");

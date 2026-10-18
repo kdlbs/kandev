@@ -90,6 +90,7 @@ function ChangesPanelTimeline(
     Pick<ChangesPanelBodyProps, "gitStatus" | "commitsInitialLoading">,
 ) {
   if (!props.hasAnything) {
+    // Only the first commits result controls loading; diff retries keep their prior data.
     if (props.commitsInitialLoading) return <EmptyChangesPanel loading />;
     return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
   }
