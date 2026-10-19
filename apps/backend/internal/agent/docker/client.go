@@ -60,14 +60,6 @@ type ContainerConfig struct {
 	NetworkEndpoint *NetworkEndpointConfig
 }
 
-// NetworkInfo is the part of a Docker network's state Kandev reads. The
-// driver decides whether the network honours published ports, which decides
-// whether the backend can reach agentctl through it.
-type NetworkInfo struct {
-	Name   string
-	Driver string
-}
-
 // NetworkEndpointConfig describes one network attachment's settings.
 type NetworkEndpointConfig struct {
 	// Network is the network the endpoint attaches to.
@@ -119,6 +111,7 @@ type imageBuilder interface {
 type Client struct {
 	cli      *client.Client
 	storage  storageAPI
+	networks networkAPI
 	remover  containerRemover
 	builder  imageBuilder
 	logger   *logger.Logger
@@ -156,12 +149,13 @@ func NewClient(cfg config.DockerConfig, log *logger.Logger) (*Client, error) {
 	)
 
 	return &Client{
-		cli:     cli,
-		storage: cli,
-		remover: cli,
-		builder: cli,
-		logger:  log,
-		config:  cfg,
+		cli:      cli,
+		storage:  cli,
+		networks: cli,
+		remover:  cli,
+		builder:  cli,
+		logger:   log,
+		config:   cfg,
 	}, nil
 }
 
@@ -659,16 +653,6 @@ func selectContainerIP(networks map[string]*network.EndpointSettings, preferred 
 		return settings.IPAddress.String(), true
 	}
 	return "", false
-}
-
-// InspectNetwork returns the named network's state, or an error naming the
-// network when the daemon does not have it.
-func (c *Client) InspectNetwork(ctx context.Context, name string) (NetworkInfo, error) {
-	result, err := c.cli.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
-	if err != nil {
-		return NetworkInfo{}, fmt.Errorf("inspect network %s: %w", name, err)
-	}
-	return NetworkInfo{Name: result.Network.Name, Driver: result.Network.Driver}, nil
 }
 
 // ConnectNetwork attaches an existing container to a further network.

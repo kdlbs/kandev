@@ -2,15 +2,21 @@ package backendapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	agentdocker "github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/docknet"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -123,6 +129,136 @@ func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[s
 }
 
 type containerInventory struct{ reader *sqlx.DB }
+
+// networkTaskOracle resolves network ownership keys to owning-task liveness
+// for the docknet provider. Keys are kandev task IDs (from kandev.* labels)
+// or compose project names (kd_<task-hash> on the governed deployment).
+type networkTaskOracle struct{ reader *sqlx.DB }
+
+// Ownership resolves the network's ownership key, then looks the key up as a
+// task ID first and as a kd_-prefixed compose project name second: broker-
+// launched projects hom via labels only.
+func (o *networkTaskOracle) Ownership(ctx context.Context, network agentdocker.NetworkInfo) (string, docknet.TaskLookup, error) {
+	key := docknet.OwnershipKeyFromLabels(network.Labels)
+	if key == "" {
+		return "", docknet.TaskLookupUnknown, nil
+	}
+	taskID := key
+	if !isUUID(key) {
+		resolved, ok, err := o.taskIDForProjectName(ctx, key)
+		if err != nil {
+			return key, docknet.TaskLookupUnknown, err
+		}
+		if !ok {
+			return key, docknet.TaskLookupUnknown, nil
+		}
+		taskID = resolved
+	}
+	removable, err := o.taskRemovable(ctx, taskID)
+	if err != nil {
+		return key, docknet.TaskLookupUnknown, err
+	}
+	if removable {
+		return key, docknet.TaskLookupInactive, nil
+	}
+	return key, docknet.TaskLookupActive, nil
+}
+
+// taskRemovable mirrors containerInventory's liveness composite: done means
+// the task is archived or terminal AND has no live environment/executor.
+// A missing task row is removable-by-unknown handled by the caller.
+func (o *networkTaskOracle) taskRemovable(ctx context.Context, taskID string) (bool, error) {
+	inventory := &containerInventory{reader: o.reader}
+	removable, err := inventory.ContainerTaskRemovable(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	return removable, nil
+}
+
+// taskIDForProjectName resolves a kd_<task-hash> compose project name to a
+// task row. The guarded Compose broker hashes the absolute task root with
+// SHA-256 and uses the first 16 hexadecimal characters after the kd_ prefix.
+func (o *networkTaskOracle) taskIDForProjectName(ctx context.Context, name string) (string, bool, error) {
+	if !strings.HasPrefix(name, "kd_") {
+		return "", false, nil
+	}
+	fragment := strings.TrimPrefix(name, "kd_")
+	if fragment == "" {
+		return "", false, nil
+	}
+	var taskID string
+	// Exact task-ID match first (the deployment's canonical form).
+	query := o.reader.Rebind("SELECT id FROM tasks WHERE id = ?")
+	if err := o.reader.GetContext(ctx, &taskID, query, fragment); err == nil {
+		return taskID, true, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	var roots []networkTaskRoot
+	query = o.reader.Rebind(`
+		SELECT t.id AS task_id,
+		       COALESCE(te.workspace_path, '') AS workspace_path,
+		       COALESCE(te.task_dir_name, '') AS task_dir_name
+		FROM tasks t
+		LEFT JOIN task_environments te ON te.task_id = t.id`)
+	if err := o.reader.SelectContext(ctx, &roots, query); err != nil {
+		return "", false, err
+	}
+	var matchedTaskID string
+	for _, row := range roots {
+		for _, root := range row.candidateRoots() {
+			if guardedComposeProjectName(root) != name {
+				continue
+			}
+			if matchedTaskID != "" && matchedTaskID != row.TaskID {
+				return "", false, errors.New("compose project hash matches multiple tasks")
+			}
+			matchedTaskID = row.TaskID
+		}
+	}
+	return matchedTaskID, matchedTaskID != "", nil
+}
+
+type networkTaskRoot struct {
+	TaskID        string `db:"task_id"`
+	WorkspacePath string `db:"workspace_path"`
+	TaskDirName   string `db:"task_dir_name"`
+}
+
+func (r networkTaskRoot) candidateRoots() []string {
+	if r.WorkspacePath == "" || !filepath.IsAbs(r.WorkspacePath) {
+		return nil
+	}
+	workspacePath := filepath.Clean(r.WorkspacePath)
+	roots := []string{workspacePath}
+	for current := workspacePath; r.TaskDirName != ""; current = filepath.Dir(current) {
+		if filepath.Base(current) == r.TaskDirName {
+			if current != workspacePath {
+				roots = append(roots, current)
+			}
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	return roots
+}
+
+func guardedComposeProjectName(taskRoot string) string {
+	digest := sha256.Sum256([]byte(taskRoot))
+	return "kd_" + hex.EncodeToString(digest[:8])
+}
+
+func isUUID(value string) bool {
+	_, err := uuid.Parse(value)
+	return err == nil
+}
 
 func (i *containerInventory) ContainerTaskRemovable(ctx context.Context, taskID string) (bool, error) {
 	task, err := i.loadContainerTask(ctx, taskID)
