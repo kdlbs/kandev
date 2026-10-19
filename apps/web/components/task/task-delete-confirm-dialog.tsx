@@ -64,6 +64,7 @@ type TaskDeleteConfirmDialogProps = {
     cascade: boolean;
     discardWorktreeChanges: boolean;
     confirmationId: string;
+    workspaceCleanup?: "delete" | "retain";
   }) => void;
   confirmTestId?: string;
   /** Overrides default focus restoration when the original trigger may disappear. */
@@ -139,10 +140,12 @@ type TaskDeleteActionProps = {
   cascade: boolean;
   discardWorktreeChanges: boolean;
   confirmationId: string;
+  workspaceCleanup?: "delete" | "retain";
   onConfirm: (opts: {
     cascade: boolean;
     discardWorktreeChanges: boolean;
     confirmationId: string;
+    workspaceCleanup?: "delete" | "retain";
   }) => void;
   onClose: () => void;
 };
@@ -154,6 +157,7 @@ function TaskDeleteAction({
   cascade,
   discardWorktreeChanges,
   confirmationId,
+  workspaceCleanup,
   onConfirm,
   onClose,
 }: TaskDeleteActionProps) {
@@ -166,27 +170,36 @@ function TaskDeleteAction({
       data-testid={confirmTestId}
       onClick={() => {
         if (isDeleting) return;
-        onConfirm({ cascade, discardWorktreeChanges, confirmationId });
+        onConfirm({
+          cascade,
+          discardWorktreeChanges,
+          confirmationId,
+          ...(workspaceCleanup === "retain" ? { workspaceCleanup } : {}),
+        });
         onClose();
       }}
     >
       {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-      {t("task:delete")}
+      {t(workspaceCleanup === "retain" ? "task:deleteKeepFilesAction" : "task:delete")}
     </AlertDialogAction>
   );
 }
 
 function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
   const [cascade, setCascade] = useState(false);
+  const [keepFiles, setKeepFiles] = useState(false);
   const [discardWorktreeChanges, setDiscardWorktreeChanges] = useState(false);
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       setCascade(false);
+      setKeepFiles(false);
       setDiscardWorktreeChanges(false);
     }
     onOpenChange(next);
   };
   return {
+    keepFiles,
+    setKeepFiles,
     cascade,
     setCascade,
     discardWorktreeChanges,
@@ -329,6 +342,8 @@ export function TaskDeleteConfirmDialog({
       });
 
   const {
+    keepFiles,
+    setKeepFiles,
     cascade,
     setCascade,
     discardWorktreeChanges,
@@ -337,12 +352,19 @@ export function TaskDeleteConfirmDialog({
   } = useTaskDeleteDialogState(onOpenChange);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
   const storeInFlight = useTaskInFlight(taskId, taskIds, open);
-  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade, discardWorktreeChanges);
+  const workspaceCleanup = keepFiles ? "retain" : "delete";
+  const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade, {
+    discardWorktreeChanges,
+    workspaceCleanup,
+  });
   const requiresDiscardConsent =
     preflight.status === "resolved" && preflight.requiresDiscardConsent;
   const preflightReady = preflight.status === "resolved";
 
   useResetDiscardWorktreeChanges(preflight.scopeKey, setDiscardWorktreeChanges);
+  useEffect(() => {
+    setKeepFiles(false);
+  }, [preflight.scopeKey, open]);
 
   const deleteDisabled =
     isDeleting ||
@@ -365,9 +387,25 @@ export function TaskDeleteConfirmDialog({
           <AlertDialogDescription asChild className="text-left text-sm leading-6">
             <div className="space-y-3">
               <p data-testid="task-confirmation-outcome">{description}</p>
-              <TaskCleanupConsequences summary={cleanup} />
+              {keepFiles ? (
+                <p>{t("task:deleteKeepFilesDescription")}</p>
+              ) : (
+                <TaskCleanupConsequences summary={cleanup} />
+              )}
             </div>
           </AlertDialogDescription>
+          <label className="flex items-start gap-2 text-sm max-sm:min-h-11 pointer-coarse:min-h-11">
+            <Checkbox
+              checked={keepFiles}
+              disabled={isDeleting}
+              data-testid="delete-keep-files-checkbox"
+              onCheckedChange={(checked) => {
+                setKeepFiles(checked === true);
+                setDiscardWorktreeChanges(false);
+              }}
+            />
+            <span>{t("task:deleteKeepFilesOption")}</span>
+          </label>
           <TaskDeleteDialogOptions
             isInFlight={isInFlight}
             isBulkOperation={isBulkOperation}
@@ -395,6 +433,7 @@ export function TaskDeleteConfirmDialog({
             cascade={cascade}
             discardWorktreeChanges={discardWorktreeChanges}
             confirmationId={preflight.confirmationId}
+            workspaceCleanup={workspaceCleanup}
             onConfirm={onConfirm}
             onClose={() => handleOpenChange(false)}
           />

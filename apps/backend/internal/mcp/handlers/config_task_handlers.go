@@ -630,15 +630,28 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
 
+	mode, err := unmarshalStringField(msg.Payload, "workspace_cleanup")
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid workspace cleanup mode", nil)
+	}
+	if mode != "" && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupDelete && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupRetain {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workspace cleanup mode", nil)
+	}
+	options := service.DeleteTaskOptions{WorkspaceCleanup: models.WorkspaceCleanupMode(mode)}
 	// Keep MCP task lifecycle mutations on the same HandoffService path as
 	// HTTP/WS when it is wired. This releases workspace-group membership and
 	// preserves shared-environment ownership before the task row is removed.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(ctx, taskID, false); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(ctx, taskID, false, options); err != nil {
 			var postCommitErr *service.CascadePostCommitError
 			if !errors.As(err, &postCommitErr) {
 				h.logger.Error("failed to delete task", zap.Error(err))
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+			}
+			if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
+				result := h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID})
+				result.RuntimeStopPending = true
+				return ws.NewResponse(msg.ID, msg.Action, result)
 			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
@@ -648,11 +661,17 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				keyTaskID:  taskID,
 			})
 		}
+		if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
+			return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID}))
+		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 	}
-	if err := h.taskSvc.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
+	if err := h.taskSvc.DeleteTaskWithLifecycleOptions(ctx, taskID, options); err != nil {
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+	}
+	if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
+		return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID}))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 }

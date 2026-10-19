@@ -1484,7 +1484,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 	if rt != nil && runtimeInstance != nil {
-		if stopErr := stopRuntimeInstanceAndRelease(ctx, rt, runtimeInstance, true); stopErr != nil {
+		if stopErr := m.stopWorkspaceRuntimeAndRelease(ctx, rt, runtimeInstance, true); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

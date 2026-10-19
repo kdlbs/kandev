@@ -108,6 +108,7 @@ type WorktreeBatchCleanerWithOptions interface {
 
 // DeleteTaskOptions controls destructive task deletion behavior.
 type DeleteTaskOptions struct {
+	WorkspaceCleanup       models.WorkspaceCleanupMode
 	DiscardWorktreeChanges bool
 }
 

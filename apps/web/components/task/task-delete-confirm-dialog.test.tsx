@@ -663,3 +663,36 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
     expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
   });
 });
+
+it("allows an explicit keep-files preview after workspace inspection fails", async () => {
+  mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+  mockGetTaskDeletePreflight.mockRejectedValueOnce(new Error("invalid marker"));
+  const confirm = vi.fn();
+  renderDialog(
+    <TaskDeleteConfirmDialog open taskId={TASK_ID} onOpenChange={() => {}} onConfirm={confirm} />,
+  );
+  await screen.findByTestId("delete-preflight-error");
+  expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true);
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: false,
+    confirmation_id: "retain-ticket",
+  });
+  fireEvent.click(screen.getByTestId("delete-keep-files-checkbox"));
+  const action = await screen.findByRole("button", { name: "Delete task and keep files" });
+  await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith(
+    [TASK_ID],
+    false,
+    false,
+    undefined,
+    "retain",
+  );
+  expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+  fireEvent.click(action);
+  expect(confirm).toHaveBeenCalledWith({
+    cascade: false,
+    discardWorktreeChanges: false,
+    confirmationId: "retain-ticket",
+    workspaceCleanup: "retain",
+  });
+});

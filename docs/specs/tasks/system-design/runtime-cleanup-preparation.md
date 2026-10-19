@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-09
-updated: 2026-09-28
+updated: 2026-10-16
 owners:
   - cfl
 ---
@@ -17,6 +17,11 @@ This design extends [Task Runtime Cleanup](runtime-cleanup.md) at the
 preparation boundary. It implements AC-TASKS-RUNTIME-CLEANUP-001.9 and
 AC-TASKS-RUNTIME-CLEANUP-001.13. The task system owns preparation because its
 cleanup snapshot must survive task deletion.
+
+These identity-capture rules authorize physical cleanup in normal delete mode.
+[Task deletion recovery](task-delete-recovery.md) defines separate retain-mode
+preparation. It captures database inventory without physical inspection and
+never authorizes workspace removal.
 
 ## Identity capture
 

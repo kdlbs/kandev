@@ -80,3 +80,26 @@ describe("useTaskDeletePreflight", () => {
     });
   });
 });
+
+it("replaces a failed workspace check with a separate retain confirmation", async () => {
+  mockGetTaskDeletePreflight.mockRejectedValueOnce(new Error("damaged marker"));
+  mockGetTaskDeletePreflight.mockResolvedValueOnce({
+    requires_discard_consent: false,
+    confirmation_id: "retain-ticket",
+  });
+  const { result, rerender } = renderHook(
+    ({ mode }: { mode: "delete" | "retain" }) =>
+      useTaskDeletePreflight(true, "task-1", undefined, false, { workspaceCleanup: mode }),
+    { initialProps: { mode: "delete" as "delete" | "retain" } },
+  );
+  await waitFor(() => expect(result.current.status).toBe("error"));
+  rerender({ mode: "retain" });
+  await waitFor(() => expect(result.current.confirmationId).toBe("retain-ticket"));
+  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith(
+    ["task-1"],
+    false,
+    false,
+    undefined,
+    "retain",
+  );
+});

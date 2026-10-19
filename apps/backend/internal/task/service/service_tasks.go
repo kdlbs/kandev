@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"maps"
 	"net/url"
 	"os"
@@ -124,10 +125,12 @@ type taskStopTarget struct {
 }
 
 type taskEnvironmentCleanup struct {
-	env                    *models.TaskEnvironment
-	deleteRow              bool
-	preserveBranches       bool
-	discardWorktreeChanges bool
+	retentionInventoryCaptured bool
+	workspaceCleanup           models.WorkspaceCleanupMode
+	env                        *models.TaskEnvironment
+	deleteRow                  bool
+	preserveBranches           bool
+	discardWorktreeChanges     bool
 	// agentHistory is set only for Quick Chat deletion.
 	agentHistory []agentHistoryTarget
 }
@@ -3051,6 +3054,12 @@ func (s *Service) deleteTaskWithManagedClaim(
 	deleteFromDB func(context.Context, string) (bool, error),
 	claim *managed.DeleteClaim,
 ) (bool, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return false, retentionErr
+	}
+	defer releaseRetention()
+
 	start := time.Now()
 	archiveDeadline := archivecascade.ArchiveDeadline(ctx)
 	operationCtx, cancelOperation := context.WithDeadline(ctx, archiveDeadline)
@@ -3100,7 +3109,7 @@ func (s *Service) deleteTaskWithManagedClaim(
 	}
 
 	envCleanup := taskEnvironmentCleanup{
-		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges,
+		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges, workspaceCleanup: options.WorkspaceCleanup, retentionInventoryCaptured: options.retainsWorkspace(),
 	}
 	if claim == nil {
 		envCleanup.agentHistory = s.captureQuickChatAgentHistory(operationCtx, task, sessions)
@@ -3152,6 +3161,12 @@ type taskDeletionInventory struct {
 }
 
 func (s *Service) gatherTaskDeletionInventory(ctx context.Context, id string, trigger models.TaskResourceCleanupTrigger, options DeleteTaskOptions) (*taskDeletionInventory, error) {
+	if err := options.validate(); err != nil {
+		return nil, err
+	}
+	if options.retainsWorkspace() && s.resourceCleanups == nil {
+		return nil, errors.New("durable workspace retention unavailable")
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -3164,7 +3179,7 @@ func (s *Service) gatherTaskDeletionInventory(ctx context.Context, id string, tr
 	if err != nil {
 		return nil, fmt.Errorf("list worktrees for delete: %w", err)
 	}
-	if trigger == models.TaskResourceCleanupTriggerDelete {
+	if trigger == models.TaskResourceCleanupTriggerDelete && !options.retainsWorkspace() {
 		if err := s.validateTaskDeleteWorktreeInventory(ctx, worktrees, options.DiscardWorktreeChanges); err != nil {
 			return nil, err
 		}

@@ -381,6 +381,7 @@ func (s *Server) registerConfigTaskTools() {
 			mcp.WithIdempotentHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
 	)
@@ -751,6 +752,9 @@ func (s *Server) deleteTaskHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 		payload := map[string]string{"task_id": taskID}
+		if mode := req.GetString("workspace_cleanup", ""); mode != "" {
+			payload["workspace_cleanup"] = mode
+		}
 		return s.forwardToBackend(ctx, ws.ActionMCPDeleteTask, payload)
 	}
 }

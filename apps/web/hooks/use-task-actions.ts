@@ -15,6 +15,7 @@ type MovePayload = {
 };
 
 export type TaskActionOptions = {
+  workspaceCleanup?: "delete" | "retain";
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   confirmationId?: string;
@@ -32,7 +33,18 @@ export function useTaskActions() {
   const deleteTaskById = useCallback(
     async (taskId: string, opts?: DeleteTaskParams) => {
       try {
-        return await deleteTask(taskId, opts);
+        const result = await deleteTask(taskId, opts);
+        if (result?.workspace_cleanup === "retain") {
+          toast({
+            title: t("task:deleteKeptFilesTitle"),
+            description: t(
+              result.runtime_stop_pending
+                ? "task:deleteKeptFilesPending"
+                : "task:deleteKeptFilesComplete",
+            ),
+          });
+        }
+        return;
       } catch (error) {
         if (isTaskDeleteDirtyWorktreeError(error)) {
           toast({

@@ -226,7 +226,10 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type TaskWorkspaceCleanup = "delete" | "retain";
+
 export type DeleteTaskParams = {
+  workspaceCleanup?: TaskWorkspaceCleanup;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   confirmationId?: string;
@@ -242,6 +245,7 @@ export async function getTaskDeletePreflight(
   cascade: boolean,
   discardWorktreeChanges = false,
   options?: ApiRequestOptions,
+  workspaceCleanup?: TaskWorkspaceCleanup,
 ) {
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
     ...options,
@@ -250,6 +254,7 @@ export async function getTaskDeletePreflight(
       method: "POST",
       body: JSON.stringify({
         task_ids: taskIds,
+        ...(workspaceCleanup ? { workspace_cleanup: workspaceCleanup } : {}),
         cascade,
         discard_worktree_changes: discardWorktreeChanges,
       }),
@@ -258,12 +263,20 @@ export async function getTaskDeletePreflight(
   });
 }
 
+export type TaskDeletionResult = {
+  success: boolean;
+  workspace_cleanup?: TaskWorkspaceCleanup;
+  retention_operation_ids?: string[];
+  runtime_stop_pending?: boolean;
+};
+
 export async function deleteTask(
   taskId: string,
   params?: DeleteTaskParams,
   options?: ApiRequestOptions,
 ) {
   const queryParams = new URLSearchParams();
+  if (params?.workspaceCleanup) queryParams.set("workspace_cleanup", params.workspaceCleanup);
   if (params?.cascade) queryParams.set("cascade", "true");
   if (params?.discardWorktreeChanges) {
     queryParams.set("discard_worktree_changes", "true");
@@ -273,7 +286,7 @@ export async function deleteTask(
   if (params?.confirmationId) {
     headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
   }
-  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
+  return fetchJson<TaskDeletionResult | undefined>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...options?.init, headers },
   });
@@ -294,6 +307,7 @@ export async function deleteTaskAfterUserAction(
     params?.cascade ?? false,
     params?.discardWorktreeChanges ?? false,
     options,
+    params?.workspaceCleanup,
   );
   return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -25,6 +26,15 @@ type ContainerLiveStatus struct {
 // Used by Reset Environment to tear down the container layer without touching worktrees
 // or sprite sandboxes.
 func (m *Manager) DestroyContainer(ctx context.Context, containerID string) error {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+	if err := m.checkRetainedWorkspaceResource(ctx, "", containerID); err != nil {
+		return err
+	}
+
 	if containerID == "" {
 		return nil
 	}
@@ -120,5 +130,5 @@ func (m *Manager) DestroySandbox(ctx context.Context, sandboxID, executionID str
 		Metadata:   map[string]interface{}{MetadataKeySpriteName: sandboxID},
 		StopReason: StopReasonTaskDeleted,
 	}
-	return spritesExec.StopInstance(ctx, instance, true)
+	return m.stopWorkspaceRuntime(ctx, spritesExec, instance, true)
 }

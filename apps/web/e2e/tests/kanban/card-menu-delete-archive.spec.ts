@@ -1,3 +1,7 @@
+import {
+  createDamagedDeleteTask,
+  deleteDamagedTaskKeepingFiles,
+} from "../../helpers/task-delete-recovery";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -182,4 +186,24 @@ test.describe("Kanban card actions menu — delete/archive in All Workflows view
       timeout: TASK_VISIBLE_TIMEOUT,
     });
   });
+});
+
+test("deletes a damaged task while keeping its workspace files", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const { task, assertRetained } = await createDamagedDeleteTask(
+    apiClient,
+    seedData,
+    "Damaged task keep files",
+  );
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto();
+  await kanban.openTaskActionsMenu(task.id);
+  await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await deleteDamagedTaskKeepingFiles(testPage, testPage.getByRole("alertdialog"), task.id);
+  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+  assertRetained();
 });

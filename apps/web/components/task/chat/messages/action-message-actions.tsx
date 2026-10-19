@@ -237,9 +237,13 @@ function DeleteActionButton({
     async ({
       cascade,
       discardWorktreeChanges,
+      confirmationId,
+      workspaceCleanup,
     }: {
       cascade: boolean;
       discardWorktreeChanges: boolean;
+      confirmationId?: string;
+      workspaceCleanup?: "delete" | "retain";
     }) => {
       if (!taskId || state === "busy") return;
       setState("busy");
@@ -248,7 +252,13 @@ function DeleteActionButton({
           "delete",
           {
             taskId,
-            mutate: () => deleteTaskById(taskId, { cascade, discardWorktreeChanges }),
+            mutate: () =>
+              deleteTaskById(taskId, {
+                cascade,
+                discardWorktreeChanges,
+                confirmationId,
+                workspaceCleanup,
+              }),
           },
           { cascade },
         );

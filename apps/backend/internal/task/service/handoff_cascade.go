@@ -556,6 +556,9 @@ func (s *HandoffService) DeleteTaskTreeWithOptions(
 func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	ctx context.Context, rootID string, cascade bool, reason string, options DeleteTaskOptions,
 ) (*CascadeOutcome, error) {
+	if err := options.validate(); err != nil {
+		return nil, err
+	}
 	deleteDeadline := archivecascade.ArchiveDeadline(ctx)
 	deleteCtx, cancelDelete := context.WithDeadline(ctx, deleteDeadline)
 	defer cancelDelete()
@@ -575,7 +578,7 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	if err != nil {
 		return nil, err
 	}
-	if checker, ok := s.resourceCleaner.(taskDeleteWorktreeAdmissionChecker); ok {
+	if checker, ok := s.resourceCleaner.(taskDeleteWorktreeAdmissionChecker); ok && !options.retainsWorkspace() {
 		if err := checker.ValidateTaskDeleteWorktrees(deleteCtx, all, options.DiscardWorktreeChanges); err != nil {
 			return nil, err
 		}
@@ -585,7 +588,7 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	defer cancelTransferCompensation()
 	ownershipTransfers, cleanupOps, err := s.prepareDeleteCascade(
 		deleteCtx, transferCompensationCtx, deleteDeadline, all, cascadeID,
-		options.DiscardWorktreeChanges,
+		options,
 	)
 	if err != nil {
 		return out, err
@@ -646,7 +649,7 @@ func (s *HandoffService) prepareDeleteCascade(
 	deadline time.Time,
 	taskIDs []string,
 	cascadeID string,
-	discardWorktreeChanges bool,
+	options DeleteTaskOptions,
 ) ([]workspaceEnvironmentOwnershipTransfer, map[string]string, error) {
 	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(
 		deleteCtx, compensationCtx, taskIDs, false,
@@ -656,7 +659,7 @@ func (s *HandoffService) prepareDeleteCascade(
 	}
 	cleanupOps, err := s.prepareCascadeResourceCleanupWithCompensation(
 		deleteCtx, compensationCtx, deadline, taskIDs, cascadeID,
-		models.TaskResourceCleanupTriggerCascadeDelete, discardWorktreeChanges,
+		models.TaskResourceCleanupTriggerCascadeDelete, options.DiscardWorktreeChanges, options,
 	)
 	if err != nil {
 		return nil, nil, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(
@@ -1204,7 +1207,17 @@ func (s *HandoffService) prepareCascadeResourceCleanupWithCompensation(
 	cascadeID string,
 	trigger models.TaskResourceCleanupTrigger,
 	discardWorktreeChanges bool,
+	deleteOptions ...DeleteTaskOptions,
 ) (map[string]string, error) {
+	options := DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges}
+	if len(deleteOptions) > 0 {
+		options = deleteOptions[0]
+	}
+	if options.retainsWorkspace() {
+		if _, ok := s.resourceCleaner.(taskResourceRetentionCoordinator); !ok {
+			return nil, errors.New("durable workspace retention unavailable")
+		}
+	}
 	coordinator, ok := s.resourceCleaner.(taskResourceCleanupCoordinator)
 	if !ok {
 		return nil, nil
@@ -1215,7 +1228,9 @@ func (s *HandoffService) prepareCascadeResourceCleanupWithCompensation(
 		operations[taskID] = operationID
 		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
 		var err error
-		if withOptions, supportsOptions := s.resourceCleaner.(taskResourceCleanupCoordinatorWithOptions); supportsOptions {
+		if retaining, ok := s.resourceCleaner.(taskResourceRetentionCoordinator); ok && options.retainsWorkspace() {
+			err = retaining.PrepareTaskResourceCleanupWithDeleteOptions(ctx, taskID, trigger, operationID, deleteEnvironmentRow, options)
+		} else if withOptions, supportsOptions := s.resourceCleaner.(taskResourceCleanupCoordinatorWithOptions); supportsOptions {
 			err = withOptions.PrepareTaskResourceCleanupWithOptions(
 				ctx, taskID, trigger, operationID, deleteEnvironmentRow, discardWorktreeChanges,
 			)

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { TaskWorkspaceCleanup } from "@/lib/api/domains/kanban-api";
 import { getTaskDeletePreflight } from "@/lib/api";
 
 export type TaskDeletePreflightStatus = "idle" | "loading" | "resolved" | "error";
@@ -24,11 +25,17 @@ export function useTaskDeletePreflight(
   taskId?: string,
   taskIds?: string[],
   cascade = false,
-  discardWorktreeChanges = false,
+  options: { discardWorktreeChanges?: boolean; workspaceCleanup?: TaskWorkspaceCleanup } = {},
 ): TaskDeletePreflightResult {
+  const { discardWorktreeChanges = false, workspaceCleanup = "delete" } = options;
   const requestIds = taskIds ?? (taskId ? [taskId] : []);
   const scopeKey = JSON.stringify({ ids: requestIds, cascade });
-  const idsKey = JSON.stringify({ ids: requestIds, cascade, discardWorktreeChanges });
+  const idsKey = JSON.stringify({
+    ids: requestIds,
+    cascade,
+    discardWorktreeChanges,
+    workspaceCleanup,
+  });
   const [retryVersion, setRetryVersion] = useState(0);
   const requestKey = `${idsKey}:${retryVersion}`;
   const [result, setResult] = useState<StoredPreflightResult>({
@@ -59,7 +66,10 @@ export function useTaskDeletePreflight(
       requiresDiscardConsent: false,
       confirmationId: "",
     });
-    getTaskDeletePreflight(requestIds, cascade, discardWorktreeChanges)
+    (workspaceCleanup === "retain"
+      ? getTaskDeletePreflight(requestIds, cascade, false, undefined, workspaceCleanup)
+      : getTaskDeletePreflight(requestIds, cascade, discardWorktreeChanges)
+    )
       .then((response) => {
         if (cancelled) return;
         setResult({

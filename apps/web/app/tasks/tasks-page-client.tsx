@@ -203,7 +203,17 @@ function useTaskMutations(fetchTasks: () => void) {
     async (taskId: string, opts?: DeleteTaskParams) => {
       setDeletingTaskId(taskId);
       try {
-        await deleteTask(taskId, opts);
+        const result = await deleteTask(taskId, opts);
+        if (result?.workspace_cleanup === "retain") {
+          toast({
+            title: t("task:deleteKeptFilesTitle"),
+            description: t(
+              result.runtime_stop_pending
+                ? "task:deleteKeptFilesPending"
+                : "task:deleteKeptFilesComplete",
+            ),
+          });
+        }
         fetchTasks();
       } catch (err) {
         toast({

@@ -2134,19 +2134,26 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
 	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
+	mode := models.WorkspaceCleanupMode(c.Query("workspace_cleanup"))
+	deletedIDs := []string{taskID}
 	err := h.service.WithTaskDeleteConfirmation(
 		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, discardWorktreeChanges,
 		func() error {
-			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges}
+			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges, WorkspaceCleanup: mode}
 			if h.handoffSvc != nil {
-				_, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				out, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				if out != nil {
+					deletedIDs = out.ArchivedTaskIDs
+				}
 				return err
 			}
 			return h.service.DeleteTaskWithOptions(deleteCtx, taskID, options)
-		},
+		}, mode,
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeletePreflightInvalid):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace cleanup options"})
 		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
 			c.JSON(http.StatusPreconditionRequired, gin.H{"error": "current task deletion preview is required"})
 		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
@@ -2157,6 +2164,12 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
 			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
 		case isCascadePostCommitError(err):
+			if mode == models.WorkspaceCleanupRetain {
+				result := h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs)
+				result.RuntimeStopPending = true
+				c.JSON(http.StatusOK, result)
+				return
+			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -2165,6 +2178,10 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 		default:
 			handleNotFound(c, h.logger, err, "task not deleted")
 		}
+		return
+	}
+	if mode == models.WorkspaceCleanupRetain {
+		c.JSON(http.StatusOK, h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs))
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})

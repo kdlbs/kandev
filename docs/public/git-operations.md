@@ -416,8 +416,8 @@ After creation, Kandev copies any repository-configured files and runs its setup
 
 ### Deleting a task with local worktree changes
 
-Task deletion checks every owned worktree before it changes the task or starts
-cleanup. If Git reports tracked or untracked changes, deletion stops and the
+Normal task deletion checks every owned worktree before it changes the task or
+starts cleanup. If Git reports tracked or untracked changes, deletion stops and the
 task remains visible. The confirmation dialog lists the affected worktrees and
 requires an explicit choice to permanently discard those changes before a
 retry.
@@ -428,6 +428,11 @@ shared-reference, and branch-safety checks. A branch with unique commits is
 preserved. If the checkout becomes dirty after admission, cleanup preserves the
 checkout and records a terminal failure instead of retrying the destructive
 operation automatically.
+
+To remove the task while preserving its files and branches, select **Keep
+workspace files**. This option also works when workspace inspection fails. See
+[Delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked)
+for the recovery steps and retention limits.
 
 ## Everyday operations
 

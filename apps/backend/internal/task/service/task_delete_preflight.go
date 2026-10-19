@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -20,8 +21,9 @@ var ErrTaskDeletePreflightUnavailable = errors.New("task delete preflight unavai
 // TaskDeletePreflightResult contains the current local-change requirement for
 // the exact task scope requested by the caller.
 type TaskDeletePreflightResult struct {
-	RequiresDiscardConsent bool   `json:"requires_discard_consent"`
-	ConfirmationID         string `json:"confirmation_id"`
+	WorkspaceCleanup       models.WorkspaceCleanupMode `json:"workspace_cleanup"`
+	RequiresDiscardConsent bool                        `json:"requires_discard_consent"`
+	ConfirmationID         string                      `json:"confirmation_id"`
 }
 
 // TaskDeletePreflight inspects all worktrees that a delete would remove and
@@ -30,6 +32,14 @@ type TaskDeletePreflightResult struct {
 func (s *Service) TaskDeletePreflight(
 	ctx context.Context, taskIDs []string, cascade bool, discardConsent ...bool,
 ) (TaskDeletePreflightResult, error) {
+	options := DeleteTaskOptions{DiscardWorktreeChanges: len(discardConsent) > 0 && discardConsent[0]}
+	return s.TaskDeletePreflightWithOptions(ctx, taskIDs, cascade, options)
+}
+
+func (s *Service) TaskDeletePreflightWithOptions(ctx context.Context, taskIDs []string, cascade bool, options DeleteTaskOptions) (TaskDeletePreflightResult, error) {
+	if err := options.validate(); err != nil {
+		return TaskDeletePreflightResult{}, err
+	}
 	roots := normalizeTaskDeletePreflightIDs(taskIDs)
 	if len(roots) == 0 {
 		return TaskDeletePreflightResult{}, fmt.Errorf("%w: task_ids is required", ErrTaskDeletePreflightInvalid)
@@ -43,6 +53,10 @@ func (s *Service) TaskDeletePreflight(
 	targets, err := s.resolveTaskDeletePreflightTargets(ctx, roots, cascade)
 	if err != nil {
 		return TaskDeletePreflightResult{}, err
+	}
+	if options.retainsWorkspace() {
+		ticket, ticketErr := s.issueTaskDeletePreview(ctx, roots, cascade, false, options.WorkspaceCleanup)
+		return TaskDeletePreflightResult{ConfirmationID: ticket, WorkspaceCleanup: options.WorkspaceCleanup}, ticketErr
 	}
 	provider, inspector, err := s.taskDeletePreflightInspector()
 	if err != nil {
@@ -64,12 +78,12 @@ func (s *Service) TaskDeletePreflight(
 			"%w: inspect worktrees before delete: %w", ErrTaskDeletePreflightUnavailable, err,
 		)
 	}
-	discardWorktreeChanges := len(discardConsent) > 0 && discardConsent[0]
+	discardWorktreeChanges := options.DiscardWorktreeChanges
 	confirmationID, err := s.issueTaskDeletePreview(ctx, roots, cascade, discardWorktreeChanges)
 	if err != nil {
 		return TaskDeletePreflightResult{}, err
 	}
-	return TaskDeletePreflightResult{RequiresDiscardConsent: len(dirty) > 0, ConfirmationID: confirmationID}, nil
+	return TaskDeletePreflightResult{RequiresDiscardConsent: len(dirty) > 0, ConfirmationID: confirmationID, WorkspaceCleanup: models.WorkspaceCleanupDelete}, nil
 }
 
 func normalizeTaskDeletePreflightIDs(taskIDs []string) []string {

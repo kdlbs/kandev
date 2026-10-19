@@ -1,3 +1,8 @@
+import {
+  createDamagedDeleteTask,
+  deleteDamagedTaskKeepingFiles,
+  waitForDeletePreviewTask,
+} from "../../helpers/task-delete-recovery";
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
@@ -96,6 +101,7 @@ test.describe("Mobile delete discard consent", () => {
         message: "the mobile dirty-delete worktree did not become ready",
       })
       .toBe("ready");
+    await waitForDeletePreviewTask(apiClient, task.id);
     const environment = await apiClient.getTaskEnvironment(task.id);
     const worktreePath = environment?.repos?.[0]?.worktree_path ?? environment?.worktree_path ?? "";
     if (!worktreePath) throw new Error("the mobile dirty-delete task has no worktree path");
@@ -148,6 +154,7 @@ test.describe("Mobile delete discard consent", () => {
       })
       .toBe("ready");
 
+    await waitForDeletePreviewTask(apiClient, task.id);
     let preflightAttempts = 0;
     await testPage.route("**/api/v1/tasks/delete-preflight**", async (route) => {
       preflightAttempts += 1;
@@ -182,4 +189,26 @@ test.describe("Mobile delete discard consent", () => {
       })
       .toBe(404);
   });
+});
+
+test("deletes a damaged task and keeps files from the phone dialog", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 393, height: 700 });
+  const title = "Mobile damaged task keep files";
+  const { task, assertRetained } = await createDamagedDeleteTask(apiClient, seedData, title);
+  await testPage.goto(`/t/${task.id}`);
+  await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+  const dialog = await openDeleteDialog(testPage, title);
+  await assertContainedTouchDialog(dialog);
+  await deleteDamagedTaskKeepingFiles(testPage, dialog, task.id);
+  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+  assertRetained();
+  await backend.restart();
+  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+  assertRetained();
 });

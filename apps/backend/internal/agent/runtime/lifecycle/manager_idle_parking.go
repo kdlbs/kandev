@@ -466,7 +466,7 @@ func (m *Manager) finishPersistedIdleSuspension(
 		}
 		instance.Metadata = metadata
 	}
-	if err := runtime.StopInstance(ctx, instance, false); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, runtime, instance, false); err != nil {
 		return fmt.Errorf("stop persisted ACP runtime for idle suspension: %w", err)
 	}
 	if err := store.CompareAndSetExecutorRunningIdleSuspension(

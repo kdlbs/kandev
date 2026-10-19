@@ -273,3 +273,24 @@ describe("useTaskActions", () => {
     });
   });
 });
+
+it.each([false, true])("reports retained files with runtime stop pending=%s", async (pending) => {
+  deleteTaskMock.mockResolvedValueOnce({
+    success: true,
+    workspace_cleanup: "retain",
+    runtime_stop_pending: pending,
+  });
+  const { result } = renderHook(() => useTaskActions());
+  await act(() =>
+    result.current.deleteTaskById("damaged", {
+      workspaceCleanup: "retain",
+      confirmationId: "ticket",
+    }),
+  );
+  expect(toastMock).toHaveBeenCalledWith({
+    title: "Task deleted. Files kept.",
+    description: pending
+      ? "Workspace files are retained. Runtime shutdown is still pending."
+      : "Workspace files and branches are retained.",
+  });
+});
