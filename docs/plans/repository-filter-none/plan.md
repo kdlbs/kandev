@@ -104,6 +104,15 @@ phone E2E tests. Lint, formatting, translation, and public-doc checks passed.
 The [work order results](task-01-repository-filter-none.md#results) record the
 commands, local runtime setup, and browser evidence.
 
+PR remediation completed locally: repository test fixtures now satisfy their
+types, the existing missing-value representation has an inline explanation,
+and the selected-first helper checks its search precondition. Typecheck,
+212 focused tests, two desktop browser tests, two phone browser tests, and
+targeted lint and formatting passed. The
+[remediation record](task-01-repository-filter-none.md#pr-remediation) records
+the scope and results. Remote verification remains pending until the published
+head passes its checks.
+
 Public docs updated: `docs/public/tasks-and-workflows.md` (how-to guidance),
 with source and browser-test evidence in `docs/public/coverage.json`.
 

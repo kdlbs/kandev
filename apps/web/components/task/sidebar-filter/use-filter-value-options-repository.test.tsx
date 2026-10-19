@@ -3,6 +3,7 @@ import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
+import { repositoryId, workspaceId } from "@/lib/types/ids";
 import { useFilterValueOptions } from "./use-filter-value-options";
 
 afterEach(cleanup);
@@ -36,10 +37,40 @@ describe("repository filter choices", () => {
   });
 
   it("keeps named repository values and order after None", () => {
-    const repositories = [
-      { id: "local", name: "local-repo", local_path: "/tmp/local-repo" },
-      { id: "remote", name: "remote-repo", provider_owner: "org", provider_name: "repo" },
-    ] as Repository[];
+    const local: Repository = {
+      id: repositoryId("local"),
+      workspace_id: workspaceId("workspace"),
+      name: "local-repo",
+      source_type: "local",
+      local_path: "/tmp/local-repo",
+      provider: "",
+      provider_repo_id: "",
+      provider_owner: "",
+      provider_name: "",
+      default_branch: "main",
+      worktree_branch_prefix: "",
+      pull_before_worktree: false,
+      setup_script: "",
+      cleanup_script: "",
+      dev_script: "",
+      copy_files: "",
+      created_at: "2026-10-19T00:00:00Z",
+      updated_at: "2026-10-19T00:00:00Z",
+    };
+    const repositories: Repository[] = [
+      local,
+      {
+        ...local,
+        id: repositoryId("remote"),
+        name: "remote-repo",
+        source_type: "provider",
+        local_path: "",
+        provider: "github",
+        provider_repo_id: "repo",
+        provider_owner: "org",
+        provider_name: "repo",
+      },
+    ];
     const { result } = renderHook(() => useFilterValueOptions("repository"), {
       wrapper: wrapper(repositories),
     });

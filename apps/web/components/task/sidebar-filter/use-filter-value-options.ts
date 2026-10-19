@@ -92,6 +92,7 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
     if (dimension === "executorType") return executorTypeOptions(snapshots);
     if (dimension === "repository") {
       return [
+        // Missing repository paths use the string "undefined" in filter clauses.
         { value: String(undefined), label: t("task:none") },
         ...repositoryOptions(repositoriesByWorkspace),
       ];

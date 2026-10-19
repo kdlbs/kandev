@@ -76,6 +76,7 @@ with `(cd apps && pnpm install --frozen-lockfile)` if this worktree lacks them.
 (cd apps/web && pnpm exec vitest run components/task/sidebar-filter/use-filter-value-options-repository.test.tsx components/task/sidebar-filter/use-filter-value-options.test.ts components/task/sidebar-filter/use-filter-value-options-locale.test.tsx lib/sidebar/apply-view.test.ts lib/sidebar/sidebar-local-conformance.test.ts components/task/sidebar-filter/use-filter-value-options-demand.test.tsx)
 (cd apps/backend && go test ./internal/task/repository/sqlite -run '^TestSidebarLocalViewSQLiteConformance$' -count=1)
 (cd apps/web && pnpm exec eslint components/task/sidebar-filter/use-filter-value-options.ts)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/sidebar-repository-filter-none.spec.ts tests/task/sidebar-filter-selected-first.spec.ts)
@@ -197,3 +198,21 @@ Screenshot:
 The requirement is active, the design is current, and this plan is implemented.
 Specification validation, coverage preflight, and diff checks passed.
 PR publication follows the user's later explicit request.
+
+### PR remediation
+
+CI typecheck rejected the incomplete repository fixture cast. The fixture now
+uses complete typed records and the shared branded-ID constructors. Review
+feedback also added a comment for the existing missing-value representation
+and an explicit search-fixture guard. The public behavior and design are
+unchanged, so no requirement or system-design update is needed.
+
+The six-file Vitest command passed all 212 tests after these changes.
+Typecheck passed with CI's 8 GiB Node heap setting. Targeted ESLint and
+Prettier checks passed for the three changed TypeScript files.
+
+The desktop browser command above rebuilt the application and passed both
+tests in 32.6 seconds (`/tmp/kandev-run.e2e.WcSCFaHQ.log`). The phone command
+reused that build and passed both tests in 41.4 seconds
+(`/tmp/kandev-run.e2e.wP3iNuW5.log`). Both runs completed without retries.
+Remote checks and review resolution require fresh evidence after publication.

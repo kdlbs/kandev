@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -149,7 +150,8 @@ export async function verifySelectedFilters(
     expect(rowBox!.height).toBeGreaterThanOrEqual(44);
   }
   const search = picker.getByRole("combobox");
-  const searchTarget = seeded.unselected.find((value) => value !== "None")!;
+  const searchTarget = seeded.unselected.find((value) => value !== "None");
+  assert.ok(searchTarget, "Fixture must include an unselected repository for search");
   await search.fill(searchTarget);
   await expect(rows).toHaveText([searchTarget]);
   await search.fill("");
