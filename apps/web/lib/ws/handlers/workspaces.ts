@@ -34,6 +34,18 @@ function workspaceIdlePolicyUpdate(
   };
 }
 
+function workspaceDynamicRoutingUpdate(
+  item: WorkspaceItem,
+  payload: WorkspacePayload,
+): Pick<WorkspaceItem, "dynamic_midturn_failover_enabled"> {
+  return {
+    dynamic_midturn_failover_enabled:
+      "dynamic_midturn_failover_enabled" in payload
+        ? (payload.dynamic_midturn_failover_enabled ?? false)
+        : item.dynamic_midturn_failover_enabled,
+  };
+}
+
 function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): WorkspaceItem {
   return {
     ...item,
@@ -44,6 +56,7 @@ function updateWorkspaceItem(item: WorkspaceItem, payload: WorkspacePayload): Wo
     default_agent_profile_id: payload.default_agent_profile_id ?? null,
     ...workspacePlacementUpdate(item, payload),
     ...workspaceIdlePolicyUpdate(item, payload),
+    ...workspaceDynamicRoutingUpdate(item, payload),
     updated_at: payload.updated_at ?? item.updated_at,
   };
 }
@@ -103,6 +116,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           unit_id: payload.unit_id ?? "",
           acp_idle_suspension_enabled: payload.acp_idle_suspension_enabled ?? false,
           acp_idle_timeout_minutes: payload.acp_idle_timeout_minutes ?? 120,
+          dynamic_midturn_failover_enabled: payload.dynamic_midturn_failover_enabled ?? false,
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };

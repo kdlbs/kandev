@@ -181,6 +181,7 @@ describe("accepted identity and descriptors", () => {
         "default_config_agent_profile_id",
         "acp_idle_suspension_enabled",
         "acp_idle_timeout_minutes",
+        "dynamic_midturn_failover_enabled",
         "office_workflow_id",
       ] as const)
         delete response[key];
@@ -202,6 +203,7 @@ describe("accepted identity and descriptors", () => {
       default_config_agent_profile_id: shape === "complete" ? "config-profile-id" : null,
       acp_idle_suspension_enabled: shape === "complete",
       acp_idle_timeout_minutes: shape === "complete" ? 45 : 120,
+      dynamic_midturn_failover_enabled: shape === "complete",
       office_workflow_id: shape === "complete" ? "office-workflow" : null,
       created_at: "2026-10-01T00:00:00Z",
       updated_at: "2026-10-02T00:00:00Z",

@@ -961,6 +961,10 @@ type Service struct {
 	routeActionLocksMu sync.Mutex
 	routeActionLocks   map[string]*routeActionOperationLock
 
+	// midTurnFailovers tracks the opt-in automatic Try next handoffs per
+	// session so each failed generation hands off at most once.
+	midTurnFailovers midTurnFailoverState
+
 	// profileExecutionResolver is the shared logical-to-concrete profile
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
@@ -1691,6 +1695,9 @@ type RouteActionRequest struct {
 	SessionID          string
 	Action             RouteAction
 	ExpectedGeneration int64
+	// Automatic marks an unattended action the orchestrator submits itself.
+	// Client requests never set it.
+	Automatic bool
 }
 
 type RouteActionResult struct {
