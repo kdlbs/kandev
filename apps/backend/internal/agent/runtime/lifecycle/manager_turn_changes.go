@@ -339,14 +339,16 @@ func finishTurnChangeCaptureLocked(execution *AgentExecution, generation uint64)
 	}
 }
 
-// preserveTurnChangesBeforeStop asks an active turn to stop, then records its
-// terminal interval before the runtime tears down the checkout. A completion
-// callback that already owns the boundary is joined instead of duplicated.
-func (m *Manager) preserveTurnChangesBeforeStop(ctx context.Context, execution *AgentExecution) {
+// preserveTurnChangesBeforeStop records the terminal interval before runtime
+// cleanup. Explicit stops cancel the prompt; backend shutdown has already
+// stopped its process. An existing completion capture is joined.
+func (m *Manager) preserveTurnChangesBeforeStop(ctx context.Context, execution *AgentExecution, reason string) {
 	if m == nil || m.turnChangeCaptureHandler == nil || !eligibleTurnChangeExecution(execution) {
 		return
 	}
-	m.cancelTurnChangePromptBeforeStop(ctx, execution)
+	if reason != StopReasonBackendShutdown {
+		m.cancelTurnChangePromptBeforeStop(ctx, execution)
+	}
 
 	execution.promptLifecycleMu.Lock()
 	generation := execution.promptGeneration

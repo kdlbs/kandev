@@ -82,7 +82,7 @@ Settings discovery links to the owning General chat group.
 
 ## Typed model
 
-New task model names are proposed contracts, not existing symbols.
+Task model names below are proposed contracts.
 Create `TurnChangeSet`, `TurnRepositoryChangeSet`, `TurnFileChange`, and `TurnChangeAvailability` in a separate model file.
 
 `TurnChangeSet` includes:
@@ -182,9 +182,9 @@ Persist the pending change-set row before fan-out; summary publication can follo
 The final assistant anchor can update after READY if the matching COMPLETE output arrives later.
 That update changes only the anchor/revision, never accepted endpoints.
 
-Stop/Cancel requests issue provider cancellation immediately and cancel an in-progress start capture.
-After provider stop acknowledgement, terminal capture receives a short independent deadline before destructive cleanup.
-A timeout records unavailable/partial and permits cleanup. Stop cannot wait behind an unbounded Git command.
+Stop/Cancel immediately cancels provider work and start capture. Backend shutdown stops the process without prompt cancellation.
+After acknowledged stop, capture has an independent deadline before cleanup.
+Timeouts and forced/unconfirmed shutdowns retain unavailable/partial history; startup reconciles unfinished rows. Git waits are bounded.
 
 ## Git capture
 

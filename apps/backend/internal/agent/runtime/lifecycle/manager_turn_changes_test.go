@@ -299,7 +299,7 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	t.Cleanup(releaseRetry)
 	stopDone := make(chan struct{})
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution)
+		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 		close(stopDone)
 	}()
 	<-handler.firstDeadline
@@ -433,7 +433,7 @@ func TestStopPreservesActiveTurnBeforeExecutorCleanup(t *testing.T) {
 	manager.SetTurnChangeCaptureHandler(handler)
 	stopDone := make(chan struct{})
 	go func() {
-		manager.preserveTurnChangesBeforeStop(context.Background(), execution)
+		manager.preserveTurnChangesBeforeStop(context.Background(), execution, "")
 		close(stopDone)
 	}()
 	select {

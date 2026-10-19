@@ -118,3 +118,38 @@ Twenty-nine focused frontend tests and specification/catalog checks passed.
 Longer local checks were interrupted; their incomplete runs are not pass evidence.
 Updated-head required CI remains the delivery gate. Work order 09's qualification
 limits remain unchanged.
+
+### Backend-shutdown delivery semantics (2026-10-20)
+
+Exact-head CI at `6d6aea8dd53d` failed the desktop continuation restart case with
+agent survival disabled: the session became idle but never reached the restored
+delivery phase. The same assertion failed locally with retries disabled. The
+checkpoint stop path sent ACP cancellation before process shutdown, changing the
+continuation submission to cancelled and removing its automatic-recovery input.
+
+Backend shutdown now uses its existing process-stop path before terminal capture,
+with the retained HTTP checkpoint transport available until executor cleanup. It
+does not issue a prompt cancellation. Explicit Stop retains cancel, capture, stop
+ordering. Forced or unconfirmed shutdowns do not accept a terminal checkpoint;
+existing startup reconciliation marks unfinished capture unavailable. The native
+restore assertion and the landed delivery ownership/settlement guards are unchanged.
+
+The new race regression rejected the old shutdown order, then passed for confirmed,
+unconfirmed, and forced shutdown plus explicit Stop. The existing stop, retry, and
+turn-capture regression selection also passed under the race detector. Fresh backend,
+delivery fixture, and plugin artifacts passed both restart browser cases, the full
+15-test desktop continuation spec, and its two-test phone counterpart with retries
+disabled. Browser runs used isolated port slot 25. Commands:
+
+```bash
+cd apps/backend
+GOMAXPROCS=2 go test -p 2 -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestTurnChangeCapturePreservesShutdownDeliveryOutcome|TestStopPreservesActiveTurnBeforeExecutorCleanup|TestStopWaitsForRetriedTerminalCaptureBeforeReturning|TestStopAgentWithReason' -count=1
+cd ../web
+E2E_PORT_OFFSET=25 pnpm e2e:raw --project=chromium tests/session/provider-interruption-continuation.spec.ts --retries=0
+E2E_PORT_OFFSET=25 pnpm e2e:raw --project=mobile-chrome tests/session/mobile-provider-interruption-continuation.spec.ts --retries=0
+```
+
+Public documentation already promises verified background native restoration in
+`docs/public/tasks-and-workflows.md`; this fix restores that behavior without new
+copy or controls. Work order 09's executor, storage, and performance qualification
+limits remain open. Fresh required CI on the remediation commit remains necessary.
