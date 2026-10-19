@@ -558,3 +558,37 @@ func canonicalTempDir(t *testing.T) string {
 	}
 	return resolved
 }
+
+// @covers AC-EXECUTORS-SURVIVAL-001.11
+func TestRenderSystemdUnitPreservesApplicationAgentLifetime(t *testing.T) {
+	for _, system := range []bool{false, true} {
+		name, mode, target, user := "user", "user", "default.target", ""
+		if system {
+			name, mode, target, user = "system", "system", "multi-user.target", "User=alice\n"
+		}
+		t.Run(name, func(t *testing.T) {
+			unit := renderSystemdUnit(nativeServiceUnitInput{
+				Executable: "/opt/kandev/bin/kandev", HomeDir: "/srv/kandev",
+				System: system, SystemUser: "alice", Port: 1234,
+			})
+			for _, line := range []string{
+				"Type=simple", "ExecStart=/opt/kandev/bin/kandev --headless",
+				"Environment=KANDEV_HOME_DIR=/srv/kandev",
+				"Environment=KANDEV_SERVICE_MODE=" + mode,
+				"Environment=KANDEV_SERVER_PORT=1234",
+				"Restart=on-failure", "RestartSec=5s",
+				"KillMode=process", "TimeoutStopSec=30s", "WantedBy=" + target,
+			} {
+				if !slices.Contains(strings.Split(unit, "\n"), line) {
+					t.Errorf("service missing exact line %q:\n%s", line, unit)
+				}
+			}
+			if strings.Count(unit, "KillMode=") != 1 {
+				t.Fatal("service must have exactly one termination policy")
+			}
+			if system && !strings.Contains(unit, user) || !system && strings.Contains(unit, "\nUser=") {
+				t.Fatalf("unexpected service user:\n%s", unit)
+			}
+		})
+	}
+}
