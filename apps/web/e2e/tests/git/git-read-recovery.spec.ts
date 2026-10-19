@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { createStandardProfile } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -7,7 +7,9 @@ test("Changes automatically recovers its initial Git read without showing a fals
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   const profile = await createStandardProfile(apiClient, "Git read recovery");
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
