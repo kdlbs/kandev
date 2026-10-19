@@ -8241,10 +8241,9 @@ func (s *Service) applyEngineTransitionWithMode(
 ) bool {
 	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode,
 		func(commitCtx context.Context) (bool, error) {
-			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
-				return false, err
-			}
-			return true, nil
+			return s.workflowStore.applyTransitionReportingApplied(
+				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
+			)
 		})
 }
 

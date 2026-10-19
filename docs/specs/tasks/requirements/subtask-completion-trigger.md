@@ -21,6 +21,22 @@ This document is the migrated task-system source for the capability. The source 
 
 - **AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
 
+### REQ-TASKS-SUBTASK-COMPLETION-TRIGGER-002: Parent Transition Commit
+
+**Intent:** A parent move driven by `on_children_completed` is either persisted
+or reported as not applied, whichever path completed the last child.
+
+#### Acceptance criteria
+
+- **AC-TASKS-SUBTASK-COMPLETION-TRIGGER-002.1:** When the last active child
+  enters a completion-enabled step through its own agent turn and the parent
+  step's `on_children_completed` actions move the parent, the system shall
+  persist the parent's new workflow step.
+- **AC-TASKS-SUBTASK-COMPLETION-TRIGGER-002.2:** If an engine transition commit
+  does not persist the task's step change, the system shall report the
+  transition as not applied and shall not record step history, run the target
+  step's `on_enter`, or mark the children-completed operation applied.
+
 ## Migrated source detail
 
 ## Why
@@ -193,6 +209,10 @@ This feature adds no new permission boundary.
   logged and the child task's terminal state remains unchanged.
 - If multiple children finish concurrently, engine operation idempotency prevents
   duplicate parent actions for the same completed child set.
+- If the parent's step change is not persisted, the transition is reported as
+  not applied: no step history row is recorded, the target step's `on_enter`
+  does not run, and the operation is not marked applied, so a later child
+  state transition can retry it.
 
 ## Persistence guarantees
 
@@ -221,6 +241,12 @@ This feature adds no new permission boundary.
 - **GIVEN** a parent step configures `on_children_completed` with `move_to_next`,
   **WHEN** all direct children are terminal, **THEN** the parent moves to the
   next workflow step and that step's `on_enter` actions run normally.
+
+- **GIVEN** a parent step configures `on_children_completed` with `move_to_step`
+  and the last child moves into a completion-enabled step through its own
+  agent turn (`on_turn_complete`), **WHEN** that move completes the child,
+  **THEN** the parent's step change is persisted. The parent transition does
+  not reuse the child turn's workflow delivery effect.
 
 - **GIVEN** a parent step configures `on_children_completed` with `queue_run` for
   the primary agent, **WHEN** all direct children are terminal, **THEN** a parent
