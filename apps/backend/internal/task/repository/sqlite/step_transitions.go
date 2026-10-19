@@ -45,6 +45,39 @@ func (r *Repository) ListTaskStepTransitions(ctx context.Context, taskID string,
 	return items, rows.Err()
 }
 
+// ListTaskStepTransitionRecords reads oldest-first ledger rows with their
+// attribution, resuming after afterID. Step names come from a left join so a
+// removed step keeps its recorded identifier with a null name.
+func (r *Repository) ListTaskStepTransitionRecords(ctx context.Context, taskID string, afterID int64, limit int) ([]models.StepTransitionRecord, error) {
+	const query = `SELECT h.id, h.from_workflow_id, h.from_workflow_step_id, fs.name,
+			h.to_workflow_id, h.to_workflow_step_id, ts.name,
+			h.trigger, h.actor_kind, h.actor_id, h.occurred_at
+		FROM task_step_transitions h
+		LEFT JOIN workflow_steps fs ON fs.id = h.from_workflow_step_id
+		LEFT JOIN workflow_steps ts ON ts.id = h.to_workflow_step_id
+		WHERE h.task_id = ? AND h.id > ?
+		ORDER BY h.id ASC LIMIT ?`
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), taskID, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list task step transition records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]models.StepTransitionRecord, 0)
+	for rows.Next() {
+		var item models.StepTransitionRecord
+		var fromWorkflow, fromStep, fromName, toWorkflow, toStep, toName, actorID sql.NullString
+		if err := rows.Scan(&item.ID, &fromWorkflow, &fromStep, &fromName, &toWorkflow, &toStep, &toName,
+			&item.Trigger, &item.ActorKind, &actorID, &item.OccurredAt); err != nil {
+			return nil, fmt.Errorf("scan task step transition record: %w", err)
+		}
+		item.FromWorkflowID, item.FromWorkflowStepID, item.FromWorkflowStepName = nullableValue(fromWorkflow), nullableValue(fromStep), nullableValue(fromName)
+		item.ToWorkflowID, item.ToWorkflowStepID, item.ToWorkflowStepName = nullableValue(toWorkflow), nullableValue(toStep), nullableValue(toName)
+		item.ActorID = nullableValue(actorID)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func nullableValue(value sql.NullString) *string {
 	if !value.Valid {
 		return nil

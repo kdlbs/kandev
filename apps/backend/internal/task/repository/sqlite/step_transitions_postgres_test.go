@@ -59,3 +59,38 @@ func TestPostgresStepTransitionsSchemaCreatesTableAndIsReplaySafe(t *testing.T) 
 		t.Fatalf("postgres groups = %+v, err=%v", groups, err)
 	}
 }
+
+// @covers AC-TASKS-STEP-TRANSITION-READ-001.1
+func TestPostgresTaskStepTransitionRecordsOldestFirstWithNames(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`),
+		"task-records-pg", "ws-records-pg", "Records", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(db.Rebind(`INSERT INTO workflow_steps (id, workflow_id, name, position) VALUES (?, ?, ?, ?)`),
+		"draft-pg", "wf-pg", "Draft", 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, move := range [][3]any{{nil, "draft-pg", "user-pg"}, {"draft-pg", "gone-pg", nil}} {
+		if _, err := db.Exec(db.Rebind(`INSERT INTO task_step_transitions
+			(task_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), "task-records-pg", "wf-pg", move[0], "wf-pg", move[1], "manual_move", "human", move[2], 1, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := repo.ListTaskStepTransitionRecords(context.Background(), "task-records-pg", 0, 10)
+	if err != nil || len(rows) != 2 || rows[0].ID >= rows[1].ID {
+		t.Fatalf("postgres records = %+v, err=%v", rows, err)
+	}
+	if rows[0].ToWorkflowStepName == nil || *rows[0].ToWorkflowStepName != "Draft" || rows[0].ActorID == nil || *rows[0].ActorID != "user-pg" {
+		t.Fatalf("first record = %+v", rows[0])
+	}
+	if rows[1].FromWorkflowStepName == nil || rows[1].ToWorkflowStepName != nil || rows[1].ActorID != nil {
+		t.Fatalf("second record = %+v", rows[1])
+	}
+}
