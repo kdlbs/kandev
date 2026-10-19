@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/startup"
 
 	"github.com/jmoiron/sqlx"
 
@@ -23,6 +24,11 @@ import (
 // Returns the Sweep (exposed for tests/diagnostics) and a cleanup
 // function that stops it.
 func Provide(writer, reader *sqlx.DB, checkout CheckoutResolver, log *logger.Logger) (*Sweep, func() error, error) {
+	return ProvideWithContext(context.Background(), writer, reader, checkout, log)
+}
+
+// ProvideWithContext initializes schema before deferring its sweep to readiness.
+func ProvideWithContext(ctx context.Context, writer, reader *sqlx.DB, checkout CheckoutResolver, log *logger.Logger) (*Sweep, func() error, error) {
 	repo, err := NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, err
@@ -32,7 +38,7 @@ func Provide(writer, reader *sqlx.DB, checkout CheckoutResolver, log *logger.Log
 		ancestry = &AncestryChecker{Checkout: checkout}
 	}
 	sweep := NewSweep(repo, ancestry, log)
-	sweep.Start(context.Background())
+	startup.AfterReady(ctx, func() { sweep.Start(ctx) })
 	cleanup := func() error {
 		sweep.Stop()
 		return nil

@@ -1,3 +1,5 @@
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { STARTUP_TIMINGS } from "../../helpers/startup-timing-fixture";
 import { expect, test } from "../../fixtures/test-base";
 import {
   setAgentRuntimeAvailability,
@@ -16,6 +18,7 @@ const PROGRESS_BODY = {
     seq: 1,
     elapsed_ms: 12_000,
     phase_elapsed_ms: 12_000,
+    completed_steps: STARTUP_TIMINGS,
     step: {
       id: "stores.services",
       label_key: "startup.step.stores_services",
@@ -71,6 +74,7 @@ const STALLED_BODY = {
 test.describe("Restart progress dialog startup detail", () => {
   test("renders step label and progress, and resolves a snapshot-free response by status", async ({
     testPage,
+    prCapture,
   }) => {
     test.setTimeout(60_000);
 
@@ -119,6 +123,13 @@ test.describe("Restart progress dialog startup detail", () => {
     await expect(dialog).toContainText("About 30 seconds remaining");
     await expect(dialog.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "40");
     await expect(dialog.getByText("Last known")).toHaveCount(0);
+
+    await expect(dialog.getByTestId("startup-timings")).toContainText("82 milliseconds");
+    await expect(dialog.getByTestId("startup-timings")).toContainText("Timing incomplete");
+    await waitForFiniteAnimations(dialog);
+    await prCapture.screenshot("restart-timings-desktop", {
+      caption: "Restart dialog with startup operation timings",
+    });
 
     // A failing status with no parseable snapshot falls back to last-known
     // (AC-PLATFORM-STARTUP-PROGRESS-002.6/003.13): the prior step detail

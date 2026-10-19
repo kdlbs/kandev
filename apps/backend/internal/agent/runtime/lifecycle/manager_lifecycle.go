@@ -13,7 +13,6 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -82,8 +81,21 @@ func (s recoveryOutcomeSummary) logFields() []zap.Field {
 	}
 }
 
-// Start starts the lifecycle manager background tasks
+// The startup policy belongs to one call, without mutating manager-wide configuration.
+type deferredStartupRecoveryKey struct{}
+
+// StartDeferredRemoteRecovery adopts local survivors before admitting new local
+// instances. Remote attachment stays behind readiness and its exact owner guard.
+func (m *Manager) StartDeferredRemoteRecovery(ctx context.Context) error {
+	if err := m.PrepareStartupRecovery(ctx); err != nil {
+		return err
+	}
+	return m.Start(context.WithValue(ctx, deferredStartupRecoveryKey{}, true))
+}
+
+// Start starts the lifecycle manager with its call-scoped startup policy.
 func (m *Manager) Start(ctx context.Context) error {
+	deferRemote, _ := ctx.Value(deferredStartupRecoveryKey{}).(bool)
 	if m.executorRegistry == nil {
 		m.logger.Warn("no runtime registry configured")
 		return nil
@@ -92,17 +104,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	runtimeNames := m.executorRegistry.List()
 	m.logger.Info("starting lifecycle manager", zap.Int("runtimes", len(runtimeNames)))
 
-	// Check health of all registered runtimes
-	healthResults := m.executorRegistry.HealthCheckAll(ctx)
-	for name, err := range healthResults {
-		if err != nil {
-			m.logger.Warn("runtime health check failed",
-				zap.String("runtime", string(name)),
-				zap.Error(err))
-		} else {
-			m.logger.Info("runtime is healthy", zap.String("runtime", string(name)))
-		}
-	}
+	m.checkStartupRuntimeHealth(ctx, deferRemote)
 
 	// AC-EXECUTORS-SURVIVAL-003.1: start this pass's re-tracked-session set
 	// empty so a stale entry from an earlier Start() call (tests, or a
@@ -125,38 +127,11 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	records := append([]*models.ExecutorRunning(nil), standaloneRecords...)
 	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(remoteRecords)+len(pluginRecords))
-	if listErr == nil {
-		pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-		pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
-		for _, record := range pluginRecords {
-			if record == nil || remoteRecoveryOwnerUnsupported(record) {
-				continue
-			}
-			copyRecord := cloneRemoteRecoveryRecord(record)
-			copyRecord.TransientAuthToken = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyAuthTokenSecret)
-			copyRecord.TransientBootstrapNonce = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyBootstrapNonceSecret)
-			if isTerminalExecutorRunningStatus(copyRecord.Status) {
-				pluginTerminalRecords = append(pluginTerminalRecords, copyRecord)
-			} else {
-				pluginLiveRecords = append(pluginLiveRecords, copyRecord)
-			}
-		}
-		eligibleRemote := m.establishRemoteRecoveryCandidates(ctx, append(remoteRecords, pluginLiveRecords...))
-		eligiblePlugin := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
-		eligibleBuiltInRemote := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
-		for _, record := range eligibleRemote {
-			if record.Runtime == agentruntime.RuntimePluginRemote {
-				credentialed := m.revealRemoteRecoveryCredentials(ctx, record)
-				eligiblePlugin = append(eligiblePlugin, credentialed)
-			} else {
-				eligibleBuiltInRemote = append(eligibleBuiltInRemote, m.revealRemoteRecoveryCredentials(ctx, record))
-			}
-		}
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, pluginTerminalRecords...)
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligiblePlugin...)
-		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligibleBuiltInRemote...)
+	if listErr == nil && !deferRemote {
+		remoteRecordsForRecovery = m.initialRemoteRecoveryRecords(ctx, pluginRecords, remoteRecords)
 		records = append(records, remoteRecordsForRecovery...)
 	}
+
 	inventoryKnown := listErr == nil && remoteListErr == nil
 	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: inventoryKnown}
 	m.runRecoveryErr = errors.Join(listErr, remoteListErr)
@@ -245,7 +220,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	var detailedOutcomes map[string]RecoveryCandidateOutcome
 	if listErr == nil {
 		var err error
-		recovered, detailedOutcomes, err = m.executorRegistry.RecoverAllDetailed(recoveryCtx, records)
+		recovered, detailedOutcomes, err = m.executorRegistry.recoverDetailed(recoveryCtx, records, deferRemote)
 		if err != nil {
 			m.runRecoveryErr = err
 			m.logger.Warn("failed to recover executions from some runtimes", zap.Error(err))
@@ -661,13 +636,18 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.stopContext != nil {
 		stopRemoteStatus = context.AfterFunc(m.stopContext, cancelRemoteStatus)
 	}
-	m.wg.Add(1)
-	go func() {
-		defer cancelRemoteStatus()
-		defer stopRemoteStatus()
-		m.remoteStatusLoop(remoteStatusCtx)
-	}()
-	m.logger.Info("remote status loop started")
+	startup.AfterReady(ctx, func() {
+		m.wg.Add(1)
+		go func() {
+			defer cancelRemoteStatus()
+			defer stopRemoteStatus()
+			if deferRemote {
+				m.pollRemoteStatuses(remoteStatusCtx)
+			}
+			m.remoteStatusLoop(remoteStatusCtx)
+		}()
+		m.logger.Info("remote status loop started")
+	})
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {

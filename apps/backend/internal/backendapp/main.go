@@ -506,7 +506,7 @@ func startServices( //nolint:cyclop
 		eventBus,
 		log,
 	)
-	hostnameResolver.Start(ctx)
+	startup.AfterReady(ctx, func() { hostnameResolver.Start(ctx) })
 	addCleanup(hostnameResolver.Close)
 	hostnameSettingsSubscription, err := eventBus.QueueSubscribe(
 		events.UserSettingsUpdated,
@@ -911,7 +911,7 @@ func startAgentInfrastructure(
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		services.GitLab.SetTaskAuthorizer(services.Task)
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
-		glPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { glPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { glPoller.Stop(); return nil })
 		log.Info("GitLab poller started")
 	}
@@ -931,7 +931,7 @@ func startAgentInfrastructure(
 			addRuntimeCleanup(azureLifecycle.Close)
 		}
 		azurePoller := azuredevopspkg.NewPoller(services.AzureDevOps, log)
-		azurePoller.Start(ctx)
+		startup.AfterReady(ctx, func() { azurePoller.Start(ctx) })
 		addRuntimeCleanup(func() error { azurePoller.Stop(); return nil })
 		log.Info("Azure DevOps auth poller started")
 	}
@@ -943,7 +943,7 @@ func startAgentInfrastructure(
 	if services.Jira != nil {
 		orchestratorSvc.SetJiraService(&jiraServiceAdapter{svc: services.Jira})
 		jiraPoller := jirapkg.NewPoller(services.Jira, log)
-		jiraPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { jiraPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { jiraPoller.Stop(); return nil })
 	}
 
@@ -953,7 +953,7 @@ func startAgentInfrastructure(
 	if services.Linear != nil {
 		orchestratorSvc.SetLinearService(&linearServiceAdapter{svc: services.Linear})
 		linearPoller := linearpkg.NewPoller(services.Linear, log)
-		linearPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { linearPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { linearPoller.Stop(); return nil })
 	}
 
@@ -963,7 +963,7 @@ func startAgentInfrastructure(
 	if services.Sentry != nil {
 		orchestratorSvc.SetSentryService(&sentryServiceAdapter{svc: services.Sentry})
 		sentryPoller := sentrypkg.NewPoller(services.Sentry, log)
-		sentryPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { sentryPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { sentryPoller.Stop(); return nil })
 	}
 
@@ -972,7 +972,7 @@ func startAgentInfrastructure(
 	// workspace's synced workflows with them.
 	if services.WorkflowSync != nil {
 		workflowSyncPoller := workflowsyncpkg.NewPoller(services.WorkflowSync, log)
-		workflowSyncPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { workflowSyncPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { workflowSyncPoller.Stop(); return nil })
 		log.Info("Workflow sync poller started")
 	}
@@ -982,7 +982,7 @@ func startAgentInfrastructure(
 	// GitHub or GitLab repo and reconciles Office's tables with them.
 	if services.OfficeSvcs != nil && services.OfficeSvcs.ConfigSync != nil {
 		officeConfigSyncPoller := officeconfigsync.NewPoller(services.OfficeSvcs.ConfigSync, log)
-		officeConfigSyncPoller.Start(ctx)
+		startup.AfterReady(ctx, func() { officeConfigSyncPoller.Start(ctx) })
 		addRuntimeCleanup(func() error { officeConfigSyncPoller.Stop(); return nil })
 		log.Info("Office config sync poller started")
 	}
@@ -1039,7 +1039,7 @@ func startAgentInfrastructure(
 	// tables exist (already true here, provided in provideRepositories) —
 	// the ledger's foreign keys require them present at CREATE TABLE time
 	// on PostgreSQL. services.Task satisfies delivery.CheckoutResolver.
-	_, deliveryCleanup, deliveryErr := delivery.Provide(dbPool.Writer(), dbPool.Reader(), services.Task, log)
+	_, deliveryCleanup, deliveryErr := delivery.ProvideWithContext(ctx, dbPool.Writer(), dbPool.Reader(), services.Task, log)
 	if recordErr := recordRequiredStore(ctx, repos.RequiredStores, "delivery", deliveryErr); recordErr != nil {
 		log.Error("delivery ledger initialization failed", zap.Error(recordErr))
 		return false
@@ -1430,7 +1430,12 @@ func startGatewayAndServe(
 		closeBoundListeners(server, listeners, log)
 		return false
 	}
-	if err := lifecycleMgr.Start(ctx); err != nil {
+	if err := orchestratorSvc.PrepareStartup(ctx); err != nil {
+		log.Error("Failed to prepare startup housekeeping", zap.Error(err))
+		closeBoundListeners(server, listeners, log)
+		return false
+	}
+	if err := lifecycleMgr.StartDeferredRemoteRecovery(ctx); err != nil {
 		_ = orchestratorSvc.StopEventWatcher()
 		log.Error("Failed to recover agent manager", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1447,7 +1452,7 @@ func startGatewayAndServe(
 			if services.Automation == nil {
 				return
 			}
-			services.Automation.Start(ctx)
+			startup.AfterReady(ctx, func() { services.Automation.Start(ctx) })
 			addCleanup(func() error { services.Automation.Stop(); return nil })
 			log.Info("Automation scheduler and evaluator started")
 		},
@@ -1458,7 +1463,7 @@ func startGatewayAndServe(
 			ghPoller := githubpkg.NewPoller(services.GitHub, eventBus, log)
 			ghPoller.SetTaskBranchProvider(orchestratorSvc)
 			ghPoller.SetTaskActivityProvider(&githubTaskActivityAdapter{repo: repos.Task})
-			ghPoller.Start(ctx)
+			startup.AfterReady(ctx, func() { ghPoller.Start(ctx) })
 			addCleanup(func() error { ghPoller.Stop(); return nil })
 			log.Info("GitHub poller started")
 		},
@@ -1498,7 +1503,12 @@ func startGatewayAndServe(
 				workers = append(workers, restoreCleanups[i])
 			}
 			restoreQuiesceErr = quiesceForRestore(
-				cancelWorkers,
+				func() {
+					if cancelWorkers != nil {
+						cancelWorkers()
+					}
+					_ = startup.WaitForActivation(context.WithoutCancel(ctx))
+				},
 				scheduling.Stop,
 				orchestratorSvc.Stop,
 				func() error { return stopLifecycleManager(lifecycleMgr, log) },
@@ -1516,37 +1526,39 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
-	services.Task.StartAutoArchiveLoop(ctx)
+	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	services.Task.StartSessionReconciliationLoop(ctx)
-	services.Task.StartQuickChatExpirationLoop(ctx)
+	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
+	startup.AfterReady(ctx, func() { services.Task.StartQuickChatExpirationLoop(ctx) })
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
 	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
-	hostUtilityWG.Add(1)
-	go func() {
-		defer hostUtilityWG.Done()
-		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
-			log.Warn("host utility manager bootstrap error", zap.Error(err))
-		}
-		close(hostUtilityReady)
-		// Reconcile profiles against fresh probe results — seeds defaults for
-		// newly probed agents, heals stale profile models/modes, cleans up
-		// orphans referencing removed agents.
-		if err := profileReconciler.Run(hostUtilityCtx); err != nil {
-			log.Warn("profile reconciler error", zap.Error(err))
-		}
-		if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
-			if errors.Is(err, context.Canceled) {
-				log.Debug("utility profile migration failed (context canceled during shutdown)", zap.Error(err))
-			} else {
-				log.Warn("utility profile migration failed", zap.Error(err))
+	startup.AfterReady(ctx, func() {
+		hostUtilityWG.Add(1)
+		go func() {
+			defer hostUtilityWG.Done()
+			if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
+				log.Warn("host utility manager bootstrap error", zap.Error(err))
 			}
-		} else if migrated > 0 {
-			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
-		}
-		migrateDefaultUtilityProfile(hostUtilityCtx, services.User, repos.AgentSettings, agentRegistry, log)
-	}()
+			close(hostUtilityReady)
+			// Reconcile profiles against fresh probe results — seeds defaults for
+			// newly probed agents, heals stale profile models/modes, cleans up
+			// orphans referencing removed agents.
+			if err := profileReconciler.Run(hostUtilityCtx); err != nil {
+				log.Warn("profile reconciler error", zap.Error(err))
+			}
+			if migrated, err := services.Utility.MigrateLegacyBindings(hostUtilityCtx); err != nil {
+				if errors.Is(err, context.Canceled) {
+					log.Debug("utility profile migration failed (context canceled during shutdown)", zap.Error(err))
+				} else {
+					log.Warn("utility profile migration failed", zap.Error(err))
+				}
+			} else if migrated > 0 {
+				log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
+			}
+			migrateDefaultUtilityProfile(hostUtilityCtx, services.User, repos.AgentSettings, agentRegistry, log)
+		}()
+	})
 	addCleanup(func() error {
 		hostUtilityCancel()
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1556,9 +1568,11 @@ func startGatewayAndServe(
 		return nil
 	})
 
-	if err := services.Retention.Start(ctx); err != nil {
-		log.Warn("office run retention scheduler failed to start", zap.Error(err))
-	}
+	startup.AfterReady(ctx, func() {
+		if err := services.Retention.Start(ctx); err != nil {
+			log.Warn("office run retention scheduler failed to start", zap.Error(err))
+		}
+	})
 	if systemSvc.LogBundles != nil {
 		systemSvc.LogBundles.SetNotifier(gateway.Hub)
 		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
@@ -1594,7 +1608,7 @@ func startGatewayAndServe(
 			log.Debug("runtime update replay unavailable")
 		}
 	})
-	systemSvc.StartBackground(ctx)
+	startup.AfterReady(ctx, func() { systemSvc.StartBackground(ctx) })
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
 	gateways.RegisterAgentRuntimeNotifications(ctx, eventBus, gateway.Hub, func() (any, bool) {
@@ -1634,6 +1648,10 @@ func startGatewayAndServe(
 			bootstrap.ready.Store(true)
 		}, func() { handler.Store(builtServer.Handler) })
 	})
+	if err := startup.Activate(ctx); err != nil {
+		log.Error("Failed to activate runtime workers", zap.Error(err))
+		return false
+	}
 	if err := services.DeliveryRetention.Start(ctx); err != nil && ctx.Err() == nil {
 		log.Error("failed to start durable delivery retention worker", zap.Error(err))
 		return false
@@ -1810,7 +1828,7 @@ func activateOfficeServices(
 	// install. Launched after reconciliation so a trigger-less routine
 	// reconciliation would have fixed is not reported prematurely; does not
 	// block startup and cannot affect its result.
-	go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC())
+	startup.AfterReady(ctx, func() { go officeroutines.RunStartupScan(ctx, reconcileSignal, repos.Office, log, time.Now().UTC()) })
 
 	// Register Office-only event subscribers. Global scheduling starts after
 	// this initializer returns, regardless of the feature flag.
@@ -2184,7 +2202,7 @@ func startSchedulingRuntime(
 		orchScheduler, runsSvc.SubscribeSignal(),
 		tickInterval, log,
 	)
-	runScheduler.Start(ctx)
+	startup.AfterReady(ctx, func() { runScheduler.Start(ctx) })
 	log.Info("Runs scheduler started",
 		zap.Duration("tick", tickInterval))
 	// Phase 5 (ADR-0004): start the shared cron loop. The routines handler

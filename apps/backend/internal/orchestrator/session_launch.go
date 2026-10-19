@@ -415,6 +415,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
+	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
+		return response, err
+	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
 	}

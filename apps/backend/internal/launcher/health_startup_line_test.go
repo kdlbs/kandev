@@ -3,6 +3,7 @@ package launcher
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -271,5 +272,25 @@ func TestWaitForReadyReprintsOnSeqChangeWithoutPhaseChange(t *testing.T) {
 	lines := strings.Count(output, "Recovering sessions")
 	if lines != 2 {
 		t.Fatalf("stderr output = %q, want exactly 2 progress lines (initial + seq change), got %d", output, lines)
+	}
+}
+
+func TestStartupHistoryFitsBoundedLauncherProbe(t *testing.T) {
+	snap := startup.Snapshot{Phase: startup.RecoveringSessions, Boot: 1, Seq: 64}
+	for i := range 32 {
+		snap.CompletedSteps = append(snap.CompletedSteps, startup.CompletedStepSnapshot{ID: startup.StepMessageTimestampsBackfill, LabelKey: "startup.step.message_timestamps", ActivationSeq: uint64(i + 1), Phase: startup.ApplyingMigrations, ElapsedMS: 9007199254740991, Completed: true})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"startup": snap})
+	}))
+	defer server.Close()
+	_, got := probeReadyStatus(context.Background(), server.URL)
+	if len(got.CompletedSteps) != 32 {
+		t.Fatalf("bounded startup payload was truncated: %d timings", len(got.CompletedSteps))
+	}
+	line := formatStartupLine(snap)
+	if !strings.Contains(line, "Message timestamps") || !strings.Contains(line, "completed") {
+		t.Fatalf("completed timing missing from launcher: %s", line)
 	}
 }

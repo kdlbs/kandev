@@ -475,6 +475,10 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			task_session_id TEXT PRIMARY KEY,
 			last_seq INTEGER NOT NULL
 		)`)
+	if err := r.migrate.ApplyContext(ctx, "task_session_messages.pending_prompt_seq.index", `CREATE INDEX IF NOT EXISTS idx_messages_pending_prompt_seq
+		ON task_session_messages(task_session_id) WHERE author_type = 'user' AND prompt_seq = 0`); err != nil {
+		return err
+	}
 	if err := r.backfillPromptSeq(ctx); err != nil {
 		return err
 	}
@@ -751,32 +755,81 @@ func (r *Repository) backfillTaskSessionQueueIncarnations() error {
 // already carrying a nonzero prompt_seq are untouched, and the counter seed
 // ignores existing rows.
 func (r *Repository) backfillPromptSeq(ctx context.Context) error {
-	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
-	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
-	update := fmt.Sprintf(`
-		UPDATE task_session_messages
-		SET prompt_seq = (
-			SELECT COUNT(*) FROM task_session_messages u
-			WHERE u.task_session_id = task_session_messages.task_session_id
-			  AND u.author_type = 'user'
-			  AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id))
-		)
-		WHERE author_type = 'user' AND prompt_seq = 0`, nmU, nmM, nmU, nmM)
 	startup.BeginStep(ctx, startup.StepPromptSeqBackfill)
 	defer startup.EndStep(ctx, startup.StepPromptSeqBackfill)
-	if _, err := r.db.ExecContext(ctx, update); err != nil {
-		return fmt.Errorf("backfill prompt_seq: %w", err)
+	var outstanding bool
+	if err := r.db.GetContext(ctx, &outstanding, `SELECT EXISTS(SELECT 1 FROM task_session_messages
+		WHERE author_type = 'user' AND prompt_seq = 0)`); err != nil {
+		return fmt.Errorf("find unnumbered prompts: %w", err)
 	}
-	seed := `
-		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
-		SELECT task_session_id, MAX(prompt_seq) FROM task_session_messages
-		WHERE author_type = 'user' AND prompt_seq > 0
-		GROUP BY task_session_id
-		ON CONFLICT(task_session_id) DO NOTHING`
-	if _, err := r.db.ExecContext(ctx, seed); err != nil {
+	if outstanding {
+		if err := r.backfillOutstandingPromptSeq(ctx); err != nil {
+			return err
+		}
+	}
+	var missingCounters bool
+	if err := r.db.GetContext(ctx, &missingCounters, `SELECT EXISTS(SELECT 1 FROM task_sessions s
+		WHERE NOT EXISTS (SELECT 1 FROM task_session_prompt_seq p WHERE p.task_session_id = s.id)
+		AND EXISTS (SELECT 1 FROM task_session_messages m WHERE m.task_session_id = s.id
+			AND m.author_type = 'user' AND m.prompt_seq > 0))`); err != nil {
+		return fmt.Errorf("find missing prompt counters: %w", err)
+	}
+	if !missingCounters {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, `INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		SELECT s.id, (SELECT MAX(m.prompt_seq) FROM task_session_messages m
+			WHERE m.task_session_id = s.id AND m.author_type = 'user' AND m.prompt_seq > 0)
+		FROM task_sessions s
+		WHERE NOT EXISTS (SELECT 1 FROM task_session_prompt_seq p WHERE p.task_session_id = s.id)
+		AND EXISTS (SELECT 1 FROM task_session_messages m WHERE m.task_session_id = s.id
+			AND m.author_type = 'user' AND m.prompt_seq > 0)
+		ON CONFLICT(task_session_id) DO NOTHING`)
+	if err != nil {
 		return fmt.Errorf("seed prompt sequence counters: %w", err)
 	}
 	return nil
+}
+
+func (r *Repository) backfillOutstandingPromptSeq(ctx context.Context) error {
+	var sessions []string
+	if err := r.db.SelectContext(ctx, &sessions, `SELECT DISTINCT task_session_id FROM task_session_messages WHERE author_type='user' AND prompt_seq=0`); err != nil {
+		return fmt.Errorf("list unnumbered prompt sessions: %w", err)
+	}
+	for _, id := range sessions {
+		if err := r.repairSessionPromptSeq(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) repairSessionPromptSeq(ctx context.Context, sessionID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	nmU := dialect.NormalizedMicrosecond(r.db.DriverName(), "u.created_at")
+	nmM := dialect.NormalizedMicrosecond(r.db.DriverName(), "task_session_messages.created_at")
+	update := fmt.Sprintf(`UPDATE task_session_messages SET prompt_seq=(
+ SELECT COUNT(*) FROM task_session_messages u
+ WHERE u.task_session_id=task_session_messages.task_session_id AND u.author_type='user'
+ AND (%s < %s OR (%s = %s AND u.id <= task_session_messages.id)))
+ WHERE task_session_id=? AND author_type='user' AND prompt_seq=0`, nmU, nmM, nmU, nmM)
+	if _, err := tx.ExecContext(ctx, tx.Rebind(update), sessionID); err != nil {
+		return fmt.Errorf("backfill prompt_seq: %w", err)
+	}
+	// The ordinal repair and counter advance commit together so replay can use
+	// the outstanding-row index as its complete repair predicate.
+	_, err = tx.ExecContext(ctx, tx.Rebind(`INSERT INTO task_session_prompt_seq(task_session_id,last_seq)
+ SELECT ?,MAX(prompt_seq) FROM task_session_messages WHERE task_session_id=? AND author_type='user'
+ ON CONFLICT(task_session_id) DO UPDATE SET last_seq=CASE
+ WHEN excluded.last_seq > task_session_prompt_seq.last_seq THEN excluded.last_seq ELSE task_session_prompt_seq.last_seq END`), sessionID, sessionID)
+	if err != nil {
+		return fmt.Errorf("advance repaired prompt counter: %w", err)
+	}
+	return tx.Commit()
 }
 
 // clearRecoveredAgentErrors repairs sessions whose stored agent failure was

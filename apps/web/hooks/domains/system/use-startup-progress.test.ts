@@ -191,3 +191,29 @@ describe("useStartupProgress validation and cleanup", () => {
     expect(signal?.aborted).toBe(true);
   });
 });
+
+it("retains completed timings after polling stops and clears them for a new restart", async () => {
+  mocks.fetchJson.mockResolvedValue({
+    startup: snapshot({
+      completed_steps: [
+        {
+          id: "database.backup",
+          label_key: "startup.step.database_backup",
+          phase: "backing_up_database",
+          activation_seq: 1,
+          elapsed_ms: 82,
+          completed: true,
+        },
+      ],
+    }),
+  });
+  const { result, rerender } = renderHook(
+    ({ enabled, retain }) => useStartupProgress(enabled, retain),
+    { initialProps: { enabled: true, retain: false } },
+  );
+  await waitFor(() => expect(result.current.snapshot?.completed_steps).toHaveLength(1));
+  rerender({ enabled: false, retain: true });
+  expect(result.current.snapshot?.completed_steps).toHaveLength(1);
+  rerender({ enabled: false, retain: false });
+  await waitFor(() => expect(result.current.snapshot).toBeNull());
+});

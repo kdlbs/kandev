@@ -38,7 +38,7 @@ function readyBodyOf(err: unknown): ReadyBody | null {
  * parseable snapshot either way and is therefore always treated as fresh
  * data, not a failure.
  */
-export function useStartupProgress(enabled: boolean): StartupProgressState {
+export function useStartupProgress(enabled: boolean, retainSnapshot = false): StartupProgressState {
   const [snapshot, setSnapshot] = useState<StartupSnapshot | null>(null);
   const [lastKnown, setLastKnown] = useState(false);
   const inFlightRef = useRef(false);
@@ -46,8 +46,10 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
 
   useEffect(() => {
     if (!enabled) {
-      setSnapshot(null);
-      setLastKnown(false);
+      if (!retainSnapshot) {
+        setSnapshot(null);
+        setLastKnown(false);
+      }
       activeControllerRef.current?.abort();
       activeControllerRef.current = null;
       inFlightRef.current = false;
@@ -102,7 +104,7 @@ export function useStartupProgress(enabled: boolean): StartupProgressState {
       activeControllerRef.current = null;
       inFlightRef.current = false;
     };
-  }, [enabled]);
+  }, [enabled, retainSnapshot]);
 
   return { snapshot, lastKnown };
 }
