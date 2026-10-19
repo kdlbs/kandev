@@ -138,6 +138,68 @@ describe("createAppStore boot settings", () => {
   });
 });
 
+describe("createAppStore Jira issue watches", () => {
+  it("composes Jira, merges initial state, isolates stores, and preserves unrelated references", () => {
+    const initialJiraIssueWatches = {
+      items: [],
+      loaded: false,
+      loading: true,
+    };
+    const store = createAppStore({ jiraIssueWatches: initialJiraIssueWatches });
+    const otherStore = createAppStore();
+    const beforeMutation = store.getState();
+
+    expect(beforeMutation.jiraIssueWatches).toEqual(initialJiraIssueWatches);
+
+    beforeMutation.setJiraIssueWatches([]);
+
+    const afterMutation = store.getState();
+    expect(afterMutation.jiraIssueWatches).toEqual({
+      items: [],
+      loaded: true,
+      loading: true,
+    });
+    expect(afterMutation.linearIssueWatches).toBe(beforeMutation.linearIssueWatches);
+    expect(afterMutation.system).toBe(beforeMutation.system);
+    expect(otherStore.getState().jiraIssueWatches).toEqual({
+      items: [],
+      loaded: false,
+      loading: false,
+    });
+  });
+});
+
+describe("createAppStore Linear issue watches", () => {
+  it("composes Linear, merges initial state, isolates stores, and preserves unrelated references", () => {
+    const initialLinearIssueWatches = {
+      items: [],
+      loaded: false,
+      loading: true,
+    };
+    const store = createAppStore({ linearIssueWatches: initialLinearIssueWatches });
+    const otherStore = createAppStore();
+    const beforeMutation = store.getState();
+
+    expect(beforeMutation.linearIssueWatches).toEqual(initialLinearIssueWatches);
+
+    beforeMutation.setLinearIssueWatches([]);
+
+    const afterMutation = store.getState();
+    expect(afterMutation.linearIssueWatches).toEqual({
+      items: [],
+      loaded: true,
+      loading: true,
+    });
+    expect(afterMutation.jiraIssueWatches).toBe(beforeMutation.jiraIssueWatches);
+    expect(afterMutation.system).toBe(beforeMutation.system);
+    expect(otherStore.getState().linearIssueWatches).toEqual({
+      items: [],
+      loaded: false,
+      loading: false,
+    });
+  });
+});
+
 describe("automation run delete serialization", () => {
   it("claims the delete slot once and releases it only for the matching generation", () => {
     const store = createAppStore();

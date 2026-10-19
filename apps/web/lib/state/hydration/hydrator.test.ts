@@ -100,6 +100,40 @@ describe("hydrateState — agent runtime availability", () => {
   });
 });
 
+describe("hydrateState preserves Jira issue watches", () => {
+  it("keeps Jira state unchanged while hydrating an unrelated root field", () => {
+    const jiraIssueWatches = {
+      items: [],
+      loaded: true,
+      loading: true,
+    };
+
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.jiraIssueWatches = jiraIssueWatches;
+      hydrateState(draft, { agentRuntime: { status: "available" } });
+    });
+
+    expect(result.jiraIssueWatches).toEqual(jiraIssueWatches);
+  });
+});
+
+describe("hydrateState preserves Linear issue watches", () => {
+  it("keeps Linear state unchanged while hydrating an unrelated root field", () => {
+    const linearIssueWatches = {
+      items: [],
+      loaded: true,
+      loading: true,
+    };
+
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.linearIssueWatches = linearIssueWatches;
+      hydrateState(draft, { agentRuntime: { status: "available" } });
+    });
+
+    expect(result.linearIssueWatches).toEqual(linearIssueWatches);
+  });
+});
+
 describe("hydrateState — agentctl readiness", () => {
   it("promotes a hydrated live session over a stale starting lifecycle status", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
