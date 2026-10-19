@@ -297,3 +297,54 @@ func TestQueuedLifecycleDeliveryCIAutoFix(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-UI-CI-PR-AUTOMATION-001.18
+func TestQueuedLifecycleDeliveryDurableError(t *testing.T) {
+	ctx := context.Background()
+	f := newLifecycleDeliveryFixture(t, true)
+	session, err := f.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.NoError(t, f.repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+		Generation: 1, NativeSessionID: "native", CreationReason: "initial",
+	}))
+	queued := f.reserve(t, map[string]interface{}{"origin": githubPRAutomationOrigin})
+	f.transportError = errors.New("transport disconnected before its reply")
+
+	f.execute(t, queued)
+
+	require.Equal(t, 1, f.calls)
+	require.NotNil(t, f.submission)
+	stored, err := f.repo.GetAgentDeliverySubmission(ctx, f.submission.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
+	require.Equal(t, "s1", stored.SessionID)
+	require.Equal(t, f.submission.PayloadHash, stored.PayloadHash)
+	block, err := f.service.GetOpenSessionRecoveryBlock(ctx, "s1")
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	require.Equal(t, "s1", block.SessionID)
+	require.Equal(t, stored.ID, block.DeliverySubmissionID)
+	require.Equal(t, "unknown_prompt_outcome", block.Reason)
+	require.Equal(t, 1, f.count(t, "queued_messages"), "uncertainty must not acknowledge the lifecycle row")
+	var retainedQueueID string
+	require.NoError(t, f.repo.DB().QueryRowContext(ctx, "SELECT id FROM queued_messages WHERE session_id = ?", "s1").Scan(&retainedQueueID))
+	require.Equal(t, queued.ID, retainedQueueID)
+	require.Zero(t, f.count(t, "queue_dispatch_claims"))
+
+	session, err = f.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	_, err = f.service.queueAndDrainLifecyclePrompt(
+		ctx, session, "t1", queued.Content, queued.Metadata, "durable-error", messagequeue.ErrTaskInactive,
+	)
+	require.ErrorIs(t, err, ErrSessionRecoveryRequired)
+	require.Equal(t, 1, f.calls, "real admission must not resend an uncertain submission")
+	require.Equal(t, 1, f.count(t, "queued_messages"))
+	retained, err := f.service.GetOpenSessionRecoveryBlock(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, block.ID, retained.ID)
+	require.Equal(t, stored.ID, retained.DeliverySubmissionID)
+	stillUnknown, err := f.repo.GetAgentDeliverySubmission(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stillUnknown.State)
+}

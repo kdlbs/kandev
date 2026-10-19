@@ -1,6 +1,6 @@
 ---
 created: 2026-10-19
-status: complete
+status: completed
 requirements:
   - REQ-UI-CI-PR-AUTOMATION-001
 system_design:
@@ -12,125 +12,121 @@ legacy_specs: []
 
 ## Overview
 
-Repair [issue #4551](https://github.com/kdlbs/kandev/issues/4551) by selecting
-the ordinary delivery-claim updater only for the existing non-lifecycle path.
-One sequential work order owns regression tests, the minimal correction, and
-targeted validation. ROOT reviewed the complete design package and later explicitly released
-implementation in this same primary session with a bounded heavy lease.
+Repair [issue #4551](https://github.com/kdlbs/kandev/issues/4551) by keeping
+retained lifecycle dispatch independent of ordinary queue claims. One work order
+owns the minimal updater correction, SQLite consumer coverage and accurate
+legacy/durable recovery documentation.
 
-## Evidence and assumptions
+## Root cause
 
-Canonical issue read, including its environment and proposed alternatives; no
-comments or image attachments were present. HEAD and remote main were both
-`530493cce701430cb9b68387eadd1d0126e78c63` at design intake.
-The issue reports SQLite, ACP agents advertising `durable_v1`, and a lifecycle
-head repeatedly requeued as superseded, obstructing `on_turn_complete`.
-
-Source confirms `reserveRetainedHead` retains lifecycle rows without an ordinary
+In baseline `530493cce701430cb9b68387eadd1d0126e78c63`,
+`reserveRetainedHead` retains lifecycle rows without an ordinary dispatch
 attempt, while `executeQueuedMessageWithReservation` always installs an updater
-requiring that attempt. `persistDeliveryClaim` maps the rejection to superseded
-under both legacy and v1 preparation, before executor dispatch.
+requiring that attempt. `persistDeliveryClaim` maps the SQL rejection to
+superseded before executor dispatch. The lifecycle event repeatedly requeues
+and obstructs normal subsequent turn-completion processing.
 
-ROOT supplied independently qualified real-consumer evidence: SQLite lifecycle
-failed with zero ordinary claims, zero executor calls, one pending row; memory
-lifecycle and SQLite ordinary controls passed. This session has not rerun that
-experiment and has not accessed ROOT's private fixture. Author permanent tests
-independently from production behavior after implementation authorization.
-
-Assumption check: dispatch through negotiated transport, preserve existing
-guards, and exclude async drain redesign are settled by the request. The owning
-pair remains the existing PR automation requirement/design despite its migrated
-UI directory; Platform's ordinary claim contract is a dependency, not a second
-repair specification. Existing control labels and outcome criteria do not
-explicitly cover retained delivery, so add only `.18` to the existing requirement.
-No new ownership or persistence model is proposed; no new ADR is needed.
+The causal SQLite regression failed in all six review-requested/merged/closed
+legacy/v1 cases with zero transport calls despite a retained lifecycle row.
+The correction conditionally attaches the ordinary updater only when
+`!lifecyclePrompt`, preserving SQL claim validation and error mapping.
 
 ## Scope
 
 ### In scope
 
-- `AC-UI-CI-PR-AUTOMATION-001.18`: real SQLite lifecycle consumer regression,
-  legacy and advertised compatible `durable_v1`, accepted acknowledgement,
-  transient unaccepted retry, and invalidation controls.
-- Preserve ordinary claim persistence and fail-closed rejection; explicitly
-  characterize non-lifecycle retained-kind updater eligibility.
+- `AC-UI-CI-PR-AUTOMATION-001.18`: initial SQLite lifecycle delivery through
+  negotiated legacy or compatible `durable_v1`, retained-row acceptance,
+  legacy failed-handoff retry, conservative durable-error recovery and existing
+  archive/reset/ownership guards.
+- Ordinary valid/missing/stale claim controls and non-lifecycle retained-kind
+  compatibility. Existing auto-fix coalescing and exact-turn binding remain
+  constrained by `.9` and `.10`.
 
 ### Out of scope
 
-Async drain/on-turn-complete architecture, startup reconciliation changes,
-new schema/claim/retry mechanisms, all-retained-row bypass, plan-comment or
-managed-input delivery repair, exactly-once crash recovery, provider adapter
-changes, UI/copy/config/public API/feature flags, unrelated paused tasks, and
-foreign refs/processes/caches/worktrees.
+Async drain/on-turn-complete redesign, startup reconciliation changes, new
+schema/claim/retry mechanisms, all-retained-row bypass, plan-comment or managed
+input repair, runtime/agentctl outcome propagation, shared ordinary/direct
+settlement changes, exactly-once crash guarantees, UI/copy/config/public APIs,
+feature flags and unrelated resources.
 
 ## Technical approach
 
-In `apps/backend/internal/orchestrator/event_handlers_agent.go`, construct
-`promptTaskOptions.deliveryClaimUpdater` only for non-lifecycle entries, using
-the existing `isLifecycleAutomationMessage`/`IsDurableLifecycle` classifier.
-Preserve all other options and callbacks. Do not infer eligibility from an empty
-attempt ID: a missing ordinary attempt must continue to reject dispatch.
-Do not modify SQL claim validation or `persistDeliveryClaim` error mapping.
+In `apps/backend/internal/orchestrator/event_handlers_agent.go`, select
+`promptTaskOptions.deliveryClaimUpdater` with the existing lifecycle classifier.
+Keep final active-task/current-token/generation checks and accepted
+acknowledgement. Never infer ordinary eligibility from a missing attempt ID or
+suppress an ordinary claim-changed error.
 
-| Queue kind / transport | Identity and intended behavior | Evidence |
+| Queue kind / transport | Intended behavior | Evidence |
 | --- | --- | --- |
-| Lifecycle / legacy peer | Retained lifecycle reservation; no ordinary updater; accept then acknowledge | SQLite consumer success and failed unaccepted handoff |
-| Lifecycle / compatible advertised v1 | Same reservation; negotiate v1, prepare real backend submission/hash, pass matching identity to mocked transport, acknowledge acceptance | SQLite consumer success, persisted submission, recovery-block control |
-| Lifecycle / unresolved or incompatible peer | Existing recovery block; no transport send, no acknowledgement as success | Consumer negative control |
-| Ordinary user / legacy and v1 | Ordinary attempt and claim-to-submission association remain mandatory | Valid, missing, and stale claim consumer controls |
-| Plan comment / either mode | Retained replay receipt and attempted boundary; updater selection unchanged | Hook eligibility and existing persistence/failure/no-replay tests |
-| Managed input / either mode | Retained receipt with exact turn/generation; updater selection unchanged | Hook eligibility and existing attempted-input/settlement tests |
+| Lifecycle / legacy | Retain reservation until acceptance; retry a known unaccepted handoff | SQLite acceptance and failed-handoff control |
+| Lifecycle / compatible v1 | Persist submission/hash, deliver and acknowledge acceptance | SQLite consumer and payload/hash assertions |
+| Lifecycle / ambiguous v1 error | Retain event and interrupted-unknown submission behind the matching recovery block; reject another admission | Durable-error consumer regression |
+| Lifecycle / unresolved capability | Preserve recovery block without legacy fallback | Existing consumer negative control |
+| Ordinary / legacy and v1 | Require ordinary claim and association; missing/stale attempts fail closed | Ordinary claim consumer controls |
+| Plan comment / managed input | Keep existing receipt, attempted-delivery and updater behavior | Eligibility and existing receipt/no-replay controls |
 
-`IsDurableDelivery` is a retention classifier, not a transport capability.
-Plan-comment and managed-input rows also reserve without ordinary claims, so a
-similar incompatibility may exist there. That is explicitly not silently fixed
-by this lifecycle-only package. If lifecycle recovery itself requires a new
-persisted claim-to-submission association, stop and checkpoint ROOT with that
-boundary rather than disable durable negotiation or invent persistence.
+`IsDurableDelivery` classifies row retention, not transport capability.
+Lifecycle delivery still negotiates protocol and preserves payload, generation,
+ownership and recovery checks. Other retained kinds do not silently acquire a
+new delivery contract through this correction.
+
+## Existing durable classification limitation
+
+[Review finding 4309336036](https://github.com/kdlbs/kandev/pull/4574#discussion_r4309336036)
+identifies a valid shared limitation already present in baseline
+`530493cce701430cb9b68387eadd1d0126e78c63`:
+
+- `apps/backend/internal/agentctl/server/process/submission_delivery.go:19-25,128-138`
+  recognizes known/deterministic failures and can record `SubmissionFailed`.
+- `apps/backend/internal/orchestrator/task_operations.go:7554-7567` marks durable
+  executor errors interrupted-unknown and opens `unknown_prompt_outcome`.
+- `apps/backend/internal/orchestrator/agent_delivery_submission.go:40-55`
+  owns that backend transition; `session_native_delivery_recovery.go:112-127`
+  restricts existing native reconciliation for automation-owned retry sessions.
+
+The bounded repair does not fix that shared classification gap. It restores
+initial delivery and accepted acknowledgement while preserving conservative
+recovery whenever an authoritative backend terminal outcome is unavailable.
+Typed outcome propagation and ordinary/direct settlement changes are outside
+this package. Neither `dispatchAccepted == false` nor error text proves safe
+retry. An authoritative terminal outcome remains subject to existing settlement
+and admission rules; the contract does not require permanent blocking.
 
 ## Tests and end-to-end evidence
 
-Add `apps/backend/internal/orchestrator/event_handlers_queue_lifecycle_delivery_test.go`
-with independent real SQLite task and queue repositories, the real queue service,
-reservation, task-service transcript/turn persistence, prompt preparation and
-consumer. Mock external agent transport; reuse the existing workflow lookup
-fixture with no configured step actions. Use bounded channel barriers and join every
-consumer; prevent uncontrolled automatic follow-up drains in failure cases.
+All new tests live in
+`apps/backend/internal/orchestrator/event_handlers_queue_lifecycle_delivery_test.go`.
+The fixture uses real SQLite task/queue repositories, queue service, task-service
+transcript/turn persistence and prompt preparation, with mocked agent transport.
+Consumers run synchronously without an uncontrolled follow-up retry loop.
 
-- `TestQueuedLifecycleDeliverySQLite`: table of review-requested, merged, closed,
-  legacy/v1 modes; no ordinary claim before/after; one
-  transport call; row retained at transport boundary; accepted row removed and
-  no pending head afterward. For v1, assert prepared submission/hash and the
-  matching transport options. Configure the real CI attempt binding when needed.
-- `TestQueuedLifecycleDeliveryCIAutoFix`: real GitHub Store/Service and task
-  service turns bind the queued CI attempt to its accepted turn in both modes;
-  acceptance removes the retained row without creating an ordinary claim.
-- `TestQueuedLifecycleDeliveryFailure`: unaccepted transient failure retains one
-  retry, invalidated/archive/reset/session-replacement controls never send, and
-  durable recovery-blocked peer never falls back to legacy. Existing targeted
-  lifecycle tests remain part of verification.
-- `TestQueuedOrdinaryDeliveryClaimControls`: real valid ordinary claim succeeds
-  in both modes and records its protocol/submission; missing/deleted or stale
-  attempt rejects before transport. Never suppress claim-changed errors.
-- `TestQueuedDeliveryUpdaterEligibility`: hook eligibility includes ordinary,
-  plan-comment and managed-input rows and excludes lifecycle rows (including
-  legacy provider-origin fallback); this test alone is not consumer evidence.
-- Reuse `TestProcessOnTurnComplete_ExplicitSignalGating` in
-  `event_handlers_step_completion_test.go`: real task/session persistence and
-  production completion processing prove absent/stale signals block and a
-  matching signal advances. Reuse
-  `TestReviewWatchLifecycle_BootReadyStaysOnReviewUntilTurnComplete` in
-  `event_handlers_github_review_test.go`: boot-ready does not advance, genuine
-  turn completion does. These are compatibility controls, not integrated
-  lifecycle transport simulations. The new consumer test proves accepted
-  lifecycle rows no longer leave a blocking head. No duplicated workflow suite
-  is planned for unchanged completion logic.
+- `TestQueuedLifecycleDeliverySQLite`: review-requested/merged/closed across
+  legacy/v1; no ordinary claim, retained row at handoff, accepted acknowledgement
+  and matching persisted v1 payload/hash.
+- `TestQueuedLifecycleDeliveryCIAutoFix`: real GitHub Store/Service bind the
+  queued attempt to its accepted task-service turn without an ordinary claim.
+- `TestQueuedLifecycleDeliveryFailure`: known unaccepted legacy failure retains
+  one retry; archive and unresolved-capability controls preserve their guards.
+- `TestQueuedLifecycleDeliveryDurableError`: a generic ambiguous transport error
+  produces a persisted interrupted-unknown submission and recovery block with
+  matching session/submission identities. The event is retained without an
+  accepted acknowledgement. A second real `queueAndDrainLifecyclePrompt`
+  admission returns recovery-required, sends nothing and preserves the evidence.
+  This characterizes existing conservative behavior; it does not manufacture
+  proof that agentctl recorded a known terminal failure.
+- `TestQueuedOrdinaryDeliveryClaimControls`: valid claims persist transport
+  association; missing/stale claims reject before transport in both modes.
+- `TestQueuedDeliveryUpdaterEligibility`: retained non-lifecycle kinds reach
+  protocol preparation while keeping their existing updater rejection.
 
-All new behavior maps to `.18`; `.9` and `.10` remain compatibility constraints
-for auto-fix coalescing and exact accepted-turn binding. The SQLite consumer provides backend end-to-end delivery evidence; existing
-completion controls independently verify unchanged signal/ready semantics. No browser rendering changes
-require a synthetic Playwright test. Mock transport evidence does not certify
-every provider or process-crash replay scenario.
+Existing `TestProcessOnTurnComplete_ExplicitSignalGating` and
+`TestReviewWatchLifecycle_BootReadyStaysOnReviewUntilTurnComplete` establish
+unchanged completion/ready semantics. The SQLite consumer provides backend
+end-to-end delivery evidence; no browser rendering changes require Playwright.
+Mock transport does not certify every provider or process-crash replay scenario.
 
 ## Work orders
 
@@ -138,56 +134,34 @@ every provider or process-crash replay scenario.
 
 ## Verification results
 
-Implementation and task-defined local checks are complete. Publication and
-hosted validation are tracked in the external task plan. All commands use the work order's task-local toolchain and
-bounded resource settings.
+The published updater repair passed its original targeted race/FTS5 tests
+(3.537s test runtime), owning-package lint, formatting, catalog/specification and
+documentation coverage checks, and normal commit hooks. Causal RED failed with
+zero lifecycle transport calls before the correction. Two intermediate test
+oracle failures (nil/empty JSON attachments and post-attempt log ordering) were
+corrected without additional production changes.
 
-- Causal RED: exit 1, all six lifecycle legacy/v1 event cases failed with zero
-  transport calls despite a retained reservation and no ordinary claim.
-  Test runtime 6.692s; compilation and test execution completed normally.
-- Initial GREEN: exit 1, four v1 test assertions distinguished nil from an empty
-  attachment slice after JSON omission. Corrected the test oracle; production
-  fix unchanged.
-- Refined GREEN: exit 1, only two retained-kind controls expected the superseded
-  log even though post-attempt failure handling returns earlier. Corrected the
-  fixture to use exact production queue identity and assert protocol preparation
-  plus no transport. Production fix unchanged.
-- Final targeted GREEN: exit 0, `go test -race -trimpath -tags fts5 -p=1
-  ./internal/orchestrator` with the work-order selector, `-count=1
-  -timeout=300s` and GNU outer 420s/kill10. Test runtime 3.537s. Original
-  native handle 28156 joined; observed owned wrapper/timeout PIDs absent.
-- Scoped lint: original exit 4 after reporting `0 issues` and an internal
-  `Timeout exceeded` error. The canonical script's 5-minute timeout did not
-  produce a successful result. No unchanged retry. ROOT subsequently granted
-  one attempt with the same package/config/diff base and a larger resource and
-  deadline budget; that attempt passed with original exit 0 (`0 issues`).
-- Authorized lint: `golangci-lint run ./internal/orchestrator
-  --new-from-rev=530493cce701430cb9b68387eadd1d0126e78c63 --timeout=10m
-  --concurrency=2`, GNU outer 620s/kill10, task-local GOMEMLIMIT3GiB,
-  GOMAXPROCS2 and GOFLAGS=-p=2. Original native 48964 joined exit 0; observed
-  wrapper absent. Canonical shared script unchanged.
-- One frozen install: original native 87426 joined exit 0, pnpm 9.15.9, 1.7s.
-  Normal hooks remain active; their receipts belong to the external task plan.
-- Cheap design validation: catalog (388 decisions, 1656 specifications), spec
-  lint, diff check and local PR-docs `validateCoverage` all passed. The initial
-  preflight found `.18` outside its owning requirement section; moving it into
-  that section produced covered status with zero errors.
+The initial canonical lint exited 4 after an internal timeout, despite reporting
+`0 issues`; it was not counted as a pass. The same package/config/diff-base lint
+subsequently passed with a 10-minute timeout. The workspace frozen install also
+passed and the normal delivery hooks remained enabled.
 
-The external task plan owns original process handles, log locations, joins,
-lease and hosted-observer checkpoints. No tests or heavy work ran during design.
+The durable-error characterization and legacy failure controls passed the
+affected race/FTS5 selector (1.503s test runtime). Canonical changed-file lint
+passed with zero issues; catalog/specification, documentation coverage and diff
+checks passed. The work order records the correction and validation details.
 
 ## Risks
 
-- In-memory queues omit the ordinary SQL updater, hiding this defect.
-- A metadata-wide retained bypass would alter unrelated receipt contracts.
-- A v1 test that only calls `prepareAgentDeliverySubmission` misses this bug;
-  the consumer must reach the transport seam and verify SQL effects.
-- Retained lifecycle rows do not acquire ordinary restart recovery guarantees
-  by skipping an inapplicable hook. Preserve the existing recovery block.
+- In-memory queues omit the ordinary SQL updater and hide the original defect.
+- A generic retained-row bypass would change unrelated receipt contracts.
+- Legacy unaccepted retry coverage cannot prove safe automatic durable retry.
+- Preserve interrupted-unknown evidence and recovery blocks until authoritative
+  existing reconciliation permits admission; do not infer certainty from a
+  missing dispatch callback.
 
 ## Documentation impact
 
 Only the owning internal requirement/design pair and this delivery package need
 updates. Public controls, copy, configuration, flags and API contracts remain
-the same; this restores the documented PR automation delivery behavior. Related
-outcome retry/scope plans keep their completed statuses and results.
+unchanged. Related outcome retry/scope plans retain their completed results.

@@ -154,6 +154,23 @@ scoping; see that ADR's Consequences section).
   compatible durable peer. Legacy peers keep their existing transport limits.
   This repair does not add a persisted reservation-to-submission association or
   promise exactly-once lifecycle recovery across a crash.
+- Known unaccepted legacy handoffs keep the existing retained-row retry path.
+  Compatible `durable_v1` errors without an authoritative backend terminal
+  outcome preserve conservative recovery: backend
+  submission evidence becomes `DeliverySubmissionInterruptedUnknown`, the
+  lifecycle event stays retained, and a matching `unknown_prompt_outcome`
+  recovery block prevents further admission until existing authoritative
+  reconciliation permits it. Neither a false `dispatchAccepted` value nor
+  error text proves that retry is safe.
+- Shared outcome classification has an existing limitation: agentctl's
+  `SubmissionDelivery.handleDispatchError` can record a known terminal failure
+  as `journal.SubmissionFailed`, while backend
+  `finishPromptExecutorDispatch` conservatively marks executor errors with a
+  durable submission as interrupted-unknown. This repair restores initial
+  lifecycle delivery and accepted acknowledgement; it does not propagate new
+  known-versus-ambiguous outcomes across agentctl/runtime/executor or redesign
+  ordinary/direct settlement. The SQLite durable-error regression
+  protects that conservative fence, not automatic known-failure retry.
 - Plan-comment and managed-input rows also satisfy `IsDurableDelivery`, but
   have their own replay receipts, attempted-delivery boundaries, and exact
   accepted-turn handling. This lifecycle repair does not change their updater
