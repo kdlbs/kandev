@@ -211,8 +211,9 @@ performed. Documentation checks include:
   design-only synthetic trigger also passed.
 - `git diff --check -- docs/specs docs/decisions docs/plans/shell-output-write-amplification`:
   PASS. New untracked Markdown also received an explicit whitespace/link check.
-- `git status --short -- docs/plans/shell-output-write-amplification`: confirms
-  the untracked manifest and all four work orders; nothing staged or committed.
+- The design checkpoint left the manifest and all four work orders uncommitted
+  for review. All four work orders are now implemented; PR delivery and review
+  remediation are tracked separately until the remote merge is verified.
 
 Node was absent from PATH; preflight ran successfully using the installed
 `/home/jcfs/.nvm/versions/node/v24.18.0/bin/node`. Its reproducible stdin program:

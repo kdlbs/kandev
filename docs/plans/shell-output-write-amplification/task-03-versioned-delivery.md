@@ -115,3 +115,93 @@ Final results:
 - Full race run of `types/streams`, `journal`, `server/process`, and `server/api`: passed (2.188s, 21.429s, 368.215s, 143.717s respectively). The only later production edit prevents checkpoint text from being counted as fresh output progress; the targeted current-source race run passed no-op, boundary and both-saturated-field cases in 5.458s. The latter covers 1,100 revisions and three checkpoint intervals under 4 MiB.
 - `TestIncrementalShellTwoSaturatedFieldsDoNotReseed` first failed because the second revision was another full checkpoint. Excluding checkpoint bytes from the next progress counter fixes the two-field lifetime bound; stdout-only results are unchanged.
 - Changed-Go lint across all modified/new Go files passed with zero issues. After later test/counter edits, focused lint passed for the journal migration test, endurance test and producer implementation/tests. SQL guard passed.
+
+### PR remediation
+
+A focused self-check found that compact title updates changed metadata but left
+message content at the initial title, unlike the legacy tool-message updater.
+`TestIncrementalShellProjectionUpdatesTitleAndContent` first failed with the
+initial content instead of the new title. The canonical transaction now updates
+content for non-empty titles and preserves it for empty-title updates, including
+metadata-only revisions. The targeted SQLite race tests passed with two Go
+workers. This preserves the approved projection contract; it adds no wire or UI
+behavior. Remote CI/review and merge evidence remain external until completed.
+
+The same review pass reproduced stale output when an ordinary/background result
+followed a compact foreground result. Ordinary complete replacements now retire
+the chunk head and reference in their existing message transaction; projected
+summary-only updates retain their reference. Both direct and conversation-receipt
+writers have rollback coverage. The producer clears the accepted baseline at
+that ordinary normalized boundary, so later compact output starts a fresh epoch.
+These cases initially failed against the old reference/baseline handling.
+
+Remediation checks use `GOMAXPROCS=2` and `-p 2`: targeted SQLite race tests
+passed in 5.333s; producer ordinary-boundary, no-op, two-field and interleaving
+race tests passed in 9.672s. Isolated PostgreSQL duplicate projection and both
+ordinary-writer paths passed in 3.911s; that fixture was limited to one CPU and
+512 MiB and was stopped immediately afterward. The focused title lint and SQL
+guard passed. Final combined lint, remote findings and exact-head CI remain
+pending until the remediation batch is published.
+
+
+The delivery review additionally reproduced a missing canonical card before an
+asynchronous subscriber ran, mixed PostgreSQL metadata/output snapshots, extra
+checkpoints driven only by tool metadata, and rejection of fresh checkpoints at
+an identity change. Foreground starts now commit their card before cursor
+advancement and callbacks only publish it. Detail reads use REPEATABLE READ;
+identity changes admit only a self-contained base-zero checkpoint. Metadata-only
+updates preserve the checkpoint progress counters. Each behavioral fix has a
+focused failing regression followed by a passing check.
+
+Removal now revokes valid canonical references even for empty or seven-byte
+results whose tombstone exceeds their body; model and scanner regressions first
+failed with retained output and now pass. Byte-savings accounting remains
+nonnegative. The UI requirement distinguishes retained v1 storage from canonical
+v2 chunks, and the shared desktop/phone E2E additionally asserts final exit
+status and absence of earlier live output after reload. This adds no product UI
+or public API behavior; existing public operations/session documentation remains
+applicable.
+
+The CI WebSocket header assertion is updated to require the v2 negotiation
+header while preserving absent Authorization for unauthenticated clients. The
+original CI artifact reproduces the obsolete nil-header expectation.
+Remote thread dispositions, exact-head CI and merge remain pending until the
+remediation commit is published and checked.
+
+
+A direct PostgreSQL replacement with projected metadata also reproduced orphaned
+canonical chunks: the incoming metadata intentionally omits the private storage
+marker. All direct message updates now use the existing stored-row guard, matching
+the conversation-receipt path, rather than deciding admission from an incoming
+private marker. The PostgreSQL replacement regression covers that omission.
+
+Canonical shell history is detected from the stored reference or its removal
+receipt under the row lock. Direct PostgreSQL legacy-message replacements retain
+their existing behavior; conversation-receipt and agent-plan writes keep their
+existing removal guards. PostgreSQL regressions cover both legacy replacement
+and non-resurrection of removed canonical output.
+
+
+Current-source remediation checks passed with `GOMAXPROCS=2` and `-p 2`:
+producer/model/scanner race checks; WebSocket negotiation headers; SQLite and
+isolated PostgreSQL projection, replacement, snapshot, replay and removal
+regressions; lifecycle `Delivery|Durable|IncrementalShell` and orchestrator
+`ToolUpdate|LateTerminal` cases. The final writer-boundary SQL pass took 15.489s;
+after the identity helper extraction its focused race pass took 10.829s. The
+lifecycle and orchestrator package checks took 21.637s and 33.147s. Persistence
+store conformance passed in 316.697s before the final writer-only refinements;
+schema and initialization were unchanged by those refinements. SQL guard passed.
+
+Lint found an over-limit projector and a repeated status literal. Identity
+reconciliation was extracted without changing behavior, and the terminal status
+uses a constant. The earlier combined lint run also exceeded five minutes; the
+same 79-file scope is being checked in package groups before publication.
+
+
+Final changed-Go lint passed with zero issues across all 79 files in
+`verification-go-files.txt`, using the repository helper in three sequential
+package groups: SQLite (20 files, 47.06s), runtime/orchestrator (34 files,
+216.74s), and agentctl/support (25 files, 8.89s). The grouping retains the full
+14-package scope while keeping each run within the helper's timeout. Two Go
+workers and the default memory target were retained; no linter or hook was
+bypassed. The role/status refactors replace identical strings with constants. Remote CI/review disposition remains pending publication.

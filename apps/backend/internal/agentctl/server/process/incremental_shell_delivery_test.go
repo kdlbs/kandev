@@ -144,3 +144,55 @@ func TestIncrementalShellTwoSaturatedFieldsDoNotReseed(t *testing.T) {
 	}
 	require.Less(t, serialized, 4<<20)
 }
+
+func TestIncrementalShellOrdinaryTransitionResetsBaseline(t *testing.T) {
+	manager := newIncrementalShellManager(t)
+	baselines := make(map[shellDeliveryKey]shellDeliveryBaseline)
+	normalized := streams.NewShellExec("cmd", "", "", 0, false)
+	normalized.ShellExec().Output = &streams.ShellExecOutput{Stdout: "foreground"}
+	update := adapter.AgentEvent{Type: streams.EventTypeToolUpdate, ToolCallID: "tool", ToolStatus: "in_progress", NormalizedPayload: normalized, ShellOutputEligible: true}
+	first, err := manager.prepareShellDelivery(update, baselines)
+	require.NoError(t, err)
+	require.NotNil(t, first.ShellOutput)
+	background := normalized.Snapshot()
+	background.ShellExec().Background = true
+	background.ShellExec().Output = &streams.ShellExecOutput{Stdout: "background"}
+	ordinary := update
+	ordinary.NormalizedPayload, ordinary.ShellOutputEligible = background, false
+	result, err := manager.prepareShellDelivery(ordinary, baselines)
+	require.NoError(t, err)
+	require.Equal(t, streams.EventTypeToolUpdate, result.Type)
+	require.Empty(t, baselines)
+	next, err := manager.prepareShellDelivery(update, baselines)
+	require.NoError(t, err)
+	require.Zero(t, next.ShellOutput.BaseRevision)
+	require.NotEqual(t, first.ShellOutput.Epoch, next.ShellOutput.Epoch)
+}
+
+func TestIncrementalShellMetadataDoesNotAdvanceCheckpoint(t *testing.T) {
+	manager := newIncrementalShellManager(t)
+	baselines := make(map[shellDeliveryKey]shellDeliveryBaseline)
+	normalized := streams.NewShellExec("cmd", "", "", 0, false)
+	normalized.ShellExec().Output = &streams.ShellExecOutput{Stdout: strings.Repeat("x", streams.MaxShellOutputFieldBytes)}
+	update := adapter.AgentEvent{Type: streams.EventTypeToolUpdate, ToolCallID: "tool", ToolStatus: "in_progress", NormalizedPayload: normalized, ShellOutputEligible: true}
+	_, err := manager.prepareShellDelivery(update, baselines)
+	require.NoError(t, err)
+	update.ShellOutputEligible = false
+	for index := range 620 {
+		update.ToolTitle = fmt.Sprintf("metadata %d", index)
+		event, prepareErr := manager.prepareShellDelivery(update, baselines)
+		require.NoError(t, prepareErr)
+		require.False(t, event.ShellOutput.Checkpoint)
+		require.Nil(t, event.ShellOutput.Stdout)
+	}
+	for _, baseline := range baselines {
+		require.Equal(t, 1, baseline.Count)
+	}
+	code := 7
+	normalized.ShellExec().Output.ExitCode = &code
+	_, err = manager.prepareShellDelivery(update, baselines)
+	require.NoError(t, err)
+	for _, baseline := range baselines {
+		require.Equal(t, 2, baseline.Count, "result metadata changes count even without text edits")
+	}
+}

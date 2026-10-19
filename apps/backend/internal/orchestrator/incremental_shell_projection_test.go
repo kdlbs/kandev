@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -33,4 +34,18 @@ func TestIncrementalShellRetainedIdleJournal(t *testing.T) {
 		require.True(t, restartJournalOwnerMatches(inputs, descriptor))
 	}
 	require.False(t, legacyNativeDescriptorIdle(journal.RecoveryDescriptor{StorageCapability: journal.StorageCapability{Version: 3, Durable: true}}))
+}
+
+func TestIncrementalShellToolStartDoesNotPersistAgain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task", "session", "")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	creator := &mockMessageCreator{}
+	svc.messageCreator = creator
+	payload := &lifecycle.AgentStreamEventPayload{TaskID: "task", SessionID: "session", Data: &lifecycle.AgentStreamEventData{
+		Type: streams.EventTypeToolCall, ToolCallID: "tool", ToolStatus: "pending", ToolTitle: "cmd",
+		CanonicalProjection: true, MessageID: "committed-message", Normalized: streams.NewShellExec("cmd", "", "", 0, false),
+	}}
+	svc.handleToolCallEvent(context.Background(), payload)
+	require.Zero(t, creator.toolCallWrites, "the committed card must only be notified")
 }

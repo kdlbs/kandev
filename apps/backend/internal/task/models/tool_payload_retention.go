@@ -71,8 +71,8 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 		delete(root, "result")
 		paths = append(paths, "result")
 	}
-	storedBytes := incrementalShellPayloadBytes(root, body, kind)
-	if storedBytes > 0 {
+	storedBytes, storedOutput := incrementalShellPayloadBytes(root, body, kind)
+	if storedOutput {
 		delete(root, ShellOutputStorageKey)
 		paths = append(paths, ShellOutputStorageKey)
 	}
@@ -83,7 +83,7 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 	if err := updateReducedPayload(root, norm, body, kind); err != nil {
 		return result, err
 	}
-	return encodePayloadRemoval(root, paths, metadata, removedAt, storedBytes)
+	return encodePayloadRemoval(root, paths, metadata, removedAt, storedBytes, storedOutput)
 }
 
 func supportedPayload(kind, messageType string, norm rawPayloadObject) bool {
@@ -105,10 +105,10 @@ func updateReducedPayload(root, norm, body rawPayloadObject, kind string) error 
 	return nil
 }
 
-func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte, removedAt time.Time, storedBytes int64) (PayloadReduction, error) {
+func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte, removedAt time.Time, storedBytes int64, storedOutput bool) (PayloadReduction, error) {
 	marker := map[string]any{"version": 1, "removed_at": removedAt.UTC().Format(time.RFC3339Nano), "removed_fields": paths}
 	// Fixed-width numeric notation keeps the receipt size independent of the
-	// positive byte count's decimal width, including power-of-ten boundaries.
+	// byte count's decimal width, including power-of-ten boundaries.
 	marker["removed_bytes"] = json.Number(strconv.FormatFloat(0, 'e', 8, 64))
 	markerJSON, err := json.Marshal(marker)
 	if err != nil {
@@ -120,9 +120,11 @@ func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte
 		return PayloadReduction{Metadata: metadata}, err
 	}
 	delta := int64(len(metadata)-len(encoded)) + storedBytes
-	if delta <= 0 {
+	if delta <= 0 && !storedOutput {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
 	}
+	// Revoking stored output does not depend on the removal receipt's size.
+	delta = max(0, delta)
 	marker["removed_bytes"] = json.Number(strconv.FormatFloat(float64(delta), 'e', 8, 64))
 	markerJSON, err = json.Marshal(marker)
 	if err != nil {
@@ -134,10 +136,10 @@ func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte
 		return PayloadReduction{Metadata: metadata}, err
 	}
 	delta = int64(len(metadata)-len(encoded)) + storedBytes
-	if delta <= 0 {
+	if delta <= 0 && !storedOutput {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
 	}
-	return PayloadReduction{Metadata: encoded, RemovedBytes: delta}, nil
+	return PayloadReduction{Metadata: encoded, RemovedBytes: max(0, delta)}, nil
 }
 
 func payloadObject(raw []byte) (rawPayloadObject, bool) {
@@ -273,24 +275,24 @@ func removeOutputPayloads(kind string, body rawPayloadObject, prefix string) ([]
 	return paths, true, nil
 }
 
-func incrementalShellPayloadBytes(root, body rawPayloadObject, kind string) int64 {
+func incrementalShellPayloadBytes(root, body rawPayloadObject, kind string) (int64, bool) {
 	if kind != "shell_exec" {
-		return 0
+		return 0, false
 	}
 	var version int
 	if json.Unmarshal(root[ShellOutputStorageKey], &version) != nil || version != 1 {
-		return 0
+		return 0, false
 	}
 	output, ok := payloadObject(body["output"])
 	if !ok {
-		return 0
+		return 0, false
 	}
 	var stdout, stderr int64
 	if json.Unmarshal(output["stdout_bytes"], &stdout) != nil || json.Unmarshal(output["stderr_bytes"], &stderr) != nil {
-		return 0
+		return 0, false
 	}
 	if stdout < 0 || stderr < 0 || stdout > 256*1024 || stderr > 256*1024 {
-		return 0
+		return 0, false
 	}
-	return stdout + stderr
+	return stdout + stderr, true
 }

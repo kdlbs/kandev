@@ -657,7 +657,9 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	}
 
 	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateToolCallMessage(
+		if payload.Data.CanonicalProjection {
+			s.publishCanonicalMessageEvent(ctx, payload)
+		} else if err := s.messageCreator.CreateToolCallMessage(
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,

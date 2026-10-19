@@ -139,6 +139,9 @@ contents remain intact and ordered. Unknown first updates without a grounded
 baseline retain the ordinary full-snapshot path. Unsupported rich-content cost
 is reported separately from the supported output bound. A
 metadata-only barrier does not reseed a baseline or emit a full checkpoint.
+An ordinary normalized replacement outside compact eligibility clears that
+tool's accepted encoder baseline; a later compact view starts a fresh epoch.
+Metadata-only barriers that keep a complete compact view retain their baseline.
 State is bounded per active tool, reclaimed at terminal/session cleanup. Baseline
 loss starts a new explicit checkpoint epoch before the next patch.
 
@@ -153,9 +156,18 @@ projector under the existing session/stream barriers. In one transaction:
 1. Revalidate owner, exact event/effect, tool identity and contiguous cursor.
 2. Load the current tool-output revision and bounded affected chunks, validate
    the base, and apply checkpoint or patch.
-3. Update the tool message's projected summary/status, canonical output, exact
+3. Update the tool message's projected summary/status and non-empty title/content,
+   canonical output, exact
    completed generic effect and projected cursor atomically.
 4. Publish the existing lightweight message notification after commit.
+
+Foreground shell start events create their canonical tool card in this same
+durable projection pipeline before advancing the cursor. An asynchronous event
+subscriber only publishes the committed card; compact output does not depend on
+subscriber timing or re-running a callback after a crash. A delivery identity
+change requires a fresh self-contained checkpoint with base revision zero;
+incremental patches cannot cross that boundary. Replace the old head and chunks
+atomically when admitting that checkpoint.
 
 Add `task_message_shell_output` (one head per message) and
 `task_message_shell_output_chunks` (message/stream/chunk ordinal primary key).
@@ -172,10 +184,21 @@ of identical output can update metadata without rewriting its text chunks.
 New live compact tools must bypass `externalizeMessagePayload`; otherwise each
 patch would again create a full digest blob. Message metadata contains a versioned
 internal storage reference and projected summary, never a false legacy digest.
-The scoped detail reader joins the head/chunks in a consistent read transaction
+When an ordinary complete tool result replaces compact output, remove the
+internal reference and canonical chunks in the same message transaction. A
+summary-only metadata update preserves/restores its internal reference; a new
+externalized legacy digest is a replacement and retires the old chunks. Rollback
+keeps the previous reference and baseline intact.
+The scoped detail reader joins metadata and head/chunks in a consistent read
+transaction (REPEATABLE READ on PostgreSQL)
 and returns the existing whole-tail API shape. Final completion retains the same canonical chunks and atomically commits the
 terminal checkpoint and status. No terminal conversion to a digest blob is
 required, and terminal detail reads use the same consistent snapshot reader.
+
+Payload removal revokes a valid incremental storage reference even for empty or
+short output whose receipt exceeds the removed body. Reclaimed-byte accounting
+is clamped to zero when the tombstone increases metadata size; it never prevents
+the atomic tombstone and chunk deletion.
 
 Lifecycle/orchestrator receive a committed projection marker plus the typed
 semantic summary. Skip duplicate `UpdateToolCallMessage` persistence only for that

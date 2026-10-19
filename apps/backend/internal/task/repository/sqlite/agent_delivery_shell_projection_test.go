@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -184,4 +185,115 @@ func TestIncrementalShellRemovedPayloadCannotResurrect(t *testing.T) {
 	var count int
 	require.NoError(t, repo.db.Get(&count, `SELECT COUNT(*) FROM task_message_shell_output_chunks`))
 	require.Zero(t, count)
+}
+
+func TestIncrementalShellProjectionUpdatesTitleAndContent(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedIncrementalShellMessage(t, repo)
+	_, err := repo.db.Exec(`UPDATE task_session_messages SET content='initial command' WHERE id='shell-message'`)
+	require.NoError(t, err)
+	var state *streams.ShellOutputState
+	expected := "initial command"
+	for index, title := range []string{"updated command", "renamed while quiet", ""} {
+		patch, encodeErr := streams.EncodeShellOutputPatch(state, streams.ShellExecOutput{Stdout: "output"}, "epoch", true)
+		require.NoError(t, encodeErr)
+		if state != nil {
+			patch.Checkpoint, patch.Stdout, patch.Stderr = false, nil, nil
+		}
+		state, err = streams.ApplyShellOutputPatch(state, patch)
+		require.NoError(t, err)
+		event := incrementalShellTestEvent(t, int64(index+1), patch)
+		var agent streams.AgentEvent
+		require.NoError(t, json.Unmarshal(event.Payload, &agent))
+		agent.ToolTitle = title
+		event.Payload, err = json.Marshal(agent)
+		require.NoError(t, err)
+		_, err = repo.ReceiveAgentDeliveryEvent(ctx, event, event.Sequence)
+		require.NoError(t, err)
+		_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, completedRetentionEventEffect(event))
+		require.NoError(t, err)
+		message, readErr := repo.GetMessage(ctx, "shell-message")
+		require.NoError(t, readErr)
+		if title != "" {
+			expected = title
+		}
+		require.Equal(t, expected, message.Content)
+		require.Equal(t, expected, message.Metadata["title"])
+	}
+}
+
+func TestIncrementalShellOrdinaryReplacementRetiresChunks(t *testing.T) {
+	for _, receipt := range []bool{false, true} {
+		for _, stdout := range []string{"background result", strings.Repeat("B", 8192)} {
+			t.Run(fmt.Sprintf("receipt_%t_bytes_%d", receipt, len(stdout)), func(t *testing.T) {
+				repo := newRepoForSessionTests(t)
+				ctx := context.Background()
+				seedIncrementalShellMessage(t, repo)
+				patch, err := streams.EncodeShellOutputPatch(nil, streams.ShellExecOutput{Stdout: "foreground"}, "epoch", true)
+				require.NoError(t, err)
+				event := incrementalShellTestEvent(t, 1, patch)
+				_, err = repo.ReceiveAgentDeliveryEvent(ctx, event, 1)
+				require.NoError(t, err)
+				_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, completedRetentionEventEffect(event))
+				require.NoError(t, err)
+				message, err := repo.GetMessage(ctx, "shell-message")
+				require.NoError(t, err)
+				write := func() error {
+					if receipt {
+						_, writeErr := repo.UpdateMessageWithConversationReceipt(ctx, message)
+						return writeErr
+					}
+					return repo.UpdateMessage(ctx, message)
+				}
+				normalized := streams.NewShellExec("test-command", "/tmp", "", 0, true)
+				normalized.ShellExec().Output = &streams.ShellExecOutput{Stdout: stdout}
+				message.Metadata["normalized"] = normalized
+				_, err = repo.db.Exec(`CREATE TRIGGER fail_shell_replacement BEFORE UPDATE OF metadata ON task_session_messages BEGIN SELECT RAISE(ABORT,'injected replacement failure'); END`)
+				require.NoError(t, err)
+				require.Error(t, write())
+				var retainedHeads int
+				require.NoError(t, repo.db.Get(&retainedHeads, `SELECT COUNT(*) FROM task_message_shell_output`))
+				require.Equal(t, 1, retainedHeads, "a failed replacement must retain its canonical baseline")
+				_, err = repo.db.Exec(`DROP TRIGGER fail_shell_replacement`)
+				require.NoError(t, err)
+				require.NoError(t, write())
+				message, err = repo.GetMessage(ctx, "shell-message")
+				require.NoError(t, err)
+				require.NoError(t, repo.RehydrateMessagePayload(ctx, message))
+				output, ok := models.ExtractShellExecOutput(message.Metadata)
+				require.True(t, ok)
+				require.True(t, stdout == output.Stdout, "ordinary replacement must own the detail body")
+				require.NotContains(t, message.Metadata, models.ShellOutputStorageKey)
+				var heads int
+				require.NoError(t, repo.db.Get(&heads, `SELECT COUNT(*) FROM task_message_shell_output`))
+				require.Zero(t, heads)
+			})
+		}
+	}
+}
+
+func TestIncrementalShellProjectedMetadataUpdateKeepsChunks(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedIncrementalShellMessage(t, repo)
+	patch, err := streams.EncodeShellOutputPatch(nil, streams.ShellExecOutput{Stdout: "retained"}, "epoch", true)
+	require.NoError(t, err)
+	event := incrementalShellTestEvent(t, 1, patch)
+	_, err = repo.ReceiveAgentDeliveryEvent(ctx, event, 1)
+	require.NoError(t, err)
+	_, err = repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, completedRetentionEventEffect(event))
+	require.NoError(t, err)
+	message, err := repo.GetMessage(ctx, "shell-message")
+	require.NoError(t, err)
+	message.Metadata = models.ProjectMessageMetadata(message.Metadata)
+	message.Metadata["status"] = "complete"
+	_, err = repo.UpdateMessageWithConversationReceipt(ctx, message)
+	require.NoError(t, err)
+	message, err = repo.GetMessage(ctx, "shell-message")
+	require.NoError(t, err)
+	require.NoError(t, repo.RehydrateMessagePayload(ctx, message))
+	output, ok := models.ExtractShellExecOutput(message.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "retained", output.Stdout)
 }

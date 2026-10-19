@@ -156,7 +156,17 @@ The extension is additive: agents that ignore it continue through their current 
 
 ## Persistence guarantees
 
-Live output updates use the existing tool-message update path and are persisted with message metadata. The latest bounded output and final exit status survive reloads and are read by the on-demand endpoint. The summary projection is computed at delivery time; it is not separately persisted. In-memory per-tool accumulation is discarded when the tool reaches a terminal state, the prompt is swept, or the adapter stops.
+Retained v1 peers use the existing tool-message update path: bounded output is
+stored inline in message metadata or externalized through the shell payload
+store. V2 compact delivery persists output in canonical chunks and keeps only an
+internal storage reference, summary and result metadata on the tool message. It
+does not rewrite the full output tail in message metadata for every update.
+
+The latest bounded output and final exit status survive reloads and are read by
+the on-demand endpoint. Browser-facing messages contain the projected summary
+without the internal storage reference or output body. In-memory per-tool
+accumulation is discarded when the tool reaches a terminal state, the prompt is
+swept, or the adapter stops.
 
 ## Scenarios
 

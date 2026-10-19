@@ -13,6 +13,14 @@ type canonicalShellMessageReader interface {
 	RehydrateMessagePayload(context.Context, *models.Message) error
 }
 
+func canonicalShellStartEvent(event agentctl.AgentEvent) bool {
+	if event.Type != streams.EventTypeToolCall || event.Role == string(models.MessageAuthorUser) || event.ToolCallID == "" || event.NormalizedPayload == nil || event.NormalizedPayload.BackgroundWork() != nil {
+		return false
+	}
+	shell := event.NormalizedPayload.ShellExec()
+	return shell != nil && !shell.Background
+}
+
 func committedShellProjectionEvent(ctx context.Context, delivery AgentDeliveryRepository, event agentctl.AgentEvent, sessionID string) (agentctl.AgentEvent, error) {
 	reader, ok := delivery.(canonicalShellMessageReader)
 	if !ok {
@@ -25,8 +33,11 @@ func committedShellProjectionEvent(ctx context.Context, delivery AgentDeliveryRe
 	if message == nil {
 		return event, ErrDeliveryRecoveryBlocked
 	}
-	event.Type = streams.EventTypeToolUpdate
 	event.CanonicalMessageID = message.ID
+	if event.Type == streams.EventTypeToolCall {
+		return event, nil
+	}
+	event.Type = streams.EventTypeToolUpdate
 	event.CanonicalMessageAppend = true
 	if !isTerminalToolUpdate(event) || models.ToolPayloadRemoved(message.Metadata) {
 		return event, nil

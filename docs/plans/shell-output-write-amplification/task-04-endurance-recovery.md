@@ -124,3 +124,20 @@ Retained v1 runtimes keep their original write cost. Forward repair and matched
 backup rollback limits are documented in Operations; retention grace and
 unacknowledged recovery evidence are unchanged. Commit, PR remediation and merge were subsequently authorized by the user;
 remote delivery is tracked in the PR and task plan.
+
+
+### PR remediation verification
+
+The shared desktop/phone helper now verifies the final exit status and absence
+of earlier live output after the final reload, in addition to exact stdout and
+stderr. A fresh managed host build passed all three Chromium cases in 33.0s;
+the same artifacts passed all three mobile-chrome cases in 29.8s. Each run used
+one shard and one worker. Commands:
+
+```bash
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/chat/incremental-shell-output.spec.ts
+pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/chat/mobile-incremental-shell-output.spec.ts
+```
+
+No UI composition, interaction or copy changes were introduced. Both viewport
+checks reuse the shipped command row and output disclosure.

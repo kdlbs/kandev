@@ -32,8 +32,9 @@ func (r *Repository) persistCanonicalShellOutputTx(ctx context.Context, tx *sqlx
 		return err
 	}
 	identity := string(identityBytes)
-	if head != nil && head.Identity != identity {
-		return streams.ErrShellOutputBaseline
+	head, err = reconcileCanonicalShellIdentityTx(ctx, tx, messageID, head, identity, agent.ShellOutput)
+	if err != nil {
+		return err
 	}
 	if head == nil && agent.ShellOutput.BaseRevision != 0 {
 		return streams.ErrShellOutputBaseline
@@ -43,6 +44,19 @@ func (r *Repository) persistCanonicalShellOutputTx(ctx context.Context, tx *sqlx
 		return err
 	}
 	return r.persistCanonicalShellChunksTx(ctx, tx, messageID, metadata, event, agent, head, base, identity)
+}
+
+func reconcileCanonicalShellIdentityTx(ctx context.Context, tx *sqlx.Tx, messageID string, head *shellOutputHead, identity string, patch *streams.ShellOutputPatch) (*shellOutputHead, error) {
+	if head == nil || head.Identity == identity {
+		return head, nil
+	}
+	if !patch.Checkpoint || patch.BaseRevision != 0 {
+		return nil, streams.ErrShellOutputBaseline
+	}
+	if err := RemoveMessageShellOutputTx(ctx, tx, messageID); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func (r *Repository) persistCanonicalShellChunksTx(ctx context.Context, tx *sqlx.Tx, messageID string, metadata map[string]any, event *models.AgentDeliveryEvent, agent streams.AgentEvent, head *shellOutputHead, base *streams.ShellOutputState, identity string) error {
@@ -122,12 +136,12 @@ func (r *Repository) updateShellOutputSummaryTx(ctx context.Context, tx *sqlx.Tx
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET metadata=?,payload_digest='',payload_size=0,updated_at=? WHERE id=?`), string(encoded), r.nowUTC(), messageID)
+	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET metadata=?,payload_digest='',payload_size=0,content=CASE WHEN ?='' THEN content ELSE ? END,updated_at=? WHERE id=?`), string(encoded), agent.ToolTitle, agent.ToolTitle, r.nowUTC(), messageID)
 	return err
 }
 
 func (r *Repository) rehydrateShellOutputChunks(ctx context.Context, message *models.Message) error {
-	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := r.ro.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return err
 	}

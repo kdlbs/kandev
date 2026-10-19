@@ -113,6 +113,10 @@ export async function exerciseIncrementalShellOutput({
     await openOutput();
     await expect(output).toContainText("AUTHORITATIVE_FINAL");
     await expect(output).toContainText("FINAL_STDERR");
+    await expect(output).not.toContainText("AFTER_SATURATION");
+    await expect(session.activeChat()).toContainText(
+      exitCode === null ? "Exit code unavailable" : `Exit code ${exitCode}`,
+    );
   } finally {
     // Release owned gates even when an assertion fails so no prompt stays blocked.
     fs.writeFileSync(liveGate, "release");

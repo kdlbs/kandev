@@ -706,10 +706,13 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.Error(err))
 		return event, false, err
 	}
-	if event.Type == streams.EventTypeShellOutputUpdate {
+	if event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event) {
 		event, err = committedShellProjectionEvent(ctx, delivery, event, durableEvent.SessionID)
 		if err != nil {
 			return event, false, err
+		}
+		if event.Type == streams.EventTypeToolCall {
+			event.CanonicalMessageAppend = isAppend
 		}
 	} else {
 		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
@@ -738,7 +741,7 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 	if len(prepared) == 0 {
 		return nil
 	}
-	if prepared[0].event.Type == streams.EventTypeShellOutputUpdate {
+	if prepared[0].event.Type == streams.EventTypeShellOutputUpdate || prepared[0].event.Type == streams.EventTypeToolCall {
 		return sm.projectCanonicalAgentEventsIndividually(ctx, execution, prepared, delivery, client, startupGeneration)
 	}
 	projector, ok := delivery.(canonicalAgentDeliveryBatchProjector)

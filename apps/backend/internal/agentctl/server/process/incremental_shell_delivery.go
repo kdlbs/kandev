@@ -67,6 +67,7 @@ func (m *Manager) prepareShellDelivery(update adapter.AgentEvent, baselines map[
 	clearShellDeliveryGeneration(update, baselines)
 	shell := compactShellPayload(update)
 	if shell == nil {
+		clearOrdinaryShellDelivery(update, baselines)
 		return update, nil
 	}
 	identity := *shell
@@ -96,6 +97,17 @@ func (m *Manager) prepareShellDelivery(update adapter.AgentEvent, baselines map[
 	return update, nil
 }
 
+func clearOrdinaryShellDelivery(update adapter.AgentEvent, baselines map[shellDeliveryKey]shellDeliveryBaseline) {
+	if update.Type != streams.EventTypeToolUpdate || update.NormalizedPayload == nil {
+		return
+	}
+	for key := range baselines {
+		if key.Session == update.SessionID && key.Tool == update.ToolCallID && key.Generation == update.PromptGeneration {
+			delete(baselines, key)
+		}
+	}
+}
+
 func compactShellPayload(update adapter.AgentEvent) *streams.ShellExecPayload {
 	if update.Type != streams.EventTypeToolUpdate || update.NormalizedPayload == nil {
 		return nil
@@ -114,7 +126,6 @@ func prepareShellOutputPatch(update adapter.AgentEvent, baseline shellDeliveryBa
 	}
 	output := *update.NormalizedPayload.ShellExec().Output
 	terminal := shellDeliveryTerminal(update.ToolStatus)
-	checkpoint := !exists || terminal || baseline.Count >= 512 || baseline.Bytes >= 2*streams.MaxShellOutputFieldBytes
 	patch, err := streams.EncodeShellOutputPatch(base, output, baseline.State.Epoch, false)
 	if err != nil {
 		return nil, nil, err
@@ -122,6 +133,7 @@ func prepareShellOutputPatch(update adapter.AgentEvent, baseline shellDeliveryBa
 	if unchangedShellDelivery(update, baseline, patch, terminal) {
 		return nil, nil, nil
 	}
+	checkpoint := !exists || terminal || (patch != nil && (baseline.Count >= 512 || baseline.Bytes >= 2*streams.MaxShellOutputFieldBytes))
 	patch, err = ensureShellOutputCheckpoint(base, output, baseline.State.Epoch, patch, checkpoint)
 	if err != nil {
 		return nil, nil, err
@@ -154,7 +166,9 @@ func advanceShellDeliveryBaseline(baseline shellDeliveryBaseline, state *streams
 			baseline.Bytes += len(patch.Stderr.Data)
 		}
 	}
-	baseline.Count++
+	if patch.BaseRevision == 0 || patch.BaseDigest != patch.ResultDigest {
+		baseline.Count++
+	}
 	baseline.State = state
 	baseline.Status = status
 	return baseline
