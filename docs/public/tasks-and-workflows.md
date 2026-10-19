@@ -166,7 +166,7 @@ The response lists the task's recorded moves oldest first. Each item has `id`, t
 
 - `trigger` says what moved the task, for example `manual_move` (a person on the board or the move API), `mcp_move` (an agent tool), or `engine_transition` (a workflow step action).
 - `actor_kind` is `human`, `agent`, `system`, `integration`, or `unknown`. `actor_id` is the user ID, session ID, or watch ID, or `null`.
-- A removed step keeps its ID with a `null` name. The first move after task creation has no source step.
+- A removed step keeps its ID with a `null` name. The task-creation record (`trigger` `task_created`) has no source step.
 - `limit` defaults to 50 and is capped at 200. While `has_more` is `true`, pass `next_cursor` as `cursor` to read the next page.
 
 The read needs the same workspace access as opening the task; an unknown or inaccessible task returns `404`. History starts when Kandev began recording step transitions and is never reconstructed for older moves.
