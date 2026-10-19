@@ -98,6 +98,16 @@ const createTablesSQL = `
 		UNIQUE(issue_watch_id, issue_identifier),
 		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
 	);
+
+	-- Issues a blocker-aware watch is holding until their blockers complete.
+	-- Polls re-check these by ID so a held issue is released even after it
+	-- leaves the watch's paged search window.
+	CREATE TABLE IF NOT EXISTS linear_issue_watch_held_issues (
+		issue_watch_id TEXT NOT NULL,
+		issue_id TEXT NOT NULL,
+		PRIMARY KEY(issue_watch_id, issue_id),
+		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
+	);
 `
 
 // singletonID is the synthetic primary key used by the legacy install-wide

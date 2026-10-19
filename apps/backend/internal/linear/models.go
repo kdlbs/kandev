@@ -218,6 +218,10 @@ type SearchFilter struct {
 	// does not narrow the search itself, and does not count as a filter
 	// condition for the non-empty filter rule.
 	RequireBlockersDone bool `json:"requireBlockersDone,omitempty"`
+	// IssueIDs restricts a search to these Linear issue IDs. Only the watch
+	// service sets it, to re-check held issues; it is never stored or read
+	// from a request.
+	IssueIDs []string `json:"-"`
 }
 
 // SearchResult is a page of issues from a search. Linear uses cursor-based

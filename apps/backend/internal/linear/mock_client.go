@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 )
 
@@ -168,6 +169,9 @@ func (m *MockClient) SearchIssues(_ context.Context, filter SearchFilter, _ stri
 	for _, id := range m.issueOrder {
 		issue, ok := m.issues[id]
 		if !ok {
+			continue
+		}
+		if len(filter.IssueIDs) > 0 && !slices.Contains(filter.IssueIDs, issue.ID) {
 			continue
 		}
 		found := *issue

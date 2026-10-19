@@ -265,56 +265,13 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 			zap.String("watch_id", w.ID), zap.Error(err))
 		seen = nil
 	}
-	// Page through matches (bounded by maxPages) so the sort below ranks the
-	// whole unseen backlog. Linear only orders by created/updated, so priority
-	// ordering must be done here over the full fetched set. Default order is a
-	// no-op for sortIssues, so paginating a default watch buys nothing but
-	// extra Linear calls and larger dispatch bursts — keep it on the legacy
-	// single-page fetch. A watch that holds blocked issues back still pages,
-	// so issues it can start are not hidden behind a full page of blocked ones.
-	maxPages := issueWatchMaxPages
-	if w.SortBy == SortByDefault && !w.Filter.RequireBlockersDone {
-		maxPages = 1
-	}
-	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
-	pageToken := ""
-	for page := 0; page < maxPages; page++ {
-		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
-		if err != nil {
-			if page == 0 {
-				return nil, err
-			}
-			// A canceled/expired context means the poll is being torn down.
-			// Abort instead of publishing issues from an incomplete fetch —
-			// dispatch detaches the context, so partial results would still
-			// create tasks during shutdown or a canceled manual trigger.
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
-			}
-			// Any other later-page error is non-fatal: rank/dispatch what we
-			// have; the next poll retries from the top.
-			s.log.Debug("linear: issue watch pagination stopped early",
-				zap.String("watch_id", w.ID), zap.Int("page", page), zap.Error(err))
-			break
-		}
-		for i := range res.Issues {
-			issue := res.Issues[i]
-			if _, ok := seen[issue.Identifier]; ok {
-				continue
-			}
-			out = append(out, &issue)
-		}
-		if res.IsLast || res.NextPageToken == "" {
-			break
-		}
-		pageToken = res.NextPageToken
+	out, fetched, err := s.searchIssueWatchPages(ctx, client, w, seen)
+	if err != nil {
+		return nil, err
 	}
 	if w.Filter.RequireBlockersDone {
-		var held int
-		out, held = dropBlockedIssues(out)
-		if held > 0 {
-			s.log.Debug("linear: issue watch holding issues with open blockers",
-				zap.String("watch_id", w.ID), zap.Int("held", held))
+		if out, err = s.holdBlockedIssues(ctx, client, w, out, fetched, seen); err != nil {
+			return nil, err
 		}
 	}
 	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
@@ -327,33 +284,58 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 	return out, nil
 }
 
-// dropBlockedIssues removes issues that still have an open blocker and
-// returns the remaining issues with the number removed. A removed issue is not
-// reserved, so a later poll considers it again.
-func dropBlockedIssues(issues []*LinearIssue) ([]*LinearIssue, int) {
-	kept := issues[:0]
-	for _, issue := range issues {
-		if issueBlocked(issue) {
-			continue
+// searchIssueWatchPages pages through a watch's matches and returns the unseen
+// issues plus the IDs of every issue the pages contained.
+func (s *Service) searchIssueWatchPages(
+	ctx context.Context, client Client, w *IssueWatch, seen map[string]struct{},
+) ([]*LinearIssue, map[string]struct{}, error) {
+	// Page through matches (bounded by maxPages) so the sort below ranks the
+	// whole unseen backlog. Linear only orders by created/updated, so priority
+	// ordering must be done here over the full fetched set. Default order is a
+	// no-op for sortIssues, so paginating a default watch buys nothing but
+	// extra Linear calls and larger dispatch bursts — keep it on the legacy
+	// single-page fetch. A watch that holds blocked issues back still pages,
+	// so issues it can start are not hidden behind a full page of blocked ones.
+	maxPages := issueWatchMaxPages
+	if w.SortBy == SortByDefault && !w.Filter.RequireBlockersDone {
+		maxPages = 1
+	}
+	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
+	fetched := make(map[string]struct{})
+	pageToken := ""
+	for page := 0; page < maxPages; page++ {
+		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
+		if err != nil {
+			if page == 0 {
+				return nil, nil, err
+			}
+			// A canceled/expired context means the poll is being torn down.
+			// Abort instead of publishing issues from an incomplete fetch —
+			// dispatch detaches the context, so partial results would still
+			// create tasks during shutdown or a canceled manual trigger.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, nil, err
+			}
+			// Any other later-page error is non-fatal: rank/dispatch what we
+			// have; the next poll retries from the top.
+			s.log.Debug("linear: issue watch pagination stopped early",
+				zap.String("watch_id", w.ID), zap.Int("page", page), zap.Error(err))
+			break
 		}
-		kept = append(kept, issue)
-	}
-	return kept, len(issues) - len(kept)
-}
-
-// issueBlocked reports whether an issue has a blocker that is not completed.
-// An issue whose relation list was truncated counts as blocked, because an
-// unseen blocker may still be open.
-func issueBlocked(issue *LinearIssue) bool {
-	if issue.BlockersTruncated {
-		return true
-	}
-	for _, b := range issue.Blockers {
-		if !b.Done() {
-			return true
+		for i := range res.Issues {
+			issue := res.Issues[i]
+			fetched[issue.ID] = struct{}{}
+			if _, ok := seen[issue.Identifier]; ok {
+				continue
+			}
+			out = append(out, &issue)
 		}
+		if res.IsLast || res.NextPageToken == "" {
+			break
+		}
+		pageToken = res.NextPageToken
 	}
-	return false
+	return out, fetched, nil
 }
 
 // attachProjectDescriptions fills ProjectDescription on every issue that

@@ -737,6 +737,9 @@ func buildIssueFilter(f SearchFilter) map[string]interface{} {
 	if len(f.ProjectIDs) > 0 {
 		out["project"] = map[string]interface{}{"id": map[string]interface{}{"in": f.ProjectIDs}}
 	}
+	if len(f.IssueIDs) > 0 {
+		out["id"] = map[string]interface{}{"in": f.IssueIDs}
+	}
 	if f.CreatorID != "" {
 		out["creator"] = map[string]interface{}{"id": map[string]interface{}{"eq": f.CreatorID}}
 	}
