@@ -183,9 +183,58 @@ func (s *Service) RecordBackgroundWorkloadObservation(
 			StartedAt:      obs.StartedAt,
 			FinishedAt:     obs.FinishedAt,
 		}
-		_ = s.backgroundWork.UpsertBackgroundRun(ctx, run)
+		if err := s.backgroundWork.UpsertBackgroundRun(ctx, run); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// SettleOpenBackgroundWorkloads atomically ends open workloads and runs after
+// the owning agent process is gone, returning committed observations to publish.
+func (s *Service) SettleOpenBackgroundWorkloads(ctx context.Context, sessionID string) ([]streams.WorkloadRunObservation, error) {
+	if s.backgroundWork == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	workloads, err := s.backgroundWork.SettleBackgroundWorkloads(ctx, sessionID, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	settled := make([]streams.WorkloadRunObservation, 0, len(workloads))
+	for _, work := range workloads {
+		settled = append(settled, settledWorkloadObservation(work))
+	}
+	return settled, nil
+}
+
+// ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a
+// non-terminal workload.
+func (s *Service) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	if s.backgroundWork == nil {
+		return nil, nil
+	}
+	return s.backgroundWork.ListSessionIDsWithOpenBackgroundWork(ctx)
+}
+
+func settledWorkloadObservation(work *models.BackgroundWorkload) streams.WorkloadRunObservation {
+	obs := streams.WorkloadRunObservation{
+		SessionID:       work.SessionID,
+		WorkID:          work.ID,
+		Kind:            streams.NormalizeWorkloadKind(work.Kind),
+		Title:           work.Title,
+		State:           streams.RunState(work.State),
+		OriginTurnID:    work.OriginTurnID,
+		SourceMessageID: work.SourceMessageID,
+		SourceCallID:    work.SourceCallID,
+		ExitCode:        work.ExitCode,
+		StartedAt:       work.StartedAt,
+		FinishedAt:      work.FinishedAt,
+		Revision:        work.Revision,
+	}
+	if work.ParentWorkID != nil {
+		obs.ParentWorkID = *work.ParentWorkID
+	}
+	return obs
 }
 
 func mergeChunkIntoOutput(currentOutput string, workOffset int64, chunk string, chunkOffset int64) (string, int64, bool) {

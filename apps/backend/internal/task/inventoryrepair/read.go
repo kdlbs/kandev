@@ -20,15 +20,16 @@ type queryer interface {
 }
 
 type inspection struct {
-	report *Report
-	rows   map[string]string
-	git    map[string]GitState
-	slots  map[string]row
-	envs   map[string]row
-	tasks  map[string]row
-	jobs   map[string]row
-	db     queryer
-	guards []observation
+	report      *Report
+	rows        map[string]string
+	git         map[string]GitState
+	slots       map[string]row
+	envs        map[string]row
+	tasks       map[string]row
+	jobs        map[string]row
+	db          queryer
+	guards      []observation
+	foreignKeys map[string]int
 }
 
 // openDatabase opens the database file itself; neither mode creates a file.

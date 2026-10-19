@@ -316,7 +316,13 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
-	plans                map[string]*models.TaskPlan              // task_id → plan
+	// failMaterializationCalls records sessions whose claim release was requested.
+	failMaterializationCalls []string
+	// reelectFailedCalls records environments whose re-election was requested;
+	// reelectFailedFunc, when set, replaces the default re-election outcome.
+	reelectFailedCalls []string
+	reelectFailedFunc  func(ctx context.Context, environmentID, sessionID string) (bool, error)
+	plans              map[string]*models.TaskPlan // task_id → plan
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -1515,6 +1521,32 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) FailTaskEnvironmentMaterialization(_ context.Context, sessionID string) (bool, error) {
+	m.failMaterializationCalls = append(m.failMaterializationCalls, sessionID)
+	for _, env := range m.taskEnvironments {
+		if env.Status == models.TaskEnvironmentStatusCreating && env.MaterializationSessionID == sessionID {
+			env.Status = models.TaskEnvironmentStatusFailed
+			env.MaterializationSessionID = ""
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (m *mockRepository) ReelectFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error) {
+	m.reelectFailedCalls = append(m.reelectFailedCalls, environmentID)
+	if m.reelectFailedFunc != nil {
+		return m.reelectFailedFunc(ctx, environmentID, sessionID)
+	}
+	env := m.taskEnvironments[environmentID]
+	if env == nil || env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" ||
+		env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" ||
+		len(env.Repos) > 0 || len(m.taskEnvironmentRepos[environmentID]) > 0 {
+		return false, nil
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = sessionID
+	return true, nil
 }
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()

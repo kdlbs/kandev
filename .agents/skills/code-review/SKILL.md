@@ -67,11 +67,11 @@ For a follow-up round, inspect `<previous-reviewed-head>..<current-head>` first,
 then re-evaluate `<base>...<current-head>` for complete PR coverage. Record both
 immutable heads. The first range does not isolate the author's response when the
 branch merged or rebased onto an advanced base: it also carries every upstream
-commit that arrived with it. Use `rtk proxy git log --oneline --first-parent
+commit that arrived with it. Use `git log --oneline --first-parent
 <previous-reviewed-head>..<current-head>` to list the branch's own commits, then
-`rtk proxy git show --stat <sha>` per commit to size the response. When history
-shape decides review scope, use `rtk proxy git log` because the normal RTK
-wrapper can omit merge commits and truncate subjects.
+`git show --stat <sha>` per commit to size the response. When history shape
+decides review scope, preserve the complete Git output, including merge commits
+and subjects.
 
 When `pr.base_advanced_since_head` is `true`, validate the actual merge result
 before declaring the PR ready. Record the latest base and immutable head SHAs,

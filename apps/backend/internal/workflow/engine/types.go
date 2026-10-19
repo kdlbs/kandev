@@ -28,6 +28,11 @@ const (
 	TriggerOnHeartbeat         Trigger = "on_heartbeat"
 	TriggerOnBudgetAlert       Trigger = "on_budget_alert"
 	TriggerOnAgentError        Trigger = "on_agent_error"
+
+	// PR lifecycle triggers, raised by the orchestrator when the PR poller
+	// reports a state change for a pull request linked to the task.
+	TriggerOnPRMerged Trigger = "on_pr_merged"
+	TriggerOnPRClosed Trigger = "on_pr_closed"
 )
 
 // ActionKind identifies a typed workflow action.
@@ -312,6 +317,8 @@ func CompileStep(step *wfmodels.WorkflowStep) StepSpec {
 		TriggerOnHeartbeat:         compileGenericActions(step.Events.OnHeartbeat),
 		TriggerOnBudgetAlert:       compileGenericActions(step.Events.OnBudgetAlert),
 		TriggerOnAgentError:        compileGenericActions(step.Events.OnAgentError),
+		TriggerOnPRMerged:          compileGenericActions(step.Events.OnPRMerged),
+		TriggerOnPRClosed:          compileGenericActions(step.Events.OnPRClosed),
 	}
 	return StepSpec{
 		ID:         step.ID,

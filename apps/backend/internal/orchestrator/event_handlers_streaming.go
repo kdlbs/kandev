@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -284,6 +285,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeTurnStarted:
 		s.persistNativeCodexTurnID(ctx, payload)
+		s.retireCountedEmptyTurn(sessionID)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -1362,6 +1364,9 @@ func (s *Service) updateTaskSessionStateWithHook(
 	// first sample, AC-21) and leaving it (immediate clear, AC-68) regardless
 	// of which of this function's many call sites drove the transition.
 	s.onSessionStateChangedForParkedProjection(ctx, taskID, sessionID, oldState, nextState)
+	if isTerminalSessionState(nextState) {
+		s.settleOpenBackgroundWork(ctx, sessionID)
+	}
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
@@ -2043,6 +2048,14 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
 	}
+	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
+		projection := dto.TaskSessionDTO{}
+		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {
+			eventData["session_recovery_blocks"] = projection.SessionRecoveryBlocks
+		} else {
+			s.logger.Warn("cannot project session recovery blocks", zap.String("session_id", sessionID), zap.Error(err))
+		}
+	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 }
 
@@ -2069,20 +2082,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		return
 	}
 
-	// Pick the best candidate: prefer RUNNING, then STARTING, then WAITING_FOR_INPUT
-	var candidate string
-	for _, sess := range sessions {
-		if sess.ID == sessionID {
-			continue
-		}
-		if sess.State == models.TaskSessionStateRunning {
-			candidate = sess.ID
-			break
-		}
-		if candidate == "" && isActiveSessionState(sess.State) {
-			candidate = sess.ID
-		}
-	}
+	// Only an active session can inherit the role after a stop. The shared
+	// selector prefers the current step's profile and ranks a parked session
+	// last; a parked session remains eligible when no better active session exists.
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",
@@ -3279,6 +3282,18 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 		return
 	}
 
+	completion := emptyTurnCompletionFromPayload(payload)
+	if completion.completeOutput {
+		s.observePromptAttempt(completion.data.SessionID, completion.data.AgentExecutionID,
+			completion.data.PromptGeneration, true, false)
+		s.markDynamicStreakResetPending(completion.data)
+		s.flushPendingDynamicStreakReset(ctx, completion.data.SessionID, &completion.data)
+	}
+	// A launched successor owns the turn, as on the error path.
+	if s.routeDynamicEmptyTurn(ctx, completion, session, streamGuard) {
+		return
+	}
+
 	s.persistCompleteStreamOutput(ctx, payload, session, completionTurnID)
 	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
 
@@ -3443,6 +3458,12 @@ func (s *Service) reconcileCompleteEventRuntime(
 	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return true
 	}
+	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
+		if !s.observeAutomationRetryTurnTerminal(ctx, payload.TaskID, payload.SessionID, completionTurnID, payload.ExecutionID) {
+			return false
+		}
+	}
+
 	return s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
@@ -3539,6 +3560,46 @@ func sessionStateString(session *models.TaskSession) string {
 		return ""
 	}
 	return string(session.State)
+}
+
+func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) emptyTurnCompletion {
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return emptyTurnCompletion{
+		data: watcher.AgentEventData{
+			TaskID:             payload.TaskID,
+			SessionID:          payload.SessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+		},
+		stopReason:     extractStopReason(payload),
+		isError:        extractCompleteIsError(payload),
+		completeOutput: completeFrameCarriesOutput(payload),
+	}
+}
+
+// completeFrameCarriesOutput reports whether a completion frame itself carries
+// assistant output: message text (persisted by saveAgentTextForTurn) or plan
+// content (persisted by publishAgentPlanForTurn). Output present only here, and
+// not in earlier stream events, still means the turn produced content.
+func completeFrameCarriesOutput(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	if strings.TrimSpace(payload.Data.Text) != "" {
+		return true
+	}
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		if planContent, ok := data["plan_content"].(string); ok && strings.TrimSpace(planContent) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.

@@ -242,6 +242,28 @@ func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID s
 	return id, nil
 }
 
+// getLatestTaskStepTransitionIDTx reads the task's latest ledger id inside the
+// caller's write transaction. A deferred move captures its request-time id and
+// compares it here, atomically with the task row the move is about to relocate,
+// so a later step change cannot slip between the replay check and the commit.
+func (r *Repository) getLatestTaskStepTransitionIDTx(ctx context.Context, tx stepTransitionTx, taskID string) (int64, error) {
+	var id int64
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // GetTaskWorkflowStepEntry returns the task's current workflow and step with
 // the latest transition identity from one database statement. The step and
 // identity must share a snapshot so a retry cannot pair an earlier step read

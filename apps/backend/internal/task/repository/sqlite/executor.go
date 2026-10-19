@@ -34,9 +34,9 @@ func (r *Repository) CreateExecutor(ctx context.Context, executor *models.Execut
 	}
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt)
+		INSERT INTO executors (id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, owner_user_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`), executor.ID, executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.CreatedAt, executor.UpdatedAt, executor.DeletedAt, executor.OwnerUserID)
 	return err
 }
 
@@ -47,11 +47,11 @@ func (r *Repository) GetExecutor(ctx context.Context, id string) (*models.Execut
 	var resumable int
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE id = ? AND deleted_at IS NULL
 	`), id).Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", models.ErrExecutorNotFound, id)
@@ -78,10 +78,19 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 		return fmt.Errorf("failed to serialize executor config: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	owner, err := r.executorOwnershipForUpdateTx(ctx, tx, executor)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE executors SET name = ?, type = ?, status = ?, is_system = ?, resumable = ?, config = ?, updated_at = ?, owner_user_id = NULLIF(?, '')
 		WHERE id = ? AND deleted_at IS NULL
-	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, executor.ID)
+	`), executor.Name, executor.Type, executor.Status, dialect.BoolToInt(executor.IsSystem), dialect.BoolToInt(executor.Resumable), string(configJSON), executor.UpdatedAt, owner, executor.ID)
 	if err != nil {
 		return err
 	}
@@ -89,10 +98,19 @@ func (r *Repository) UpdateExecutor(ctx context.Context, executor *models.Execut
 	if rows == 0 {
 		return fmt.Errorf("executor not found: %s", executor.ID)
 	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	executor.OwnerUserID = owner
+	executor.OwnershipIntent = nil
 	return nil
 }
 
 func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
+	return r.deleteExecutor(ctx, id, nil)
+}
+
+func (r *Repository) deleteExecutor(ctx context.Context, id string, expectedOwner *string) error {
 	now := time.Now().UTC()
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -100,14 +118,24 @@ func (r *Repository) DeleteExecutor(ctx context.Context, id string) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
-	`), now, now, id)
+	if err := r.lockExecutorOwnershipTx(ctx, tx, id); err != nil {
+		return err
+	}
+	query := "UPDATE executors SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL"
+	args := []any{now, now, id}
+	if expectedOwner != nil {
+		query += " AND COALESCE(owner_user_id, '') = ?"
+		args = append(args, *expectedOwner)
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if expectedOwner != nil {
+			return models.ErrExecutorOwnershipChanged
+		}
 		return fmt.Errorf("executor not found: %s", id)
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
@@ -132,7 +160,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 	var resumable int
 	if err := scanner.Scan(
 		&executor.ID, &executor.Name, &executor.Type, &executor.Status,
-		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt,
+		&isSystem, &resumable, &configJSON, &executor.CreatedAt, &executor.UpdatedAt, &executor.DeletedAt, &executor.OwnerUserID,
 	); err != nil {
 		return nil, err
 	}
@@ -148,7 +176,7 @@ func scanExecutorRow(scanner interface{ Scan(...any) error }) (*models.Executor,
 
 func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors WHERE deleted_at IS NULL ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -219,6 +247,12 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			return lockErr
 		}
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), running.SessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{running.SessionID}, nil); err != nil {
+		return err
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
@@ -230,6 +264,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID.String); err != nil {
 			return err
 		}
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
@@ -305,6 +342,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.UpdatedAt,
 	)
 	if err != nil {
+		return err
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -557,6 +597,12 @@ func (r *Repository) DeleteExecutorRunningBySessionID(ctx context.Context, sessi
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM executors_running WHERE session_id = ?`), sessionID)
 	if err != nil {
 		return err
@@ -641,6 +687,18 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
+		return err
+	}
+	if _, err := lockTaskSessionRow(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var (
 		result sql.Result
 	)
@@ -673,6 +731,9 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 		}
 		return models.ErrExecutionRotated
 	}
+	if err := r.retainQuickChatHistoryTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -697,6 +758,12 @@ func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID st
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -781,6 +848,12 @@ func (r *Repository) DeleteExecutorRunningIfCurrent(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := r.ensureExecutorRunningAvailableTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return err
 	}
 	query := `DELETE FROM executors_running WHERE session_id = ? AND agent_execution_id = ?`

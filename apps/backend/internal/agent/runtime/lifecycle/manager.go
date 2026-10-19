@@ -110,7 +110,8 @@ type Manager struct {
 	// the caller a shell, a file write, or a port preview. Reading a
 	// transcript and running a command in the worktree are different
 	// permissions, so they get different checks.
-	sessionExecCheck func(ctx context.Context, sessionID string) error
+	sessionExecCheck  func(ctx context.Context, sessionID string) error
+	executorAdmission func(context.Context, string, string, string) (context.Context, error)
 
 	// recoveryGuard is the in-memory per-session acquire-or-observe map of
 	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
@@ -217,6 +218,11 @@ type Manager struct {
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
+	remoteRecoveryMu         sync.Mutex
+	remoteRecoveryPending    map[string]*remoteRecoveryRetry
+	remoteRecoveryCursor     string
+	stopContext              context.Context
+	cancelStop               context.CancelFunc
 	// Bounds the non-mutating contribution push check before agent launch.
 	// A zero value uses the production default and keeps test Manager literals safe.
 	remoteContributionPreflightTimeout time.Duration
@@ -462,6 +468,7 @@ func NewManager(
 
 	// Create stop channel for graceful shutdown
 	stopCh := make(chan struct{})
+	stopContext, cancelStop := context.WithCancel(context.Background())
 
 	// Initialize session manager
 	sessionManager := NewSessionManager(log, stopCh)
@@ -495,6 +502,9 @@ func NewManager(
 		historyManager:                 historyManager,
 		remoteStatusPollInterval:       60 * time.Second,
 		remoteStatusBySession:          make(map[string]*RemoteStatus),
+		remoteRecoveryPending:          make(map[string]*remoteRecoveryRetry),
+		stopContext:                    stopContext,
+		cancelStop:                     cancelStop,
 		stopCh:                         stopCh,
 		skillDeployer:                  NoopSkillDeployer(),
 		remediateNpxCache:              routingerr.RemediateNpxCache,
@@ -531,6 +541,7 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
@@ -643,6 +654,12 @@ func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository)
 		return
 	}
 	m.streamManager.setAgentDeliveryRepository(repository)
+}
+
+// CredentialsManager returns the credentials manager the manager launches
+// agents with, for read-only inspection by admission checks.
+func (m *Manager) CredentialsManager() CredentialsManager {
+	return m.credsMgr
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -987,4 +1004,11 @@ func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) 
 		return m.sessionExecCheck
 	}
 	return m.sessionAccessCheck
+}
+
+func (m *Manager) SetExecutorAdmission(admit func(context.Context, string, string, string) (context.Context, error)) {
+	m.executorAdmission = admit
+	if m.sessionManager != nil {
+		m.sessionManager.executorAdmission = admit
+	}
 }

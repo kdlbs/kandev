@@ -196,6 +196,30 @@ func TestOpenCodeNativeDetectionDoesNotReuseCacheThatExpiresDuringRetries(t *tes
 	}
 }
 
+func TestIsUnsupportedOpenCodeMajorErrorDistinguishesDefiniteAnswers(t *testing.T) {
+	unsupported := newFakeOpenCodeDetector(&fakeOpenCodeNative{
+		now:  time.Unix(1_000, 0),
+		runs: []versionRun{{output: "opencode 3.0.0"}},
+	}, "/bin/opencode")
+	_, _, err := unsupported.detect(context.Background())
+	if err == nil || !IsUnsupportedOpenCodeMajorError(err) {
+		t.Fatalf("detect err = %v, want an unsupported-major error", err)
+	}
+
+	transient := newFakeOpenCodeDetector(&fakeOpenCodeNative{
+		now:  time.Unix(1_000, 0),
+		runs: []versionRun{{err: errExitStatus1}, {err: errExitStatus1}, {err: errExitStatus1}},
+	}, "/bin/opencode")
+	_, _, err = transient.detect(context.Background())
+	if err == nil || IsUnsupportedOpenCodeMajorError(err) {
+		t.Fatalf("detect err = %v, want a transient failure that is not the unsupported-major answer", err)
+	}
+
+	if IsUnsupportedOpenCodeMajorError(nil) {
+		t.Fatal("nil must not be reported as an unsupported-major error")
+	}
+}
+
 func TestOpenCodeNativeDetectionCacheExpiresAndIsPerPath(t *testing.T) {
 	fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
 		{output: "opencode 1.18.33"},

@@ -33,6 +33,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
       name: "Mobile Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const taskA = await apiClient.createTaskWithAgent(
@@ -105,6 +107,30 @@ test.describe("Coordinator screens on a phone viewport", () => {
       (el) => getComputedStyle(el.parentElement ?? el).position,
     );
     expect(stripPosition).toBe("sticky");
+
+    await cardA.getByTestId("needs-you-answer-here").tap();
+    const overlay = cardA.getByTestId("clarification-overlay");
+    await expect(overlay).toBeVisible();
+    const disclosure = overlay.getByRole("button", { name: "Collapse clarification", exact: true });
+    const disclosureBox = await disclosure.boundingBox();
+    expect(disclosureBox).not.toBeNull();
+    expect(disclosureBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    expect(disclosureBox!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    await disclosure.tap();
+    await expect(overlay).toBeHidden();
+    const expand = cardA.getByRole("button", { name: "Expand clarification", exact: true });
+    await expect(expand).toHaveCount(1);
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await waitForSessionState(apiClient, {
+      taskId: taskA.id,
+      sessionId: taskA.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "collapsing a phone question must not answer or reject it",
+    });
+    await expand.tap();
+    await expect(overlay).toBeVisible();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await expectNoHorizontalScroll(testPage);
   });
 
   // The phone nav's Inbox/Coordinator rows live in the "saved sidebar layout"
@@ -184,6 +210,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
         name: "Default Layout Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
 
       await testPage.goto("/");

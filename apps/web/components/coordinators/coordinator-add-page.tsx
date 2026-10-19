@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTaskPairPrefill } from "@/hooks/domains/coordinator/use-task-pair-prefill";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -45,8 +46,28 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
       agentProfiles,
     ),
     executorProfileId: resolveDefaultExecutorProfileId(workspace?.default_executor_id, executors),
+    taskAgentProfileId: "",
+    taskExecutorProfileId: "",
     context: "",
   }));
+  const [taskTouched, setTaskTouched] = useState({ agent: false, executor: false });
+  const agentsLoaded = useAppStore((state) => state.settingsData.agentsLoaded);
+  useTaskPairPrefill({
+    workspaceDefaultAgentProfileId: workspace
+      ? (workspace.default_agent_profile_id ?? null)
+      : undefined,
+    agentProfiles: agentsLoaded ? agentProfiles : undefined,
+    ownAgent: form.agentProfileId,
+    ownExecutor: form.executorProfileId,
+    touched: taskTouched,
+    current: { agent: form.taskAgentProfileId, executor: form.taskExecutorProfileId },
+    onChange: (pair) =>
+      setForm((prev) => ({
+        ...prev,
+        taskAgentProfileId: pair.agent,
+        taskExecutorProfileId: pair.executor,
+      })),
+  });
   const [saving, setSaving] = useState(false);
   const [fieldError, setFieldError] = useState<CoordinatorFieldError | null>(null);
 
@@ -54,6 +75,8 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
     key: K,
     value: CoordinatorFormState[K],
   ) => {
+    if (key === "taskAgentProfileId") setTaskTouched((prev) => ({ ...prev, agent: true }));
+    if (key === "taskExecutorProfileId") setTaskTouched((prev) => ({ ...prev, executor: true }));
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -80,6 +103,8 @@ export function CoordinatorAddPage({ workspaceId }: CoordinatorAddPageProps) {
       name: form.name,
       agentProfileId: form.agentProfileId,
       executorProfileId: form.executorProfileId,
+      taskAgentProfileId: form.taskAgentProfileId,
+      taskExecutorProfileId: form.taskExecutorProfileId,
     });
 
   return (

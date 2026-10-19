@@ -305,7 +305,8 @@ export async function answerLongThreadQuestion(
       "true",
     );
     for (const [index, label] of ["SQLite", "Rust", "Bare metal"].entries()) {
-      await activate(option(label), index === 1 ? "Enter" : "Space");
+      // Return upward from the footer to the first question's options.
+      await activate(option(label), index === 1 ? "Enter" : "Space", index === 0);
       await expect(tile.getByTestId("clarification-step").nth(index)).toHaveAttribute(
         "data-answered",
         "true",

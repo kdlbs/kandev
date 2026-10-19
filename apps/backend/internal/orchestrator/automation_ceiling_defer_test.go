@@ -59,14 +59,16 @@ func deferAutomationStartAtCeilingOnStep(
 	seedAutomationTask(t, base.repo, taskID, models.TaskOriginAutomationRun, false)
 	stepGetter := newMockStepGetter()
 	workflowStepID := ""
+	task, err := base.repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	// As in production, the created task reserves its start for the dispatch.
+	task.Metadata = map[string]interface{}{}
 	if step != nil {
 		stepGetter.steps[step.ID] = step
 		workflowStepID = step.ID
-		task, err := base.repo.GetTask(ctx, taskID)
-		require.NoError(t, err)
 		task.WorkflowID, task.WorkflowStepID = step.WorkflowID, step.ID
-		require.NoError(t, base.repo.UpdateTask(ctx, task))
 	}
+	require.NoError(t, base.repo.UpdateTask(ctx, task))
 
 	f := &deferredAutomationStartFixture{
 		repo: base.repo, db: base.db, autoSvc: base.autoSvc, autoStore: base.autoStore, taskID: taskID,
@@ -110,12 +112,14 @@ func deferAutomationStartAtCeilingOnStep(
 	}
 	require.NoError(t, base.autoStore.CreateRun(ctx, run))
 	f.runID = run.ID
+	require.NoError(t, base.repo.SetTaskMetadataKey(ctx, taskID, models.MetaKeyAutomationStartOwned, run.ID))
+	task.Metadata[models.MetaKeyAutomationStartOwned] = run.ID
 
 	require.True(t, f.svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: "occupier", sessionID: deferredAutomationOccupierSession, origin: launchOriginAutomatic, seam: "test-setup",
 	}).admitted)
-	f.svc.autoStartAutomationTaskForRun(ctx, f.auto, &models.Task{ID: taskID, Description: "sweep"}, workflowStepID,
-		run.ID, automation.ThreadActionCreated, deferredAutomationThreadReason)
+	f.svc.autoStartAutomationTaskForRun(ctx, f.auto, task, workflowStepID,
+		run.ID, automation.ThreadActionCreated, deferredAutomationThreadReason, false, nil)
 
 	deferred := f.run(t)
 	surviving, taskErr := base.repo.GetTask(ctx, taskID)
@@ -245,6 +249,16 @@ func TestAutomationStartDeferredByCeiling_DeletedAutomationDropsTheStart(t *test
 	require.False(t, f.ceilingDeferred(t), "the start of a deleted run is dropped, not retried")
 }
 
+// A queued dispatch retains its initial-start fence until its replay or drop resolves.
+func TestAutomationStartDeferredByCeiling_RetainsStartOwnership(t *testing.T) {
+	f := deferAutomationStartAtCeiling(t, "t-defer-release")
+
+	task, err := f.repo.GetTask(context.Background(), f.taskID)
+	require.NoError(t, err)
+	require.True(t, models.AutomationStartOwned(task.Metadata),
+		"a queued dispatch still owns the initial start")
+}
+
 // Dropping a queued automation start settles its run: the launch that would
 // have produced a completion event never happens.
 func TestAutomationStartDeferredByCeiling_DroppedStartFailsTheRun(t *testing.T) {
@@ -259,6 +273,9 @@ func TestAutomationStartDeferredByCeiling_DroppedStartFailsTheRun(t *testing.T) 
 	dropped := f.run(t)
 	require.Equal(t, automation.RunStatusFailed, dropped.Status)
 	require.Contains(t, dropped.ErrorMessage, "task is archived")
+	task, err := f.repo.GetTask(ctx, f.taskID)
+	require.NoError(t, err)
+	require.False(t, models.AutomationStartOwned(task.Metadata), "a definitively dropped launch releases its exact owner")
 	require.False(t, f.ceilingDeferred(t))
 	require.Zero(t, f.activeRuns(t))
 	require.Zero(t, f.launches)
@@ -409,7 +426,7 @@ func TestAutomationStartDeferredByCeiling_RunClosedBeforeReplayDropsTheStart(t *
 	require.NoError(t, err)
 
 	outcome := f.svc.replayCeilingDeferral(ctx, task, deferral)
-	require.Equal(t, ceilingReplayRunClosed, outcome)
+	require.Equal(t, ceilingReplayRunClosed, outcome.outcome)
 	require.Zero(t, f.launches)
 
 	f.svc.settleCeilingReplay(ctx, task, nil, deferral, outcome)

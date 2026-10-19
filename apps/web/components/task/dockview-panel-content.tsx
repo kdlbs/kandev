@@ -78,12 +78,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const { openFile } = useFileEditors();
+  const isVisible = usePanelActive(panelId);
+  const { openFile } = useFileEditors(isVisible);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId);
-  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -103,6 +103,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}
+      detailActive={isVisible}
       panelId={panelId}
     />
   );

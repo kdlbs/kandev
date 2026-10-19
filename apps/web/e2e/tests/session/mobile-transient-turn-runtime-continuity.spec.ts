@@ -1,11 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   assertCompletedCapacityACPTrace,
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -201,6 +203,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
       executionId,
     );
     assertCompletedCapacityACPTrace(fixture.tracePath, "/capacity-completed-tools");
+    await expect(session.transientRetryCard()).toHaveCount(0);
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
@@ -218,6 +221,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
     initialPrompt: "/e2e:simple-message",
   });
   try {
+    const ws = watchWs(testPage);
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
@@ -229,22 +233,27 @@ test("phone: capacity retry can be cancelled during backoff", async ({
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage);
+    const cancelled = ws.waitForResponse("session.recover");
     await session.recoveryCancelRetryButton().tap();
+    expect((await cancelled).payload).toMatchObject({ cancelled: true });
 
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "cancelled");
     assertRetainedFailureMessage(failure);
-    expect(failure.metadata?.attempts_started).toBe(0);
+    const attemptsStarted = failure.metadata?.attempts_started as number;
+    expect(Number.isInteger(attemptsStarted)).toBe(true);
+    expect(attemptsStarted).toBe(0);
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
-    assertRetainedACPTrace(fixture.tracePath, 2);
+    assertRetainedACPTrace(fixture.tracePath, attemptsStarted + 2);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();
   }
 });
 
-test("phone: capacity continuation exhausts after five dispatches and keeps Chat available", async ({
+test("phone and desktop: one capacity episode exhausts after five dispatches and keeps Chat available", async ({
   testPage,
+  desktopTestPage,
   apiClient,
   backend,
   seedData,
@@ -254,6 +263,14 @@ test("phone: capacity continuation exhausts after five dispatches and keeps Chat
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
+    const desktopSession = new SessionPage(desktopTestPage);
+    await desktopTestPage.goto(`/t/${fixture.taskId}`);
+    await desktopSession.waitForLoad();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    expect(await desktopTestPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    expect(await desktopTestPage.evaluate(() => innerWidth)).toBeGreaterThanOrEqual(1024);
+    await expect(session.transientRetryCard()).toBeVisible();
+    await expect(desktopSession.transientRetryCard()).toBeVisible();
     const executionId = await pollUntil(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
@@ -289,6 +306,16 @@ test("phone: capacity continuation exhausts after five dispatches and keeps Chat
         "waiting for the retained task session execution identity",
       ),
     ).toBe(executionId);
+    await expectRetainedTurnReady(desktopSession);
+    const desktopFeedback = desktopSession
+      .activeChat()
+      .getByTestId("retained-turn-recovery-feedback");
+    await expect(desktopFeedback).toBeVisible();
+    await expect(desktopFeedback).toContainText("5");
+    const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(messages.filter((message) => message.metadata?.runtime_retained === true)).toHaveLength(
+      1,
+    );
     assertRetainedACPTrace(fixture.tracePath, 6);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {

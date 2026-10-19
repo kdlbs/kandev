@@ -72,3 +72,24 @@ type OnAgentErrorPayload struct {
 	FailedSessionID string
 	ErrorMessage    string
 }
+
+// LinkedPR identifies one pull request linked to a task.
+type LinkedPR struct {
+	Owner    string
+	Repo     string
+	PRNumber int
+	PRURL    string
+	State    string
+}
+
+// OnPRMergedPayload accompanies TriggerOnPRMerged. PRs lists every pull
+// request linked to the task; all of them are merged.
+type OnPRMergedPayload struct {
+	PRs []LinkedPR
+}
+
+// OnPRClosedPayload accompanies TriggerOnPRClosed. PR is the pull request
+// that was closed without merging.
+type OnPRClosedPayload struct {
+	PR LinkedPR
+}

@@ -34,6 +34,10 @@ var (
 	// fail closed rather than silently degrade to a generation-only claim,
 	// which would let two concurrent callers both win the same transition.
 	ErrStatusClaimUnsupported = errors.New("dynamic route persistence does not support status-fenced claims")
+	// ErrExecutionProfileHeld refuses to resume a route on a profile held
+	// until its owner releases it. It is a pending recovery, so route action
+	// callers report the durable manual-recovery state.
+	ErrExecutionProfileHeld = fmt.Errorf("%w: execution profile is held until its owner releases it", ErrRecoveryPending)
 )
 
 type Candidate struct {
@@ -136,6 +140,10 @@ type UnclassifiedFailureOrigin string
 const (
 	UnclassifiedOriginTerminalProvider UnclassifiedFailureOrigin = "terminal_provider_result"
 	UnclassifiedOriginAgentStartup     UnclassifiedFailureOrigin = "agent_startup"
+	// UnclassifiedOriginEmptyTurn is a normal end_turn completion with no
+	// assistant text, reasoning, or tool activity. It has no provider
+	// diagnostic, so its identity is a fixed tuple instead.
+	UnclassifiedOriginEmptyTurn UnclassifiedFailureOrigin = "empty_turn_completion"
 )
 
 // UnclassifiedFailureEvidence is the typed, default-deny context for the
@@ -185,7 +193,14 @@ func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
 
 func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
 	return e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
-		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved && e.DiagnosticComplete
+		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved &&
+		(e.DiagnosticComplete || e.waivesProviderDiagnostic())
+}
+
+// waivesProviderDiagnostic reports whether the origin derives its identity
+// without a complete provider diagnostic or provider ID.
+func (e UnclassifiedFailureEvidence) waivesProviderDiagnostic() bool {
+	return e.Origin == UnclassifiedOriginEmptyTurn
 }
 
 func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
@@ -196,7 +211,7 @@ func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Err
 		return false
 	}
 	if routingerr.ClassForCode(failure.Code) != routingerr.ClassUnclassified ||
-		failure.Phase != e.Phase || e.ProviderID == "" {
+		failure.Phase != e.Phase || (e.ProviderID == "" && !e.waivesProviderDiagnostic()) {
 		return false
 	}
 	return true
@@ -209,6 +224,8 @@ func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Er
 	case UnclassifiedOriginAgentStartup:
 		return failure.Code == routingerr.CodeAgentRuntime &&
 			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
+	case UnclassifiedOriginEmptyTurn:
+		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend
 	default:
 		return false
 	}

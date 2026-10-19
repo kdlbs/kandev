@@ -478,7 +478,15 @@ test.describe("mobile: dirty managed clone relocation", () => {
     });
     await fixture.session.recoveryResumeButton().click();
 
-    const relocate = testPage.getByTestId("managed-clone-relocate-button");
+    const recoveryWarning = testPage
+      .getByRole("main")
+      .getByText("This worktree belongs to an older repository clone and has local changes.", {
+        exact: false,
+      });
+    await expect(recoveryWarning).toBeVisible({ timeout: 30_000 });
+    const relocate = testPage
+      .getByRole("main")
+      .getByRole("button", { name: "Move files and resume", exact: true });
     await expect(relocate).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(
@@ -520,7 +528,6 @@ test.describe("mobile: dirty managed clone relocation", () => {
     await expect(confirmation).toContainText("snapshot");
     await expect(confirmation).toContainText("staging choices");
     const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
-    await confirm.scrollIntoViewIfNeeded();
     if (prCapture.capturing) {
       await waitForFiniteAnimations(confirmation);
       await prCapture.screenshot("managed-clone-relocation-confirm-phone", {

@@ -15,7 +15,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 
 ### REQ-WORKSPACES-REPOSITORY-SECRETS-001: Repository and Workspace Secrets
 
-**Intent:** Repository setup and agent work often need credentials that are specific to a project: package registry tokens, deployment keys, test service credentials, or API keys. Today users must place those values on a shared agent or executor profile, even when only one workspace or repository needs them. This broadens access and becomes ambiguous when a task attaches several repositories.
+**Intent:** Provide project-scoped credentials through explicit workspace and repository authority.
 
 #### Acceptance criteria
 
@@ -35,17 +35,33 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.13:** Global and Workspace Secrets settings shall explain that saving a secret does not add it to a session environment. The guidance shall remain visible when secrets exist. Global guidance shall name agent profile, executor profile, and repository environment bindings. Workspace guidance shall name repository bindings and state that shared profiles cannot use Workspace secrets. The guidance shall be readable on desktop and phone without exposing secret values.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.14:** While the selected workspace and its supplied initial listing remain unchanged, starting, completing, or failing an unrelated Global secrets load shall preserve the Workspace Secrets metadata list, including successfully acknowledged creation, rename, and deletion. It shall not restart that workspace's loading state. This applies on desktop and phone.
 
+### REQ-WORKSPACES-REPOSITORY-SECRETS-002: Accepted Global metadata during initial loading
+
+An older initial Global read can overlap accepted metadata changes. Successful reads and
+qualified server failures preserve them. Workspace independence remains in
+AC-WORKSPACES-REPOSITORY-SECRETS-001.14.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.1:** When a Global secret creation is acknowledged while an older initial metadata read is pending, successful completion of that read, including an empty result, shall preserve the accepted secret and its rendered Settings row on desktop and phone.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.2:** When the current Global metadata list changes during an older initial read through acknowledged creation, update, removal, or accepted metadata events, successful completion of that read shall preserve the entire current list's membership, order, and metadata field values. Removed rows shall remain absent, updated fields shall not revert, and repeated creation acknowledgments shall not duplicate a row. This applies to every current row, including a mixed list with several changes.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.3:** When no metadata change intervenes, an initial successful read shall publish its complete result, including an empty list, and settle the shared loaded/loading state. Consumers shall share the existing initial-load gate and settled list; creating a secret from an already-loaded list shall retain the accepted rendered row without starting an initial read.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.4:** Global consumers shall retain Global and legacy unscoped metadata filtering, excluding Workspace rows. Completion of a superseded successful read shall settle shared readiness without restarting loading or replacing accepted metadata. Workspace list lifetimes and other initial-read failure settlement shall retain their established behavior.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.5:** When accepted creation, edit, deletion, or metadata events change the current Global inventory during an older initial read, HTTP 500–599 completion shall preserve the complete current inventory and rendered accepted rows on desktop and phone. Preservation is universal over membership, order, and all metadata fields, including untouched rows in mixed inventories and an empty inventory after deletion. Shared consumers shall settle loaded=true/loading=false with that inventory, without another initial read.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-002.6:** Initial HTTP 5xx without intervening accepted metadata changes, every 4xx (including 403), and nonqualified errors shall retain empty-list loaded=true/loading=false settlement. Challenged 401 retains its authentication notification; unchallenged 401 shall not acquire one. Intervening mutations shall not override authorization failure clearing.
+
+#### Exclusions
+
+Only current Global metadata publication is covered. Secret plaintext, reveal, authorization,
+API, encryption, binding, transfer, running environments, retries, refresh, cross-workspace
+caching, and navigation/lifecycle hardening are unchanged.
+
 ## Migrated source detail
 
 ## Why
 
-Repository setup and agent work often need credentials that are specific to a project: package
-registry tokens, deployment keys, test service credentials, or API keys. Today users must place
-those values on a shared agent or executor profile, even when only one workspace or repository
-needs them. This broadens access and becomes ambiguous when a task attaches several repositories.
-
-Kandev needs a repository-level authority grant with workspace-scoped storage and a deterministic,
-fail-closed way to build one task environment.
+Project credentials need repository-level authority, workspace-scoped storage, and a
+deterministic, fail-closed task environment. The Overview describes the motivation.
 
 ## What
 

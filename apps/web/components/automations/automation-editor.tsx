@@ -28,6 +28,8 @@ import { RunsSection } from "./runs-section";
 import {
   type CreatedWebhookDetails,
   type FormState,
+  DEFAULT_RETRY_POLICY,
+  normalizeRetryPolicyForTaskMode,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
@@ -75,8 +77,8 @@ const defaultForm: FormState = {
   taskMode: "automation_run",
   managedDestination: undefined,
   repositoryMode: "none",
+  retryPolicy: DEFAULT_RETRY_POLICY,
 };
-
 function formFromAutomation(a: Automation): FormState {
   return {
     name: a.name,
@@ -101,6 +103,7 @@ function formFromAutomation(a: Automation): FormState {
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
+    retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
   };
 }
 
@@ -224,7 +227,10 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
       .then((a) => {
         const loadedForm = formFromAutomation(a);
         const loadedTriggers = a.triggers ?? [];
-        setForm(loadedForm);
+        setForm({
+          ...loadedForm,
+          retryPolicy: normalizeRetryPolicyForTaskMode(loadedForm.taskMode, loadedForm.retryPolicy),
+        });
         loadTriggers(loadedTriggers);
         onLoaded(loadedForm, loadedTriggers);
       })
@@ -461,7 +467,15 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   });
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [key]: value };
+      return key === "taskMode"
+        ? {
+            ...next,
+            retryPolicy: normalizeRetryPolicyForTaskMode(next.taskMode, prev.retryPolicy),
+          }
+        : next;
+    });
   }, []);
 
   const discard = useCallback(() => {
@@ -523,7 +537,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         updateField={updateField}
       />
       <Separator />
-      <RunsSection automationId={currentId} workspaceId={workspaceId} />
+      <RunsSection
+        automationId={currentId}
+        workspaceId={workspaceId}
+        historyMode={form.retryPolicy.history_mode}
+      />
       <AutomationDeleteControls
         saving={saving}
         isNew={isNew}

@@ -31,9 +31,10 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		RepositoryID     string   `json:"repository_id"`
 		SourceTaskID     string   `json:"source_task_id"`
 		StandingOrderIDs []string `json:"standing_order_ids"`
+		InReplyTo        string   `json:"in_reply_to"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid JSON payload", nil)
 	}
 
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
@@ -53,6 +54,7 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		RepositoryID:     payload.RepositoryID,
 		SourceTaskID:     payload.SourceTaskID,
 		StandingOrderIDs: payload.StandingOrderIDs,
+		InReplyTo:        payload.InReplyTo,
 	}
 	proposal, openCount, err := h.coordinatorSvc.ProposeTask(ctx, principal.CoordinatorID, req)
 	if err != nil {
@@ -69,10 +71,37 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"proposal_id":     proposal.ID,
+	result := map[string]interface{}{
+		proposalIDKey:     proposal.ID,
 		stopTaskStatusKey: string(proposal.Status),
-	})
+	}
+	h.applyAutomaticApproval(ctx, proposal, result)
+	return ws.NewResponse(msg.ID, msg.Action, result)
+}
+
+// applyAutomaticApproval runs the automatic path for a stored proposal and
+// overlays its status, task id and note on the tool result. A nil outcome or an
+// error leaves the pending proposal as phase 1 returned it.
+func (h *Handlers) applyAutomaticApproval(ctx context.Context, proposal *coordinator.Proposal, result map[string]interface{}) {
+	if !h.coordinatorSvc.Phase3Enabled() {
+		return
+	}
+	auto, err := h.coordinatorSvc.TryAutomaticApproval(ctx, proposal)
+	if err != nil {
+		h.logger.Warn("automatic approval failed unexpectedly",
+			zap.String("proposal_id", proposal.ID), zap.Error(err))
+		return
+	}
+	if auto == nil {
+		return
+	}
+	result[stopTaskStatusKey] = string(auto.Status)
+	if auto.TaskID != "" {
+		result["task_id"] = auto.TaskID
+	}
+	if auto.Note != "" {
+		result["note"] = auto.Note
+	}
 }
 
 // proposeTaskErrorResponse maps a ProposeTask error to a WS error response:
@@ -81,6 +110,9 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 // error with no field (AC-COORDINATOR-PROPOSALS-001.4); anything else is
 // logged and returned as an internal error.
 func (h *Handlers) proposeTaskErrorResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if errors.Is(err, coordinator.ErrNotFound) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
+	}
 	var fieldErr *coordinator.FieldError
 	if errors.As(err, &fieldErr) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldErr.Message,

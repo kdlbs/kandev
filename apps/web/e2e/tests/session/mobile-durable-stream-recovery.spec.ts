@@ -3,8 +3,22 @@ import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import { assertDeliveryRecoveryGeometry } from "../../helpers/delivery-recovery-controls";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { verifyNativeResumeClearsRecoveryNotice } from "../../helpers/native-resume-notice";
+
+test("native resume clears the uncertain notice on a phone after reload", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir);
+  await assertNoDocumentHorizontalOverflow(testPage, "native resume notice");
+});
 
 async function seedUncertainDeliverySession(apiClient: ApiClient, seedData: SeedData) {
   const task = await apiClient.createTask(seedData.workspaceId, "Mobile durable recovery", {
@@ -46,6 +60,9 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
 }) => {
   const capture = attachGatewayTrafficCapture(testPage);
   const { task, sessionId } = await seedUncertainDeliverySession(apiClient, seedData);
+  const proxy = await routeSessionEntryRecovery(testPage);
+  proxy.holdResponses("session.recover", { sessionId });
+  proxy.rejectResponsesUntilReleased("session.stop", "Stop was refused", { sessionId });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -59,10 +76,30 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
   await expect(banner.getByTestId("recovery-retry-connection-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
   await banner.getByTestId("recovery-retry-connection-button").tap();
-  await expect(session.recoveryError()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => proxy.heldResponseCount("session.recover")).toBe(1);
+  await assertDeliveryRecoveryGeometry(testPage);
   await banner.getByTestId("recovery-stop-button").tap();
+  await expect(banner.getByTestId("delivery-stop-failed")).toBeVisible();
+  await assertDeliveryRecoveryGeometry(testPage);
+  proxy.releaseHeldResponses("session.recover");
+  await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
+  for (const id of ["recovery-retry-connection-button", "recovery-stop-button"]) {
+    const box = await banner.getByTestId(id).boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  await testPage.evaluate(() => {
+    document.cookie = "kandev_locale=pseudo; path=/; SameSite=Lax";
+  });
+  await testPage.reload();
+  await assertDeliveryRecoveryGeometry(testPage);
+  await testPage.setViewportSize({ width: 1024, height: 900 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  await assertDeliveryRecoveryGeometry(testPage);
   await expect
     .poll(
       () =>
@@ -77,4 +114,52 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
     .toBe(true);
 
   await assertNoDocumentHorizontalOverflow(testPage, "mobile durable stream recovery");
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("legacy empty delivery fence exposes Resume without replaying the old prompt", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir, true);
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
+test("ordinary native resume surfaces recovery before first send and retains the draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "readiness",
+  );
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("mobile: cancelled prompt recovery remains reachable without an error record", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.skip(
+    process.platform !== "linux",
+    "isolated original-process death proof is Linux-specific",
+  );
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "cancelled",
+  );
 });

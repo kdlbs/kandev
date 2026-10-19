@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 )
 
 const teamClaudeStatusResponseLimit = 1 << 20
+
+var errNoUsablePoolCapacity = errors.New("teamclaude usage: no usable account")
 
 // TeamClaudeUsageClient reads the local TeamClaude control-plane status. It
 // reports the best usable account for each quota window, which reflects the
@@ -93,7 +96,7 @@ func (c *TeamClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage,
 		// a success with zero windows here would cache that as "not limited" —
 		// IsPotentiallyRateLimited finds nothing to compare against an empty
 		// Windows slice — masking a total outage as healthy capacity.
-		return nil, fmt.Errorf("teamclaude usage: no usable account in pool of %d", len(status.Accounts))
+		return nil, fmt.Errorf("%w in pool of %d", errNoUsablePoolCapacity, len(status.Accounts))
 	}
 	return &ProviderUsage{
 		Provider:  "teamclaude",

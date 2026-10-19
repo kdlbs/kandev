@@ -191,12 +191,15 @@ it("loads every option with only one cached snapshot", async () => {
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(3);
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("feature", {
     cache: "no-store",
+    init: { signal: expect.any(AbortSignal) },
   });
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("review", {
     cache: "no-store",
+    init: { signal: expect.any(AbortSignal) },
   });
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("kanban", {
     cache: "no-store",
+    init: { signal: expect.any(AbortSignal) },
   });
 });
 

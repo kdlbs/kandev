@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002
 created: 2026-09-28
-updated: 2026-10-06
+updated: 2026-10-12
 owners:
   - cfl
 ---
@@ -16,12 +16,13 @@ The agent system owns candidate selection and durable route state.
 This design extends [dynamic routing](dynamic-agent-routing-01.md), with a narrow exception to the shared provider policy.
 The [decision](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records the accepted boundary.
 The [implementation package](../../../plans/dynamic-unclassified-fallback/plan.md) and its three work orders are complete.
+The [empty turn package](../../../plans/upstream-no-result-dynamic-turn/plan.md) adds the empty normal turn end origin.
 
 ## Requirement mapping
 
 | Requirement | Sections |
 | --- | --- |
-| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002` | Configuration, Evidence admission, Streak lifecycle, Integration, Compatibility and presentation |
+| `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002` | Configuration, Evidence admission, Empty turn ends, Streak lifecycle, Integration, Compatibility and presentation |
 
 ## Configuration
 
@@ -63,6 +64,7 @@ Eligible origins are:
 
 - `unknown_provider_error` from an authoritative terminal provider result, before any output or effects.
 - `agent_runtime_error` from a proven agent process-start or session-initialization failure, before prompt dispatch.
+- `agent_runtime_error` at `prompt_send` from an empty normal turn end, as defined in [Empty turn ends](#empty-turn-ends).
 
 A generic task launch error, a missing phase, or an arbitrary wrapped `errors.New` is not proven agent startup failure.
 The startup boundary must distinguish agent process/session initialization from executor, repository, and task preparation.
@@ -76,10 +78,54 @@ Do not infer task scope only from a session ID or the absence of an Office field
 Revalidate the current step, route generation, and concrete candidate at the durable transition boundary.
 Use the current cancellation/settlement owner so a step change or stop cannot race a successor launch.
 
+## Empty turn ends
+
+A prompt turn can end normally with stop reason `end_turn` and no error frame, yet produce no assistant text, reasoning, or tool activity.
+Error paths never see it, so without this origin a candidate that keeps returning empty completions is never counted.
+
+The orchestrator's stream completion handler is the only producer of the `empty_turn_completion` origin.
+It runs before the ordinary completion follow-up and while the process-local prompt evidence for the turn still exists.
+It produces evidence only when all of these hold:
+
+- the completion is not a terminal replay, the stop reason is exactly `end_turn`, and the frame is not marked as an error;
+- the prompt attempt is a dynamic task attempt whose execution ID and nonzero prompt generation own the session;
+- that attempt has known evidence with no output and no effects;
+- no cancellation is in flight for the session;
+- the current concrete candidate has an enabled `unclassified` policy with a valid threshold;
+- the workflow step is known and does not veto the policy.
+
+Assistant text or plan content on the completion frame itself is output, even when no earlier stream event carried it. The current prompt evidence records that output and clears a previous failure streak through the existing fenced reset boundary.
+
+If any precondition fails, the handler does nothing and the completion keeps its existing behavior.
+The policy and step checks happen before routing because the engine treats a current ineligible failure as a manual-recovery stop.
+Without them, a disabled or vetoed profile would newly stop on every empty turn.
+
+The producer builds an unclassified `agent_runtime_error` failure at `prompt_send` and passes typed evidence through the existing failure route.
+Its attempt identity is the existing prompt attempt identity: concrete execution ID plus prompt generation.
+The origin carries no provider diagnostic, so the `DiagnosticComplete` and provider identity requirements are waived for this origin only.
+Every other origin keeps both requirements.
+
+Its fingerprint is a fixed, versioned tuple of code, origin, phase, and a constant non-secret label that represents `end_turn`.
+It contains no transcript, diagnostic, or prompt text.
+Consecutive empty ends on one candidate therefore match each other and never match a provider or startup diagnostic.
+
+A handled empty end with a launched successor skips the ordinary completion follow-up, as the error path does.
+Below the threshold, the route records the count with `action_required` and the ordinary completion follow-up still runs.
+If the route declines, the ordinary completion runs unchanged.
+
+A counted empty end must not clear its own count.
+The orchestrator records the counted execution ID and prompt generation for the session.
+The later successful completion or process exit for that same turn consumes the record instead of clearing the streak.
+A new turn start retires the record, and the identity check prevents a later turn from consuming a stale one.
+
+This origin does not cover a post-start runtime failure that arrives before any result without a complete diagnostic.
+Such failures retain manual recovery.
+
 ## Matching identity
 
 Count identical diagnostics, not merely identical classes or candidate IDs.
 A versioned fingerprint includes code, trusted origin, phase, provider identity, and the complete diagnostic text after whitespace normalization.
+Empty turn ends use the fixed tuple in [Empty turn ends](#empty-turn-ends) instead.
 Retain the case and punctuation. Do not strip timestamps, paths, IDs, or variable suffixes to manufacture equality.
 
 Before hashing, apply the existing diagnostic sanitizer and bounds.
@@ -149,6 +195,8 @@ Repeated delivery while already `action_required` must not increment again.
 `applyPolicyFailure` owns fenced persistence and successor selection.
 Extend `Conductor.nextAfterLaunchFailure` so eligible unknown failures reach evaluation before the current `ActionFor`/`FallbackAllowed` shortcuts reject them.
 Extend `RouteAfterFailure` and `ProfileExecutionResolver` to carry typed context, without permissive defaults for existing callers.
+`ProfileExecutionResolver` also reports whether a concrete candidate has an enabled, valid unclassified policy, for the empty turn precheck.
+The stream completion handler in `orchestrator/event_handlers_streaming.go` calls the empty turn producer.
 
 `orchestrator/dynamic_evidence.go` remains the authority for prompt output/effect evidence.
 The backend route-action handler preserves a same-candidate streak through manual retries.

@@ -2,11 +2,12 @@
 
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { SETUP_STEPS, type SetupStepId } from "@/lib/coordinators/setup";
+import type { SetupStepId } from "@/lib/coordinators/setup";
 
 export const STEP_LABEL: Record<SetupStepId, string> = {
   identity: "coordinator:setupStepIdentity",
   watches: "coordinator:setupStepWatches",
+  projects: "coordinator:setupStepProjects",
   goal: "coordinator:setupStepGoal",
   context: "coordinator:setupStepContext",
   "may-do": "coordinator:setupStepMayDo",
@@ -14,17 +15,18 @@ export const STEP_LABEL: Record<SetupStepId, string> = {
 };
 
 type Props = {
+  steps: readonly SetupStepId[];
   current: SetupStepId;
   marked: ReadonlySet<SetupStepId>;
 };
 
-export function SetupStepList({ current, marked }: Props) {
+export function SetupStepList({ steps, current, marked }: Props) {
   const { t } = useTranslation();
-  const index = SETUP_STEPS.indexOf(current);
+  const index = steps.indexOf(current);
   return (
     <>
       <p className="text-sm font-medium md:hidden" data-testid="setup-step-compact">
-        {t("coordinator:setupStepOf", { current: index + 1, total: SETUP_STEPS.length })}
+        {t("coordinator:setupStepOf", { current: index + 1, total: steps.length })}
         {": "}
         {t(STEP_LABEL[current])}
       </p>
@@ -33,7 +35,7 @@ export function SetupStepList({ current, marked }: Props) {
         aria-label={t("coordinator:setupStepListLabel")}
         data-testid="setup-step-list"
       >
-        {SETUP_STEPS.map((step, i) => {
+        {steps.map((step, i) => {
           const isCurrent = step === current;
           return (
             <li

@@ -46,6 +46,8 @@ function row(workspace: string, id: string): Coordinator {
     name: id,
     agent_profile_id: "agent",
     executor_profile_id: "executor",
+    task_agent_profile_id: "agent",
+    task_executor_profile_id: "executor",
     context: "",
     conversation_task_id: null,
     created_at: "2026-10-06T00:00:00Z",

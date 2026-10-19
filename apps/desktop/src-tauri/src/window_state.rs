@@ -57,6 +57,21 @@ pub fn visible_restore(saved: WindowBounds, monitors: &[MonitorBounds]) -> Windo
     }
 }
 
+/// Tauri applies `set_size` to the client area, while the saved bounds record the
+/// whole frame. Restoring one with the other grows the window by the frame on every
+/// restart, so the frame is removed before the saved size is applied.
+pub fn client_size(
+    saved_width: u32,
+    saved_height: u32,
+    frame_width: u32,
+    frame_height: u32,
+) -> (u32, u32) {
+    (
+        saved_width.saturating_sub(frame_width).max(1),
+        saved_height.saturating_sub(frame_height).max(1),
+    )
+}
+
 fn intersects(window: WindowBounds, monitor: MonitorBounds) -> bool {
     let window_right = window.x.saturating_add(window.width as i32);
     let window_bottom = window.y.saturating_add(window.height as i32);
@@ -132,8 +147,11 @@ impl WindowStateStore {
             })
             .collect::<Vec<_>>();
         let restored = visible_restore(saved, &monitors);
+        let (frame_width, frame_height) = frame_size(window);
+        let (client_width, client_height) =
+            client_size(restored.width, restored.height, frame_width, frame_height);
         window
-            .set_size(PhysicalSize::new(restored.width, restored.height))
+            .set_size(PhysicalSize::new(client_width, client_height))
             .map_err(|err| err.to_string())?;
         window
             .set_position(PhysicalPosition::new(restored.x, restored.y))
@@ -214,6 +232,17 @@ impl WindowStateStore {
             Some(bounds)
         };
         Ok(bounds)
+    }
+}
+
+#[cfg(feature = "desktop-runtime")]
+fn frame_size(window: &WebviewWindow) -> (u32, u32) {
+    match (window.outer_size(), window.inner_size()) {
+        (Ok(outer), Ok(inner)) => (
+            outer.width.saturating_sub(inner.width),
+            outer.height.saturating_sub(inner.height),
+        ),
+        _ => (0, 0),
     }
 }
 
@@ -317,6 +346,60 @@ mod tests {
         assert_eq!(restored.width, PRIMARY.width);
         assert_eq!(restored.height, PRIMARY.height);
         assert_eq!((restored.x, restored.y), (PRIMARY.x, PRIMARY.y));
+    }
+
+    const FRAME: (u32, u32) = (16, 39);
+
+    fn restart(saved: WindowBounds, frame: (u32, u32)) -> WindowBounds {
+        let restored = visible_restore(saved, &[PRIMARY]);
+        let (width, height) = client_size(restored.width, restored.height, frame.0, frame.1);
+        WindowBounds {
+            width: width + frame.0,
+            height: height + frame.1,
+            ..restored
+        }
+    }
+
+    #[test]
+    fn repeated_restarts_keep_the_saved_outer_size() {
+        let saved = WindowBounds {
+            x: 100,
+            y: 80,
+            width: 1280,
+            height: 900,
+            maximized: false,
+        };
+        let mut current = saved;
+        for _ in 0..3 {
+            current = restart(current, FRAME);
+        }
+        assert_eq!(current, saved);
+    }
+
+    #[test]
+    fn clamped_bounds_still_fit_the_monitor_once_the_frame_is_added() {
+        let saved = WindowBounds {
+            x: -5000,
+            y: -5000,
+            width: 4000,
+            height: 3000,
+            maximized: false,
+        };
+        let restored = restart(saved, FRAME);
+        assert_eq!(
+            (restored.width, restored.height),
+            (PRIMARY.width, PRIMARY.height)
+        );
+    }
+
+    #[test]
+    fn frameless_windows_keep_the_saved_size() {
+        assert_eq!(client_size(1280, 900, 0, 0), (1280, 900));
+    }
+
+    #[test]
+    fn a_frame_larger_than_the_saved_size_keeps_a_positive_size() {
+        assert_eq!(client_size(10, 20, 16, 39), (1, 1));
     }
 
     #[test]

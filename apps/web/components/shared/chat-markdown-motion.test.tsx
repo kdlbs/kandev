@@ -48,13 +48,19 @@ describe("chat Markdown reveals", () => {
   });
   it("cancels active effects on disable and does not replay on enable or rewrite", () => {
     const cancel = vi.fn();
-    const animate = vi.fn(() => ({ cancel }));
+    const handles: { cancel: () => void; effect: unknown }[] = [];
+    const animate = vi.fn(() => {
+      const handle = { cancel, effect: {} as unknown };
+      handles.push(handle);
+      return handle;
+    });
     Object.defineProperty(Element.prototype, "animate", { value: animate, configurable: true });
     const view = render(<MemoizedMarkdown content="old" animateText />);
     view.rerender(<MemoizedMarkdown content="old new" animateText />);
     expect(animate).toHaveBeenCalled();
     view.rerender(<MemoizedMarkdown content="old new" animateText={false} />);
     expect(cancel).toHaveBeenCalled();
+    expect(handles.every((handle) => handle.effect === null)).toBe(true);
     animate.mockClear();
     view.rerender(<MemoizedMarkdown content="old new" animateText />);
     view.rerender(<MemoizedMarkdown content="replacement" animateText />);

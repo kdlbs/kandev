@@ -68,7 +68,9 @@ describe("planned shard runner", () => {
     const current = manifest({
       shards: [{ index: 1, predictedSeconds: 0, files: [], units: [] }],
     });
-    writeShardMetadata(current, current.shards[0]!, "2026-08-10T00:00:00.000Z", 0, dir);
+    writeShardMetadata(current, current.shards[0]!, "2026-08-10T00:00:00.000Z", 0, {
+      outputDir: dir,
+    });
     expect(
       JSON.parse(fs.readFileSync(path.join(dir, "shard-normal-1-metadata.json"), "utf8")),
     ).toMatchObject({

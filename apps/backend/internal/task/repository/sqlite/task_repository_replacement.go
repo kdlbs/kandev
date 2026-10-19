@@ -24,6 +24,9 @@ func (r *Repository) ReplaceTaskRepositories(ctx context.Context, taskID string,
 	}
 	tx, err := r.db.BeginTxx(ctx, options)
 	if err != nil {
+		if cancelErr := ctx.Err(); cancelErr != nil {
+			return nil, cancelErr
+		}
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()

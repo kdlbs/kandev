@@ -365,11 +365,17 @@ credentials or storage are missing, recovery fails rather than silently creating
 an empty replacement workspace. A software update cannot restore resources that
 were already deleted.
 
+If Resume cannot stop the previous runtime, verify that the Kubernetes API and the Pod's node/kubelet are reachable, including the API server's connection to the kubelet used for port forwarding. Restore executor connectivity and retry **Resume** in the existing session. Kandev preserves the registration when cleanup is unconfirmed; a retained registration is not evidence of a second live agent.
+
 Task archive/delete cleanup is destructive after all attached sessions are settled. Deleting or stopping an individual session does not delete the task Pod or its managed claim. Before deletion, Kandev verifies the recorded namespace, name, UID, and complete standard plus `kandev.ai/*` ownership-label set. It then deletes the exact Pod with UID/resource-version preconditions and deletes a PVC only when inventory proves Kandev created that managed claim. Existing claims are never deleted. A missing object is idempotent; an inventory read error, same-name replacement, UID mismatch, missing label, changed label, extra `kandev.ai/*` label, or mismatched create nonce fails closed without deleting the ambiguous object.
 
 Kandev blocks deleting an executor, or changing an executor into or out of Kubernetes, while runtime inventory still refers to it. Archive or delete the owning tasks to finish resource cleanup first. Removing the last session alone retains the task Pod. Profile deletion does not rewrite or destroy a retained workload because recovery owns the recorded profile ID and snapshot.
 
 Do not manually delete by name or label alone. If manual incident cleanup is unavoidable, compare the Kandev runtime inventory with namespace, name, UID, and all ownership labels first, preserve required workspace data, and record the out-of-band action.
+
+Subtasks cannot attach to a different task's Kubernetes environment. When creating a runnable child with `create_task_kandev`, explicitly select `workspace_mode: "new_workspace"` and keep the desired Kubernetes executor profile.
+
+Queued creation with `start_agent: false` can still default to `inherit_parent`; later workspace or agent admission returns `workspace_reuse_unsupported` before creating a session. Restoring or retrying the parent does not change this ownership restriction. See [MCP workspace modes](automation-and-mcp.md#task-creation-boundaries).
 
 Older installations may have several session Pods for one task. Kandev does not merge or delete those Pods automatically. Additional attachment requires an unambiguous recorded Pod and claim with matching task ownership and recoverable credentials; conflicting inventory blocks attachment. Adopted legacy resources keep their original labels.
 

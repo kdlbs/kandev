@@ -267,6 +267,10 @@ func (c *Conductor) launchWithFallback(
 	current := decision
 	currentContinuation := continuation
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if c.engine.Circuits().IsHeld(accountBlockKey(current.ExecutionProfileID)) {
+			c.engine.ReleaseProbe(current, false)
+			return DownstreamExecution{}, current, ErrExecutionProfileHeld
+		}
 		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
 			AttemptID:          uuid.NewString(),
@@ -398,6 +402,9 @@ func (c *Conductor) Resume(ctx context.Context, sessionID, prompt string) error 
 		c.mu.Lock()
 		c.active[sessionID] = execution
 		c.mu.Unlock()
+	}
+	if c.engine != nil && c.engine.Circuits().IsHeld(accountBlockKey(execution.ExecutionProfileID)) {
+		return ErrExecutionProfileHeld
 	}
 	return c.downstream.Resume(ctx, execution.ID, prompt)
 }

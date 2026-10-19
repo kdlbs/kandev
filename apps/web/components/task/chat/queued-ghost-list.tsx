@@ -1,6 +1,8 @@
 /* eslint-disable max-lines -- queue panel keeps its responsive controls and row composition together. */
 "use client";
 
+import { queueMutationErrorKey } from "@/lib/queue-mutation-error";
+
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList } from "@tabler/icons-react";
@@ -62,6 +64,7 @@ function headPreviewText(entries: QueuedMessage[]): string {
 
 type QueueAffordanceProps = {
   sessionId: string | null;
+  detailActive?: boolean;
   children: ReactNode;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
@@ -107,7 +110,7 @@ function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void
         const key = messages[err.code];
         if (key) return t(key);
       }
-      return t("chat:failedToSendQueuedMessageNow");
+      return t(queueMutationErrorKey(err, "chat:failedToSendQueuedMessageNow"));
     },
     [t],
   );
@@ -163,7 +166,7 @@ function useQueuePanelHandlers({
         await removeEntry(entryId);
       } catch (err) {
         console.error("Failed to remove queued entry:", err);
-        toast.error(t("chat:failedToRemoveQueuedMessage"));
+        toast.error(t(queueMutationErrorKey(err, "chat:failedToRemoveQueuedMessage")));
       }
     },
     [removeEntry, t],
@@ -184,24 +187,24 @@ function useQueuePanelHandlers({
           return;
         }
         console.error("Failed to merge queued entry:", err);
-        toast.error(t("chat:failedToMergeQueuedMessages"));
+        toast.error(t(queueMutationErrorKey(err, "chat:failedToMergeQueuedMessages")));
       } finally {
         pendingMerges.current.delete(entryId);
       }
     },
-    [mergeEntry],
+    [mergeEntry, t],
   );
   const handleClear = useCallback(() => {
     clearAll().catch((err) => {
       console.error("Failed to clear queued messages:", err);
-      toast.error(t("chat:failedToClearQueuedMessages"));
+      toast.error(t(queueMutationErrorKey(err, "chat:failedToClearQueuedMessages")));
     });
   }, [clearAll, t]);
   const handleAutoRunChange = useCallback(
     (enabled: boolean) => {
       setAutoRun(enabled).catch((err) => {
         console.error("Failed to update queue Auto-run:", err);
-        toast.error(t("chat:failedToSetQueueAutoRun"));
+        toast.error(t(queueMutationErrorKey(err, "chat:failedToSetQueueAutoRun")));
       });
     },
     [setAutoRun, t],
@@ -210,7 +213,7 @@ function useQueuePanelHandlers({
     (enabled: boolean) => {
       setAutoMerge(enabled).catch((err) => {
         console.error("Failed to update queue Auto-merge:", err);
-        toast.error(t("chat:failedToSetQueueAutoMerge"));
+        toast.error(t(queueMutationErrorKey(err, "chat:failedToSetQueueAutoMerge")));
       });
     },
     [setAutoMerge, t],
@@ -224,7 +227,7 @@ function useQueuePanelHandlers({
         // authoritative order, so it is a successful UI outcome — no toast.
         if (err instanceof QueueReorderError) return;
         console.error("Failed to reorder queued entries:", err);
-        toast.error(t("chat:failedToReorderQueuedMessages"));
+        toast.error(t(queueMutationErrorKey(err, "chat:failedToReorderQueuedMessages")));
       }
     },
     [reorderEntries, t],
@@ -357,7 +360,12 @@ function QueuePanelDisclosure({
  *   auto-collapse.
  */
 // eslint-disable-next-line max-lines-per-function -- coordinates the queue panel's responsive controls and mutations.
-export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
+export function QueueAffordance({
+  sessionId,
+  detailActive = true,
+  children,
+  renderStatusBar,
+}: QueueAffordanceProps) {
   const {
     entries,
     count,
@@ -377,7 +385,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
     reorderEntries,
     sendEntryNow,
     cancellationPending,
-  } = useQueue(sessionId);
+  } = useQueue(sessionId, { detailActive });
   const { editingEntryId, editLease, beginEdit, completeEdit } = useQueueEditProtection({
     sessionId,
     entries,

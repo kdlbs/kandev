@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/githubauth"
-	"github.com/kandev/kandev/pkg/agent"
 )
 
 func envValue(env []string, key string) string {
@@ -498,22 +497,25 @@ func TestManager_PipedProcessInheritsAgentEnvironment(t *testing.T) {
 
 func TestManager_StartAutoShellDoesNotDeadlockOnEnvironmentSnapshot(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
-		AgentArgs:    []string{"echo"},
+		AgentEnv:     []string{"GIT_CONFIG_COUNT=invalid"},
 		ShellEnabled: true,
-		Protocol:     agent.ProtocolACP,
 	}, newTestLogger(t))
-	mgr.adapter = newOneShotStubAdapter()
-	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+	t.Cleanup(mgr.lifetimeCancel)
+	if _, err := mgr.buildShellConfigWithAgentEnv(mgr.cfg.AgentEnv); err == nil {
+		t.Fatal("fixture must reject the environment before spawning a shell")
+	}
 
-	done := make(chan error, 1)
-	go func() { done <- mgr.Start(context.Background()) }()
+	done := make(chan struct{})
+	go func() {
+		mgr.startMu.Lock()
+		defer mgr.startMu.Unlock()
+		mgr.startAgentShell()
+		close(done)
+	}()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Start() error = %v", err)
-		}
+	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Start() deadlocked while creating the auto shell")
+		t.Fatal("auto shell environment snapshot attempted to acquire the start lock")
 	}
 }
 

@@ -49,6 +49,9 @@ func TraceProtocolEvent(
 
 	_, span := tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindInternal))
 	defer span.End()
+	if !span.IsRecording() {
+		return
+	}
 
 	span.SetAttributes(
 		attribute.String("protocol", protocol),

@@ -31,22 +31,6 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 }
 
 func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sqlx.Tx, message *models.Message, metadataJSON []byte, requestsInput int) error {
-	if !dialect.IsPostgres(r.db.DriverName()) {
-		// SQLite has a database-level writer lock, and this no-op update takes it
-		// before the retained metadata is read. PostgreSQL uses FOR UPDATE below;
-		// an UPDATE here would fire the conversation revision trigger.
-		result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET id = id WHERE id = ?`), message.ID)
-		if err != nil {
-			return err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if rows == 0 {
-			return fmt.Errorf("message not found: %s", message.ID)
-		}
-	}
 	query := `SELECT metadata,type,updated_at,payload_digest,payload_size FROM task_session_messages WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
@@ -59,7 +43,7 @@ func (r *Repository) updateMessageWithPayloadGuardTx(ctx context.Context, tx *sq
 	if err := tx.QueryRowContext(ctx, tx.Rebind(query), message.ID).Scan(
 		&raw, &storedType, &storedUpdatedAt, &storedPayloadDigest, &storedPayloadSize,
 	); err != nil {
-		if errors.Is(err, sql.ErrNoRows) && dialect.IsPostgres(r.db.DriverName()) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("message not found: %s", message.ID)
 		}
 		return err

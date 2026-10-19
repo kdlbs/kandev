@@ -67,6 +67,7 @@ export type TaskSessionStateChangedPayload = {
   downstream_acp_session_id?: string;
   metadata?: Record<string, unknown>;
   session_metadata?: Record<string, unknown>;
+  session_recovery_blocks?: import("./http").SessionRecoveryBlockProjection[];
   is_passthrough?: boolean;
   error_message?: string;
   /** User-supplied session tab label; present (possibly "") on rename broadcasts. */

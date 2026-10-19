@@ -17,7 +17,7 @@ func TestNativeResumeRetirementRequiresIdleCurrentOwner(t *testing.T) {
 			journalPath := filepath.Join(t.TempDir(), "delivery.bbolt")
 			store, err := journal.Open(journal.Config{Path: journalPath})
 			require.NoError(t, err)
-			manager := &Manager{cfg: &config.InstanceConfig{DurableJournalPath: journalPath, SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream"}, deliveryJournal: store}
+			manager := &Manager{cfg: &config.InstanceConfig{DurableJournalPath: journalPath, SessionID: "session", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 1, DeliveryStreamID: "stream"}, logger: newTestLogger(t), deliveryJournal: store}
 			t.Cleanup(func() { _ = manager.closeDeliveryJournal() })
 			submission := journal.Submission{ID: "interrupted", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, StreamID: "stream", Hash: "hash", Payload: []byte("prompt"), State: journal.SubmissionInterruptedUnknown}
 			switch condition {

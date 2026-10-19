@@ -12,6 +12,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const nativeReplacementCreationReason = "native_replaced"
+
 const sessionContinuitySchema = `
 		CREATE TABLE IF NOT EXISTS harness_session_generations (
 			session_id TEXT NOT NULL,
@@ -43,6 +45,7 @@ const sessionContinuitySchema = `
 			reason TEXT NOT NULL DEFAULT '',
 			target_workspace TEXT NOT NULL DEFAULT '',
 			authorized INTEGER NOT NULL DEFAULT 0,
+			checkpoint_json TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			completed_at TIMESTAMP,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
@@ -111,7 +114,18 @@ func (r *Repository) CreateHarnessSessionGeneration(ctx context.Context, generat
 	if generation.CommittedAt.IsZero() {
 		generation.CommittedAt = generation.CreatedAt
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), generation.SessionID); err != nil {
+		return err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO harness_session_generations
 		(session_id, incarnation_id, generation, predecessor_generation, native_session_id,
 		 agent_type, adapter_version, original_workspace, current_workspace,
@@ -121,8 +135,10 @@ func (r *Repository) CreateHarnessSessionGeneration(ctx context.Context, generat
 		generation.PredecessorGeneration, generation.NativeSessionID, generation.AgentType,
 		generation.AdapterVersion, generation.OriginalWorkspace, generation.CurrentWorkspace,
 		generation.NativeStateReference, generation.CreationReason, generation.CreatedAt,
-		generation.CommittedAt)
-	return err
+		generation.CommittedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) GetCurrentHarnessSessionGeneration(ctx context.Context, sessionID, incarnationID string) (*models.HarnessSessionGeneration, error) {
@@ -149,6 +165,27 @@ func (r *Repository) GetCurrentHarnessSessionGeneration(ctx context.Context, ses
 }
 
 func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64) (bool, error) {
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, "", "")
+}
+
+// CommitHarnessSessionGenerationForExecution commits only while the event's
+// task, incarnation, execution and native token still own the session. The
+// ownership check and predecessor CAS share the executor writer's SQL locks.
+func (r *Repository) CommitHarnessSessionGenerationForExecution(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
+	if generation == nil || taskID == "" || executionID == "" ||
+		generation.Generation != expectedGeneration+1 || generation.PredecessorGeneration != expectedGeneration {
+		return false, fmt.Errorf("adjacent generation and execution identity are required")
+	}
+	return r.commitHarnessSessionGeneration(ctx, generation, expectedGeneration, taskID, executionID)
+}
+
+func (r *Repository) commitHarnessSessionGeneration(
+	ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+	taskID, executionID string,
+) (bool, error) {
 	if generation == nil {
 		return false, fmt.Errorf("harness generation is required")
 	}
@@ -157,6 +194,18 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), generation.SessionID); err != nil {
+		return false, err
+	}
+	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
+		return false, err
+	}
+	if executionID != "" {
+		owns, err := r.harnessGenerationExecutionOwnsTx(ctx, tx, generation, taskID, executionID)
+		if err != nil || !owns {
+			return false, err
+		}
+	}
 	var current int64
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT generation FROM harness_session_generations
@@ -173,11 +222,23 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.moveOpenRecoveryBlocksWithGenerationTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) moveOpenRecoveryBlocksWithGenerationTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64,
+) error {
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot
 	// leave an open block stranded on the predecessor generation.
-	if generation.Generation == expectedGeneration+1 {
+	if generation.Generation == expectedGeneration+1 && generation.CreationReason != nativeReplacementCreationReason {
 		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
 			SET expected_generation = ?, updated_at = ?
@@ -186,13 +247,25 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 			generation.Generation, generation.CommittedAt,
 			generation.SessionID, generation.IncarnationID,
 			expectedGeneration, models.RecoveryBlockOpen); err != nil {
-			return false, fmt.Errorf("move open recovery blocks with generation: %w", err)
+			return fmt.Errorf("move open recovery blocks with generation: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	return true, nil
+	return nil
+}
+
+func (r *Repository) harnessGenerationExecutionOwnsTx(
+	ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, taskID, executionID string,
+) (bool, error) {
+	var owns bool
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+  SELECT EXISTS (
+   SELECT 1 FROM task_sessions ts
+   JOIN executors_running er ON er.session_id = ts.id AND er.task_id = ts.task_id
+   WHERE ts.id = ? AND ts.task_id = ?
+    AND COALESCE(NULLIF(ts.queue_incarnation_id, ''), ts.id) = ?
+    AND er.agent_execution_id = ? AND er.resume_token = ?
+  )`), generation.SessionID, taskID, generation.IncarnationID, executionID, generation.NativeSessionID).Scan(&owns)
+	return owns, err
 }
 
 func insertGenerationTx(ctx context.Context, tx *sql.Tx, rebind func(string) string, generation *models.HarnessSessionGeneration) error {
@@ -226,14 +299,18 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 	if attempt.CreatedAt.IsZero() {
 		attempt.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	checkpointJSON, err := marshalSilentRestoreCheckpoint(attempt.Checkpoint)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO session_restore_attempts
 		(id, session_id, incarnation_id, expected_generation, action, outcome, reason,
-		 target_workspace, authorized, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		 target_workspace, authorized, checkpoint_json, created_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		attempt.ID, attempt.SessionID, attempt.IncarnationID, attempt.ExpectedGeneration,
 		attempt.Action, attempt.Outcome, attempt.Reason, attempt.TargetWorkspace,
-		boolToInt(attempt.Authorized), attempt.CreatedAt, attempt.CompletedAt)
+		boolToInt(attempt.Authorized), checkpointJSON, attempt.CreatedAt, attempt.CompletedAt)
 	return err
 }
 
@@ -319,6 +396,17 @@ func (r *Repository) UpsertSessionRecoveryBlock(ctx context.Context, block *mode
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if block.ConsumerReference == "agent_delivery" {
+		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), block.SessionID); err != nil {
+			return err
+		}
+		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{block.SessionID}, []string{block.DeliveryStreamID}); err != nil {
+			return err
+		}
+	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, block.SessionID); err != nil {
+		return err
+	}
 	if err := r.upsertSessionRecoveryBlockTx(ctx, tx, block); err != nil {
 		return err
 	}
@@ -362,7 +450,12 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
 		   AND excluded.consumer_reference = 'agent_delivery'
 		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
-		   THEN session_recovery_blocks.delivery_stream_id ELSE excluded.delivery_stream_id END,
+		   THEN session_recovery_blocks.delivery_stream_id
+           WHEN session_recovery_blocks.consumer_reference = 'agent_delivery'
+           AND excluded.consumer_reference = 'agent_delivery'
+           AND session_recovery_blocks.delivery_submission_id = excluded.delivery_submission_id
+           AND excluded.delivery_stream_id = '' THEN session_recovery_blocks.delivery_stream_id
+           ELSE excluded.delivery_stream_id END,
 		 delivery_sequence = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
 		   AND excluded.consumer_reference = 'agent_delivery'
@@ -441,6 +534,39 @@ func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID,
 	return &block, nil
 }
 
+// ListOpenSessionRecoveryBlocks returns all live causes for one observed owner.
+// Recovery consumers must not treat the earliest cause as the only one.
+func (r *Repository) ListOpenSessionRecoveryBlocks(
+	ctx context.Context,
+	sessionID, incarnationID string,
+	expectedGeneration int64,
+) ([]*models.SessionRecoveryBlock, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
+		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
+		FROM session_recovery_blocks
+		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = ?
+		ORDER BY created_at, id`), sessionID, incarnationID, expectedGeneration, models.RecoveryBlockOpen)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	blocks := make([]*models.SessionRecoveryBlock, 0)
+	for rows.Next() {
+		block := new(models.SessionRecoveryBlock)
+		if err := rows.Scan(&block.ID, &block.SessionID, &block.IncarnationID,
+			&block.ExpectedGeneration, &block.Reason, &block.State, &block.ConsumerReference,
+			&block.DeliverySubmissionID, &block.DeliveryStreamID, &block.DeliverySequence,
+			&block.DeliveryTurnID, &block.DeliveryOutcome, &block.AuthorizedAction,
+			&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, rows.Err()
+}
+
 // GetSessionRecoveryBlock returns a block by stable identity, including
 // resolved blocks that autonomous consumers use to release their parked work.
 func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*models.SessionRecoveryBlock, error) {
@@ -461,14 +587,48 @@ func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*m
 }
 
 func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var sessionID, streamID, consumerReference string
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT session_id, delivery_stream_id, consumer_reference
+		FROM session_recovery_blocks WHERE id = ?`), id).Scan(&sessionID, &streamID, &consumerReference)
+	if err == sql.ErrNoRows {
+		return false, tx.Commit()
+	}
+	if err != nil {
+		return false, err
+	}
+	if consumerReference == "agent_delivery" {
+		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+			return false, err
+		}
+		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{streamID}); err != nil {
+			return false, err
+		}
+	}
+	if consumerReference == "agent_delivery" && action == nativeResumeRecoveryAction {
+		if valid, err := r.restoreNativeResumeMetadataTx(ctx, tx, id, resolvedAt); err != nil || !valid {
+			return false, err
+		}
+	}
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_recovery_blocks SET state = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
 		WHERE id = ? AND state = ?`), models.RecoveryBlockResolved, action, resolvedAt, resolvedAt, id, models.RecoveryBlockOpen)
 	if err != nil {
 		return false, err
 	}
 	count, err := result.RowsAffected()
-	return count == 1, err
+	if err != nil || count != 1 {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func boolToInt(value bool) int {

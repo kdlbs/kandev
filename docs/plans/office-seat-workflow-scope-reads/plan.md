@@ -131,3 +131,31 @@ Wave 1 (sequential):
 ## Open Questions
 
 None.
+
+## Delivery integration (2026-10-19)
+
+Merged current main into the existing PR branch to resolve actual conflicts.
+The resolution preserves both PostgreSQL pool-schema regressions, both mobile
+screenshot-capture readiness assertions, and Office automation guidance along
+with the workflow-scoped seat-read guidance. No production behavior, ownership,
+termination, recovery, retention, or persistence contract changed in this
+integration.
+
+Focused validation on the integrated tree:
+
+- `go test -trimpath ./internal/office/dashboard ./internal/office/repository/sqlite ./internal/workflow/engine -count=1`: passed.
+- Focused startup and retained-session recovery tests in
+  `internal/agent/runtime/lifecycle` with `-trimpath -race`: passed.
+- `KANDEV_TEST_POSTGRES_DSN=<disposable PostgreSQL 16 DSN> go test -trimpath -race ./internal/testutil -run TestIsolatedPostgres -count=1 -v`: passed, including both pool and replacement-connection regressions with an existing URL search path.
+- `pnpm e2e:run --project mobile-chrome e2e/tests/task/mobile-html-preview.spec.ts -- --retries=0`: passed all three scenarios using a fresh managed production build.
+- Focused ESLint for the conflicted mobile spec: passed.
+- Harness tests/lint, specification tests/lint, and documentation catalog
+  validation: passed.
+
+- `GOMEMLIMIT=3GiB GOMAXPROCS=2 GOFLAGS=-p=2 golangci-lint run ./... --new-from-rev=ebcb1212db30e247b2558ad4cf5916c03487b273 --timeout=5m --concurrency=2`: passed, zero issues after the cold-cache run timed out.
+- `NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck`: passed after
+  the default Node heap was exhausted.
+
+Exact-head delivery CI and merge confirmation remain external delivery gates.
+The earlier full-suite results above are historical implementation evidence;
+this integration uses focused checks for the affected contracts.

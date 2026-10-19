@@ -1,5 +1,6 @@
 "use client";
 
+import { executorProfileAvailable } from "@/lib/auth/executor-ownership";
 import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
@@ -393,6 +394,10 @@ function useDialogSetupData(
     fs.repositories,
     repositoryBranches,
   );
+  const executorOwnershipBlockedReason =
+    fs.executorProfileId && !executorProfileAvailable(fs.executorProfileId, data.executors)
+      ? t("executors:ownershipUnavailable")
+      : undefined;
   const refreshBranchPolicies = useRefreshBranchPolicies(fs);
   return {
     ...data,
@@ -400,6 +405,7 @@ function useDialogSetupData(
     refreshBranchPolicies,
     repositoryLocalPath: resolveSingleRowLocalPath(fs, repositories),
     savedBaseSubmitBlockedReason: savedBaseSubmitBlockedReasonValue,
+    executorOwnershipBlockedReason,
   };
 }
 
@@ -482,7 +488,8 @@ export function useTaskCreateDialogSetup(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
-      workflowAgentOverridesBlockedReason,
+      workflowAgentOverridesBlockedReason ??
+      data.executorOwnershipBlockedReason,
     !isTaskStarted && computed.noCompatibleAgent,
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);

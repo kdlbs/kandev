@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-07-17
-updated: 2026-09-07
+updated: 2026-10-18
 owners:
   - tbd
 ---
@@ -31,6 +31,15 @@ Teams whose source code and planning work live in Azure DevOps cannot use Kandev
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.9:** When a user opens the task-creation Remote repository picker, Kandev shall request and show repositories only from source-control integrations that report an available connection for that workspace. An unconfigured integration shall not produce a repository-list error or a provider tab.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.10:** When repository listing fails for a source-control integration that reported an available connection, Kandev shall show that provider failure without removing repositories loaded from other providers, and the user shall be able to retry the listing.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.11:** Desktop and phone task-creation flows shall apply the same provider-availability and partial-failure behavior while preserving manual remote URL entry.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.12:** When a user opens an Azure work item, its detail surface shall list every linked Kandev task in the current workspace whose association identifies that item and its project by either the selected project ID or the current provider work item's project name. Existing project-ID associations and normal task-creation associations stored with a project name shall both remain visible on desktop and phone.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.13:** When the current work item's project name is missing, empty, or whitespace-only, detail shall match only the nonempty selected project ID. Empty association project values shall never match. When the selected project and work-item project values coincide, each matching association shall appear once; several distinct linked tasks shall all remain visible.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.14:** Detail shall exclude associations for another workspace, another work item, or a project value other than those two exact current-project identities, including when the work-item number matches. Matching shall not infer project aliases by changing case, trimming identifiers, or dropping the project constraint.
+
+## Exclusions
+
+Linked-task display does not change association validation or stored identities,
+introduce a migration, or infer historical project names after an Azure project
+rename. It adds no provider mutation or new detail interaction.
 
 ## System design
 

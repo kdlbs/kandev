@@ -34,14 +34,15 @@ type RepositoryLookup interface {
 // Service orchestrates Linear config storage, the cached client, and the
 // fetch/transition operations used by the WebSocket + HTTP handlers.
 type Service struct {
-	store     *Store
-	secrets   SecretStore
-	log       *logger.Logger
-	mu        sync.Mutex
-	clientFn  ClientFactory
-	clients   map[string]Client
-	probeHook func()
-	eventBus  bus.EventBus
+	executorContext func(context.Context, string, string) (context.Context, error)
+	store           *Store
+	secrets         SecretStore
+	log             *logger.Logger
+	mu              sync.Mutex
+	clientFn        ClientFactory
+	clients         map[string]Client
+	probeHook       func()
+	eventBus        bus.EventBus
 	// taskDeleter is the cascade-delete entry point used by ResetIssueWatch.
 	// Wired post-construction via SetTaskDeleter to avoid an import cycle
 	// with the task service.

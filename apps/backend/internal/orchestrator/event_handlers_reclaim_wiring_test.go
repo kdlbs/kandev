@@ -40,6 +40,14 @@ func (m *reclaimTrackingAgentManager) CleanupStaleExecutionBySessionID(_ context
 	return nil
 }
 
+func (m *reclaimTrackingAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	ctx context.Context,
+	sessionID, _ string,
+	_ time.Time,
+) error {
+	return m.CleanupStaleExecutionBySessionID(ctx, sessionID)
+}
+
 func (m *reclaimTrackingAgentManager) callCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()

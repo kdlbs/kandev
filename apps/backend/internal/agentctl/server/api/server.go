@@ -115,6 +115,7 @@ func (s *Server) setupRoutes() {
 
 	// Agent control
 	api := s.router.Group("/api/v1")
+	s.registerPassthroughRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
@@ -408,15 +409,17 @@ func (s *Server) handleSetPluginTools(c *gin.Context) {
 
 // Status response
 type StatusResponse struct {
-	AgentStatus string                 `json:"agent_status"`
-	ProcessInfo map[string]interface{} `json:"process_info"`
-	Uptime      string                 `json:"uptime,omitempty"`
+	DeliveryHealth process.DeliveryHealth `json:"delivery_health"`
+	AgentStatus    string                 `json:"agent_status"`
+	ProcessInfo    map[string]interface{} `json:"process_info"`
+	Uptime         string                 `json:"uptime,omitempty"`
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, StatusResponse{
-		AgentStatus: string(s.procMgr.Status()),
-		ProcessInfo: s.procMgr.GetProcessInfo(),
+		AgentStatus:    string(s.procMgr.Status()),
+		DeliveryHealth: s.procMgr.DeliveryHealth(),
+		ProcessInfo:    s.procMgr.GetProcessInfo(),
 	})
 }
 

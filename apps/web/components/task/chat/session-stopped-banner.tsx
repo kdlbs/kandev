@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconCircleCheck, IconPlayerStop } from "@tabler/icons-react";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -57,14 +58,24 @@ function uncertainDeliveryRecoveryChoices(
   t: RecoveryTranslator,
 ): RecoveryChoice[] {
   if (!props.taskId || !props.sessionId) return [];
-  return [
-    {
+  const choices: RecoveryChoice[] = [];
+  if (props.actions.deliveryHistoryGap || props.actions.deliveryResumeAvailable) {
+    choices.push({
+      kind: "resume",
+      label: t("task:resume"),
+      testId: "recovery-resume-button",
+      onClick: () => void props.actions.handleRecover("resume"),
+    });
+  }
+  if (!props.actions.deliveryHistoryGap) {
+    choices.push({
       kind: "retry_connection",
       label: t("task:retryConnection"),
       testId: "recovery-retry-connection-button",
       onClick: () => void props.actions.handleRecover("retry_connection"),
-    },
-  ];
+    });
+  }
+  return choices;
 }
 
 function sessionRecoveryChoices(
@@ -186,38 +197,55 @@ function UncertainDeliveryActions({
   const { t } = useTranslation();
   const { stop } = useSessionActions({ taskId, sessionId });
   const [stopping, setStopping] = useState(false);
+  const [stopFailed, setStopFailed] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
   const handleStop = useCallback(async () => {
     setStopping(true);
+    setStopFailed(false);
     try {
       if (await stop()) setStopRequested(true);
+      else setStopFailed(true);
+    } catch {
+      setStopFailed(true);
     } finally {
       setStopping(false);
     }
   }, [stop]);
 
   return (
-    <div className="mt-3 flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-        <RecoveryActions
-          actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
-          busy={busyAction !== null}
-          busyAction={busyAction}
-          blocked={blocked}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          aria-label={t("task:stop")}
-          disabled={busyAction !== null || stopping || !taskId || !sessionId}
-          onClick={() => void handleStop()}
-          data-testid="recovery-stop-button"
-          className="h-auto min-h-11 w-full cursor-pointer gap-1.5 whitespace-normal md:min-h-7 md:w-auto"
+    <div className="min-w-0">
+      <RecoveryActions
+        actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
+        busy={busyAction !== null}
+        busyAction={busyAction}
+        blocked={blocked}
+        trailingActions={
+          <Button
+            type="button"
+            variant="outline"
+            aria-label={t("task:stop")}
+            disabled={stopping || !taskId || !sessionId}
+            onClick={() => void handleStop()}
+            data-testid="recovery-stop-button"
+            className={controlSizingClassName(
+              "standard",
+              "h-auto min-h-7 w-full cursor-pointer gap-1.5 whitespace-normal py-0.5 md:w-auto",
+            )}
+          >
+            <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
+            {stopping ? t("task:stopping") : t("task:stop")}
+          </Button>
+        }
+      />
+      {stopFailed && (
+        <p
+          role="status"
+          data-testid="delivery-stop-failed"
+          className="mt-2 text-xs text-muted-foreground"
         >
-          <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
-          {stopping ? t("task:stopping") : t("task:stop")}
-        </Button>
-      </div>
+          {t("task:deliveryStopFailed")}
+        </p>
+      )}
       {stopRequested && (
         <p
           role="status"
@@ -316,6 +344,15 @@ function StoppedSessionMessages({
           {props.actions.recoveryNotice}
         </p>
       )}
+      {props.actions.deliveryRecoveryNotice && (
+        <p
+          role="status"
+          data-testid="delivery-recovery-result"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {props.actions.deliveryRecoveryNotice}
+        </p>
+      )}
     </>
   );
 }
@@ -387,16 +424,18 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
     cause,
     t,
   );
-  const title = stoppedSessionTitle(
-    {
-      completed,
-      managedCloneRecovery,
-      uncertainDelivery: Boolean(props.uncertainDelivery),
-      deliveryRecoveryPhase: props.deliveryRecoveryPhase,
-      message: props.message ?? "",
-    },
-    t,
-  );
+  const title = props.actions.deliveryHistoryGap
+    ? t("task:deliveryHistoryGapTitle")
+    : stoppedSessionTitle(
+        {
+          completed,
+          managedCloneRecovery,
+          uncertainDelivery: Boolean(props.uncertainDelivery),
+          deliveryRecoveryPhase: props.deliveryRecoveryPhase,
+          message: props.message ?? "",
+        },
+        t,
+      );
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
@@ -416,6 +455,14 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
               recoveryErrorMessage={recoveryErrorMessage}
             />
             <StoppedSessionRecoveryControls props={props} choices={choices} blocked={blocked} />
+            {props.actions.deliveryHistoryGap && (
+              <SessionErrorDetails>
+                {t("task:deliveryHistoryGapRange", {
+                  first: props.actions.deliveryHistoryGap.firstSequence,
+                  last: props.actions.deliveryHistoryGap.lastSequence,
+                })}
+              </SessionErrorDetails>
+            )}
             {!props.uncertainDelivery && (
               <SessionErrorDetails>
                 {[props.message, props.detail, props.actions.recoveryError?.message]

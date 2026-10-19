@@ -308,7 +308,9 @@ func (s *Service) confirmConversationTask(ctx context.Context, coordinatorID, ta
 // taskrepo.ErrTaskNotFound as done. Any other failure is logged at warn and
 // swallowed: the startup cleanup pass will retry it.
 func (s *Service) deleteConversationTaskBestEffort(ctx context.Context, taskID string) {
-	if err := s.conversationTasks.DeleteTask(ctx, taskID); err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindTimeout)
+	defer cancel()
+	if err := s.conversationTasks.DeleteTask(cleanupCtx, taskID); err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
 		s.logger.Warn("failed to delete conversation task", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
@@ -371,6 +373,11 @@ func (s *Service) CleanupConversationTasks(ctx context.Context, t0 time.Time) {
 // alone.
 func (s *Service) cleanupOneConversationTask(ctx context.Context, task *taskmodels.Task) {
 	coordinatorID := conversationTaskCoordinatorID(task)
+	if isDreamTask(task) && coordinatorID != "" {
+		if _, err := s.store.GetCoordinatorByID(ctx, coordinatorID); !errors.Is(err, ErrNotFound) {
+			return
+		}
+	}
 	if coordinatorID == "" {
 		s.deleteConversationTaskBestEffort(ctx, task.ID)
 		return
@@ -404,6 +411,16 @@ func conversationTaskCoordinatorID(task *taskmodels.Task) string {
 	}
 	id, _ := task.Metadata[taskmodels.MetaKeyCoordinatorID].(string)
 	return id
+}
+
+// isDreamTask reports whether a coordinator-origin task is a shadow dream
+// episode, which is not a conversation and is archived by the dream tick.
+func isDreamTask(task *taskmodels.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	purpose, _ := task.Metadata[taskmodels.MetaKeyCoordinatorPurpose].(string)
+	return purpose == taskmodels.CoordinatorPurposeDream
 }
 
 // archiveConversation archives the conversation task a committed

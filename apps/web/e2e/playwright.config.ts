@@ -83,6 +83,7 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
+      testIgnore: /ssh\/.*\.spec\.ts/,
       use: { ...devices["Pixel 5"] },
     },
     {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -207,6 +208,9 @@ func TestWaitForHealthPrefersHigherPriorityTargetWhenLowerRespondsFirst(t *testi
 }
 
 func TestWaitForHealthBypassesHTTPProxyForSpecificBind(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a non-loopback test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	hosts := listHostNetworkAddresses()
 	if len(hosts) == 0 {
 		t.Skip("no non-loopback interface available for proxy-bypass coverage")

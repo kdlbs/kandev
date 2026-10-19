@@ -102,6 +102,8 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
           name: COORDINATOR_NAME,
           agent_profile_id: agentProfileId,
           executor_profile_id: executorProfileId,
+          task_agent_profile_id: agentProfileId,
+          task_executor_profile_id: executorProfileId,
           context: "",
         },
       },
@@ -131,7 +133,7 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
     await expect(page.getByLabel("Name")).toBeDisabled();
     await expect(page.getByLabel("Context")).toBeDisabled();
     await expect(page.getByTestId("coordinator-agent-profile-picker")).toBeDisabled();
-    await expect(page.getByTestId("executor-profile-selector")).toBeDisabled();
+    await expect(page.getByTestId("executor-profile-selector").first()).toBeDisabled();
     await expect(page.getByTestId("delete-coordinator-button")).toHaveCount(0);
     await expect(page.getByTestId("settings-floating-save")).toHaveCount(0);
 
@@ -149,6 +151,8 @@ test.describe.serial("Coordinators settings tab reader gating", () => {
         name: "Reader Attempt",
         agent_profile_id: "does-not-matter",
         executor_profile_id: "does-not-matter",
+        task_agent_profile_id: "does-not-matter",
+        task_executor_profile_id: "does-not-matter",
         context: "",
       },
     });

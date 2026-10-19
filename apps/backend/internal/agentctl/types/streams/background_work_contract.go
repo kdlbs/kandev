@@ -38,14 +38,17 @@ const (
 	RunStateUnknown     RunState = "unknown"
 )
 
+// TerminalRunStates lists every final RunState.
+var TerminalRunStates = []RunState{RunStateCompleted, RunStateFailed, RunStateInterrupted, RunStateEnded}
+
 // IsTerminal reports whether the RunState is final.
 func (s RunState) IsTerminal() bool {
-	switch s {
-	case RunStateCompleted, RunStateFailed, RunStateInterrupted, RunStateEnded:
-		return true
-	default:
-		return false
+	for _, terminal := range TerminalRunStates {
+		if s == terminal {
+			return true
+		}
 	}
+	return false
 }
 
 // WorkloadActionKind identifies an action that can be executed on a workload.

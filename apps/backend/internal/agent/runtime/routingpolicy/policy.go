@@ -177,6 +177,14 @@ func Evaluate(document Document, input EvaluationInput) Evaluation {
 	}
 	result.PendingOutcome = policy.OnExhausted
 
+	if routingerr.HoldsUntilRelease(input.Failure.Code) {
+		// The candidate stays held until its owner releases it, so neither a
+		// same-candidate retry nor a reset wait can recover this failure.
+		if policy.OnExhausted == OutcomeSkip {
+			result.Kind = DecisionSkip
+		}
+		return result
+	}
 	if resetAt, ok := resetWaitDeadline(policy, input); ok {
 		result.Kind = DecisionWaitForReset
 		result.Deadline = resetAt

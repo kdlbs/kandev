@@ -34,8 +34,15 @@ not change route order, credential circuits, or reset-time parsing.
 ## Classification
 
 The classifier processes structured HTTP status before provider-specific
-rules. The OpenCode rules then run in this order: period usage limits, explicit
-credit exhaustion, payment requirement, generic quota, rate limit, and auth.
+rules. The OpenCode rules then run in this order: period usage limits, the
+OpenCode Go usage limit, explicit credit exhaustion, payment requirement,
+generic quota, rate limit, and auth.
+
+The `opencode.acp.go_usage_limit.v1` rule recognizes `Go usage limit exceeded`,
+which OpenCode Go reports through the ACP prompt error without a reset time. It
+uses the same line-start shape as the other OpenCode rules and yields
+high-confidence `quota_limited` with fallback allowed. It runs after the period
+rule, so a stderr notice with a reset time keeps that rule and its hint.
 
 The `opencode.stderr.credit.v1` rule recognizes `credit limit reached`, `out of
 credit(s)`, `insufficient credit(s)`, and `insufficient balance`. The bounded

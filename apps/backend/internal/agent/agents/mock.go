@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"github.com/kandev/kandev/internal/agent/hostcli"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -52,6 +53,7 @@ func NewMockAgent() *MockAgent {
 	return &MockAgent{
 		StandardPassthrough: StandardPassthrough{
 			Cfg: PassthroughConfig{
+				MCPStrategy:       mcpconfig.ClaudeStrategy{},
 				Supported:         true,
 				Label:             "TUI Passthrough",
 				Description:       "Terminal UI mode for testing",
@@ -91,6 +93,13 @@ func (a *MockAgent) SetEnabled(enabled bool) { a.enabled = enabled }
 func (a *MockAgent) SetBinaryPath(path string) {
 	a.binaryPath = path
 	a.Cfg.PassthroughCmd = NewCommand(path, "--tui")
+}
+
+func (a *MockAgent) BuildPassthroughCommand(opts PassthroughOptions) Command {
+	if opts.Runtime == agentruntime.RuntimeSSH && opts.BaseCommand.IsEmpty() {
+		opts.BaseCommand = NewCommand(mockAgentDefaultID, "--tui")
+	}
+	return a.StandardPassthrough.BuildPassthroughCommand(opts)
 }
 
 // SetSupportsMCP controls whether the mock agent reports MCP support.

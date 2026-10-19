@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-10
-updated: 2026-08-30
+updated: 2026-10-14
 owners:
   - kandev
 ---
@@ -20,7 +20,7 @@ The E2E workflow currently uses Playwright's ordinal test-level sharding. It kee
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1:** **Normal:** the existing fourteen-shard Chromium and mobile-Chrome matrix.
+- **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1:** **Normal:** the twenty-eight-shard Chromium and mobile-Chrome matrix, with complete disjoint catalog coverage.
 - **AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.2:** **Containers:** the existing six-shard Docker and SSH matrix.
 
 ### REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002: Efficient setup and actionable flake feedback
@@ -68,7 +68,7 @@ then removed a valid pull request from the merge queue.
 
 The E2E workflow gains two duration-aware cohorts:
 
-- **Normal:** the existing fourteen-shard Chromium and mobile-Chrome matrix.
+- **Normal:** the twenty-eight-shard Chromium and mobile-Chrome matrix, with complete disjoint catalog coverage.
 - **Containers:** the existing six-shard Docker and SSH matrix.
 
 Each run creates an ephemeral manifest for each cohort. The manifest contains
@@ -125,7 +125,7 @@ Every manifest must pass these checks before it is uploaded:
 
 - every discovered project/file unit appears exactly once;
 - no manifest contains a unit outside the selected cohort;
-- the declared shard count is exactly fourteen or six as appropriate;
+- the declared shard count is exactly twenty-eight or six as appropriate;
 - the sum of assigned estimates matches the per-shard totals;
 - unknown and changed units are listed rather than silently omitted.
 

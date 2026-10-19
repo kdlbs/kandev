@@ -13,6 +13,7 @@ import { SessionRecoveryCard } from "./session-recovery-card";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
+import { DeliveryHistoryNotice } from "./delivery-history-notice";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   ChatInputBody,
@@ -75,6 +76,7 @@ export type ChatSubmitPayload = {
 type ChatInputContainerProps = {
   onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId: string | null;
+  detailActive?: boolean;
   taskId: string | null;
   workspaceId?: string | null;
   workspaceResolutionFailed?: boolean;
@@ -217,6 +219,7 @@ function buildEditorAreaProps(
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
+    detailActive: p.detailActive ?? true,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
@@ -275,18 +278,21 @@ function useChatPromptEnhancement({
   inputRef,
   taskId,
   sessionId,
+  detailActive,
   taskTitle,
   taskDescription,
 }: {
   inputRef: ContainerState["inputRef"];
   taskId: string | null;
   sessionId: string | null;
+  detailActive: boolean;
   taskTitle?: string;
   taskDescription: string;
 }) {
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId,
+    detailActive,
     taskTitle,
     taskDescription,
   });
@@ -317,11 +323,13 @@ function useChatInputRecoveryActions(
   taskId: string | null,
   sessionId: string | null,
   errorStamp?: string,
+  onDeliveryReconciled?: () => void,
 ) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
     errorStamp,
+    onDeliveryReconciled,
   });
 }
 
@@ -368,12 +376,14 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskId,
       sessionId,
       composerRecovery?.model?.stamp,
+      composerRecovery?.onDeliveryReconciled,
     );
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
       taskId,
       sessionId,
+      detailActive: p.detailActive ?? true,
       taskTitle,
       taskDescription,
     });
@@ -435,35 +445,38 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     return (
-      <ChatInputBody
-        containerRef={s.containerRef}
-        height={s.height}
-        resizeHandleProps={s.resizeHandleProps}
-        isStarting={isBusyVisual}
-        isAgentBusy={isAgentBusy}
-        hasClarification={s.hasClarification}
-        showRequestChangesTooltip={p.showRequestChangesTooltip}
-        hasPendingComments={s.hasPendingComments}
-        planModeEnabled={props.planModeEnabled}
-        showFocusHint={s.showFocusHint}
-        needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
-        addFiles={s.addFiles}
-        contextAreaProps={buildContextAreaProps(s, p)}
-        promptResultRecovery={
-          promptEnhancement.promptDelivery.pendingResult ? (
-            <PromptResultRecovery
-              pendingResult={promptEnhancement.promptDelivery.pendingResult}
-              onApply={promptEnhancement.promptDelivery.applyPending}
-              onCopy={promptEnhancement.promptDelivery.copyPending}
-            />
-          ) : null
-        }
-        editorAreaProps={buildEditorAreaProps(s, p, {
-          onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
-          isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
-          isUtilityConfigured: promptEnhancement.isUtilityConfigured,
-        })}
-      />
+      <>
+        <DeliveryHistoryNotice sessionId={sessionId} />
+        <ChatInputBody
+          containerRef={s.containerRef}
+          height={s.height}
+          resizeHandleProps={s.resizeHandleProps}
+          isStarting={isBusyVisual}
+          isAgentBusy={isAgentBusy}
+          hasClarification={s.hasClarification}
+          showRequestChangesTooltip={p.showRequestChangesTooltip}
+          hasPendingComments={s.hasPendingComments}
+          planModeEnabled={props.planModeEnabled}
+          showFocusHint={s.showFocusHint}
+          needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
+          addFiles={s.addFiles}
+          contextAreaProps={buildContextAreaProps(s, p)}
+          promptResultRecovery={
+            promptEnhancement.promptDelivery.pendingResult ? (
+              <PromptResultRecovery
+                pendingResult={promptEnhancement.promptDelivery.pendingResult}
+                onApply={promptEnhancement.promptDelivery.applyPending}
+                onCopy={promptEnhancement.promptDelivery.copyPending}
+              />
+            ) : null
+          }
+          editorAreaProps={buildEditorAreaProps(s, p, {
+            onEnhancePrompt: promptEnhancement.handleEnhancePrompt,
+            isEnhancingPrompt: promptEnhancement.isEnhancingPrompt,
+            isUtilityConfigured: promptEnhancement.isUtilityConfigured,
+          })}
+        />
+      </>
     );
   },
 );

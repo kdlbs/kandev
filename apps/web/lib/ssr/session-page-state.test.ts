@@ -7,7 +7,7 @@ import { mergeInitialState } from "@/lib/state/default-state";
 import { createAppStore } from "@/lib/state/store";
 import type { AppState } from "@/lib/state/store";
 import { sessionId, taskId, workflowId } from "@/lib/types/ids";
-import type { Task, TaskSession, Turn } from "@/lib/types/http";
+import type { Message, Task, TaskSession, Turn } from "@/lib/types/http";
 import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   fetchTaskSession: vi.fn(),
   fetchUserSettings: vi.fn(),
   fetchWorkflowSnapshot: vi.fn(),
+  listWorkflowSteps: vi.fn(),
   listAgents: vi.fn(),
   listAvailableAgents: vi.fn(),
   listExecutors: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock("@/lib/api", () => ({
   fetchTaskSession: mocks.fetchTaskSession,
   fetchUserSettings: mocks.fetchUserSettings,
   fetchWorkflowSnapshot: mocks.fetchWorkflowSnapshot,
+  listWorkflowSteps: mocks.listWorkflowSteps,
   listAgents: mocks.listAgents,
   listAvailableAgents: mocks.listAvailableAgents,
   listExecutors: mocks.listExecutors,
@@ -45,6 +47,8 @@ vi.mock("@/lib/api", () => ({
   listWorkflows: mocks.listWorkflows,
   listWorkspaces: mocks.listWorkspaces,
 }));
+
+vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
 
 vi.mock("@/lib/api/domains/session-api", () => ({
   listSessionTurns: mocks.listSessionTurns,
@@ -96,6 +100,7 @@ function mockDefaultHydrationData() {
   mocks.fetchTask.mockResolvedValue(makeTask());
   mocks.listTaskSessions.mockResolvedValue({ sessions: [] });
   mocks.listAgents.mockResolvedValue({ agents: [] });
+  mocks.listWorkflowSteps.mockResolvedValue({ steps: [] });
   mocks.listAvailableAgents.mockReturnValue(new Promise(() => {}));
   mocks.listExecutors.mockResolvedValue({ executors: [] });
   mocks.listRepositories.mockResolvedValue({ repositories: [] });
@@ -369,6 +374,48 @@ describe("fetchSessionDataForTask initial hydration", () => {
 });
 
 describe("fetchSessionDataForTask per-turn hydration", () => {
+  it("hydrates turn coverage from the bounded message window without claiming full history", async () => {
+    const session = makeSession();
+    const message = {
+      id: "message-window",
+      session_id: session.id,
+      task_id: taskId(TASK_ID),
+      turn_id: "turn-window",
+      author_type: "agent",
+      content: "response",
+      type: "message",
+      created_at: NOW,
+    } as Message;
+    const windowTurn = makeTurn("turn-window");
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+    mocks.listTaskSessionMessages.mockResolvedValue({
+      messages: [message],
+      turns: [windowTurn],
+      turn_coverage: { message_ids: [message.id], active_turn_id: windowTurn.id },
+      has_more: false,
+      total: 1,
+      cursor: message.id,
+    });
+
+    const result = await fetchSessionDataForTask(TASK_ID);
+    const hydratedState = mergeInitialState(result.initialState);
+
+    expect(mocks.listTaskSessionMessages).toHaveBeenCalledWith(
+      SESSION_ID,
+      { limit: 50, sort: "desc", include_turns: true },
+      { cache: "no-store" },
+    );
+    expect(mocks.listSessionTurns).not.toHaveBeenCalled();
+    expect(hydratedState.turns.bySession[SESSION_ID]).toEqual([windowTurn]);
+    expect(hydratedState.turns.activeBySession[SESSION_ID]).toBe(windowTurn.id);
+    expect(hydratedState.turns.loadedBySession[SESSION_ID]).toBeUndefined();
+    expect(hydratedState.turns.windowCoverageBySession?.[SESSION_ID]).toEqual({
+      messageIds: [message.id],
+      activeTurnObserved: true,
+    });
+  });
+
   it("hydrates persisted per-turn runtime configuration after a page reload", async () => {
     const session = makeSession();
     const runtimeConfigSnapshot = {
@@ -469,7 +516,7 @@ describe("fetchSessionDataForTask agent hydration", () => {
 describe("fetchSessionDataForTask optional enrichment", () => {
   it("omits failed optional workflow, agent, and repository state for client recovery", async () => {
     mocks.fetchTask.mockResolvedValue(makeTask({ workflow_id: workflowId(WORKFLOW_ID) }));
-    mocks.fetchWorkflowSnapshot.mockRejectedValue(new Error("workflow unavailable"));
+    mocks.listWorkflowSteps.mockRejectedValue(new Error("workflow unavailable"));
     mocks.listAgents.mockRejectedValue(new Error("agents unavailable"));
     mocks.listRepositories.mockRejectedValue(new Error("repositories unavailable"));
 
@@ -532,7 +579,7 @@ describe("fetchSessionDataForTask optional enrichment", () => {
   it("omits timed-out optional slices so client hooks can recover them", async () => {
     vi.useFakeTimers();
     mocks.fetchTask.mockResolvedValue(makeTask({ workflow_id: workflowId(WORKFLOW_ID) }));
-    mocks.fetchWorkflowSnapshot.mockReturnValue(new Promise(() => {}));
+    mocks.listWorkflowSteps.mockReturnValue(new Promise(() => {}));
     mocks.listAgents.mockReturnValue(new Promise(() => {}));
     mocks.listRepositories.mockReturnValue(new Promise(() => {}));
 

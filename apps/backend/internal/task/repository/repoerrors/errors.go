@@ -2,6 +2,10 @@ package repoerrors
 
 import "errors"
 
+// ErrWorkspaceCloneConfiguration reports a source setting that cannot be
+// copied into an independent workspace.
+var ErrWorkspaceCloneConfiguration = errors.New("workspace configuration cannot be cloned")
+
 // ErrWorkspaceNameMismatch reports that a confirmed workspace delete did not
 // match the workspace row's current name.
 var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")
@@ -45,6 +49,10 @@ var ErrTaskCompletionHumanConfirmationRequired = errors.New("human confirmation 
 // ErrTaskOperationConflict reports reuse of an exact operation identity with
 // a different task or payload.
 var ErrTaskOperationConflict = errors.New("task operation identity conflict")
+
+// ErrSilentRestoreAttemptConflict reports reuse of a restore-attempt ID for a
+// different durable source identity.
+var ErrSilentRestoreAttemptConflict = errors.New("silent restore attempt identity conflict")
 
 // ErrNoPrimarySession reports that a task exists but has no primary session.
 // Callers can repair that state without hiding other repository failures.

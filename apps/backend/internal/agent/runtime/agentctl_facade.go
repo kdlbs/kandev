@@ -14,6 +14,8 @@ type AgentCtlClient = agentctl.Client
 type RuntimeOwner = agentctl.RuntimeOwner
 type AvailabilitySnapshot = agentctl.AvailabilitySnapshot
 
+const AvailabilityStatusAvailable = agentctl.AvailabilityStatusAvailable
+
 type AgentctlEventPayload = lifecycle.AgentctlEventPayload
 
 var (
@@ -21,4 +23,5 @@ var (
 	ErrRecoveryNotRetryable = agentctl.ErrRecoveryNotRetryable
 	ErrRecoveryRequestID    = agentctl.ErrRecoveryRequestID
 	ErrRuntimeOwnerStopped  = agentctl.ErrRuntimeOwnerStopped
+	ErrRuntimeLeaseRetired  = agentctl.ErrRuntimeLeaseRetired
 )

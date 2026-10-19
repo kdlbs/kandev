@@ -113,12 +113,16 @@ export function QueueGroup({
 
   return (
     <Collapsible
+      key={`${group}:${open}`}
       defaultOpen={open}
       id={`queue-group-${group}`}
       data-testid={`queue-group-${group}`}
     >
       <CollapsibleTrigger asChild>
-        <Button variant="ghost" className="flex w-full items-center justify-start gap-2 px-0">
+        <Button
+          variant="ghost"
+          className="flex w-full items-center justify-start gap-2 px-0 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
           <span className={GROUP_HEADING_CLASS}>{label}</span>
           <Badge variant="secondary">{items.length}</Badge>
         </Button>

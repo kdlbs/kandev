@@ -31,7 +31,10 @@ func TestDecisionActions_Value(t *testing.T) {
 	if ActionRejectProposal != "coordinator.reject_proposal" {
 		t.Errorf("ActionRejectProposal = %q, want %q", ActionRejectProposal, "coordinator.reject_proposal")
 	}
-	for _, action := range []string{ActionApproveProposal, ActionRejectProposal} {
+	if ActionReplyProposal != "coordinator.reply_proposal" || ActionDeliverReply != "coordinator.deliver_reply" {
+		t.Errorf("reply action names = %q, %q", ActionReplyProposal, ActionDeliverReply)
+	}
+	for _, action := range []string{ActionApproveProposal, ActionRejectProposal, ActionReplyProposal, ActionDeliverReply} {
 		if _, ok := DecisionActions[action]; !ok {
 			t.Errorf("DecisionActions missing %q", action)
 		}
@@ -47,6 +50,7 @@ func TestProposalStatus_Values(t *testing.T) {
 		ProposalStatusApproved:  "approved",
 		ProposalStatusRejected:  "rejected",
 		ProposalStatusFailed:    "failed",
+		ProposalStatusReturned:  "returned",
 	}
 	for status, want := range cases {
 		if string(status) != want {

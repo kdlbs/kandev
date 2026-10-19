@@ -72,7 +72,11 @@ func StartsAgentOnEnter(steps []StepNode, stepID string) bool {
 	for _, step := range steps {
 		byID[step.ID] = step
 	}
-	if candidate, ok := byID[stepID]; ok && candidate.AutoStartOnEnter {
+	candidate, ok := byID[stepID]
+	if !ok {
+		return false
+	}
+	if candidate.AutoStartOnEnter {
 		return true
 	}
 	for _, step := range steps {

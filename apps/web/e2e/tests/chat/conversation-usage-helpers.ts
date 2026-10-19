@@ -127,13 +127,14 @@ export async function openConversationUsageTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  description = "/e2e:simple-message",
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:simple-message",
+      description,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],

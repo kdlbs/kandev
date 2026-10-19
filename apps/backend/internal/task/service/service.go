@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -464,6 +465,7 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer
@@ -530,6 +532,7 @@ type Service struct {
 	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
 	executionLivenessChecker        TaskExecutionLivenessChecker
+	pendingRemoteRecoveryChecker    func(sessionID, executionID string) bool
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
 	branchMaterializer              BranchMaterializer
@@ -544,6 +547,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
+	workspaceCloner                 WorkspaceClonePersistence
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
@@ -637,6 +641,9 @@ type Service struct {
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string
+	archiveReclaimWakeCutoff              time.Time
+	archiveReclaimWakeAfterID             string
+	archiveReclaimWakeDone                bool
 	cleanupWorkerCancel                   context.CancelFunc
 	cleanupWorkerWG                       sync.WaitGroup
 	cleanupWorkerWake                     chan struct{}
@@ -966,10 +973,19 @@ func (s *Service) SetRowLivenessProber(prober TaskRowLivenessProber) {
 // SetExecutionLivenessChecker wires the in-memory execution-store lookup
 // (satisfied by the lifecycle adapter) used by the orphan-session
 // reconciliation sweep. It is optional; when unwired the sweep is inert,
-// because absent-from-store is its only dead signal and a nil checker can
-// never prove a session unbacked.
+// because absent-from-store is its only local dead signal. Production also
+// wires SetPendingRemoteRecoveryChecker so a remote owner absent from this
+// process's execution store is not mistaken for a dead session.
 func (s *Service) SetExecutionLivenessChecker(checker TaskExecutionLivenessChecker) {
 	s.executionLivenessChecker = checker
+}
+
+// SetPendingRemoteRecoveryChecker wires the exact remote owner lookup used by
+// reconciliation to avoid settling a session whose remote execution is still
+// awaiting authenticated recovery. The callback receives the persisted
+// executor identity observed for the session; it must not perform recovery.
+func (s *Service) SetPendingRemoteRecoveryChecker(checker func(sessionID, executionID string) bool) {
+	s.pendingRemoteRecoveryChecker = checker
 }
 
 // SetContextWindowResetter wires the guarded context-window reset callback

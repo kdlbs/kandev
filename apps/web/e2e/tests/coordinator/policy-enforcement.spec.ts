@@ -38,6 +38,8 @@ test.describe("Coordinator policy enforcement", () => {
         name: "Policy Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const workspacePath = `/api/v1/workspaces/${seedData.workspaceId}/coordinators/${coordinator.id}`;
       const saved = await apiClient.rawRequest("PUT", `${workspacePath}/settings`, {

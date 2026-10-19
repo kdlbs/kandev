@@ -12,7 +12,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { formatCompactDuration } from "@/lib/i18n/formats";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useMRFeedback } from "@/hooks/domains/gitlab/use-mr-feedback";
 import { bucketJobCounts, groupJobsByStage, type JobBucket } from "@/lib/gitlab/pipeline-buckets";
 import type { GitLabPipelineJob, TaskMR } from "@/lib/types/gitlab";
@@ -25,7 +25,7 @@ import { MRMergeButton } from "./mr-merge-button";
  * built-in enabled/lazy flag of its own.
  */
 function useMRFeedbackGated(mr: TaskMR, enabled: boolean) {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(mr.task_id);
   return useMRFeedback(
     enabled ? workspaceId : null,
     enabled ? mr.project_path : null,

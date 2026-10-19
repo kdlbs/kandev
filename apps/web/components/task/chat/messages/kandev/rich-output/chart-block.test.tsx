@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RichOutputChartBlock } from "./types";
+import type { ChartProps } from "@/lib/rich-output/catalog";
 
 type ObserverRecord = {
   callback: IntersectionObserverCallback;
@@ -64,10 +64,9 @@ vi.mock("recharts", () => ({
   },
 }));
 
-import { ChartBlock } from "./chart-block";
+import { Chart } from "./chart-block";
 
-const BLOCK: RichOutputChartBlock = {
-  type: "chart",
+const BLOCK: ChartProps = {
   chart_type: "line",
   title: "Latency",
   summary: "Latency over time",
@@ -131,9 +130,9 @@ afterEach(() => {
   }
 });
 
-describe("ChartBlock plot scheduling", () => {
+describe("Chart plot scheduling", () => {
   it("defers the Recharts plot until the chart approaches the viewport", () => {
-    render(<ChartBlock block={BLOCK} />);
+    render(<Chart {...BLOCK} />);
 
     expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
     expect(screen.getByText(BLOCK.title)).not.toBeNull();
@@ -144,7 +143,7 @@ describe("ChartBlock plot scheduling", () => {
   });
 
   it("mounts when a later observation in the same batch intersects", () => {
-    render(<ChartBlock block={BLOCK} />);
+    render(<Chart {...BLOCK} />);
     const record = observerRecords[0];
 
     act(() => {
@@ -162,7 +161,7 @@ describe("ChartBlock plot scheduling", () => {
 
   it("waits for a background tab to become visible after intersection", () => {
     setDocumentVisibility("hidden");
-    render(<ChartBlock block={BLOCK} />);
+    render(<Chart {...BLOCK} />);
 
     intersect();
     expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
@@ -172,7 +171,7 @@ describe("ChartBlock plot scheduling", () => {
   });
 
   it("keeps an eligible plot mounted after it leaves the visible tab", () => {
-    render(<ChartBlock block={BLOCK} />);
+    render(<Chart {...BLOCK} />);
     intersect();
     const mountedPlot = screen.getByTestId(MOCK_LINE_CHART);
 
@@ -184,17 +183,17 @@ describe("ChartBlock plot scheduling", () => {
   it("renders immediately when intersection observation is unavailable", () => {
     vi.stubGlobal("IntersectionObserver", undefined);
 
-    render(<ChartBlock block={BLOCK} />);
+    render(<Chart {...BLOCK} />);
 
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 
   it("reuses derived chart inputs when a legend toggle changes local visibility", () => {
-    const block: RichOutputChartBlock = {
+    const block: ChartProps = {
       ...BLOCK,
       series: [BLOCK.series[0], { label: "p50", values: [80, 75] }],
     };
-    render(<ChartBlock block={block} />);
+    render(<Chart {...block} />);
     intersect();
 
     const initialData = captured.lineCharts.at(-1)?.data;
@@ -212,11 +211,11 @@ describe("ChartBlock plot scheduling", () => {
   });
 
   it("skips an unchanged parent rerender and retains default chart animation", () => {
-    const view = render(<ChartBlock block={BLOCK} />);
+    const view = render(<Chart {...BLOCK} />);
     intersect();
     const renderCount = captured.lineCharts.length;
 
-    view.rerender(<ChartBlock block={BLOCK} />);
+    view.rerender(<Chart {...BLOCK} />);
 
     expect(captured.lineCharts).toHaveLength(renderCount);
     expect(captured.lines.at(-1)?.isAnimationActive).not.toBe(false);
@@ -224,15 +223,15 @@ describe("ChartBlock plot scheduling", () => {
 
   it("disables every line and bar animation when effective chart motion is off", () => {
     chartMotion.enabled = false;
-    const line = render(<ChartBlock block={BLOCK} />);
+    const line = render(<Chart {...BLOCK} />);
     intersect();
 
     expect(captured.lines.at(-1)?.isAnimationActive).toBe(false);
 
     line.unmount();
     observerRecords.length = 0;
-    const barBlock: RichOutputChartBlock = { ...BLOCK, chart_type: "bar" };
-    render(<ChartBlock block={barBlock} />);
+    const barBlock: ChartProps = { ...BLOCK, chart_type: "bar" };
+    render(<Chart {...barBlock} />);
     intersect();
 
     expect(captured.bars.at(-1)?.isAnimationActive).toBe(false);

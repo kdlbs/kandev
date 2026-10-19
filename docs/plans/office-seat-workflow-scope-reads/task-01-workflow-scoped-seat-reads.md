@@ -91,3 +91,15 @@ together.
   shape — no DTO or API contract change.
 - `dashboard.Repository` interface gains
   `ListTaskParticipantsAtCurrentStep(ctx, taskID) ([]sqlite.Participant, error)`.
+
+## Delivery integration results
+
+The 2026-10-19 integration preserves the existing seat-read and termination
+contracts. Office dashboard/repository and workflow-engine tests passed.
+Startup/session recovery race tests and both PostgreSQL schema regressions
+passed. The conflicted mobile preview spec passed all three scenarios with
+retries disabled on a fresh managed build; its focused lint passed. Harness,
+specification, documentation-catalog, changed-scope backend lint, and web
+typecheck checks passed. See the plan's delivery
+integration section for commands. Exact-head CI and merge confirmation remain
+external delivery gates.

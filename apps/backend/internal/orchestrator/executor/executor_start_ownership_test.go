@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -149,7 +150,8 @@ func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T
 	request := &LaunchAgentRequest{
 		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
 		InitialDeliverySubmissionID: "message-delivery",
-		BeforeAgentStart: func(context.Context, string) error {
+		BeforeAgentStart: func(_ context.Context, _ string, prompt string) error {
+			require.Equal(t, "initial prompt", prompt)
 			admissionOrder.Store(order.Add(1))
 			return nil
 		},
@@ -315,4 +317,44 @@ func TestSessionStartingRaceWithRunningStateReturnsBusy(t *testing.T) {
 
 	require.ErrorIs(t, err, ErrExecutionAlreadyRunning)
 	require.ErrorIs(t, err, errSessionAdvancedToRunning)
+}
+
+func TestInitialAdmissionReceivesTheFinalHandoverPrompt(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_%t", existing), func(t *testing.T) {
+			repo := newMockRepository()
+			task := &v1.Task{ID: "task-handover", WorkspaceID: "workspace-handover"}
+			repo.tasks[task.ID] = &models.Task{ID: task.ID}
+			repo.sessions["prior-session"] = &models.TaskSession{ID: "prior-session", TaskID: task.ID}
+			session := &models.TaskSession{ID: "new-session", TaskID: task.ID, AgentProfileID: "profile", State: models.TaskSessionStateCreated}
+			repo.sessions[session.ID] = session
+			if existing {
+				repo.executorsRunning[session.ID] = &models.ExecutorRunning{ID: "runtime", TaskID: task.ID, SessionID: session.ID, AgentExecutionID: "execution", Status: models.ExecutorRunningStatusPrepared}
+			}
+			var dispatchedPrompt string
+			manager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return "execution", nil },
+				setExecutionDescriptionFunc:  func(_ context.Context, _ string, prompt string) error { dispatchedPrompt = prompt; return nil },
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					dispatchedPrompt = req.TaskDescription
+					return &LaunchAgentResponse{AgentExecutionID: "execution", Status: v1.AgentStatusStarting}, nil
+				},
+			}
+			exec := newTestExecutor(t, manager, repo)
+			admitted := false
+			_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
+				AgentProfileID: "profile", Prompt: "original instruction", StartAgent: true,
+				BeforeAgentStart: func(_ context.Context, executionID, prompt string) error {
+					require.Equal(t, "execution", executionID)
+					require.NotEqual(t, "original instruction", prompt, "sibling history must be included")
+					require.Contains(t, prompt, "original instruction")
+					require.Equal(t, dispatchedPrompt, prompt, "canonical admission must match the final runtime instruction")
+					admitted = true
+					return nil
+				},
+			})
+			require.NoError(t, err)
+			require.True(t, admitted)
+		})
+	}
 }

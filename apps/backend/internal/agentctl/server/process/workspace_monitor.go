@@ -105,6 +105,9 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(filePoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("monitor", filePoll)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -200,7 +203,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		return false
 	}
 	*consecutiveFailures = 0
-	if currentState.changed(*lastState) {
+	changed := currentState.changed(*lastState)
+	noteSlowPollIdle(&wt.slowIdleMonitorTicks, changed)
+	if changed {
 		*lastState = currentState
 		wt.logger.Debug("workspace state changed, updating")
 

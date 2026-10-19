@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskSession,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
@@ -16,8 +17,8 @@ import type {
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
   Repository,
-  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
+import type { RetryPolicy } from "../../lib/types/automation";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
   Coordinator,
@@ -1522,6 +1523,8 @@ export class ApiClient {
         on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
       auto_advance_requires_signal?: boolean;
       wip_limit?: number;
@@ -2145,6 +2148,20 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
   }
 
+  async mockGitHubSetRepositoryDetails(
+    owner: string,
+    repo: string,
+    pushAccess: boolean | null,
+    adminAccess = false,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repository-details", {
+      owner,
+      repo,
+      push_access: pushAccess,
+      admin_access: adminAccess,
+    });
+  }
+
   private async seedMockGitHubRepositoryAccess(
     items: Array<{ repo_owner: string; repo_name: string }>,
   ): Promise<void> {
@@ -2313,6 +2330,10 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    /** RFC 3339; GitHub reports it for merged PRs. */
+    merged_at?: string;
+    /** RFC 3339; GitHub reports it for merged and closed PRs. */
+    closed_at?: string;
     head_sha?: string;
     head_repo_owner?: string;
     head_repo_name?: string;
@@ -2833,12 +2854,6 @@ export class ApiClient {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: { id: string; last_read_message_id?: string };
-  }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
-  }
-
   /**
    * Force-sets the session's read cursor directly, bypassing the production
    * mark-read endpoint's forward-only (monotonic) guard. Used by e2e specs
@@ -2903,18 +2918,18 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: {
-      id: string;
-      task_id: string;
-      agent_profile_id?: string;
-      agent_profile_snapshot?: Record<string, unknown> | null;
-      state: string;
-      task_environment_id?: string;
-      workspace_recovery?: WorkspaceRecoveryProjection | null;
-      error_message?: string;
-    };
-  }> {
+  async listTaskSessionDetails(taskId: string) {
+    const summary = await this.listTaskSessions(taskId);
+    const sessions = await Promise.all(
+      summary.sessions.map(async (row) => {
+        const { session } = await this.getTaskSession(row.id);
+        return { ...row, ...session };
+      }),
+    );
+    return { ...summary, sessions };
+  }
+
+  async getTaskSession(sessionId: string): Promise<{ session: TaskSession }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
@@ -3584,6 +3599,10 @@ export class ApiClient {
     await this.request("POST", "/api/v1/linear/mock/states", { teamKey, states });
   }
 
+  async mockLinearSetProjects(teamKey: string, projects: MockLinearProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/projects", { teamKey, projects });
+  }
+
   async mockLinearAddIssues(issues: MockLinearIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/linear/mock/issues", { issues });
   }
@@ -3753,7 +3772,7 @@ export class ApiClient {
     workflowStepId: string;
     agentProfileId: string;
     executorProfileId?: string;
-    filter?: { teamKey?: string };
+    filter?: { teamKey?: string; projectIds?: string[] };
     prompt?: string;
     enabled?: boolean;
     pollIntervalSeconds?: number;
@@ -3779,15 +3798,37 @@ export class ApiClient {
     enabled: boolean;
     lastError?: string;
     lastErrorAt?: string;
+    prompt?: string;
+    filter?: { teamKey?: string; projectIds?: string[] };
   } | null> {
     // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
     // walk the workspace list and find by id. Scoped by workspace_id so the
     // result set stays small even if the install accumulates watchers. The
     // list endpoint wraps the rows in a { watches: [...] } envelope.
     const { watches } = await this.request<{
-      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+      watches: Array<{
+        id: string;
+        enabled: boolean;
+        lastError?: string;
+        lastErrorAt?: string;
+        prompt?: string;
+        filter?: { teamKey?: string; projectIds?: string[] };
+      }>;
     }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
     return watches.find((w) => w.id === watchId) ?? null;
+  }
+
+  async deleteLinearIssueWatches(workspaceId: string): Promise<void> {
+    const { watches } = await this.request<{ watches: Array<{ id: string }> }>(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+    for (const w of watches) {
+      await this.request(
+        "DELETE",
+        `/api/v1/linear/watches/issue/${encodeURIComponent(w.id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      );
+    }
   }
 
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
@@ -4059,6 +4100,7 @@ export class ApiClient {
     workflowStepId?: string;
     taskMode?: "automation_run" | "normal_task" | "managed_conversation";
     managedDestination?: { plugin_id: string; instance_key: string; revision: number };
+    retryPolicy?: RetryPolicy;
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -4085,10 +4127,8 @@ export class ApiClient {
     /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
-     * disk. The API ignores `execution_mode` on input by design, so this is
-     * the only way to stand up the state the board-move migration notice
-     * exists to explain; the `legacy_board_card` flag the UI reads is then
-     * derived by the same production SQL a real upgraded install goes through.
+     * disk. The API ignores `execution_mode` on input by design, so this flag
+     * seeds the state a real upgraded install carries.
      */
     legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
@@ -4102,6 +4142,7 @@ export class ApiClient {
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
+      retry_policy: opts.retryPolicy,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",
@@ -4356,6 +4397,8 @@ export type MockJiraTicket = {
 };
 
 export type MockLinearTeam = { id: string; key: string; name: string };
+
+export type MockLinearProject = { id: string; name: string; content?: string };
 
 export type MockLinearState = {
   id: string;

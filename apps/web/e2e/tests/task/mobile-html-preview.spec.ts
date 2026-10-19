@@ -228,6 +228,7 @@ test.describe("Mobile HTML preview", () => {
     const elementChoiceBox = await elementChoice.boundingBox();
     expect(elementChoiceBox?.height).toBeGreaterThanOrEqual(44);
     await elementChoice.tap();
+    await expect(trigger).toHaveAttribute("data-capture-mode", "element");
     await frame.locator("#capture-button").tap();
 
     const elementDraft = testPage.getByTestId("preview-feedback-draft");
@@ -239,6 +240,7 @@ test.describe("Mobile HTML preview", () => {
     await expect(elementDraft).toBeHidden({ timeout: 15_000 });
 
     await drawer.getByRole("button", { name: "Select screenshot region", exact: true }).tap();
+    await expect(trigger).toHaveAttribute("data-capture-mode", "screenshot");
     await waitForScreenshotCaptureMode(frame);
     const screenshotTarget = frame.locator("#capture-card");
     const region = await screenshotTarget.evaluate((element) => {

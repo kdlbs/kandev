@@ -9,8 +9,10 @@ import (
 
 var comparableVersionPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)*(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$`)
 
+var publishedNightlyVersionPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-nightly\.sha[0-9a-f]{12}$`)
+
 // CheckMinimumKandevVersion enforces a package minimum against a stamped
-// release build. Development and git-describe builds deliberately skip the
+// Stable or published Nightly build. Development and git-describe builds skip the
 // check because they do not provide a trustworthy release boundary.
 func CheckMinimumKandevVersion(minVersion, runningVersion string) error {
 	if strings.TrimSpace(minVersion) == "" || strings.TrimSpace(runningVersion) == "" || strings.EqualFold(strings.TrimSpace(runningVersion), "dev") {
@@ -18,7 +20,10 @@ func CheckMinimumKandevVersion(minVersion, runningVersion string) error {
 	}
 	running, runningRelease := NormalizeReleaseVersion(runningVersion)
 	if !runningRelease {
-		return nil
+		running = strings.TrimPrefix(strings.TrimSpace(runningVersion), "v")
+		if !publishedNightlyVersionPattern.MatchString(running) {
+			return nil
+		}
 	}
 	minimum, minimumRelease := NormalizeReleaseVersion(minVersion)
 	if !minimumRelease {

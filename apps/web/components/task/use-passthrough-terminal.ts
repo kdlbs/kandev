@@ -335,7 +335,7 @@ export type WebSocketConnectionOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
-  onDisconnected?: () => void;
+  onDisconnected?: (event: CloseEvent) => void;
   /** When true, AttachAddon is created in receive-only mode so callers can
    * intercept onData themselves (used by mobile to route input through the
    * key-bar's modifier transform). Defaults to bidirectional. */

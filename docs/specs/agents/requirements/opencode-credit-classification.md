@@ -51,6 +51,11 @@ and users can repair inactive billing.
   an exhaustion phrase shall keep its existing classification.
 - **AC-AGENTS-OPENCODE-CREDIT-001.6:** Credit classification shall not depend
   on a renewal URL or date that sanitization removes.
+- **AC-AGENTS-OPENCODE-CREDIT-001.7:** When `opencode-acp` reports the OpenCode
+  Go subscription limit (`Go usage limit exceeded`) at the start of a line, the
+  system shall classify it as high-confidence `quota_limited` and allow
+  fallback. A correlated period usage-limit notice shall keep its own rule and
+  reset hint, and other providers shall not acquire the classification.
 
 ## Out of scope
 

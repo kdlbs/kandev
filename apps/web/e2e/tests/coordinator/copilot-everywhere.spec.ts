@@ -17,6 +17,8 @@ test.describe("Workspace copilot everywhere", () => {
       name: "Everywhere Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const task = await apiClient.createTask(seedData.workspaceId, "Everywhere task", {
       workflow_id: seedData.workflowId,
@@ -49,6 +51,8 @@ test.describe("Workspace copilot everywhere", () => {
       name: "Phone Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto("/");
@@ -70,6 +74,8 @@ test.describe("Workspace copilot everywhere", () => {
       name: "Chip Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto("/");
@@ -110,6 +116,8 @@ test.describe("Workspace copilot everywhere", () => {
       name: "Reload Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await testPage.reload();
     const launcher = testPage.getByTestId("workspace-copilot-launcher");

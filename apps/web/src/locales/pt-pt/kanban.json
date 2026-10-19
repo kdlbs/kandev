@@ -133,5 +133,5 @@
   "bulkActions": "Ações",
   "selectTasks": "Selecionar tarefas",
   "cancelTaskSelection": "Cancelar seleção",
-  "groupTasksIntoSectionsByWorkflowStep": "Agrupar as tarefas em secções por etapa do fluxo de trabalho, fluxo de trabalho, repositório ou não agrupar."
+  "groupTasksIntoSectionsByWorkflowStep": "Agrupar as tarefas em secções por etapa do fluxo de trabalho, fluxo de trabalho, repositório, valores de plugin ou não agrupar."
 }

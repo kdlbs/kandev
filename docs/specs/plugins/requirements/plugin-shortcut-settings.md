@@ -74,3 +74,9 @@ plugin without mixing them into Kandev's core shortcuts.
 - Adding plugin-authored fields or individual plugin shortcuts to global
   Settings search results.
 - Deleting orphaned per-user override keys when a plugin is uninstalled.
+
+## Implementation plans
+
+- [Shortcut conflict dispatch repair](../../../plans/shortcut-conflict-dispatch/plan.md)
+  restores conformance to AC-PLUGINS-PLUGIN-SHORTCUT-SETTINGS-001.5 without
+  changing accepted keyboard chords or the configuration workflow.

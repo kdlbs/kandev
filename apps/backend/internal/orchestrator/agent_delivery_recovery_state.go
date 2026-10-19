@@ -144,7 +144,8 @@ func (s *Service) agentDeliveryRecoveryCursorMatches(
 
 func agentDeliveryRecoveryFromEvent(payload agentruntime.AgentctlEventPayload) *models.AgentDeliveryRecovery {
 	return &models.AgentDeliveryRecovery{
-		Phase: payload.DeliveryRecoveryPhase, SessionID: payload.SessionID,
+		OriginalRuntime: payload.OriginalRuntime,
+		Phase:           payload.DeliveryRecoveryPhase, SessionID: payload.SessionID,
 		AgentExecutionID: payload.AgentExecutionID, SubmissionID: payload.DeliverySubmissionID,
 		StreamID: payload.DeliveryStreamID, IncarnationID: payload.DeliveryIncarnationID,
 		HarnessGeneration: int64(payload.DeliveryHarnessGeneration), PromptGeneration: payload.PromptGeneration,
@@ -190,6 +191,9 @@ func (s *Service) persistAgentDeliveryRecoveryNotice(
 	if stored {
 		agentruntime.RecordRecoveryRequired("agent_delivery", "unknown_prompt_outcome")
 		s.publishAgentDeliveryRecoveryState(ctx, payload.SessionID)
+		if lifecycleCtx := s.recoveryLifecycleContext(); lifecycleCtx != nil {
+			s.startSilentRestoreRecovery(lifecycleCtx)
+		}
 	}
 	// A terminal may have committed between the initial read and notice write.
 	// Clearing remains submission-specific, so a racing successor is preserved.
@@ -225,7 +229,7 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 	if !ok {
 		return nil
 	}
-	cleared, err := recoveryStore.ClearAgentDeliveryRecovery(
+	_, err := recoveryStore.ClearAgentDeliveryRecovery(
 		ctx, sessionID, incarnationID, submissionID, harnessGeneration,
 	)
 	if err != nil {
@@ -233,9 +237,7 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 			zap.String("session_id", sessionID), zap.String("submission_id", submissionID), zap.Error(err))
 		return err
 	}
-	if cleared {
-		s.publishAgentDeliveryRecoveryState(ctx, sessionID)
-	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	return nil
 }
 

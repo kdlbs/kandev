@@ -10,7 +10,8 @@ import {
 } from "@/lib/api/domains/queue-api";
 import { useQueueEditProtection } from "./use-queue-edit-protection";
 
-vi.mock("@/lib/api/domains/queue-api", () => ({
+vi.mock("@/lib/api/domains/queue-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/queue-api")>()),
   beginQueuedMessageEdit: vi.fn(),
   endQueuedMessageEdit: vi.fn(),
   renewQueuedMessageEdit: vi.fn(),

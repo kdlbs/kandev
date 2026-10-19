@@ -512,5 +512,12 @@
   "sshReachabilityStateReachable": "到達可能",
   "sshReachabilityStateUnknown": "不明",
   "sshReachabilityStateUnreachable": "到達不可",
-  "sshReachabilityTitle": "到達可能性"
+  "sshReachabilityTitle": "到達可能性",
+  "ownershipProfile": "プロファイルへのアクセス",
+  "ownershipExecutor": "エグゼキューターへのアクセス",
+  "ownershipShared": "共有",
+  "ownershipMe": "自分のみ",
+  "ownershipDescription": "所有者と管理者だけが非公開の実行環境を表示、使用できます。共有にすると既存の権限が適用されます。",
+  "ownershipInherited": "エグゼキューターは非公開です。このプロファイルを共有にしても、所有者と管理者だけがアクセスできます。",
+  "ownershipUnavailable": "このエグゼキュータープロファイルは利用できません。開始する前に利用可能なプロファイルを選択してください。"
 }

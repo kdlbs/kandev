@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -18,6 +19,14 @@ type assignmentEligibilityTestStepIDs struct {
 
 func (f assignmentEligibilityTestStepIDs) GetTaskWorkflowStepID(context.Context, string) (string, error) {
 	return f.stepID, nil
+}
+
+func (f assignmentEligibilityTestStepIDs) ListTaskBlockers(context.Context, string) ([]*models.TaskBlocker, error) {
+	return nil, nil
+}
+
+func (f assignmentEligibilityTestStepIDs) IsTaskInTerminalStep(context.Context, string) (bool, error) {
+	return true, nil
 }
 
 type assignmentEligibilityTestSteps struct {

@@ -511,7 +511,7 @@ func validateStepPositionRefs(steps []StepPortable, validPositions map[int]bool)
 }
 
 // validateGenericStepPositionRefs checks move_to_step position refs across
-// the seven ADR-0004 Phase 2 GenericAction triggers.
+// every GenericAction trigger.
 func validateGenericStepPositionRefs(step StepPortable, validPositions map[int]bool) error {
 	triggers := map[string][]GenericAction{
 		"on_comment":            step.Events.OnComment,
@@ -521,6 +521,8 @@ func validateGenericStepPositionRefs(step StepPortable, validPositions map[int]b
 		"on_heartbeat":          step.Events.OnHeartbeat,
 		"on_budget_alert":       step.Events.OnBudgetAlert,
 		"on_agent_error":        step.Events.OnAgentError,
+		"on_pr_merged":          step.Events.OnPRMerged,
+		"on_pr_closed":          step.Events.OnPRClosed,
 	}
 	for _, trigger := range genericTriggerOrder {
 		for _, a := range triggers[trigger] {
@@ -539,6 +541,7 @@ func validateGenericStepPositionRefs(step StepPortable, validPositions map[int]b
 var genericTriggerOrder = []string{
 	"on_comment", "on_blocker_resolved", "on_children_completed",
 	"on_approval_resolved", "on_heartbeat", "on_budget_alert", "on_agent_error",
+	"on_pr_merged", "on_pr_closed",
 }
 
 func checkPositionRef(config map[string]any, validPositions map[int]bool) error {
@@ -687,6 +690,8 @@ func remapStepEvents(events StepEvents, fromKey, toKey string, lookup func(any) 
 	result.OnHeartbeat = remapGenericActionsConfigKey(events.OnHeartbeat, fromKey, toKey, lookup)
 	result.OnBudgetAlert = remapGenericActionsConfigKey(events.OnBudgetAlert, fromKey, toKey, lookup)
 	result.OnAgentError = remapGenericActionsConfigKey(events.OnAgentError, fromKey, toKey, lookup)
+	result.OnPRMerged = remapGenericActionsConfigKey(events.OnPRMerged, fromKey, toKey, lookup)
+	result.OnPRClosed = remapGenericActionsConfigKey(events.OnPRClosed, fromKey, toKey, lookup)
 	return result
 }
 

@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -59,10 +61,9 @@ func taskExists(t *testing.T, repo *sqliterepo.Repository, taskID string) bool {
 	return err == nil && task != nil
 }
 
-// SQLite wraps ErrNoPrimarySession with the task id. Ensure must classify that
-// typed absence as repairable instead of returning an error and leaving the
-// managed task without a session.
-func TestEnsureRepairsWrappedMissingPrimarySessionOverRealRepository(t *testing.T) {
+// A deterministic primary ID cannot be reused until delivery retirement
+// finishes; Ensure must expose the retryable barrier and repair after purge.
+func TestEnsureWaitsForDeliveryRetirementBeforePrimaryRepairOverRealRepository(t *testing.T) {
 	svc, repo := newAgentConversationServiceOverRealRepo(t)
 	ctx := context.Background()
 	seedConversationWorkspace(t, repo, "ws-one")
@@ -76,17 +77,31 @@ func TestEnsureRepairsWrappedMissingPrimarySessionOverRealRepository(t *testing.
 		t.Fatalf("delete conversation session: %v", err)
 	}
 
-	repaired, status, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+	_, _, err = svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-one", ConversationKey: "coordinator",
+	})
+	if !errors.Is(err, repoerrors.ErrAgentDeliveryIdentityRetiring) {
+		t.Fatalf("Ensure before delivery purge error = %v, want retirement conflict", err)
+	}
+	result, err := repo.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{})
+	if err != nil || result.Completed != 1 {
+		t.Fatalf("purge deleted primary evidence = %+v, %v", result, err)
+	}
+	repaired, outcome, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
 		WorkspaceID: "ws-one", ConversationKey: "coordinator",
 	})
 	if err != nil {
-		t.Fatalf("Ensure repair: %v", err)
+		t.Fatalf("Ensure repair after purge: %v", err)
 	}
-	if status != AgentConversationStatusExists {
-		t.Fatalf("Ensure repair status = %q, want %q", status, AgentConversationStatusExists)
+	if outcome != AgentConversationStatusExists {
+		t.Fatalf("Ensure repair status = %q, want %q", outcome, AgentConversationStatusExists)
 	}
 	if repaired.TaskID != original.TaskID || repaired.SessionID != original.SessionID {
 		t.Fatalf("repaired descriptor = %#v, want stable task/session %#v", repaired, original)
+	}
+	newSession, err := repo.GetTaskSession(ctx, repaired.SessionID)
+	if err != nil || newSession.QueueIncarnationID == session.QueueIncarnationID {
+		t.Fatalf("repaired session incarnation = %q, err %v; want fresh incarnation", newSession.QueueIncarnationID, err)
 	}
 }
 

@@ -1517,7 +1517,8 @@ test.describe("LSP file intelligence", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(210_000);
+    test.setTimeout(90_000);
+    await testPage.clock.install();
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
     });
@@ -1541,11 +1542,8 @@ test.describe("LSP file intelligence", () => {
       await editorTab.click({ button: "right" });
       await testPage.getByRole("menuitem", { name: "Close", exact: true }).click();
       await expect(editorTab).toHaveCount(0);
-      await dwell(
-        125_000,
-        "product-timer",
-        "the LSP client intentionally releases its retained lease after two minutes with no open editor",
-      );
+      // Advance the browser-owned idle deadline; transport and process shutdown stay real.
+      await testPage.clock.fastForward(125_000);
       await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
       await expectFakeLspEvent(
         backend,

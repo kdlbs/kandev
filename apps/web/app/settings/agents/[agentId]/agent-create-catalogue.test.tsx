@@ -29,7 +29,8 @@ vi.mock("@/lib/api/client", async (importOriginal) => ({
   fetchJson: vi.fn(),
 }));
 
-const CREATE_ROUTE = "/settings/agents/claude-code?mode=create";
+const SAVED_ROUTE = "/settings/agents/claude-code";
+const CREATE_ROUTE = `${SAVED_ROUTE}?mode=create`;
 const TARGET_OWNER = "creation-owner";
 const OTHER_OWNER = "independent-owner";
 const RECEIVED_ID = "received-profile";
@@ -271,8 +272,9 @@ function assertPartialResult(context: Creation, result: SaveResult) {
   const target = context
     .getStore()
     .getState()
-    .settingsAgents.items.find((agent) => agent.id === TARGET_OWNER)!;
-  const profile = target.profiles.find((item) => item.id === ACCEPTED_ID) as DraftProfile;
+    .settingsAgents.items.find((agent) => agent.id === TARGET_OWNER);
+  expect(target).toBeDefined();
+  const profile = target!.profiles.find((item) => item.id === ACCEPTED_ID) as DraftProfile;
   expect(profile).toMatchObject({
     id: ACCEPTED_ID,
     name: DRAFT_NAME,
@@ -340,7 +342,7 @@ describe("normal creation catalogue publication", () => {
       name: DRAFT_NAME,
       model: MODEL,
     });
-    await waitFor(() => expect(window.location.pathname).toBe("/settings/agents/claude-code"));
+    await waitFor(() => expect(window.location.pathname).toBe(SAVED_ROUTE));
     expect(context.getCoordinator().hasDirty).toBe(false);
   });
 
@@ -400,6 +402,23 @@ describe("creation partial results and new owners", () => {
 
   // @covers AC-AGENTS-CREATION-CATALOGUE-001.5
   // @covers AC-AGENTS-CREATION-CATALOGUE-001.6
+  it("accepts new-agent creation without an intervening event", async () => {
+    const context = mountCreation(true);
+    const { save } = await submitCreation(context);
+    const result = await completeCreation(context, save);
+    expect(result.failedIds.size).toBe(0);
+    const state = context.getStore().getState();
+    expect(
+      state.settingsAgents.items.find((agent) => agent.id === TARGET_OWNER)?.profiles,
+    ).toMatchObject([{ id: ACCEPTED_ID, agentId: TARGET_OWNER, name: DRAFT_NAME, model: MODEL }]);
+    expect(state.agentProfiles.items.filter((profile) => profile.id === ACCEPTED_ID)).toHaveLength(
+      1,
+    );
+    await waitFor(() => expect(window.location.pathname).toBe(SAVED_ROUTE));
+  });
+
+  // @covers AC-AGENTS-CREATION-CATALOGUE-001.5
+  // @covers AC-AGENTS-CREATION-CATALOGUE-001.6
   it("publishes a newly created agent over the current catalogue", async () => {
     const context = mountCreation(true);
     const { save } = await submitCreation(context);
@@ -423,7 +442,7 @@ describe("creation partial results and new owners", () => {
     expect(state.agentProfiles.items.filter((profile) => profile.id === ACCEPTED_ID)).toHaveLength(
       1,
     );
-    await waitFor(() => expect(window.location.pathname).toBe("/settings/agents/claude-code"));
+    await waitFor(() => expect(window.location.pathname).toBe(SAVED_ROUTE));
   });
 
   // @covers AC-AGENTS-CREATION-CATALOGUE-001.5
@@ -442,6 +461,6 @@ describe("creation partial results and new owners", () => {
         .getState()
         .settingsAgents.items.map((agent) => agent.id),
     ).toEqual([OTHER_OWNER, TARGET_OWNER]);
-    await waitFor(() => expect(window.location.pathname).toBe("/settings/agents/claude-code"));
+    await waitFor(() => expect(window.location.pathname).toBe(SAVED_ROUTE));
   });
 });

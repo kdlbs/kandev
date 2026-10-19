@@ -3,6 +3,8 @@ package models
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
 const SessionMetaKeyAgentDeliveryRecovery = "agent_delivery_recovery"
@@ -12,23 +14,92 @@ const (
 	AgentDeliveryRecoveryUncertain    = "uncertain"
 	AgentDeliveryRecoveryRecovered    = "recovered"
 	AgentDeliveryRecoverySettled      = "settled"
+	AgentDeliveryRecoveryContinued    = "continued"
+	AgentDeliveryRecoveryRestored     = "restored"
+)
+
+const (
+	SilentRestoreStagePrepared           = "prepared"
+	SilentRestoreStageCandidateAllocated = "candidate_allocated"
+	SilentRestoreStageCandidateLaunching = "candidate_launching"
+	SilentRestoreStageCandidateDead      = "candidate_dead"
+	SilentRestoreStageTerminal           = "terminal"
+
+	SilentRestoreAction          = "silent_restart_restore"
+	SilentRestoreOutcomePending  = "pending"
+	SilentRestoreOutcomeRestored = "restored"
 )
 
 // AgentDeliveryRecovery is the persisted UI and admission snapshot for one
 // immutable prompt whose transport is being reconciled or whose outcome is
 // uncertain. Revision is assigned by the repository's compare-and-set write.
 type AgentDeliveryRecovery struct {
-	Phase             string    `json:"phase"`
-	Revision          int64     `json:"revision"`
-	SessionID         string    `json:"session_id"`
-	AgentExecutionID  string    `json:"agent_execution_id"`
-	SubmissionID      string    `json:"submission_id"`
-	StreamID          string    `json:"stream_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration int64     `json:"harness_generation"`
-	PromptGeneration  uint64    `json:"prompt_generation"`
-	Message           string    `json:"message,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	OriginalRuntime   processidentity.Identity               `json:"original_runtime,omitempty"`
+	Phase             string                                 `json:"phase"`
+	Revision          int64                                  `json:"revision"`
+	SessionID         string                                 `json:"session_id"`
+	AgentExecutionID  string                                 `json:"agent_execution_id"`
+	SubmissionID      string                                 `json:"submission_id"`
+	StreamID          string                                 `json:"stream_id"`
+	IncarnationID     string                                 `json:"incarnation_id"`
+	HarnessGeneration int64                                  `json:"harness_generation"`
+	PromptGeneration  uint64                                 `json:"prompt_generation"`
+	Message           string                                 `json:"message,omitempty"`
+	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
+	HistoryGap        *AgentDeliveryHistoryGap               `json:"history_gap,omitempty"`
+	UpdatedAt         time.Time                              `json:"updated_at"`
+}
+
+// AgentDeliveryReconstructionProvenance records the retained journal evidence
+// that justified restoring a missing canonical submission association.
+type AgentDeliveryReconstructionProvenance struct {
+	SourceSessionID           string    `json:"source_session_id"`
+	SourceIncarnationID       string    `json:"source_incarnation_id"`
+	SourceHarnessGeneration   int64     `json:"source_harness_generation"`
+	SourceStreamID            string    `json:"source_stream_id"`
+	PayloadHash               string    `json:"payload_hash"`
+	ObservedState             string    `json:"observed_state"`
+	SourceStreamHighWater     int64     `json:"source_stream_high_water"`
+	SourceStreamAcknowledged  int64     `json:"source_stream_acknowledged"`
+	SourceStreamFirstRetained int64     `json:"source_stream_first_retained"`
+	ProcessIdentityKnown      bool      `json:"process_identity_known"`
+	ProcessTerminated         *bool     `json:"process_terminated,omitempty"`
+	ReconstructedAt           time.Time `json:"reconstructed_at"`
+}
+
+// AgentDeliveryReconstructionRequest is the validated owner snapshot passed
+// to the transaction that restores one retained prompt's canonical association.
+type AgentDeliveryReconstructionRequest struct {
+	// Retirement evidence is verified through the authenticated runtime before
+	// these immutable canonical snapshots are checked under the SQL write lock.
+	VerifiedRetiredSubmissions []AgentDeliverySubmission
+	// ExistingSubmissionOnly repairs presentation from a canonical SQL row and
+	// cannot insert a missing submission or infer a user-message association.
+	ExistingSubmissionOnly    bool
+	TaskID                    string
+	SessionID                 string
+	IncarnationID             string
+	HarnessGeneration         int64
+	ExpectedExecutionID       string
+	ExpectedSessionState      TaskSessionState
+	ExpectedWorkspacePath     string
+	NativeSessionID           string
+	MessageID                 string
+	ExpectedBlock             SessionRecoveryBlock
+	SourceStreamHighWater     int64
+	SourceStreamAcknowledged  int64
+	SourceStreamFirstRetained int64
+	ExpectedCursor            *AgentDeliveryCursor
+	Submission                AgentDeliverySubmission
+	Recovery                  AgentDeliveryRecovery
+}
+
+// AgentDeliveryReconstructionResult reports the committed recovery identity.
+// It intentionally contains no prompt payload.
+type AgentDeliveryReconstructionResult struct {
+	Inserted bool
+	Recovery AgentDeliveryRecovery
+	Block    SessionRecoveryBlock
 }
 
 // LoadAgentDeliveryRecovery decodes the typed recovery view from session
@@ -74,17 +145,52 @@ type HarnessSessionGeneration struct {
 // RestoreAttempt records the decision and result of one native restore or
 // explicitly authorized continuation action.
 type RestoreAttempt struct {
-	ID                 string     `json:"id"`
-	SessionID          string     `json:"session_id"`
-	IncarnationID      string     `json:"incarnation_id"`
-	ExpectedGeneration int64      `json:"expected_generation"`
-	Action             string     `json:"action"`
-	Outcome            string     `json:"outcome"`
-	Reason             string     `json:"reason"`
-	TargetWorkspace    string     `json:"target_workspace,omitempty"`
-	Authorized         bool       `json:"authorized"`
-	CreatedAt          time.Time  `json:"created_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	ID                 string                   `json:"id"`
+	SessionID          string                   `json:"session_id"`
+	IncarnationID      string                   `json:"incarnation_id"`
+	ExpectedGeneration int64                    `json:"expected_generation"`
+	Action             string                   `json:"action"`
+	Outcome            string                   `json:"outcome"`
+	Reason             string                   `json:"reason"`
+	TargetWorkspace    string                   `json:"target_workspace,omitempty"`
+	Authorized         bool                     `json:"authorized"`
+	CreatedAt          time.Time                `json:"created_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+	Checkpoint         *SilentRestoreCheckpoint `json:"checkpoint,omitempty"`
+}
+
+// SilentRestoreCheckpoint pins every durable identity that a restart restore
+// must revalidate after native loading and across process crashes.
+type SilentRestoreCheckpoint struct {
+	Version              int                      `json:"version"`
+	Stage                string                   `json:"stage"`
+	SourceRecovery       AgentDeliveryRecovery    `json:"source_recovery"`
+	SourceGeneration     HarnessSessionGeneration `json:"source_generation"`
+	SourceBlock          SessionRecoveryBlock     `json:"source_block"`
+	TaskID               string                   `json:"task_id"`
+	WorkspaceID          string                   `json:"workspace_id"`
+	WorkspaceOwnerID     string                   `json:"workspace_owner_id"`
+	WorkspaceOrgID       string                   `json:"workspace_org_id"`
+	CandidateExecutionID string                   `json:"candidate_execution_id,omitempty"`
+}
+
+// SilentRestoreCandidate is a bounded startup inventory row. The caller must
+// validate its metadata and load exact generation and block evidence.
+type SilentRestoreCandidate struct {
+	TaskID      string
+	SessionID   string
+	WorkspaceID string
+	State       TaskSessionState
+	Metadata    map[string]interface{}
+}
+
+// SilentRestoreCommit binds a candidate execution to its pinned checkpoint
+// and native generation in one transaction.
+type SilentRestoreCommit struct {
+	AttemptID   string
+	Checkpoint  SilentRestoreCheckpoint
+	Generation  HarnessSessionGeneration
+	CompletedAt time.Time
 }
 
 // ContinuationSnapshot is bounded, untrusted context composed from canonical
@@ -136,3 +242,13 @@ const (
 	RecoveryBlockOpen     = "open"
 	RecoveryBlockResolved = "resolved"
 )
+
+// InterruptedContinuationCommit binds a verified native restore to its admitted instruction.
+type InterruptedContinuationCommit struct {
+	Recovery             AgentDeliveryRecovery
+	Generation           HarnessSessionGeneration
+	CandidateExecutionID string
+	BlockID              string
+	SnapshotID           string
+	ContentHash          string
+}

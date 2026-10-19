@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const MOCK_STATE = {
   authenticated: true,
@@ -346,7 +347,9 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
   const resetDialog = testPage.getByTestId("reset-watch-dialog");
   await expect(resetDialog).toBeVisible();
+  const resetFinished = waitForHttp(testPage, "POST", /\/watches\/work-items\/[^/]+\/reset$/);
   await resetDialog.getByTestId("reset-watch-dialog-confirm").click();
+  expect((await resetFinished).ok()).toBe(true);
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
   await workItemWatch.getByRole("button", { name: "Delete this watch?" }).click();
   await testPage
