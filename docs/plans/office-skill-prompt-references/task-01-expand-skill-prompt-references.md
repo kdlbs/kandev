@@ -67,12 +67,12 @@ Run from `apps/backend`:
 ```bash
 go test -trimpath -race ./internal/prompts/service ./internal/office/skills ./internal/agent/runtime/lifecycle/skill -count=1
 go build -trimpath ./internal/backendapp/... ./cmd/kandev
-bash ../../scripts/lint-go-changed internal/prompts/service/expansion.go internal/prompts/service/skill_expansion_test.go internal/office/skills/runtime_adapter.go internal/office/skills/runtime_adapter_prompt_test.go internal/backendapp/main.go
 ```
 
 From the repository root:
 
 ```bash
+bash scripts/lint-go-changed apps/backend/internal/prompts/service/expansion.go apps/backend/internal/prompts/service/skill_expansion_test.go apps/backend/internal/office/skills/runtime_adapter.go apps/backend/internal/office/skills/runtime_adapter_prompt_test.go apps/backend/internal/backendapp/main.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -91,5 +91,3 @@ git diff --check
 - `internal/office/skills` tests may import `internal/prompts/service` and
   `internal/prompts/models` as test-only dependencies. Production code depends
   only on the local interface.
-- `lint-go-changed` must be run from the repository root if the script requires
-  it. Check its usage header first.

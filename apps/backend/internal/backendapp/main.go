@@ -2442,7 +2442,7 @@ func wireRuntimeSkillDeployer(
 	}
 	skillReader := officeskills.NewSkillReaderAdapter(officeSvc)
 	if promptSvc != nil {
-		skillReader.WithPromptReferenceExpander(promptSvc, log.Zap())
+		skillReader = skillReader.WithPromptReferenceExpander(promptSvc, log.Zap())
 	}
 	deployer, err := runtimeskill.New(runtimeskill.Config{
 		Logger:                  log,
