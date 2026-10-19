@@ -9,6 +9,9 @@ type CoordinatorUpdatedPayload struct {
 	WorkspaceID   string `json:"workspace_id"`
 	CoordinatorID string `json:"coordinator_id"`
 	OpenProposals int    `json:"open_proposals"`
+	// AutonomyChanged is true when the event reports a change to autonomy_enabled
+	// or the cost ceiling; omitted otherwise.
+	AutonomyChanged bool `json:"autonomy_changed,omitempty"`
 }
 
 // NewCoordinatorUpdatedPayload builds the events.CoordinatorUpdated payload.

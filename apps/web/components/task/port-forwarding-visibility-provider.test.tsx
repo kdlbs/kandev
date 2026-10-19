@@ -166,6 +166,83 @@ describe("PortForwardingVisibilityProvider reconciliation", () => {
 });
 
 describe("PortForwardingVisibility context boundaries", () => {
+  // @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.10
+  it.each([false, true])(
+    "keeps management open when hiding its shortcut (failure=%s)",
+    async (fail) => {
+      if (fail) updateTaskPortForwardingMock.mockRejectedValueOnce(new Error("network"));
+      else updateTaskPortForwardingMock.mockResolvedValueOnce({});
+      const { result } = renderHook(() => usePortForwardingVisibility(), { wrapper });
+      act(() => result.current.setDialogOpen(true));
+
+      await act(async () => {
+        await result.current.togglePortForwarding({ preserveDialogOpen: true });
+      });
+
+      expect(result.current.dialogOpen).toBe(true);
+      expect(result.current.enabled).toBe(fail);
+    },
+  );
+
+  // @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.13
+  it.each(["session", "readiness", "archive"])(
+    "does not reopen after a delayed enable and %s change",
+    async (change) => {
+      let resolveWrite!: () => void;
+      updateTaskPortForwardingMock.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveWrite = resolve;
+        }),
+      );
+      let sessionId = "session-1";
+      let isAgentctlReady = true;
+      let isArchived = false;
+      const { result, rerender } = renderHook(() => usePortForwardingVisibility(), {
+        wrapper: ({ children }) => (
+          <PortForwardingVisibilityProvider
+            taskId="task-1"
+            metadata={{}}
+            sessionId={sessionId}
+            isAgentctlReady={isAgentctlReady}
+            isArchived={isArchived}
+          >
+            {children}
+          </PortForwardingVisibilityProvider>
+        ),
+      });
+      act(() => {
+        void result.current.togglePortForwarding({ openDialogOnEnable: true });
+      });
+      if (change === "session") sessionId = "session-2";
+      if (change === "readiness") isAgentctlReady = false;
+      if (change === "archive") isArchived = true;
+      rerender();
+      await act(async () => resolveWrite());
+      expect(result.current.dialogOpen).toBe(false);
+      expect(result.current.isUpdating).toBe(false);
+    },
+  );
+
+  it("closes management on a ready session replacement", () => {
+    let sessionId = "session-1";
+    const { result, rerender } = renderHook(() => usePortForwardingVisibility(), {
+      wrapper: ({ children }) => (
+        <PortForwardingVisibilityProvider
+          taskId="task-1"
+          metadata={{}}
+          sessionId={sessionId}
+          isAgentctlReady
+        >
+          {children}
+        </PortForwardingVisibilityProvider>
+      ),
+    });
+    act(() => result.current.setDialogOpen(true));
+    sessionId = "session-2";
+    rerender();
+    expect(result.current.dialogOpen).toBe(false);
+  });
+
   it("returns no visibility state outside a task provider", () => {
     const { result } = renderHook(() => useOptionalPortForwardingVisibility());
 

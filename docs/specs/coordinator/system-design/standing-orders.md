@@ -205,7 +205,7 @@ still match, foreign or deleted ones do not) is not an error, because
 validation of the ids belongs to the propose transaction. The list route reads the column directly; there is no scan and no
 time bound on how far back a citing proposal counted, so an order cited
 once, however long ago, still shows that time (`003.3`). Null reads as
-"Never applied". 
+"Never applied".
 
 ## Shaped by UI
 

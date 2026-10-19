@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"strings"
 	"time"
 
@@ -346,6 +347,8 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
+	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Sprites runtime
 	MetadataKeySpriteName:      true,
@@ -456,6 +459,8 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
+	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Project MCP ownership belongs to the execution that materialized the
 	// workspace file. It survives same-session recovery but must not be copied
@@ -640,8 +645,9 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID   string
-	CausingRunID string
+	InstanceID    string
+	CausingRunID  string
+	IsPassthrough bool
 	// ExecutorType is retained in execution metadata so recovered sessions can
 	// safely re-check host-local filesystem eligibility.
 	ExecutorType      string
@@ -655,11 +661,14 @@ type ExecutorCreateRequest struct {
 	// ForceContextContinuation records that the explicit recovery path started
 	// a new native conversation from a bounded Kandev context snapshot.
 	ForceContextContinuation bool
-	AgentProfileID           string
-	OfficeAgentProfileID     string
-	PromptTurnID             string
-	WorkspacePath            string
-	OriginalWorkspacePath    string
+	// ReplacesNativeConversation records an explicit fresh start on the
+	// successor harness generation.
+	ReplacesNativeConversation bool
+	AgentProfileID             string
+	OfficeAgentProfileID       string
+	PromptTurnID               string
+	WorkspacePath              string
+	OriginalWorkspacePath      string
 	// DurableJournalHostRoot is the retained storage root owned by the
 	// executor. Providers map it to their own stable environment path.
 	DurableJournalHostRoot string
@@ -752,7 +761,8 @@ type ExecutorInstance struct {
 	RuntimeName agentruntime.Runtime
 
 	// Agentctl client for communicating with this instance
-	Client *agentctl.Client
+	Client                    *agentctl.Client
+	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
 
 	// DiscardRecovery closes only host-side resources allocated for this
 	// recovery attempt. It must never stop the remote process or resource. The
@@ -878,40 +888,42 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		startupDisposition:        startupDispositionFromMetadata(metadata),
-		ID:                        ri.InstanceID,
-		CausingRunID:              causingRunID,
-		ExecutorType:              executorType,
-		RunID:                     req.Env["KANDEV_RUN_ID"],
-		TaskID:                    req.TaskID,
-		SessionID:                 req.SessionID,
-		TaskEnvironmentID:         req.TaskEnvironmentID,
-		AgentProfileID:            req.AgentProfileID,
-		OfficeAgentProfileID:      req.OfficeAgentProfileID,
-		promptTurnID:              req.PromptTurnID,
-		AgentID:                   agentID,
-		ContainerID:               ri.ContainerID,
-		ContainerIP:               ri.ContainerIP,
-		WorkspacePath:             workspacePath,
-		OriginalWorkspacePath:     originalWorkspacePath,
-		WorkspaceSourceRoots:      append([]string(nil), req.WorkspaceSourceRoots...),
-		DeliveryStreamID:          req.DeliveryStreamID,
-		DeliveryIncarnationID:     req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
-		ForceContextContinuation:  req.ForceContextContinuation,
-		RuntimeName:               ri.RuntimeName,
-		Status:                    v1.AgentStatusRunning,
-		StartedAt:                 time.Now(),
-		metadata:                  metadata,
-		agentctl:                  ri.Client,
-		standaloneInstanceID:      ri.StandaloneInstanceID,
-		standalonePort:            ri.StandalonePort,
-		runtimeEpoch:              runtimeEpochFromClient(ri.Client),
-		standaloneHostPID:         runtimeProcessIDFromClient(ri.Client),
-		historyEnabled:            historyEnabled,
-		promptDoneCh:              make(chan PromptCompletionSignal, 1),
+		startupDisposition:         startupDispositionFromMetadata(metadata),
+		ID:                         ri.InstanceID,
+		CausingRunID:               causingRunID,
+		ExecutorType:               executorType,
+		RunID:                      req.Env["KANDEV_RUN_ID"],
+		TaskID:                     req.TaskID,
+		SessionID:                  req.SessionID,
+		TaskEnvironmentID:          req.TaskEnvironmentID,
+		AgentProfileID:             req.AgentProfileID,
+		OfficeAgentProfileID:       req.OfficeAgentProfileID,
+		promptTurnID:               req.PromptTurnID,
+		AgentID:                    agentID,
+		ContainerID:                ri.ContainerID,
+		ContainerIP:                ri.ContainerIP,
+		WorkspacePath:              workspacePath,
+		OriginalWorkspacePath:      originalWorkspacePath,
+		WorkspaceSourceRoots:       append([]string(nil), req.WorkspaceSourceRoots...),
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		ForceContextContinuation:   req.ForceContextContinuation,
+		ReplacesNativeConversation: req.ReplacesNativeConversation,
+		RuntimeName:                ri.RuntimeName,
+		Status:                     v1.AgentStatusRunning,
+		StartedAt:                  time.Now(),
+		metadata:                   metadata,
+		agentctl:                   ri.Client,
+		standaloneInstanceID:       ri.StandaloneInstanceID,
+		standalonePort:             ri.StandalonePort,
+		runtimeEpoch:               runtimeEpochFromClient(ri.Client),
+		standaloneHostPID:          runtimeProcessIDFromClient(ri.Client),
+		historyEnabled:             historyEnabled,
+		promptDoneCh:               make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
+	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }
 

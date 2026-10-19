@@ -20,7 +20,7 @@ import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-po
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import {
   hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
@@ -175,7 +175,7 @@ function useChipPopoverInteractions() {
  * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskId);
   const { prs, refresh, unlink } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
   const triggerRef = useRef<HTMLButtonElement>(null);

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -75,12 +75,11 @@ export function TaskPickerSurface({
   if (presentation === "drawer")
     return (
       <TaskSwitcherDrawer
-        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         onCloseAutoFocus={handleCloseAutoFocus}
       >
-        {children}
+        <Fragment key={workspaceId}>{children}</Fragment>
       </TaskSwitcherDrawer>
     );
   return (

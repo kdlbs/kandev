@@ -931,7 +931,7 @@ jobs:
         with:
           ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
@@ -1079,7 +1079,7 @@ jobs:
         with:
           ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum

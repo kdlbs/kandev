@@ -115,6 +115,7 @@ func (s *Server) setupRoutes() {
 
 	// Agent control
 	api := s.router.Group("/api/v1")
+	s.registerPassthroughRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)

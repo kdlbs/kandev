@@ -226,7 +226,20 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
-`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Actual workflow-step changes requested through `move_task_kandev` from a RUNNING or STARTING session use the deferred MCP path and persist their complete options through turn completion, WIP promotion, and backend restart. A valid same-step MCP request without entry options returns `disposition: "applied"` with the stored task, so the caller does not need to retry.
+`task.move` accepts an optional one-shot `entry_options` object:
+
+- Normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`. Empty optional strings are omitted, and the values never mutate workflow defaults.
+- Reset is additive. Instructions are appended after the destination step's normal prompt.
+- `skip_step_prompt` suppresses the destination prompt and task-description fallback for this entry. With instructions, the agent starts a turn carrying only those instructions. Without instructions, no turn starts and the task lands idle.
+- A successful response includes the normalized options when supplied, plus a `move_id` correlating options retained for a deferred move.
+- HTTP and WebSocket moves keep the session-or-auto-start acceptance rule.
+
+The agent tool has additional rules:
+
+- `move_task_kandev` accepts the same options. Its legacy `prompt` aliases `entry_options.instructions`; conflicting non-empty values are rejected.
+- Manual targets reject agent prompts and options, even when the task has a session. See [agent move guidance](agent-communication.md#move-a-task-with-entry-options) for recipient semantics and the workaround.
+- A step change requested by a `RUNNING` or `STARTING` session uses the deferred MCP path. Complete options persist through turn completion, WIP promotion, and restart.
+- A same-step request without options returns `disposition: "applied"` with the stored task; no retry is needed.
 
 ```json
 {
@@ -849,6 +862,14 @@ browser's `task.plan.get` contract. Use
 for defaults, bounds, and examples.
 
 ## Emitted notifications and recipients
+
+Executor and executor-profile configuration notifications are sent only to
+eligible recipients. Ownership changes also emit the payload-free
+`executor.catalogue.invalidated` notification so clients discard cached
+configuration and refetch their permitted catalogue, including when access was
+revoked. Failed eligibility resolution does not broadcast private executor
+configuration.
+
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 

@@ -51,3 +51,14 @@ causation requirement and design remain the behavior contract.
 The integration CI exposed the landed `useSecrets` hook's function-size warning.
 Task 01 also records its behavior-preserving helper extraction and focused hook
 validation. Fresh remote CI remains required after that remediation push.
+
+
+## Resumed Main Integration
+
+The resumed delivery resolves actual conflicts with the newer main branch while
+preserving causing-run attribution alongside passthrough launch identity,
+native-conversation replacement, executor admission, recovery, and database
+ownership initialization. The secrets hook uses the canonical main implementation,
+which already contains the earlier function-size extraction and newer failure
+handling. Task 01 records the focused validation; historical results above do
+not establish the new merge head's CI status.

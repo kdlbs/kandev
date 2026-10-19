@@ -91,7 +91,7 @@ func (j *Journal) reserveDiskCapacity(db *bolt.DB, writeBytes int64, preserveRes
 	if preserveReserve {
 		reserve = j.config.DiskReserveBytes
 	}
-	reusableBytes := reusableJournalPageBytes(db)
+	reusableBytes := reusableJournalPageBytes(db, j.pageSize)
 	if reusableBytes <= j.diskReusablePendingBytes {
 		reusableBytes = 0
 	} else {
@@ -131,15 +131,14 @@ func (j *Journal) diskAvailableAfterWritesLocked() int64 {
 func (j *Journal) reusableJournalBytes(db *bolt.DB) int64 {
 	j.diskCapacityMu.Lock()
 	defer j.diskCapacityMu.Unlock()
-	reusable := reusableJournalPageBytes(db)
+	reusable := reusableJournalPageBytes(db, j.pageSize)
 	if reusable <= j.diskReusablePendingBytes {
 		return 0
 	}
 	return reusable - j.diskReusablePendingBytes
 }
 
-func reusableJournalPageBytes(db *bolt.DB) int64 {
-	pageSize := int64(db.Info().PageSize)
+func reusableJournalPageBytes(db *bolt.DB, pageSize int64) int64 {
 	freePages := int64(db.Stats().FreePageN)
 	if pageSize <= 0 || freePages <= 0 || freePages > math.MaxInt64/pageSize {
 		return 0

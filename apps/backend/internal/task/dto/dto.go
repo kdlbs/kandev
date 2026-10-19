@@ -3,6 +3,7 @@ package dto
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -144,20 +145,22 @@ type ShellOutputSnapshotResponse struct {
 }
 
 type ExecutorDTO struct {
-	ID        string                   `json:"id"`
-	Name      string                   `json:"name"`
-	Type      models.ExecutorType      `json:"type"`
-	Status    models.ExecutorStatus    `json:"status"`
-	IsSystem  bool                     `json:"is_system"`
-	Resumable bool                     `json:"resumable"`
-	Config    map[string]string        `json:"config,omitempty"`
-	Profiles  []ExecutorProfileDTO     `json:"profiles,omitempty"`
-	Provider  *models.ExecutorProvider `json:"provider,omitempty"`
-	CreatedAt time.Time                `json:"created_at"`
-	UpdatedAt time.Time                `json:"updated_at"`
+	OwnerUserID string                   `json:"owner_user_id"`
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	Type        models.ExecutorType      `json:"type"`
+	Status      models.ExecutorStatus    `json:"status"`
+	IsSystem    bool                     `json:"is_system"`
+	Resumable   bool                     `json:"resumable"`
+	Config      map[string]string        `json:"config,omitempty"`
+	Profiles    []ExecutorProfileDTO     `json:"profiles,omitempty"`
+	Provider    *models.ExecutorProvider `json:"provider,omitempty"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
 }
 
 type ExecutorProfileDTO struct {
+	OwnerUserID   string                   `json:"owner_user_id"`
 	ID            string                   `json:"id"`
 	ExecutorID    string                   `json:"executor_id"`
 	ExecutorType  string                   `json:"executor_type,omitempty"`
@@ -542,6 +545,9 @@ func EnrichSessionRecoveryBlocks(
 		incarnationID = session.ID
 	}
 	generation, err := reader.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -997,22 +1003,24 @@ func FromRepositoryScript(script *models.RepositoryScript) RepositoryScriptDTO {
 
 func FromExecutor(executor *models.Executor) ExecutorDTO {
 	return ExecutorDTO{
-		ID:        executor.ID,
-		Name:      executor.Name,
-		Type:      executor.Type,
-		Status:    executor.Status,
-		IsSystem:  executor.IsSystem,
-		Resumable: executor.Resumable,
-		Config:    executor.Config,
-		Provider:  executor.Provider,
-		CreatedAt: executor.CreatedAt,
-		UpdatedAt: executor.UpdatedAt,
+		OwnerUserID: executor.OwnerUserID,
+		ID:          executor.ID,
+		Name:        executor.Name,
+		Type:        executor.Type,
+		Status:      executor.Status,
+		IsSystem:    executor.IsSystem,
+		Resumable:   executor.Resumable,
+		Config:      executor.Config,
+		Provider:    executor.Provider,
+		CreatedAt:   executor.CreatedAt,
+		UpdatedAt:   executor.UpdatedAt,
 	}
 }
 
 func FromExecutorProfile(profile *models.ExecutorProfile) ExecutorProfileDTO {
 	config, secretFields := models.RedactExecutorProfileConfig(profile.Config)
 	return ExecutorProfileDTO{
+		OwnerUserID:   profile.OwnerUserID,
 		ID:            profile.ID,
 		ExecutorID:    profile.ExecutorID,
 		Name:          profile.Name,
@@ -1427,6 +1435,8 @@ type StepEventsDTO struct {
 	OnHeartbeat         []StepActionDTO `json:"on_heartbeat,omitempty"`
 	OnBudgetAlert       []StepActionDTO `json:"on_budget_alert,omitempty"`
 	OnAgentError        []StepActionDTO `json:"on_agent_error,omitempty"`
+	OnPRMerged          []StepActionDTO `json:"on_pr_merged,omitempty"`
+	OnPRClosed          []StepActionDTO `json:"on_pr_closed,omitempty"`
 }
 
 // StepActionDTO represents a step action for API responses

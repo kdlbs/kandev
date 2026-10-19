@@ -37,6 +37,12 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Integrated navigation across existing authorized workspace conversations.
+  KANDEV_FEATURES_INTEGRATED_CONTROL:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Retains supported language-server leases across browser disconnects. The
   # bounded task-host lifecycle is enabled by default; this restart-required
   # flag remains the operator kill switch.
@@ -145,6 +151,24 @@ features:
     prod: "false"
     dev:  "false"
     e2e:  "true"
+
+  # Coordinator autonomy (phase 3): unattended wakes, the spend ceiling and
+  # the automatic decision classes. Only effective together with
+  # KANDEV_FEATURES_COORDINATOR and KANDEV_FEATURES_COORDINATOR_PHASE2.
+  KANDEV_FEATURES_COORDINATOR_PHASE3:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
+  # Coordinator phase 3.1 (record and measure): pausing a coordinator, the
+  # Projects scope editor, and everything that reads or acts on the recorded
+  # turn ledger. Recording itself runs without it. Off in every shipped
+  # profile; only effective together with KANDEV_FEATURES_COORDINATOR, _PHASE2
+  # and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_PHASE31:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
 
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production

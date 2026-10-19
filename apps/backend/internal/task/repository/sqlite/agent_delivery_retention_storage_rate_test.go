@@ -70,6 +70,8 @@ func runRetentionStorageSteadyRate(t *testing.T, engine string, batchRows int) {
 		t.Fatal(err)
 	}
 	defer worker.Stop()
+	// Drain immediate startup work before advancing the repository clock.
+	_ = finishRetentionStorageWorkerPass(t, timers, snapshots)
 	payload := []byte(`{"type":"message_chunk","text":"` + strings.Repeat("x", 990) + `"}`)
 	for minute := 1; minute <= 8; minute++ {
 		now = base.Add(time.Hour + time.Duration(minute)*time.Minute)
@@ -122,26 +124,21 @@ func (r retentionStorageRateRepository) RunAgentDeliveryRetirementBatch(ctx cont
 
 func finishRetentionStorageWorkerPass(t *testing.T, timers chan workerTimer, snapshots <-chan deliveryretention.Snapshot) deliveryretention.Snapshot {
 	t.Helper()
-	guard := time.NewTimer(10 * time.Second)
-	defer guard.Stop()
 	for {
+		snapshot := receiveWorkerSnapshot(t, snapshots)
+		if snapshot.ContinuationPending {
+			continue
+		}
 		select {
-		case snapshot := <-snapshots:
-			return snapshot
 		case timer := <-timers:
-			if timer.delay == time.Minute {
-				timers <- timer
-				return receiveWorkerSnapshot(t, snapshots)
+			if timer.delay != time.Minute {
+				t.Fatalf("unexpected idle timer: %s", timer.delay)
 			}
-			if timer.delay != 100*time.Millisecond {
-				t.Fatalf("unexpected in-pass timer: %s", timer.delay)
-			}
-			// Keep the production yield duration while advancing only the minute schedule virtually.
-			yield := time.NewTimer(timer.delay)
-			<-yield.C
-			timer.fire <- time.Now()
-		case <-guard.C:
-			t.Fatal("worker did not finish bounded pass")
+			// Leave the idle timer for the caller's next virtual-minute advance.
+			timers <- timer
+			return snapshot
+		case <-time.After(5 * time.Second):
+			t.Fatal("worker did not become idle after completing its pass")
 			return deliveryretention.Snapshot{}
 		}
 	}

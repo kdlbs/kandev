@@ -17,10 +17,10 @@ requirements:
 Platform owns retained delivery evidence; Tasks owns schema, lifecycle authenticates traffic, and orchestrator owns queue/workflow authority.
 Extends [delivery](durable-agent-delivery.md), [reattachment](durable-agent-reattachment.md) and [stream processing](durable-agent-stream-processing.md).
 The [checkpoint ADR](../../../decisions/2026-10-05-backend-delivery-retirement-checkpoints.md) records replay; the [barrier ADR](../../../decisions/2026-10-10-delivery-event-retention-barriers.md) defines scoped serialization.
-Journal policy, wire version and runtime flags remain unchanged.
-For this extension, contiguous checkpoints replace permanent generic event-effect retention. Other parent delivery boundaries remain authoritative.
+Contiguous checkpoints replace permanent generic receipts; parent delivery boundaries remain authoritative.
 
-Cache only SQL syntax; reload proofs after locks.
+[Payload proof](backend-agent-delivery-retention-payloads.md) and
+[control eligibility](delivery-stream-storage.md).
 
 ## Requirement mapping
 
@@ -134,7 +134,7 @@ Within one serialized receive transaction, apply this order:
 5. For an identical compact duplicate, return `inserted=false` and the committed projected cursor. Do not invoke projection or manufacture terminal effects.
 6. For a conflict, return the existing conflict family. For genuinely new later events, use normal contiguous receive and projection.
 
-A missing row above retirement but within received/projected range is corruption. Missing retained-generation cursor is `delivery_checkpoint_missing`, never zero.
+Missing received receipts are corruption. Missing cursors fail closed, except [verified bootstrap receipt](durable-agent-stream-processing.md#resumed-bootstrap-recovery).
 Projection checks compact duplicates/expired prefixes under shared serialization, including callers holding an event fetched before cleanup; no canonical/effect reapplication.
 
 Maintain `0 <= retired_sequence <= projected_sequence <= received_sequence`.
@@ -201,11 +201,11 @@ Update `internal/backendapp/e2e_reset.go` so fixture reset stops cleanup before 
 ## Worker budgets and indexes
 
 `internal/task/deliveryretention` owns one Start(ctx)/Stop worker and a shared repository batch operation.
-Initial work waits 60 seconds; startup does not scan payloads or hash all legacy rows.
+Start background work without an artificial delay; readiness does not await the sweep.
 Stop cancels, drains its WaitGroup and supports Stop-to-Start. Include package goleak coverage.
 Restore/reset must stop this worker before pool close.
 
-Acquire `maintenance.ForPool(pool).TryAcquire()` per batch; release before waiting. Visit retention, orphan and retirement once per pass; repeat phases that commit cleanup work. Recheck quiet phases next pass.
+Acquire `maintenance.ForPool(pool).TryAcquire()` per batch; release before waiting. Visit retention, orphan and retirement once per pass; repeat phases with committed cleanup or forward discovery. Recheck quiet phases next pass.
 Background event/prompt leases target 50 candidates under configured ceilings. Skip busy maintenance without reporting corruption. Offline execution owns exclusive backend access.
 Budgets apply to candidate scanning as well as changed rows:
 
@@ -215,8 +215,8 @@ Budgets apply to candidate scanning as well as changed rows:
 | Serialized payload bytes read/changed | 4 MiB | Use metadata lengths before loading payloads |
 | Admitted SQL work | 250 ms | Admit only with a full lease remaining; cancel/rollback on expiry |
 | Pass duration | 5 s | Do not start another batch after the deadline |
-| Between batches | 100 ms | Cancellable wait, no lock held |
-| Normal cadence | 60 s | Fair sweep across sessions, streams and deletion jobs |
+| Between batches | No sleep | Release locks, check cancellation |
+| Idle / productive cadence | 60 s / immediate | [Continuation rules](backend-agent-delivery-retention-throughput.md) |
 
 Use one 250 ms batch context for BEGIN and SQL; admit only when it fits remaining pass time. Never reset it after entry. SQLite native BEGIN can outlast cancellation up to its 5-second busy timeout plus scheduling overhead. Check cancellation before predicates; join entry/rollback before Stop or reuse. Measure admission separately.
 The byte budget fits 1 MiB events.
@@ -235,7 +235,7 @@ Add indexes after additive migrations:
 - Terminal lookup `(effect_type, submission_id, stream_id, sequence)` for current MAX and exact binding.
 - Cursors `(session_id, stream_id)` for bounded attribution; jobs `(phase, session_id, incarnation_id)` and unique identity.
 
-Check million-row plans on both engines. Hash and update progress once per stream.
+Check indexed query plans on both engines. Hash and update progress once per stream.
 MVCC/TOAST and WAL need ordinary maintenance; no worker VACUUM or full-table UPDATE.
 
 Transient lock/busy/serialization errors rollback and retry next pass with jittered cancellable backoff capped at five minutes.
@@ -253,7 +253,7 @@ Existing settlement proofs are unknown until normal reconciliation verifies them
 Old-schema dry-run returns retention schema unavailable, with no migrations or file creation.
 Offline execute takes its verified backup before schema initialization, then validates format and invokes the same predicates.
 
-SQLite's version-change `VACUUM INTO` snapshot is the pre-pruning rollback artifact. `persistence/provider.go` retains only the newest two backups; operators must preserve a verified external copy beyond that rotation.
+SQLite's verified upgrade snapshot is the rollback artifact; retain an external copy beyond its two-backup rotation. See [snapshot copy](sqlite-snapshot-copy.md).
 PostgreSQL has no automatic upgrade snapshot: public guidance requires a verified `pg_dump` before the pruning upgrade and a tested restore. No pg_dump runs at startup.
 Test interrupted schema initialization and repeated startup on old and fresh databases.
 Preserve the previous-stable fixture; add active, uncertain and partially settled records to an exact pre-retention fixture.

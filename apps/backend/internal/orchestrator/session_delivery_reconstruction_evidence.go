@@ -15,6 +15,7 @@ type reconstructionSelection struct {
 	submission *journal.Submission
 	stream     *journal.Stream
 	messageID  string
+	canonical  *models.AgentDeliverySubmission
 }
 
 func (s *Service) readReconstructionSelection(ctx context.Context, client deliveryRecordEvidenceClient, session *models.TaskSession, incarnationID string, generation int64, block *models.SessionRecoveryBlock) (*reconstructionSelection, string, error) {
@@ -34,7 +35,8 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	if !ok {
 		return blocked(deliveryIdentityMismatchReason)
 	}
-	if reason, err := s.validateReconstructionMessage(ctx, session, messageID); err != nil {
+	canonical, reason, err := s.reconstructionMessageAuthority(ctx, session, candidate, messageID)
+	if err != nil {
 		return nil, "", err
 	} else if reason != "" {
 		return blocked(reason)
@@ -49,7 +51,7 @@ func (s *Service) readReconstructionSelection(ctx context.Context, client delive
 	if selected == nil || journal.VerifyReconstructionSubmission(*selected, candidate) != nil {
 		return blocked(deliveryIdentityMismatchReason)
 	}
-	return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID}, "", nil
+	return &reconstructionSelection{evidence: evidence, submission: selected, stream: stream, messageID: messageID, canonical: canonical}, "", nil
 }
 
 func (s *Service) prepareReconstructionRequest(ctx context.Context, session *models.TaskSession, incarnationID string, generation int64, block *models.SessionRecoveryBlock, selection *reconstructionSelection) (*models.AgentDeliveryReconstructionRequest, string, error) {
@@ -83,10 +85,15 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	if !okHigh || !okAcknowledged || !okFirst {
 		return blocked(deliveryIdentityMismatchReason)
 	}
+	dispatchAttemptID := messageID
+	if selection.canonical != nil {
+		dispatchAttemptID = selection.canonical.DispatchAttemptID
+	}
 	payloadHash := selected.Hash
 	state := models.DeliverySubmissionInterruptedUnknown
 	request := &models.AgentDeliveryReconstructionRequest{
-		TaskID: session.TaskID, SessionID: session.ID, IncarnationID: incarnationID,
+		ExistingSubmissionOnly: selection.canonical != nil,
+		TaskID:                 session.TaskID, SessionID: session.ID, IncarnationID: incarnationID,
 		HarnessGeneration: generation, ExpectedExecutionID: session.AgentExecutionID,
 		ExpectedSessionState: session.State, ExpectedWorkspacePath: session.WorkspacePath,
 		NativeSessionID: current.NativeSessionID, MessageID: messageID, ExpectedBlock: *block,
@@ -95,7 +102,7 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 		Submission: models.AgentDeliverySubmission{
 			ID: selected.ID, SessionID: selected.SessionID, IncarnationID: selected.IncarnationID,
 			HarnessGeneration: int64(selected.HarnessGeneration), OwnerGeneration: int64(selected.HarnessGeneration),
-			DispatchAttemptID: messageID, PayloadHash: payloadHash, Payload: append([]byte(nil), selected.Payload...),
+			DispatchAttemptID: dispatchAttemptID, PayloadHash: payloadHash, Payload: append([]byte(nil), selected.Payload...),
 			State: state, Outcome: "reconstructed_unknown", CreatedAt: selected.CreatedAt, UpdatedAt: selected.UpdatedAt,
 		},
 		Recovery: models.AgentDeliveryRecovery{
@@ -115,5 +122,23 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	if existing, present := models.LoadAgentDeliveryRecovery(session.Metadata); present {
 		request.Recovery.Revision = existing.Revision
 	}
+	request.Recovery.HistoryGap = reconstructionHistoryGap(request, evidence)
 	return request, "", nil
+}
+
+func reconstructionHistoryGap(request *models.AgentDeliveryReconstructionRequest, evidence *agentruntime.DeliveryRecordEvidence) *models.AgentDeliveryHistoryGap {
+	if evidence.ProcessTerminated == nil || !*evidence.ProcessTerminated {
+		return nil
+	}
+	var received, projected int64
+	if cursor := request.ExpectedCursor; cursor != nil {
+		received, projected = cursor.ReceivedSequence, cursor.ProjectedSequence
+	}
+	gap := models.AgentDeliveryHistoryGap{FirstSequence: received + 1, LastSequence: request.SourceStreamHighWater,
+		ReceivedSequence: received, ProjectedSequence: projected}
+	if !gap.MatchesPrunedStream(received, projected, request.SourceStreamHighWater, request.SourceStreamAcknowledged, request.SourceStreamFirstRetained) {
+		return nil
+	}
+	request.Recovery.Message = "delivery_history_gap"
+	return &gap
 }

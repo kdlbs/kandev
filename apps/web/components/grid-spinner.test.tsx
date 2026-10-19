@@ -56,6 +56,7 @@ function installAnimate(implementation?: (...args: unknown[]) => Animation) {
 function makeAnimation() {
   let playState: AnimationPlayState = "running";
   return {
+    effect: {},
     get playState() {
       return playState;
     },
@@ -252,6 +253,7 @@ describe("GridSpinner lifecycle", () => {
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(animate).toHaveBeenCalledTimes(2);
     expect(firstAnimation.cancel).toHaveBeenCalledOnce();
+    expect(firstAnimation.effect).toBeNull();
     expect(cubes.every((cube) => cube.style.animation === "")).toBe(true);
 
     Object.defineProperty(document, "visibilityState", {
@@ -281,6 +283,7 @@ describe("GridSpinner lifecycle", () => {
 
     for (const animation of animations) {
       expect(animation.cancel).toHaveBeenCalledOnce();
+      expect(animation.effect).toBeNull();
     }
   });
 });

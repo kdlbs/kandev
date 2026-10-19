@@ -7,8 +7,8 @@ runs:
     - name: Download and verify OpenCode
       shell: bash
       env:
-        OPENCODE_VERSION: v1.18.0
-        OPENCODE_SHA256: a46af88b710248cc55719abd7f8fb482030494d6c9ed63f37aae7c6d6af4fc90
+        OPENCODE_VERSION: v1.19.3
+        OPENCODE_SHA256: 13a8fb2978302071b86f9d7e00da9c8895f9cd846978379c3bdc6a5333536c9b
       run: |
         set -euo pipefail
 

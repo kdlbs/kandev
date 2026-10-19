@@ -22,6 +22,8 @@ class ChangedGoLintTest(unittest.TestCase):
         self.calls = self.repo / "lint-calls.jsonl"
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         self.env.pop("SKIP", None)
+        for key in ("GOMEMLIMIT", "GOMAXPROCS", "GOFLAGS"):
+            self.env.pop(key, None)
         self.env["GO_LINT_TEST_CALLS"] = str(self.calls)
         self.env["PATH"] = f"{self.repo / 'bin'}{os.pathsep}{self.env['PATH']}"
         self.write(
@@ -33,7 +35,9 @@ class ChangedGoLintTest(unittest.TestCase):
                 import sys
 
                 with open(os.environ["GO_LINT_TEST_CALLS"], "a") as calls:
-                    calls.write(json.dumps({"cwd": os.getcwd(), "args": sys.argv[1:]}) + "\\n")
+                    calls.write(json.dumps({"cwd": os.getcwd(), "args": sys.argv[1:],
+                        "env": {key: os.environ.get(key) for key in
+                            ("GOMEMLIMIT", "GOMAXPROCS", "GOFLAGS")}}) + "\\n")
                 sys.exit(int(os.environ.get("GO_LINT_TEST_EXIT", "0")))
                 """),
         ).chmod(0o755)
@@ -90,7 +94,9 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.lint_calls(), [{
             "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m"],
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+                     "--concurrency=2"],
+            "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
         }])
         self.assertEqual(other.read_text(), unstaged)
 
@@ -111,8 +117,31 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertCountEqual(calls[0]["args"], [
             "run", ".", "./internal/first", "./internal/first/child", "./internal/second",
-            f"--new-from-rev={self.base}", "--timeout=5m",
+            f"--new-from-rev={self.base}", "--timeout=5m", "--concurrency=2",
         ])
+
+    def test_preserves_explicit_resource_overrides(self):
+        self.env.update({
+            "GOMEMLIMIT": "512MiB", "GOMAXPROCS": "4", "GOFLAGS": "-trimpath -p=1",
+        })
+
+        result = self.run_hook("--files", "apps/backend/internal/first/one.go")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call, = self.lint_calls()
+        self.assertEqual(call["env"], {
+            "GOMEMLIMIT": "512MiB", "GOMAXPROCS": "4", "GOFLAGS": "-trimpath -p=1",
+        })
+        self.assertIn("--concurrency=4", call["args"])
+
+    def test_bounds_build_workers_without_dropping_other_go_flags(self):
+        self.env["GOFLAGS"] = "-trimpath -tags=fts5"
+
+        result = self.run_hook("--files", "apps/backend/internal/first/one.go")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call, = self.lint_calls()
+        self.assertEqual(call["env"]["GOFLAGS"], "-trimpath -tags=fts5 -p=2")
 
     def test_non_go_commit_skips_lint(self):
         self.write("README.md", "Fixture\n")
@@ -170,7 +199,9 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.lint_calls(), [{
             "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m"],
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+                     "--concurrency=2"],
+            "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
         }])
 
 

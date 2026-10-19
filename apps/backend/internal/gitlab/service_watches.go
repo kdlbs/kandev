@@ -458,6 +458,10 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := store.CreateReviewWatch(ctx, rw); err != nil {
 		return nil, fmt.Errorf("create review watch: %w", err)
 	}
@@ -543,6 +547,10 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		return fmt.Errorf("invalid cleanup_policy: %q", *req.CleanupPolicy)
 	}
 	if err := validateWatchMaxInflight(rw.MaxInflightTasks); err != nil {
+		return err
+	}
+
+	if _, err := s.executorActorContext(ctx, rw.CreatedByUserID, rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
 		return err
 	}
 	return store.UpdateReviewWatch(ctx, rw)
@@ -687,6 +695,12 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if watch == nil {
 		return nil, fmt.Errorf("watch is nil")
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	if !watch.Enabled {
 		return nil, nil
 	}

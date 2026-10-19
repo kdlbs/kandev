@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-10-08
+updated: 2026-10-13
 owners:
   - tbd
 ---
@@ -20,6 +20,114 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | --- | --- |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .11-.15) | [Discussion reply draft settlement](#discussion-reply-draft-settlement) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
+
+## Pipeline job summary classification
+
+The [optional-manual plan](../../../plans/gitlab-optional-manual-ci/plan.md)
+records one locally implemented and verified pass. This section clarifies the existing
+Integrations-owned provider projection; it introduces no separate UI contract
+or architecture decision. Hosted CI, review and merge remain pending. This
+classification section describes the implemented behavior; unrelated migrated
+sections and the overall split design retain their existing draft lifecycle.
+
+### Provider evidence and classification boundary
+
+[GitLab job control](https://docs.gitlab.com/ci/jobs/job_control/#types-of-manual-jobs)
+defines optional manual jobs by `allow_failure=true` and states that they do not
+contribute to overall pipeline status. The
+[YAML reference](https://docs.gitlab.com/ci/yaml/#when) treats unstarted manual
+jobs as skipped/successful for pipeline progression. Kandev's existing pass
+bucket is an acceptance summary, already including skipped and allowed-failure
+jobs, rather than an execution verdict.
+
+`apps/backend/internal/gitlab/models_pipeline_jobs.go` owns
+`pipelineJobBucket` and `summarizePipelineJobs`. Add only the `manual` case:
+accepted when `AllowFailure` is true, otherwise in progress. Mirror that exact
+predicate in `bucketJob` in `apps/web/lib/gitlab/pipeline-buckets.ts`. Do not
+accept arbitrary nonterminal jobs merely because `allow_failure` is true.
+
+| Raw job status | `allow_failure=false` | `allow_failure=true` |
+| --- | --- | --- |
+| `success`, `skipped` | passed | passed |
+| `manual` | in_progress | passed |
+| `failed`, `canceled` | failed | passed |
+| `running`, `pending`, `created`, `scheduled`, unknown | in_progress | in_progress |
+
+`summarizePipelineJobs` retains `len(jobs)` as total and the same failing-job
+selection. `bucketJobCounts` retains one bucket per job; `groupJobsByStage`
+retains stage order, membership, empty-stage fallback and priority
+`failed > in_progress > passed`. The stage's click target remains the first
+linked job matching its derived bucket. No job object is rewritten.
+
+### API, cached and first-party display paths
+
+`PATClient.ListPipelineJobs` decodes `rawPipelineJob` into `PipelineJob`,
+including raw `Status`, `AllowFailure` and `WebURL`, across existing pages.
+`PATClient.GetMRStatus` calls `populatePipelineJobCounts`; `GetMRFeedback`
+calls the same summarizer and includes raw jobs on the latest pipeline.
+Their counts therefore agree without changes to endpoints or schemas.
+`GLabClient` embeds `PATClient`, so authenticated CLI connections use this
+same REST implementation; environment-token connections also resolve a PAT
+client. `MockClient` already uses the backend summarizer.
+
+`Service.syncTaskMRWithClient` and task linking project the status counts into
+`TaskMR.PipelineJobsTotal` and `PipelineJobsPass`; existing store upserts and
+HTTP/WS task-MR projections carry `pipeline_jobs_total` and
+`pipeline_jobs_pass`. Existing cached rows become correct on their next
+ordinary sync. Do not migrate rows, force refreshes, or change polling.
+`Controller.httpGetMRFeedback` returns live feedback at
+`GET /api/v1/gitlab/mrs/feedback` with the existing workspace/project/IID/host
+identity and permission checks.
+
+The real `MRCIPopover` owns its existing gated `useMRFeedback` read. When the
+latest pipeline contains jobs it uses `bucketJobCounts` for its pass-rate bar
+and `groupJobsByStage` for stage counts, icons and links. With no live job list,
+including before feedback or on an unavailable initial read, it uses the
+`TaskMR` aggregate counts and renders no invented stage rows. Live job data
+continues to take precedence over aggregate counts. Other feedback consumers
+continue to receive backend `jobs_passing`/`jobs_total` summaries.
+
+`latestPipelineStatusAndFailingJobs` continues to return the provider's raw
+pipeline status and the summarizer's failing jobs. Both blocking and optional
+manual jobs were already absent from that failing set; accepting the optional
+one does not change auto-fix inputs. Merge readiness and automation continue
+to use existing raw pipeline and MR gates, as documented by the
+[GitLab lifecycle ADR](../../../decisions/2026-08-01-gitlab-mr-lifecycle-notifications.md).
+No automation or readiness code changes are planned.
+
+### Shared desktop/phone outcome and evidence
+
+The fine-pointer `MRStatusChipPopover` and coarse-pointer
+`MRStatusChipDrawer` render the same `MRCIPopover` body. The existing drawer
+is the nearest shipped exemplar for the mobile skill's hover-to-drawer
+pattern. Shared normalization changes counts and existing status icons only;
+composition, scrolling, controls, navigation, breakpoints and copy remain as
+shipped. The mobile skill's pure state/data exception applies: meaningful
+unit and real-consumer component evidence satisfies parity without a new
+Playwright case or browser build. The plan's UI-01 preview describes the same
+data within both existing wrappers.
+
+Independently extend the backend bucket/summarizer tables and a disposable
+provider `httptest` API regression exercising real `GetMRStatus` and
+`GetMRFeedback`. Prove 2/2 for success plus optional manual, retain raw manual
+metadata, and use mixed jobs to prove real failures and active/blocking jobs
+survive classification. Extend frontend bucket/count/stage tests with the
+same policy controls and dominant-state URL selection.
+
+Add `apps/web/components/gitlab/mr-ci-popover.optional-manual.test.tsx` using
+real `StateProvider`, locales, Tooltip/Toast providers, `MRCIPopover`,
+`useMRFeedback`, API functions and classifier helpers. Stub only fetch
+transport, supplying production-shaped feedback/files/commits and automation
+reads. Assert the actual pass bar, stage counts, icon classes and native hrefs,
+including live precedence, aggregate fallback and mixed pending/failing
+stages. Settle held fetches and clean up timers/providers. Existing mocked
+popover tests do not establish the live read/consumer contract by themselves.
+
+No new dependencies, configuration, state ownership, persistence, permissions,
+telemetry, races, provider actions or public API shapes are introduced.
+Protected discovery source files are evidence only; permanent tests must be
+independently authored without reading, copying, importing or replaying them.
 
 ## Discussion reply draft settlement
 

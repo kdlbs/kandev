@@ -123,6 +123,7 @@ func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 func dropTaskRecoveryTablesForLegacyCutover(t *testing.T, db *sqlx.DB) {
 	t.Helper()
 	for _, table := range []string{
+		"task_environment_checkout_adoptions",
 		"task_environment_recovery_claims",
 		"task_environment_recovery_artifacts",
 		"task_environment_recovery_operations",

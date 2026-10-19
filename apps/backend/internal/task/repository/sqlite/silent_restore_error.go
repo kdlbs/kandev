@@ -20,6 +20,11 @@ func clearSilentRestoreUncertainError(metadata map[string]json.RawMessage, recov
 	lastError, exists := models.LoadLastAgentError(map[string]interface{}{
 		models.SessionMetaKeyLastAgentError: decoded,
 	})
+	if exists && recovery.HistoryGap != nil && lastError.Code == models.AgentDeliveryHistoryGapFailureCode &&
+		lastError.Details == models.AgentDeliveryHistoryGapFailureCode+": "+models.AgentDeliveryHistoryGapDetails(recovery.StreamID, recovery.HistoryGap.FirstSequence, recovery.HistoryGap.LastSequence) {
+		delete(metadata, models.SessionMetaKeyLastAgentError)
+		return
+	}
 	structuredSubmission, hasStructuredSubmission := decoded["delivery_submission_id"]
 	submissionMatches := false
 	if hasStructuredSubmission {

@@ -8,6 +8,7 @@ import type { Locator, Page } from "@playwright/test";
 type MotionWindow = Window & {
   __KANDEV_E2E_STORE__?: { getState(): AppState };
   __chatMotionSamples?: { text: string; opacity: number; kind: string }[];
+  __chatMotionAnimations?: Animation[];
   __chatScrollGeometryReads?: number;
 };
 
@@ -15,6 +16,7 @@ async function observeMotion(page: Page) {
   await page.evaluate(() => {
     const win = window as MotionWindow;
     win.__chatMotionSamples = [];
+    win.__chatMotionAnimations = [];
     const original = Element.prototype.animate;
     Element.prototype.animate = function (...args: Parameters<Element["animate"]>) {
       const animation = original.apply(this, args);
@@ -22,6 +24,7 @@ async function observeMotion(page: Page) {
         this.hasAttribute("data-chat-motion-item") ||
         this.hasAttribute("data-chat-text-motion")
       ) {
+        win.__chatMotionAnimations!.push(animation);
         win.__chatMotionSamples!.push({
           text: this.textContent ?? "",
           opacity: Number(getComputedStyle(this).opacity),
@@ -201,6 +204,20 @@ export function chatMotionScenarios(mobile: boolean) {
     await expect(session.activeChat().locator("[data-chat-text-motion]")).toHaveCount(0);
 
     await testPage.emulateMedia({ reducedMotion: "reduce" });
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => {
+          const animations = (window as MotionWindow).__chatMotionAnimations!;
+          return (
+            animations.length > 0 && animations.every((animation) => animation.effect === null)
+          );
+        }),
+      )
+      .toBe(true);
+    await expect(session.activeChat().getByText("new suffix", { exact: true })).toHaveCSS(
+      "opacity",
+      "1",
+    );
     await testPage.evaluate(() => {
       (window as MotionWindow).__chatMotionSamples = [];
     });

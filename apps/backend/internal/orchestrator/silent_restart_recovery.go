@@ -44,16 +44,34 @@ func (s *Service) startSilentRestoreRecovery(parent context.Context) {
 	ctx, cancel := context.WithCancel(parent)
 	s.silentRestoreMu.Lock()
 	if s.silentRestoreStopped || s.silentRestoreCancel != nil {
+		if !s.silentRestoreStopped && s.silentRestoreWake != nil {
+			select {
+			case s.silentRestoreWake <- struct{}{}:
+			default:
+			}
+		}
 		s.silentRestoreMu.Unlock()
 		cancel()
 		return
 	}
 	s.silentRestoreCancel = cancel
+	wake := make(chan struct{}, 1)
+	s.silentRestoreWake = wake
 	s.silentRestoreWorkers.Add(1)
 	s.silentRestoreMu.Unlock()
 	go func() {
 		defer s.silentRestoreWorkers.Done()
-		s.runSilentRestoreRecoveryPass(ctx, store)
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for ctx.Err() == nil {
+			s.runSilentRestoreRecoveryPass(ctx, store)
+			select {
+			case <-ctx.Done():
+				return
+			case <-wake:
+			case <-ticker.C:
+			}
+		}
 	}()
 }
 
@@ -62,6 +80,7 @@ func (s *Service) stopSilentRestoreRecovery() {
 	s.silentRestoreStopped = true
 	cancel := s.silentRestoreCancel
 	s.silentRestoreCancel = nil
+	s.silentRestoreWake = nil
 	s.silentRestoreMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -129,6 +148,11 @@ func (s *Service) ensureSilentRestoreCandidate(
 	checkpoint models.SilentRestoreCheckpoint,
 	inputs *silentRestoreInputs,
 ) error {
+	ownerCtx, err := s.revalidateSilentRestoreInputs(ctx, inputs, checkpoint)
+	if err != nil {
+		return err
+	}
+	ctx = ownerCtx
 	if checkpoint.CandidateExecutionID == "" {
 		expected := checkpoint
 		next := expected
@@ -385,6 +409,12 @@ func (s *Service) loadSilentRestoreSourceExecution(
 		return nil, errors.New("candidate execution row exists before its launch checkpoint")
 	}
 	if running.AgentExecutionID != inputs.recovery.AgentExecutionID {
+		if inputs.recovery.HistoryGap != nil {
+			if err := s.provePrunedDeliveryReplacementDead(running, inputs.recovery.SessionID); err != nil {
+				return nil, err
+			}
+			return running, nil
+		}
 		return nil, errors.New("session execution does not match either pinned identity")
 	}
 	return running, nil
@@ -394,6 +424,10 @@ func (s *Service) proveSilentRestoreSourceDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 ) error {
+	// Row selection cannot authorize retirement after replacement liveness changes.
+	if recovery.HistoryGap != nil && running != nil && running.AgentExecutionID != recovery.AgentExecutionID {
+		return s.provePrunedDeliveryReplacementDead(running, recovery.SessionID)
+	}
 	state := models.ProcessLivenessUnknown
 	if prober, ok := s.agentManager.(rowLivenessProber); ok {
 		state = prober.RowLiveness(running)

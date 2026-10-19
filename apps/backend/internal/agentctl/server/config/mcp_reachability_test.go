@@ -3,6 +3,7 @@ package config
 import (
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"testing"
 )
@@ -25,6 +26,9 @@ func TestMCPReachableHostUsesMatchingLoopbackForWildcardListeners(t *testing.T) 
 }
 
 func TestNewInstanceConfigMCPURLsReachConfiguredListener(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a non-loopback test listener prompts for Windows Firewall access from each temporary test binary")
+	}
 	listener := listenOnNonLoopbackIPv4(t)
 	host, portText, err := net.SplitHostPort(listener.Addr().String())
 	if err != nil {

@@ -4,12 +4,32 @@ import type {
   ControlSetting,
   SetupCoordinatorRequest,
 } from "@/lib/api/domains/coordinator-api";
-import { CONTROL_ACTIONS, MAX_WATCHED_BOARDS, type WatchesDraft } from "./control-draft";
+import {
+  CONTROL_ACTIONS,
+  MAX_WATCHED_BOARDS,
+  MAX_WATCHED_PROJECTS,
+  projectsRequest,
+  type ProjectsDraft,
+  type WatchesDraft,
+} from "./control-draft";
 import { EMPTY_GOAL_FORM, type GoalFormState } from "./goal-form";
 import { COORDINATOR_NAME_MAX_LENGTH } from "./validate-form";
 
-export const SETUP_STEPS = ["identity", "watches", "goal", "context", "may-do", "review"] as const;
+export const SETUP_STEPS = [
+  "identity",
+  "watches",
+  "projects",
+  "goal",
+  "context",
+  "may-do",
+  "review",
+] as const;
 export type SetupStepId = (typeof SETUP_STEPS)[number];
+
+/** The steps shown: Projects exists only while the phase 3.1 flag is effective. */
+export function activeSetupSteps(projectsOffered: boolean): SetupStepId[] {
+  return SETUP_STEPS.filter((step) => step !== "projects" || projectsOffered);
+}
 
 export const GOAL_NAME_MAX = 120;
 export const GOAL_CRITERION_MAX = 200;
@@ -21,7 +41,12 @@ export type SetupState = {
   name: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskAgentProfileId: string;
+  taskExecutorProfileId: string;
+  /** A field the manager changed keeps its value until the setup is left. */
+  taskPairTouched: { agent: boolean; executor: boolean };
   watches: WatchesDraft;
+  projects: ProjectsDraft;
   goal: GoalFormState;
   context: string;
   actions: Record<ControlAction, ControlSetting>;
@@ -40,7 +65,11 @@ export function initialSetupState(defaults: {
     name: "",
     agentProfileId: defaults.agentProfileId,
     executorProfileId: defaults.executorProfileId,
+    taskAgentProfileId: "",
+    taskExecutorProfileId: "",
+    taskPairTouched: { agent: false, executor: false },
     watches: { scope: "all", workflowIds: [] },
+    projects: { scope: "all", entries: [], includeNoRepository: false },
     goal: EMPTY_GOAL_FORM,
     context: "",
     actions,
@@ -61,8 +90,12 @@ const KEY = {
   name: "coordinator:setupErrorName",
   agent: "coordinator:setupErrorAgentProfile",
   executor: "coordinator:setupErrorExecutor",
+  taskAgent: "coordinator:setupErrorTaskAgentProfile",
+  taskExecutor: "coordinator:setupErrorTaskExecutor",
   watches: "coordinator:watchesKeepOneBoard",
   watchesMax: "coordinator:watchesAtMost",
+  projects: "coordinator:watchesKeepOneProject",
+  projectsMax: "coordinator:watchesProjectsAtMost",
   goalName: "coordinator:setupErrorGoalName",
   goalDue: "coordinator:setupErrorGoalDue",
   criteriaMax: "coordinator:setupErrorCriteriaMax",
@@ -76,6 +109,8 @@ export function identityErrors(state: SetupState): SetupErrors {
   if (name === "" || length(name) > COORDINATOR_NAME_MAX_LENGTH) errors.name = KEY.name;
   if (state.agentProfileId === "") errors.agent_profile_id = KEY.agent;
   if (state.executorProfileId === "") errors.executor_profile_id = KEY.executor;
+  if (state.taskAgentProfileId === "") errors.task_agent_profile_id = KEY.taskAgent;
+  if (state.taskExecutorProfileId === "") errors.task_executor_profile_id = KEY.taskExecutor;
   return errors;
 }
 
@@ -84,6 +119,14 @@ export function watchesErrors(state: SetupState): SetupErrors {
   if (scope === "all") return {};
   if (workflowIds.length === 0) return { "watches.workflow_ids": KEY.watches };
   if (workflowIds.length > MAX_WATCHED_BOARDS) return { "watches.workflow_ids": KEY.watchesMax };
+  return {};
+}
+
+export function projectsErrors(state: SetupState): SetupErrors {
+  const { scope, entries, includeNoRepository } = state.projects;
+  if (scope === "all") return {};
+  if (entries.length === 0 && !includeNoRepository) return { "projects.entries": KEY.projects };
+  if (entries.length > MAX_WATCHED_PROJECTS) return { "projects.entries": KEY.projectsMax };
   return {};
 }
 
@@ -128,6 +171,8 @@ export function stepErrors(step: SetupStepId, state: SetupState): SetupErrors {
       return identityErrors(state);
     case "watches":
       return watchesErrors(state);
+    case "projects":
+      return projectsErrors(state);
     case "goal":
       return goalErrors(state.goal);
     case "context":
@@ -147,6 +192,9 @@ export function isSetupValid(state: SetupState): boolean {
 
 /** Skip clears the step's values. */
 export function skipStep(step: SetupStepId, state: SetupState): SetupState {
+  if (step === "projects") {
+    return { ...state, projects: { scope: "all", entries: [], includeNoRepository: false } };
+  }
   if (step === "goal") return { ...state, goal: EMPTY_GOAL_FORM };
   if (step === "context") return { ...state, context: "" };
   return state;
@@ -157,6 +205,8 @@ export function buildSetupRequest(state: SetupState): SetupCoordinatorRequest {
     name: state.name.trim(),
     agent_profile_id: state.agentProfileId,
     executor_profile_id: state.executorProfileId,
+    task_agent_profile_id: state.taskAgentProfileId,
+    task_executor_profile_id: state.taskExecutorProfileId,
     context: state.context.trim(),
     watches:
       state.watches.scope === "all"
@@ -164,6 +214,7 @@ export function buildSetupRequest(state: SetupState): SetupCoordinatorRequest {
         : { scope: "selected", workflow_ids: [...state.watches.workflowIds] },
     policy: { actions: { ...state.actions } },
   };
+  if (state.projects.scope === "selected") request.projects = projectsRequest(state.projects);
   if (!isGoalEmpty(state.goal)) {
     request.goal = {
       name: state.goal.name.trim(),
@@ -193,7 +244,14 @@ export type SetupServerError = {
   code: string | null;
 };
 
-const SERVER_STEPS: readonly string[] = ["identity", "watches", "goal", "context", "may-do"];
+const SERVER_STEPS: readonly string[] = [
+  "identity",
+  "watches",
+  "projects",
+  "goal",
+  "context",
+  "may-do",
+];
 
 /** A 400 carrying `step` is a setup validation failure; any other answer is not. */
 export function setupServerError(error: unknown): SetupServerError | null {
@@ -213,6 +271,8 @@ export function gotRefusal(error: unknown): boolean {
 }
 
 export const WATCHES_PATHS: readonly SetupFieldPath[] = ["watches.scope", "watches.workflow_ids"];
+
+export const PROJECTS_PATHS: readonly SetupFieldPath[] = ["projects.scope", "projects.entries"];
 
 export function actionPath(action: ControlAction): SetupFieldPath {
   return `policy.actions.${action}`;

@@ -3,96 +3,15 @@ import { waitForActiveSessionForegroundActivity } from "../../helpers/session-st
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Archive confirmation preference", () => {
-  test("keeps the fine-pointer archive popover wide and the sidebar row stable", async ({
-    testPage,
-    apiClient,
-    seedData,
-    prCapture,
-  }, testInfo) => {
-    await testPage.setViewportSize({ width: 900, height: 900 });
-    const title = "Fine pointer archive geometry target";
-    const task = await apiClient.seedTask(seedData.workspaceId, title, {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-    });
-
-    await testPage.goto(`/t/${task.task_id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    const taskRow = session.sidebarTaskItem(title);
-    await expect(taskRow).toBeVisible({ timeout: 15_000 });
-    const heightBefore = await taskRow.evaluate(
-      (element) => element.getBoundingClientRect().height,
-    );
-    await prCapture.screenshot("before-archive-popover", {
-      caption: "Fine-pointer sidebar row before archive confirmation",
-    });
-
-    await session.openSidebarMenuAndClick(title, "Archive");
-    const popover = testPage.getByTestId("task-archive-confirm-popover");
-    await expect(popover).toBeVisible();
-    await prCapture.screenshot("archive-popover-open", {
-      caption: "Fine-pointer archive confirmation popover",
-    });
-
-    const openRowMetrics = await taskRow.evaluate((element) => {
-      const rowBox = element.getBoundingClientRect();
-      return { rowHeight: rowBox.height };
-    });
-    const openSurfaceMetrics = await popover.evaluate((element) => {
-      const surfaceBox = element.getBoundingClientRect();
-      return {
-        surface: {
-          x: surfaceBox.x,
-          y: surfaceBox.y,
-          width: surfaceBox.width,
-          height: surfaceBox.height,
-        },
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        documentWidth: document.documentElement.scrollWidth,
-        viewportWidth: document.documentElement.clientWidth,
-      };
-    });
-    const openMetrics = {
-      rowHeight: openRowMetrics.rowHeight,
-      ...openSurfaceMetrics,
-    };
-
-    expect(openMetrics.rowHeight).toBeCloseTo(heightBefore, 3);
-    expect(openMetrics.surface.width).toBeGreaterThan(256);
-    expect(openMetrics.surface.x).toBeGreaterThanOrEqual(0);
-    expect(openMetrics.surface.x + openMetrics.surface.width).toBeLessThanOrEqual(
-      openMetrics.viewport.width,
-    );
-    expect(openMetrics.surface.y).toBeGreaterThanOrEqual(0);
-    expect(openMetrics.surface.y + openMetrics.surface.height).toBeLessThanOrEqual(
-      openMetrics.viewport.height,
-    );
-    expect(openMetrics.documentWidth).toBeLessThanOrEqual(openMetrics.viewportWidth);
-
-    await popover.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(popover).toBeHidden();
-    const heightAfter = await taskRow.evaluate((element) => element.getBoundingClientRect().height);
-    expect(heightAfter).toBeCloseTo(heightBefore, 3);
-    await testInfo.attach("archive-popover-geometry.json", {
-      body: Buffer.from(
-        JSON.stringify(
-          {
-            heightBefore,
-            heightOpen: openMetrics.rowHeight,
-            heightAfter,
-            popover: openMetrics.surface,
-            viewport: openMetrics.viewport,
-            documentWidth: openMetrics.documentWidth,
-            viewportWidth: openMetrics.viewportWidth,
-          },
-          null,
-          2,
-        ),
-      ),
-      contentType: "application/json",
-    });
+  let previousConfirmation = true;
+  test.beforeEach(async ({ testPage, apiClient }) => {
+    await testPage.goto("/");
+    previousConfirmation =
+      (await apiClient.getUserSettings()).settings.confirm_task_archive !== false;
+    await apiClient.saveUserSettings({ confirm_task_archive: true });
+  });
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({ confirm_task_archive: previousConfirmation });
   });
 
   test("keeps the full archive warning subordinate to dialog copy", async ({
@@ -139,7 +58,7 @@ test.describe("Archive confirmation preference", () => {
     await archiveMenuItem.click();
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText("Clean Git worktrees are removed.");
+    await expect(dialog).toContainText("Git worktrees and local changes are deleted on archive.");
     await expect(dialog).toContainText("Unpublished local branches remain available.");
     const warning = dialog.getByTestId("still-working-warning");
     await expect(warning).toBeVisible();

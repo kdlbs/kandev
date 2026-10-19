@@ -107,9 +107,15 @@ function requestLocalRecoveryModel(
 ): ActiveSessionRecovery | null {
   if (!sessionId) return null;
   if (recovery?.noticeKind === "inspection_busy") {
-    return { sessionId, kind: "recovery_inspection_busy", summary: recovery.notice ?? undefined };
+    return {
+      sessionId,
+      kind: "recovery_inspection_busy",
+      summary: recovery.notice ?? undefined,
+      requestLocal: true,
+    };
   }
-  if (recovery?.error) return { sessionId, kind: "generic", summary: recovery.error };
+  if (recovery?.error)
+    return { sessionId, kind: "generic", summary: recovery.error, requestLocal: true };
   return null;
 }
 

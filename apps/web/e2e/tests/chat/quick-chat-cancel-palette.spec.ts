@@ -43,7 +43,8 @@ function commandDialog(page: Page) {
   return page.locator('[role="dialog"]:has([cmdk-input])').last();
 }
 
-test.describe.serial("Quick Chat cancellation palette and composer", () => {
+test.describe("Quick Chat cancellation palette and composer", () => {
+  test.describe.configure({ retries: 0 });
   test.afterEach(async ({ backend }, testInfo) => {
     if (testInfo.status === testInfo.expectedStatus) return;
     await testInfo.attach("quick-chat-cancellation-backend.log", {
@@ -118,12 +119,13 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     cancellation.arm(quickSessionId);
     try {
       await cancel.click();
-      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
       await expect(cancel).toBeDisabled();
     } finally {
       cancellation.release();
     }
-    await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
+    // A fresh session advances its projection for acceptance and settlement.
+    // Finish before the detached workload's natural 60-second completion.
+    await waitForQuickChatSessionSettled(testPage, quickSessionId, 20_000, 2);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
   });
 
@@ -168,6 +170,7 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
+    await waitForAgentMessage(apiClient, quickSessionId, "Done. Emitted 2 messages", 30_000);
     await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
 

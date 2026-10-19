@@ -56,7 +56,7 @@ func Inspect(identity Identity) (State, error) {
 		return StateUnknown, ErrUnverifiableIdentity
 	}
 	stat, err := readProcStat(identity.PID)
-	if errors.Is(err, os.ErrNotExist) {
+	if processNoLongerExists(err) {
 		return StateExited, nil
 	}
 	if err != nil {
@@ -191,7 +191,7 @@ func processesInOwnedSession(sessionID int, rootStartTime uint64) ([]ownedProces
 			continue
 		}
 		stat, err := readProcStat(pid)
-		if errors.Is(err, os.ErrNotExist) {
+		if processNoLongerExists(err) {
 			continue
 		}
 		if err != nil {
@@ -217,7 +217,7 @@ func signalOwnedProcesses(processes []ownedProcess, sessionID int, signal syscal
 			return fmt.Errorf("open process identity for pid %d: %w", process.pid, err)
 		}
 		stat, statErr := readProcStat(process.pid)
-		if errors.Is(statErr, os.ErrNotExist) {
+		if processNoLongerExists(statErr) {
 			_ = unix.Close(pidfd)
 			continue
 		}
@@ -275,4 +275,9 @@ func OwnedSessionTerminated(identity Identity) (bool, error) {
 	}
 	processes, err := processesInOwnedSession(identity.SessionID, start)
 	return len(processes) == 0, err
+}
+
+// Procfs can return ESRCH when a process exits after its stat file was opened.
+func processNoLongerExists(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH)
 }

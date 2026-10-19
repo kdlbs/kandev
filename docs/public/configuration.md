@@ -101,7 +101,7 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
 
-`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
+`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
 ### Default SQLite continuity
 
@@ -213,6 +213,8 @@ Environment values override YAML. These values do not configure the agentctl jou
 | `tasks.deliveryRetention.interval` | `KANDEV_TASK_DELIVERY_RETENTION_INTERVAL` | `1m` | `10s` to `1h` |
 | `tasks.deliveryRetention.batchRows` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_ROWS` | `200` | 1 to 200 |
 | `tasks.deliveryRetention.batchBytes` | `KANDEV_TASK_DELIVERY_RETENTION_BATCH_BYTES` | `4194304` | 1048576 to 4194304 |
+
+`interval` controls idle rechecks after work is exhausted or maintenance is busy. Productive cleanup continues immediately without inter-batch or inter-pass sleeps.
 
 `batchRows` sets a candidate ceiling. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings. Other cleanup batches can use the configured ceiling.
 
@@ -350,6 +352,13 @@ Active and closed backend files use at most 256 MiB in total. Kandev removes the
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
+
+Managed agentctl children use `AGENTCTL_LOG_FORMAT=json` so their stdout
+records pass through the backend relay's privacy projection. Approved probe
+diagnostics remain in the message; unrelated structured fields are omitted. The
+backend overrides an inherited value. `AGENTCTL_LOG_FORMAT` still configures
+agentctl processes started independently; it does not change the backend's
+`logging.format` setting.
 
 ### Repository, worktree, and clone paths
 

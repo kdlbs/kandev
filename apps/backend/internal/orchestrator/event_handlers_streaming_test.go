@@ -1786,6 +1786,10 @@ func TestPublishPromptUsage_NonTerminalCompletionZeroGenerationUsesReadyTurnSnap
 	require.NoError(t, err)
 	require.Nil(t, active, "handleAgentReady must have already closed the turn")
 
+	// Readiness can release a queued successor before the async complete frame.
+	successor, err := svc.turnService.StartTurn(ctx, "s1")
+	require.NoError(t, err)
+
 	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:      "t1",
 		SessionID:   "s1",
@@ -1795,6 +1799,11 @@ func TestPublishPromptUsage_NonTerminalCompletionZeroGenerationUsesReadyTurnSnap
 			Usage: &streams.PromptUsage{InputTokens: 10, OutputTokens: 5},
 		},
 	})
+
+	active, err = svc.turnService.GetActiveTurn(ctx, "s1")
+	require.NoError(t, err)
+	require.NotNil(t, active, "late native completion must preserve the successor")
+	require.Equal(t, successor.ID, active.ID)
 
 	usageEvent := findPromptUsageEvent(t, eb)
 	require.NotNil(t, usageEvent, "expected a session_prompt_usage.updated event to be published")

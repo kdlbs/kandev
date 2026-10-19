@@ -176,7 +176,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
-	sort := usermodels.NormalizeTasksListSort(c.Query("sort"))
+	sort := usermodels.TasksListApiSort(c.Query("sort"))
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
@@ -683,6 +683,15 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 	}
 	resp, err := h.orchestrator.EnsureSession(c.Request.Context(), taskID)
 	if err != nil {
+		if errors.Is(err, models.ErrWorkspaceReuseUnsupported) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       models.WorkspaceReuseUnsupportedMessage,
+				"reason":      "workspace_reuse_unsupported",
+				"recoverable": true,
+				"retry":       models.WorkspaceReuseUnsupportedRetry,
+			})
+			return
+		}
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}

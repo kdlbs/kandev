@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
@@ -207,4 +208,27 @@ func TestGuard_ProposeKindDeniedByPolicyRecordsItsOwnClass(t *testing.T) {
 	guarded := f.call(t, f.ctxFor(f.binding(names...), true), coordinator.ActionProposeMove)
 	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 	require.Equal(t, []struct{ Class, Reason string }{{"move", "policy_denied"}}, f.refusals(t))
+}
+
+// A dream episode's refusals are written nowhere: no activity row appears
+// under the real coordinator for any action outside the episode's one tool.
+func TestGuard_DreamEpisodeRefusalsWriteNoActivityRow(t *testing.T) {
+	f := newPhase2GuardFixture(t)
+	ctx := context.Background()
+	principal := coordinatorTestPrincipal(f.c.WorkspaceID)
+	now := time.Now().UTC()
+	d := coordinator.Dream{ID: coordinator.NewDreamID(), CoordinatorID: f.c.ID, WindowStart: now.Add(-time.Hour),
+		WindowEnd: now, StartedAt: now, Model: "m"}
+	held, err := f.store.InsertRunningDream(ctx, d)
+	require.NoError(t, err)
+	require.True(t, held)
+	bound, err := f.store.SetDreamEpisodeTask(ctx, d.ID, principal.CallerTaskID)
+	require.NoError(t, err)
+	require.True(t, bound)
+
+	dreamCtx := f.ctxFor(f.binding("list_coordinator_turns_kandev"), true)
+	for _, action := range []string{coordinator.ActionProposeTask, ws.ActionMCPListTasks, "coordinator.propose_message"} {
+		assertWSError(t, f.call(t, dreamCtx, action), ws.ErrorCodeUnknownAction)
+	}
+	require.Empty(t, f.refusals(t))
 }

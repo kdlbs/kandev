@@ -599,6 +599,9 @@ test.describe("Markdown preview", () => {
       { sid: sessionId, pathName: fileName, codeContent: wrappedLine },
     );
 
+    // Let the new file's Git update activate Changes before choosing Files.
+    await session.clickTab("Changes");
+    await expect(session.changes.locator(`[data-changes-file="${fileName}"]`)).toBeVisible();
     await openFileInCode(testPage, session, fileName);
     await expect(testPage.locator(".view-line").first()).toContainText("wrapped-word-00", {
       timeout: 10_000,

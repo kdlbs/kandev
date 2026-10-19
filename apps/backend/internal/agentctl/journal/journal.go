@@ -154,6 +154,7 @@ type Submission struct {
 type Journal struct {
 	mu                       sync.RWMutex
 	db                       *bolt.DB
+	pageSize                 int64
 	config                   Config
 	diskCapacityMu           sync.Mutex
 	diskCapacityAt           time.Time
@@ -194,7 +195,8 @@ func Open(config Config) (journal *Journal, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("open delivery journal: %w", err)
 	}
-	journal = &Journal{db: db, config: config}
+	// Page size is immutable; Info also reads the mapping, so capture it before concurrent writes.
+	journal = &Journal{db: db, pageSize: int64(db.Info().PageSize), config: config}
 	if config.ReadOnly {
 		err = journal.validateReadOnly()
 	} else {
@@ -419,6 +421,7 @@ func (j *Journal) Compact(ctx context.Context) error {
 		reopened, reopenErr := bolt.Open(j.config.Path, 0o600, &bolt.Options{Timeout: j.config.OpenTimeout, NoSync: false})
 		if reopenErr == nil {
 			j.db = reopened
+			j.pageSize = int64(reopened.Info().PageSize)
 		}
 		return errors.Join(fmt.Errorf("replace compacted journal: %w", err), reopenErr)
 	}
@@ -428,6 +431,7 @@ func (j *Journal) Compact(ctx context.Context) error {
 		return fmt.Errorf("reopen compacted journal: %w", err)
 	}
 	j.db = reopened
+	j.pageSize = int64(reopened.Info().PageSize)
 	return nil
 }
 

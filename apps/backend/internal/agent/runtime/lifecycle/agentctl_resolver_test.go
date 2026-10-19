@@ -882,8 +882,11 @@ func TestAgentctlResolverLinuxAMD64BadPrimaryEnvDoesNotUseLegacyFallback(t *test
 
 func TestAgentctlResolverRemoteBinaryNotFoundErrorNamesPlatformAndEnv(t *testing.T) {
 	t.Setenv("KANDEV_AGENTCTL_DARWIN_AMD64_BINARY", "")
+	t.Chdir(t.TempDir())
 
-	resolver := NewAgentctlResolver(newResolverTestLogger(t))
+	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
+		BundleDir: t.TempDir(),
+	})
 	_, err := resolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "darwin", GOARCH: "amd64"})
 	if err == nil {
 		t.Fatal("expected error")

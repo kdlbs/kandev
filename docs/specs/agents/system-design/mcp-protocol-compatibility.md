@@ -40,8 +40,9 @@ line that supports MCP `2026-07-28`. The first planned target is
 `v1.0.0-beta.1`. Implementation must re-check for a newer compatible v1
 release before it changes `go.mod`.
 
-The shared server uses the SDK's dual-era request handling. Kandev does not
-fork protocol parsing or maintain a local modern-protocol shim.
+The shared server uses the SDK's dual-era request handling. A narrow HTTP
+adapter supplements missing protocol metadata on notifications as described
+below; request parsing, validation, and dispatch remain SDK-owned.
 
 ## Routes and profiles
 
@@ -136,9 +137,53 @@ legacy initialization.
 ## Failure behavior
 
 Kandev returns the SDK's protocol error for missing, malformed, or unsupported
-modern metadata. The server does not downgrade the same invalid request to the
-legacy handler. A client can make another request through its own documented
-negotiation or fallback path.
+modern request metadata. The server does not downgrade the same invalid request
+to the legacy handler. A client can make another request through its own
+documented negotiation or fallback path.
+
+### Header-only notifications
+
+Both `/mcp` route registrations use `streamableHTTPHandler` in
+`internal/mcp/server/notification_protocol_compatibility.go`. For a POST with a
+supported modern protocol header, it supplements a single JSON-RPC 2.0
+notification only when the `id` member is absent and `params._meta` is absent.
+An absent `params` object is created; an existing object retains its fields.
+The adapter supplies only `io.modelcontextprotocol/protocolVersion`, using the
+header value. It does not infer client identity or capabilities.
+
+When `Mcp-Method` declares an ordinary request method, the route passes the
+original body straight to the SDK without buffering it in the adapter. A missing
+method header still allows notification compatibility; the SDK continues to
+validate the headers required by ordinary requests.
+
+The adapter preserves all messages containing an `id` member, including
+`id: null`, and all explicitly supplied metadata, including malformed or
+conflicting values. Invalid JSON, batches, invalid parameter shapes, and
+unsupported or legacy versions keep the SDK path. Raw JSON fields preserve
+numeric precision, and unchanged messages retain their original body bytes.
+The adapter reads the body only when the SDK first reads it, so SDK transport
+checks such as DNS-rebinding protection run before the body is consumed.
+Body read errors are forwarded to the SDK as read errors.
+Closing the lazy body delegates to the original body and preserves its error.
+Differently cased core fields or metadata keys are left untouched because the
+SDK's struct decoder can recognize those spellings; supplementation must not
+introduce competing fields or change the SDK's validation result.
+This includes Unicode simple-fold equivalents recognized by Go's JSON decoder.
+Duplicate members in the envelope or `params` object also leave the entire body
+untouched. A later duplicate must not erase earlier explicit metadata or
+malformed values before the SDK validates them. Nested values remain raw JSON.
+
+Every message still reaches the SDK's transport checks and notification
+dispatcher. An accepted notification returns an empty 202 through the SDK;
+there is no direct acceptance shortcut. Authentication, task/session binding,
+DNS-rebinding protection, and attachment evidence remain at their existing
+boundaries. Notification acceptance does not imply tool loading or tool use.
+
+This exception supports clients that emit a header-only notification when
+restoring a native conversation. Kandev does not consume roots updates. The
+[modern transport specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#sending-messages)
+defines notification acceptance but does not define notification POST header
+requirements. The interoperability exception does not relax tool requests.
 
 Failure in one protocol era does not disable the other era. The endpoint does
 not use a runtime feature flag because the SDK selects the era per request and

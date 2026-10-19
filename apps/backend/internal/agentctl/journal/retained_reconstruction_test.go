@@ -336,3 +336,47 @@ func retainedReconstructionFixture(t *testing.T, payload []byte) (string, Submis
 	}
 	return root, candidate
 }
+
+func TestRetainedEvidenceReadsRetiredUnknownWithoutChangingJournal(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := CheckStorage(root, "session").Path
+	j, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"text":"historical prompt"}`)
+	_, err = j.PutSubmission(ctx, Submission{ID: "retired", SessionID: "session", IncarnationID: "incarnation",
+		HarnessGeneration: 1, StreamID: "old-stream", Hash: SubmissionHash(payload), Payload: payload, State: SubmissionInterruptedUnknown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = j.RetireSubmission(ctx, "retired", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := ReadRetainedReconstructionEvidence(ctx, RetainedReconstructionEvidenceRequest{
+		Root: root, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, RetiredSubmissionID: "retired"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.RetiredSubmission == nil || !evidence.RetiredSubmission.Retired || len(evidence.RetiredSubmission.Payload) != 0 {
+		t.Fatalf("retirement proof must preserve the unknown outcome and omit payload: %+v", evidence.RetiredSubmission)
+	}
+	if len(evidence.Descriptor.Submissions) != 0 {
+		t.Fatal("retired history must remain outside unresolved work")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("retirement inspection mutated the journal")
+	}
+}

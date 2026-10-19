@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -481,6 +482,9 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
+	}
 	return &sessionRecoveryRequiredError{Block: block}
 }
 
@@ -548,12 +552,19 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err != nil {
 		return fmt.Errorf("load session recovery block for resolution: %w", err)
 	}
-	resolved, err := store.ResolveSessionRecoveryBlock(ctx, block.ID, action, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
@@ -637,6 +648,9 @@ func (s *Service) recordSessionRecoveryBlock(
 	block.State = models.RecoveryBlockOpen
 	if block.ConsumerReference == "" {
 		block.ConsumerReference = consumer
+		if consumer == "interactive" && reason == durableDeliveryUnresolvedReason {
+			block.ConsumerReference = agentDeliveryConsumer
+		}
 	}
 	if block.CreatedAt.IsZero() {
 		block.CreatedAt = time.Now().UTC()
@@ -806,6 +820,11 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	manualTaskID := ""
+	if launchOriginForActivation(req) == launchOriginManual && retryLaunchInContext(ctx) == nil {
+		manualTaskID = req.TaskID
+	}
+	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
@@ -1044,6 +1063,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		}
 		var blocked *sessionOpenRecoveryBlockedError
 		if errors.As(err, &blocked) {
+			if req.RecoveryAction != "" {
+				// An explicit recovery must not report success when no runtime
+				// was launched: its caller would acknowledge delivery or commit
+				// a continuation against an execution that does not exist.
+				return nil, err
+			}
 			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
 		}
 		if req.ActivationSource == LaunchActivationSourceSessionOpen && errors.Is(err, ErrCeilingLaunchConflict) {
@@ -1351,11 +1376,17 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		return nil, automation.ErrRetryLaunchUncertain
+	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}

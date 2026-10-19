@@ -43,21 +43,29 @@ func TestDeliveryRetentionPostgresMVCCAndMonotonicCheckpoint(t *testing.T) {
 	}
 
 	event := seedRetentionCrashEventInRepo(t, writerRepo)
+	fixtureCtx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	reachedCursor := make(chan struct{})
-	releaseCommit := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(releaseCommit) }) }
-	defer release()
+	var visiblePayload []byte
+	var visibleCursor int64
+	var visibleEffects int
 	writerRepo.agentDeliveryRetentionFailpoint = func(point string) error {
 		if point == "after_retired_cursor" {
+			err := readerDB.QueryRowxContext(fixtureCtx, readerDB.Rebind(`
+				SELECT
+				 (SELECT payload FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?),
+				 (SELECT retired_sequence FROM agent_delivery_cursors WHERE stream_id = ?),
+				 (SELECT COUNT(*) FROM agent_delivery_effects WHERE effect_key = ?)`),
+				event.StreamID, event.Sequence, event.StreamID,
+				fmt.Sprintf("agent_delivery.event:%s:1", event.StreamID)).Scan(&visiblePayload, &visibleCursor, &visibleEffects)
 			close(reachedCursor)
-			<-releaseCommit
+			return err
 		}
 		return nil
 	}
 	writerDone := make(chan error, 1)
 	go func() {
-		_, err := writerRepo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{})
+		_, err := writerRepo.RunAgentDeliveryRetentionBatch(fixtureCtx, models.AgentDeliveryRetentionBatchOptions{})
 		writerDone <- err
 	}()
 	select {
@@ -65,31 +73,13 @@ func TestDeliveryRetentionPostgresMVCCAndMonotonicCheckpoint(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("retention transaction did not reach the retired cursor boundary")
 	}
-	var visiblePayload []byte
-	var visibleCursor int64
-	var visibleEffects int
-	if err := readerDB.QueryRowx(readerDB.Rebind(`
-		SELECT payload FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`),
-		event.StreamID, event.Sequence).Scan(&visiblePayload); err != nil {
-		t.Fatalf("read uncommitted inbox deletion: %v", err)
-	}
-	if err := readerDB.QueryRowx(readerDB.Rebind(`
-		SELECT retired_sequence FROM agent_delivery_cursors WHERE stream_id = ?`), event.StreamID).Scan(&visibleCursor); err != nil {
-		t.Fatalf("read uncommitted cursor update: %v", err)
-	}
-	if err := readerDB.QueryRowx(readerDB.Rebind(`
-		SELECT COUNT(*) FROM agent_delivery_effects WHERE effect_key = ?`),
-		fmt.Sprintf("agent_delivery.event:%s:1", event.StreamID)).Scan(&visibleEffects); err != nil {
-		t.Fatalf("read uncommitted receipt deletion: %v", err)
-	}
-	if len(visiblePayload) == 0 || visibleCursor != 0 || visibleEffects != 1 {
-		t.Fatalf("reader saw partial retention commit: payload=%d bytes, cursor=%d, effects=%d", len(visiblePayload), visibleCursor, visibleEffects)
-	}
-	release()
 	if err := <-writerDone; err != nil {
 		t.Fatalf("commit retention transaction: %v", err)
 	}
 	writerRepo.agentDeliveryRetentionFailpoint = nil
+	if len(visiblePayload) == 0 || visibleCursor != 0 || visibleEffects != 1 {
+		t.Fatalf("reader saw partial retention commit: payload=%d bytes, cursor=%d, effects=%d", len(visiblePayload), visibleCursor, visibleEffects)
+	}
 	var committedInbox int
 	if err := readerDB.QueryRowx(readerDB.Rebind(`
 		SELECT COUNT(*) FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`),

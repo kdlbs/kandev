@@ -70,9 +70,19 @@ describe("duration-aware shard planning", () => {
       ].join("\n"),
     );
     fs.writeFileSync(
+      path.join(testDir, "shared-cases.ts"),
+      [
+        'import { test } from "@playwright/test";',
+        "export function sharedCases() {",
+        '  test.describe("shared suite", () => { test("defined in a helper", async () => {}); });',
+        "}",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
       path.join(testDir, "example.spec.ts"),
       [
         'import { test } from "@playwright/test";',
+        'import { sharedCases } from "./shared-cases";',
         'test.describe("suite", () => {',
         "  test.beforeEach(async () => {});",
         '  test("works", async () => {});',
@@ -81,14 +91,25 @@ describe("duration-aware shard planning", () => {
         "    test(name, async () => {});",
         "  }",
         "});",
+        "sharedCases();",
       ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(testDir, "mobile-example.spec.ts"),
+      'import { sharedCases } from "./shared-cases"; sharedCases();',
     );
 
     expect(discoverTestCatalog(webRoot, "normal")).toEqual([
       expect.objectContaining({
         project: "chromium",
         file: "tests/chat/example.spec.ts",
-        testCount: 4,
+        testCount: 5,
+        fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      expect.objectContaining({
+        project: "mobile-chrome",
+        file: "tests/chat/mobile-example.spec.ts",
+        testCount: 1,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     ]);
@@ -114,6 +135,103 @@ describe("duration-aware shard planning", () => {
     expect(first.summary.warmUnits).toBe(1);
     expect(first.summary.unknownUnits).toBe(2);
     expect(first.shards[0]?.predictedSeconds).toBeGreaterThan(0);
+  });
+
+  it.each([false, true])(
+    "co-locates Kind fixtures without dropping or duplicating native units (profile: %s)",
+    (hasProfile) => {
+      const catalog: CatalogUnit[] = [
+        {
+          project: "containers",
+          file: "tests/kubernetes/kubernetes-executor.spec.ts",
+          fileHash: "k1",
+          testCount: 12,
+        },
+        {
+          project: "containers",
+          file: "tests/kubernetes/future-case.spec.ts",
+          fileHash: "k2",
+          testCount: 1,
+        },
+        {
+          project: "containers",
+          file: "tests/kubernetes/kubernetes-docker-workloads.spec.ts",
+          fileHash: "k3",
+          testCount: 4,
+        },
+        {
+          project: "containers",
+          file: "tests/kubernetes/kubernetes-worker-presets.spec.ts",
+          fileHash: "worker",
+          testCount: 1,
+        },
+        {
+          project: "containers",
+          file: "tests/docker/launch.spec.ts",
+          fileHash: "d",
+          testCount: 10,
+        },
+        { project: "containers", file: "tests/ssh/launch.spec.ts", fileHash: "s", testCount: 10 },
+      ];
+      const timings: TimingProfile | undefined = hasProfile
+        ? {
+            ...profile,
+            entries: catalog.flatMap((unit) =>
+              Array.from({ length: unit.testCount }, (_, index) => ({
+                ...profile.entries[0]!,
+                key: `${unit.project}::${unit.file}::test-${index}`,
+                project: unit.project,
+                file: unit.file,
+                fileHash: unit.fileHash,
+                title: `test-${index}`,
+                p75Seconds: 20,
+              })),
+            ),
+          }
+        : undefined;
+      const options = {
+        cohort: "containers" as const,
+        shardCount: 3,
+        profile: timings,
+        generatedAt: "2026-10-14",
+      };
+      const plan = createShardPlan(catalog, options);
+      expect(createShardPlan([...catalog].reverse(), options)).toEqual(plan);
+      expect(() => validateShardManifest(plan, catalog)).not.toThrow();
+      const kindShards = plan.shards.filter((shard) =>
+        shard.files.some((file) => file.startsWith("tests/kubernetes/")),
+      );
+      expect(kindShards).toHaveLength(2);
+      const shared = kindShards.find((shard) =>
+        shard.files.includes("tests/kubernetes/future-case.spec.ts"),
+      )!;
+      const workers = kindShards.find((shard) =>
+        shard.files.includes("tests/kubernetes/kubernetes-worker-presets.spec.ts"),
+      )!;
+      expect(shared.units).toHaveLength(3);
+      expect(workers.index).not.toBe(shared.index);
+      expect(workers.units).toHaveLength(1);
+      expect(
+        plan.shards.flatMap((shard) => shard.units).reduce((sum, unit) => sum + unit.testCount, 0),
+      ).toBe(38);
+      expect(shared.predictedSeconds).toBe(
+        shared.units.reduce((sum, unit) => sum + unit.estimatedSeconds, 0),
+      );
+      const single = createShardPlan(catalog, { ...options, shardCount: 1 });
+      expect(() => validateShardManifest(single, catalog)).not.toThrow();
+      expect(single.shards[0]!.units).toHaveLength(catalog.length);
+    },
+  );
+
+  it("keeps normal and non-container project units independent of Kind affinity", () => {
+    const catalog: CatalogUnit[] = [
+      { project: "chromium", file: "tests/kubernetes/a.spec.ts", fileHash: "a", testCount: 1 },
+      { project: "chromium", file: "tests/kubernetes/b.spec.ts", fileHash: "b", testCount: 1 },
+    ];
+    for (const cohort of ["normal", "containers"] as const) {
+      const plan = createShardPlan(catalog, { cohort, shardCount: 2, generatedAt: "2026-10-14" });
+      expect(plan.shards.map((shard) => shard.units.length)).toEqual([1, 1]);
+    }
   });
 
   it("validates exact coverage and rejects duplicate assignments", () => {

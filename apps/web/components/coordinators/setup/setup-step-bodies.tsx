@@ -2,11 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import type { ControlAction } from "@/lib/api/domains/coordinator-api";
-import type { WatchesDraft } from "@/lib/coordinators/control-draft";
+import type { ProjectsDraft, WatchesDraft } from "@/lib/coordinators/control-draft";
 import type { GoalFormState } from "@/lib/coordinators/goal-form";
 import {
   actionOfPath,
   actionPath,
+  PROJECTS_PATHS,
   WATCHES_PATHS,
   type SetupErrors,
   type SetupState,
@@ -17,7 +18,9 @@ import type { useWorkspaceBoards } from "@/hooks/domains/coordinator/use-workspa
 import { CoordinatorFormFields } from "../coordinator-form-fields";
 import { GoalFormFields } from "../sections/goal-form-fields";
 import { MayDoRows } from "../sections/may-do-section";
+import { ProjectsFields } from "../sections/projects-fields";
 import { WatchesFields } from "../sections/watches-section";
+import type { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-projects";
 
 type Edit = (patch: Partial<SetupState>, paths: readonly string[]) => void;
 
@@ -62,11 +65,13 @@ export function IdentityStep({
     <div className="space-y-4">
       <StepLine messages={messages} />
       <CoordinatorFormFields
-        only={["name", "agent", "executor"]}
+        only={["name", "agent", "executor", "taskPair"]}
         form={{
           name: state.name,
           agentProfileId: state.agentProfileId,
           executorProfileId: state.executorProfileId,
+          taskAgentProfileId: state.taskAgentProfileId,
+          taskExecutorProfileId: state.taskExecutorProfileId,
           context: "",
         }}
         onChange={(key, value) => {
@@ -74,6 +79,24 @@ export function IdentityStep({
           if (key === "agentProfileId") edit({ agentProfileId: value }, ["agent_profile_id"]);
           if (key === "executorProfileId")
             edit({ executorProfileId: value }, ["executor_profile_id"]);
+          if (key === "taskAgentProfileId") {
+            edit(
+              {
+                taskAgentProfileId: value,
+                taskPairTouched: { ...state.taskPairTouched, agent: true },
+              },
+              ["task_agent_profile_id"],
+            );
+          }
+          if (key === "taskExecutorProfileId") {
+            edit(
+              {
+                taskExecutorProfileId: value,
+                taskPairTouched: { ...state.taskPairTouched, executor: true },
+              },
+              ["task_executor_profile_id"],
+            );
+          }
         }}
         onLeave={leave}
         disabled={false}
@@ -84,6 +107,8 @@ export function IdentityStep({
           name: translated("name"),
           agent_profile_id: translated("agent_profile_id"),
           executor_profile_id: translated("executor_profile_id"),
+          task_agent_profile_id: translated("task_agent_profile_id"),
+          task_executor_profile_id: translated("task_executor_profile_id"),
         }}
       />
     </div>
@@ -105,6 +130,28 @@ export function WatchesStep({ state, messages, edit, boards }: WatchesProps) {
         onBoardsRetry={boards.retry}
         canManage
         onChange={(next: WatchesDraft) => edit({ watches: next }, WATCHES_PATHS)}
+        errorMessage={line ? t(line) : null}
+      />
+    </div>
+  );
+}
+
+type ProjectsProps = BodyProps & { projects: ReturnType<typeof useWorkspaceProjects> };
+
+export function ProjectsStep({ state, messages, edit, projects }: ProjectsProps) {
+  const { t } = useTranslation();
+  const line = firstMessage(messages, (p) => p.startsWith("projects"));
+  return (
+    <div className="space-y-4">
+      <StepLine messages={messages} />
+      <ProjectsFields
+        projects={state.projects}
+        sets={projects.sets}
+        loose={projects.loose}
+        status={projects.status}
+        onRetry={projects.retry}
+        canManage
+        onChange={(next: ProjectsDraft) => edit({ projects: next }, PROJECTS_PATHS)}
         errorMessage={line ? t(line) : null}
       />
     </div>
@@ -172,7 +219,14 @@ export function ContextStep({
       <StepLine messages={messages} />
       <CoordinatorFormFields
         only={["context"]}
-        form={{ name: "", agentProfileId: "", executorProfileId: "", context: state.context }}
+        form={{
+          name: "",
+          agentProfileId: "",
+          executorProfileId: "",
+          taskAgentProfileId: "",
+          taskExecutorProfileId: "",
+          context: state.context,
+        }}
         onChange={(_key, value) => edit({ context: value as string }, ["context"])}
         onLeave={() => leave("context")}
         disabled={false}

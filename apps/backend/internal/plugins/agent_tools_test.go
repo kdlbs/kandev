@@ -2,7 +2,10 @@ package plugins
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -104,6 +107,123 @@ func TestAgentToolCatalogUsesConservativeAnnotationDefaults(t *testing.T) {
 	require.True(t, tool.DestructiveHint)
 	require.False(t, tool.IdempotentHint)
 	require.True(t, tool.OpenWorldHint)
+}
+
+type countingAgentToolCatalogListener struct{ calls atomic.Int32 }
+
+func (l *countingAgentToolCatalogListener) NotifyAgentToolCatalogChanged() { l.calls.Add(1) }
+
+func requiredConfigToolRecord(id string, schema map[string]any) *store.Record {
+	return &store.Record{
+		Manifest: manifest.Manifest{
+			ID:           id,
+			ConfigSchema: schema,
+			AgentTools: []manifest.AgentTool{{
+				Name:        "pr",
+				Description: "This task's pull request.",
+				Surfaces:    []string{manifest.AgentToolSurfaceKanban},
+				InputSchema: map[string]any{"type": "object"},
+			}},
+		},
+		Status: store.StatusActive,
+	}
+}
+
+func addAgentToolRecord(t *testing.T, svc *Service, fsStore *store.FSStore, record *store.Record) {
+	t.Helper()
+	svc.registry.Add(record)
+	require.NoError(t, fsStore.Save(record))
+}
+
+func catalogPluginIDs(t *testing.T, svc *Service) []string {
+	t.Helper()
+	snapshot, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	ids := make([]string, 0, len(snapshot.Tools))
+	for _, tool := range snapshot.Tools {
+		ids = append(ids, tool.PluginID)
+	}
+	return ids
+}
+
+func TestAgentToolCatalogHidesPluginUntilRequiredConfigIsSaved(t *testing.T) {
+	svc, fsStore, _ := newTestServiceWithVault(t)
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("kandev-plugin-forge", map[string]any{
+		"type":     "object",
+		"required": []any{"base_url", "api_token"},
+		"properties": map[string]any{
+			"base_url":  map[string]any{"type": "string"},
+			"api_token": map[string]any{"type": "string", "secret": true},
+		},
+	}))
+	listener := &countingAgentToolCatalogListener{}
+	svc.SetAgentToolCatalogListener(listener)
+
+	require.Empty(t, catalogPluginIDs(t, svc), "unconfigured plugin must contribute no agent tools")
+
+	require.NoError(t, svc.UpdateConfig(context.Background(), "kandev-plugin-forge", map[string]any{
+		"base_url": "https://forge.example", "api_token": "placeholder-token",
+	}))
+	require.Positive(t, listener.calls.Load(), "saving config must recompute the catalog")
+	snapshot, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Len(t, snapshot.Tools, 1)
+	require.Equal(t, plugintools.ExposedName("kandev-plugin-forge", "pr"), snapshot.Tools[0].ExposedName)
+
+	signalsBeforeClear := listener.calls.Load()
+	require.NoError(t, svc.UpdateConfig(context.Background(), "kandev-plugin-forge", map[string]any{
+		"base_url": "   ", "api_token": configSecretMask,
+	}))
+	require.Greater(t, listener.calls.Load(), signalsBeforeClear)
+	cleared, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Empty(t, cleared.Tools, "clearing required config must remove the plugin's tools")
+	require.Equal(t, snapshot.Generation, cleared.Generation)
+	require.Equal(t, snapshot.Revision+1, cleared.Revision)
+	unchanged, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Equal(t, cleared.Revision, unchanged.Revision)
+}
+
+func TestAgentToolCatalogRequiredConfigReadinessMatchesSetupBadge(t *testing.T) {
+	svc, fsStore, _ := newTestService(t)
+	schema := map[string]any{"type": "object", "required": []any{"enabled", "limit", "base_url"}}
+	cases := map[string]map[string]any{
+		"zero-values": {"enabled": false, "limit": 0, "base_url": "https://forge.example"},
+		"blank":       {"enabled": true, "limit": 1, "base_url": "   "},
+		"null":        {"enabled": true, "limit": 1, "base_url": nil},
+		"missing":     {"enabled": true, "limit": 1},
+	}
+	for id, config := range cases {
+		addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord(id, schema))
+		require.NoError(t, fsStore.SetConfig(id, config))
+	}
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("no-required", map[string]any{"type": "object"}))
+
+	require.ElementsMatch(t, []string{"no-required", "zero-values"}, catalogPluginIDs(t, svc))
+}
+
+func TestAgentToolCatalogIsolatesUnreadablePluginConfig(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	dir := t.TempDir()
+	fsStore := store.NewFSStore(dir)
+	svc := NewService(fsStore, NewRegistry(), nil, log)
+	schema := map[string]any{"type": "object", "required": []any{"base_url"}}
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("broken", schema))
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("healthy", schema))
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("no-required", map[string]any{"type": "object"}))
+	require.NoError(t, fsStore.SetConfig("healthy", map[string]any{"base_url": "https://forge.example"}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.config.yml"), []byte("base_url: [unterminated-value\n"), 0o600))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "no-required.config.yml"), []byte("[invalid\n"), 0o600))
+
+	require.ElementsMatch(t, []string{"healthy", "no-required"}, catalogPluginIDs(t, svc))
+
+	entries := observed.FilterMessage("plugins: agent tools hidden because the plugin config could not be read").All()
+	require.NotEmpty(t, entries)
+	require.Equal(t, map[string]any{"plugin_id": "broken"}, entries[0].ContextMap())
 }
 
 func TestInvokeAgentToolLogsOnlyBoundMetadata(t *testing.T) {

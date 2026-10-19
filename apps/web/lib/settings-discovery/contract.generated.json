@@ -1565,6 +1565,21 @@
       },
       "fields": [
         {
+          "key": "executor.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
+        {
           "key": "executor.name",
           "field_path": "name",
           "label": "Name",
@@ -1657,6 +1672,21 @@
         "requires_resource_id": true
       },
       "fields": [
+        {
+          "key": "executor_profile.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor_profile",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
         {
           "key": "executor_profile.name",
           "field_path": "name",
@@ -6061,6 +6091,38 @@
                 "type": "array"
               },
               "on_heartbeat": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_pr_closed": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_pr_merged": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {

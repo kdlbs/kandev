@@ -13,9 +13,10 @@ owners:
 
 The plugin system owns plugin keybinding declarations and their namespaced
 override identities, so it also owns where users configure those bindings.
-This design moves their presentation from the core shortcut list to each
-installed plugin's existing detail route without changing the manifest,
-frontend registry, dispatcher, HTTP settings contract, or backend storage.
+This design places their presentation on each installed plugin's existing
+detail route. Conflict detection and plugin dispatch enforce existing
+core-shortcut precedence without changing the manifest, frontend registration
+contract, accepted chords, HTTP settings contract, or backend storage.
 
 The UI system continues to own the shared settings-save coordinator described
 by [Settings Manual Save](../../ui/requirements/settings-manual-save.md).
@@ -108,16 +109,63 @@ continues to use the plugin config endpoint and is a separate save contributor.
 
 Both shortcut surfaces resolve conflicts from the union of translated core
 entries and every installed plugin entry using
-`findShortcutConflicts`. Each surface filters only the rows it displays, not
-the comparison set. This retains core-versus-plugin and plugin-versus-plugin
-warnings after the rows move to separate pages.
+`findShortcutConflicts`, with the existing integration entries included by
+`useShortcutConflictLabels`. Each surface filters only the rows it displays,
+not the comparison set. Installed declarations remain warning inputs even
+when their plugin is inactive.
 
-`usePluginShortcuts` is unchanged. It reads the same override map on each
-keydown, invokes only currently registered plugin handlers, skips disallowed
-editable targets, and suppresses a plugin handler when its effective combo
-matches a Kandev-owned shortcut. Disabled and errored plugins have no live
-handler registration even though their saved declaration and override remain
-editable.
+### Accepted-event overlap
+
+`matchesShortcut` in `apps/web/lib/keyboard/utils.ts` is the authority for
+accepted events. Keys compare case-insensitively. Without `ctrlOrCmd`, Ctrl,
+Meta, Alt, and Shift are exact Boolean requirements. With `ctrlOrCmd`, either
+Ctrl or Meta or both is accepted on every platform; explicit `ctrl` and `cmd`
+fields in the same modifiers object do not narrow that branch. Alt and Shift
+remain exact. An unbound entry contributes no conflict.
+
+Two effective bindings conflict if there exists at least one key/modifier event
+accepted by both. `shortcut-conflicts.ts` evaluates this bounded intersection
+using `matchesShortcut` over the 16 Boolean modifier combinations for the
+shared key. Platform-dependent display formatting is not conflict evidence.
+Remove the platform-specific `comboKey` comparison and its internal callers;
+do not change `matchesShortcut`, platform detection, or CodeMirror conversion.
+
+`findShortcutConflicts` returns one two-entry group per directly overlapping
+pair, in input order. The group needs only its entries; a single canonical
+combo identity cannot represent this relation. Ctrl-only and Meta-only
+bindings are disjoint even when a third Mod binding overlaps each. Do not
+merge connected groups into a transitive conflict group.
+
+`buildConflictLabels` in
+`apps/web/components/settings/keyboard-shortcuts-card.tsx` accumulates each
+action's directly overlapping peers across groups rather than overwriting a
+previous group. Deduplicate peers by action identity and displayed labels in
+stable encounter order. Exclude the action itself. Both existing settings
+surfaces use this lookup with their current translated warning copy; neither
+surface changes its rows, controls, drafts, or save behavior.
+
+### Core reservation during dispatch
+
+`usePluginShortcuts` reads the current override map on each keydown. Resolve
+the configurable core entries with that snapshot and retain the fixed defaults
+from `NON_CONFIGURABLE_CORE_SHORTCUT_IDS` (`FIND_IN_PANEL`, `SAVE`, and
+`COMMAND_PANEL_SHIFT`). Those fixed reservations do not become configurable
+or start honoring an override under an otherwise unknown key.
+
+Reserve an event if **at least one** bound effective core shortcut accepts
+that actual event through `matchesShortcut`. A matching plugin handler is
+skipped without invocation or `preventDefault` when the event is reserved,
+leaving independent core listeners able to process it. Reservation does not
+depend on whether a core listener is currently mounted. Do not suppress all
+events for a plugin binding merely because it overlaps a core binding on some
+other event: a Mod plugin binding may run on Meta+Q when a core binding reserves
+only Ctrl+Q.
+
+Preserve existing `defaultPrevented` admission, editable-target eligibility,
+editor opt-in and non-Shift-modifier guards, handler registration order,
+multiple matching plugin callbacks, and exception isolation. Disabled and
+errored plugins have no live handler registration even though their saved
+declarations and overrides remain editable.
 
 ## Responsive behavior
 
@@ -137,6 +185,12 @@ surface remains the primary persistence action and retains its existing
 dynamic-viewport and safe-area behavior. Shared manifest data, drafts,
 conflict calculation, and save callbacks are identical across viewports;
 only row composition and touch geometry vary.
+
+The overlap and dispatch repair is shared state/data and action logic. A phone
+with an attached keyboard uses the same accepted-event and reservation path.
+It introduces no viewport-specific behavior, geometry, navigation, touch, or
+scrolling changes; targeted hook and conflict-label consumer tests satisfy
+mobile parity for this repair without new layout E2E coverage.
 
 ## Failure and compatibility
 
@@ -164,7 +218,22 @@ longer contains the plugin row. The existing mobile plugin-detail scenario
 proves direct entry, touch geometry, single-axis containment, an acknowledged
 Save, and reload while the fixture plugin is disabled. Existing plugin
 dispatcher tests remain the regression evidence for dispatch precedence and
-editor-target rules.
+editor-target rules. The conflict-dispatch repair adds an independently authored
+test mounting real `usePluginShortcuts` with real
+`useKeyboardShortcut(SHORTCUTS.FIND_IN_PANEL)` and dispatching cancelable
+keydown events under a restored Mac platform stub. Ctrl+F must invoke only
+core Find; canonical Meta+F and noncolliding Ctrl+Q are controls. This is
+simulated DOM dispatch evidence, not proof of physical OS key delivery.
+
+Pure conflict tests cover accepted intersections and disjoint modifier/key
+cases, including mixed `ctrlOrCmd` plus explicit modifier fields. Actual
+`buildConflictLabels`/`useShortcutConflictLabels` consumers cover the Mod
+bridge and duplicate-peer cases, with rendered warnings on both existing
+settings cards. Partial-overlap dispatch tests ensure an event outside the
+core reservation still reaches the plugin. See the
+[repair plan](../../../plans/shortcut-conflict-dispatch/plan.md) for exact
+checks; the completed relocation package remains historical evidence for its
+unchanged persistence and responsive surfaces.
 
 ## Related decisions
 

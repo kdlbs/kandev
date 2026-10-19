@@ -55,7 +55,7 @@ func TestDeliveryRetentionBounds(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run terminal retention batch: %v", err)
 			}
-			if result.Candidates != 3 || result.EventPayloadsPruned != 1 || result.EventRowsRetired != 1 {
+			if result.Candidates != 3 || result.EventPayloadsPruned != 2 || result.EventRowsRetired != 1 {
 				t.Fatalf("terminal retention result = %+v", result)
 			}
 			cursor, err := repo.GetAgentDeliveryCursor(context.Background(), events[0].StreamID)
@@ -73,8 +73,11 @@ func TestDeliveryRetentionBounds(t *testing.T) {
 					WHERE stream_id = ? AND sequence = ?`), events[0].StreamID, sequence).Scan(&payload, &pruned); err != nil {
 					t.Fatalf("read terminal-pinned event %d: %v", sequence, err)
 				}
-				if len(payload) == 0 || pruned.Valid {
-					t.Errorf("event %d behind first terminal was compacted", sequence)
+				if sequence == 2 && (len(payload) == 0 || pruned.Valid) {
+					t.Error("unsettled terminal was compacted")
+				}
+				if sequence == 3 && (len(payload) != 0 || !pruned.Valid) {
+					t.Error("independently projected output was not compacted")
 				}
 			}
 		})

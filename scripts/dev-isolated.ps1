@@ -39,7 +39,7 @@
   49429 (default: first available slot).
 
 .PARAMETER NoBuild
-  Do not (re)build; require kandev + agentctl + mock-agent to already exist.
+  Do not (re)build; require kandev + agentctl + mock-agent + winjob to already exist.
 
 .PARAMETER Install
   Run `make install` (backend deps + pnpm install + playwright browsers) before
@@ -78,6 +78,12 @@ param(
   [int]$Timeout = 60,
   [int]$BackendPort,
   [int]$WebPort,
+  [ValidateNotNullOrEmpty()]
+  [ValidateScript({
+    $address = $null
+    return ([Net.IPAddress]::TryParse($_.Trim('[', ']'), [ref]$address) -or
+      [Uri]::CheckHostName($_) -eq [UriHostNameType]::Dns)
+  })]
   [string]$WebHost = '127.0.0.1',
   [int]$AgentctlPort,
   [string]$HomeDir
@@ -85,6 +91,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$WebHost = $WebHost.Trim('[', ']')
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
@@ -95,10 +102,89 @@ $BinDir = Join-Path $BackendDir 'bin'
 $BackendBin = Join-Path $BinDir 'kandev.exe'
 $AgentctlBin = Join-Path $BinDir 'agentctl.exe'
 $MockAgentBin = Join-Path $BinDir 'mock-agent.exe'
+$WinjobBin = Join-Path $BinDir 'winjob.exe'
 $WebDir = Join-Path $RepoRoot 'apps\web'
 $ViteCli = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
 $NodeModules = Join-Path $RepoRoot 'apps\node_modules'
-$RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin)
+$RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin, $WinjobBin)
+
+# The supervisor owns a kill-on-close Job Object; only its exact child can be
+# adopted. ShellExecute gives the supervisor its own hidden console, while its
+# native child writes directly to files rather than inheriting caller pipes.
+function Start-IsolatedSupervisor {
+  param([string]$Program, [string[]]$Arguments, [System.Collections.IDictionary]$Environment,
+    [string]$WorkingDirectory, [string]$IdentityFile, [string]$OutLog, [string]$ErrLog)
+  $parts = @('--isolated', $IdentityFile, $OutLog, $ErrLog, $Program) + $Arguments
+  # These are file paths, fixed options, or validated host/port tokens. File
+  # paths cannot contain quotes, and none of these arguments ends in a slash.
+  $commandArguments = ($parts | ForEach-Object { '"' + $_ + '"' }) -join ' '
+  return Invoke-WithIsolatedEnvironment -Environment $Environment -Action {
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $WinjobBin
+    $start.Arguments = $commandArguments
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $true
+    $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+    [Diagnostics.Process]::Start($start)
+  }
+}
+
+function Get-IsolatedProcessInfo {
+  param($Supervisor, [string]$Program, [string]$IdentityFile)
+  if ($Supervisor.HasExited -or -not (Test-Path -LiteralPath $IdentityFile)) { return $null }
+  $identity = Get-Content -LiteralPath $IdentityFile -Raw | ConvertFrom-Json
+  $info = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$identity.pid)" -ErrorAction SilentlyContinue
+  if ($info -and $info.ParentProcessId -eq $Supervisor.Id -and
+    [string]::Equals($info.ExecutablePath, $Program, [StringComparison]::OrdinalIgnoreCase) -and
+    $info.CreationDate.ToUniversalTime().Ticks -eq [long]$identity.started_ticks) { return $info }
+  return $null
+}
+
+function Write-IsolatedLogs {
+  param([string]$OutLog, [string]$ErrLog)
+  foreach ($log in @($ErrLog, $OutLog)) {
+    if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 30 | Out-Host }
+  }
+}
+
+function Wait-IsolatedListener {
+  param($Supervisor, [string]$Program, [string]$IdentityFile, [int]$Port,
+    [string]$OutLog, [string]$ErrLog)
+  $discoverDeadline = (Get-Date).AddSeconds($Timeout)
+  while ((Get-Date) -lt $discoverDeadline) {
+    if ($Supervisor.HasExited) { break }
+    $info = Get-IsolatedProcessInfo -Supervisor $Supervisor -Program $Program -IdentityFile $IdentityFile
+    if ($info) {
+      foreach ($connection in @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)) {
+        if ($connection.OwningProcess -eq $info.ProcessId) { return $info }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  Write-IsolatedLogs -OutLog $OutLog -ErrLog $ErrLog
+  throw "dev-isolated: cannot identify this launch's listener on port $Port within ${Timeout}s."
+}
+
+function Write-IsolatedMetadata {
+  param([string]$Path, [string]$Value, [Text.Encoding]$Encoding = [Text.Encoding]::ASCII)
+  # Do not replace, or later remove, a record belonging to another launch.
+  $stream = [IO.File]::Open($Path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+  $OwnedMetadata.Add($Path)
+  try {
+    $preamble = $Encoding.GetPreamble()
+    $stream.Write($preamble, 0, $preamble.Length)
+    $bytes = $Encoding.GetBytes($Value + [Environment]::NewLine)
+    $stream.Write($bytes, 0, $bytes.Length)
+  } finally { $stream.Dispose() }
+}
+
+function Stop-IsolatedSupervisor {
+  param($Supervisor)
+  if ($Supervisor -and -not $Supervisor.HasExited) {
+    Stop-Process -InputObject $Supervisor -Force -ErrorAction SilentlyContinue
+    if (-not $Supervisor.WaitForExit(5000)) { throw 'dev-isolated: supervisor did not stop within 5s.' }
+  }
+}
 
 # Ports we must never reuse (the well-known production ports).
 $GuardedPorts = @(38429, 37429, 39429)
@@ -282,11 +368,22 @@ if ($NoBuild) {
   }
   if ($needBuild) {
     Write-Host "dev-isolated: building backend binaries (make -C apps/backend build)..."
-    & make -C $BackendDir build
-    if ($LASTEXITCODE -ne 0) { throw "dev-isolated: build failed (exit $LASTEXITCODE)." }
+    # `go build -v` writes package paths to stderr; under $ErrorActionPreference
+    # 'Stop' a redirected error stream turns that into a terminating
+    # NativeCommandError. Scope Continue to this call; the exit code still decides.
+    $previousErrorAction = $ErrorActionPreference
+    $buildExit = $null
+    try {
+      $ErrorActionPreference = 'Continue'
+      & make -C $BackendDir build
+      $buildExit = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previousErrorAction
+    }
+    if ($buildExit -ne 0) { throw "dev-isolated: build failed (exit $buildExit)." }
     Write-Host "dev-isolated: build complete."
     if (-not (Test-RequiredBinsPresent)) {
-      throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe after build, but one is missing."
+      throw "dev-isolated: expected kandev.exe, agentctl.exe, mock-agent.exe and winjob.exe after build, but one is missing."
     }
   }
 }
@@ -356,11 +453,6 @@ $BackendOutLog = Join-Path $RunDir 'backend.out.log'
 $BackendErrLog = Join-Path $RunDir 'backend.err.log'
 $WebOutLog = Join-Path $RunDir 'web.out.log'
 $WebErrLog = Join-Path $RunDir 'web.err.log'
-# An empty stdin file keeps the detached child from inheriting the caller's
-# console/pipe handles; without it the launching shell can block until the
-# backend exits.
-$StdinFile = Join-Path $RunDir 'stdin.empty'
-New-Item -ItemType File -Path $StdinFile -Force | Out-Null
 $Pidfile = Join-Path $env:TEMP ("kandev-dev-isolated-" + $EffectiveBackendPort + '.pid')
 $BackendStartedFile = $Pidfile -replace '\.pid$', '.backend.started'
 $HomeFile = $Pidfile -replace '\.pid$', '.home'
@@ -403,99 +495,93 @@ $backendOverrides = [ordered]@{
 }
 $BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
   -IsolatedHome $IsolatedHome -Overrides $backendOverrides
-
-$backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -Action {
-  Start-Process -FilePath $BackendBin -ArgumentList '__backend' `
-    -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
-    -RedirectStandardInput $StdinFile `
-    -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
-}
-$BackendPid = $backendProc.Id
-$backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $BackendPid"
-if (-not $backendInfo) { throw "dev-isolated: cannot identify backend PID $BackendPid" }
-Set-Content -LiteralPath $Pidfile -Value $BackendPid -Encoding ASCII
-Set-Content -LiteralPath $BackendStartedFile -Value $backendInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
-Set-Content -LiteralPath $HomeFile -Value $IsolatedHome -Encoding UTF8
-
-# --- Wait for backend health ---
-$HealthUrl = "$BackendUrl/api/v1/system/health"
-$deadline = (Get-Date).AddSeconds($Timeout)
-$healthy = $false
-while ((Get-Date) -lt $deadline) {
-  if ($backendProc.HasExited) {
-    Write-Host "dev-isolated: backend exited early. Last log lines:" -ForegroundColor Red
-    if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
-    if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
-    Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $BackendStartedFile, $HomeFile -Force -ErrorAction SilentlyContinue
-    throw "dev-isolated: backend exited before becoming healthy."
-  }
-  try {
-    $resp = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 2
-    if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) { $healthy = $true; break }
-  } catch {
-    # Not ready yet.
-  }
-  Start-Sleep -Seconds 1
-}
-
-if (-not $healthy) {
-  Write-Host "dev-isolated: backend did not become healthy within ${Timeout}s. Last log lines:" -ForegroundColor Red
-  if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
-  if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
-  Stop-Process -Id $BackendPid -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $BackendStartedFile, $HomeFile -Force -ErrorAction SilentlyContinue
-  throw "dev-isolated: backend did not become healthy within ${Timeout}s."
-}
-
-# --- Optionally launch the web frontend (Vite dev) ---
+$OwnedMetadata = New-Object 'System.Collections.Generic.List[string]'
+$backendProc = $null
+$webProc = $null
 $webStarted = $false
-if ($Web) {
-  Write-Host "dev-isolated: starting web (vite dev) on :$EffectiveWebPort ..."
-  $webUrl = $WebInternalUrl
-  $webOverrides = [ordered]@{
-    'TEMP'                 = $RunDir
-    'TMP'                  = $RunDir
-    'KANDEV_API_BASE_URL'  = $BackendUrl
-    'PORT'                 = "$EffectiveWebPort"
-    'VITE_KANDEV_DEBUG'    = 'true'
-  }
-  $WebEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory (Split-Path -Parent $nodeCmd.Source) `
-    -IsolatedHome $IsolatedHome -Overrides $webOverrides
-  $webProc = $null
-  try {
-    # Launch Vite directly so the recorded PID is the listener, not a pnpm/cmd wrapper.
-    $webProc = Invoke-WithIsolatedEnvironment -Environment $WebEnvironment -Action {
-      Start-Process -FilePath $nodeCmd.Source `
-        -ArgumentList 'node_modules/vite/bin/vite.js', '--host', $WebHost, '--port', "$EffectiveWebPort", '--strictPort' `
-        -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardInput $StdinFile `
-        -RedirectStandardOutput $WebOutLog -RedirectStandardError $WebErrLog
-    }
-    $webInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($webProc.Id)"
-    if (-not $webInfo) { throw "dev-isolated: cannot identify web PID $($webProc.Id)" }
-    Set-Content -LiteralPath $WebPidfile -Value $webProc.Id -Encoding ASCII
-    Set-Content -LiteralPath $WebStartedFile -Value $webInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
-  } catch {
-    if ($webProc) { Stop-Process -Id $webProc.Id -Force -ErrorAction SilentlyContinue }
-    & (Join-Path $ScriptDir 'kandev-kill.ps1') -Pidfile $Pidfile -Yes
-    throw
-  }
-  $webDeadline = (Get-Date).AddSeconds($Timeout)
-  while ((Get-Date) -lt $webDeadline) {
-    if ($webProc.HasExited) { break }
+try {
+  $BackendIdentityFile = Join-Path $RunDir 'backend.identity.json'
+  $backendProc = Start-IsolatedSupervisor -Program $BackendBin -Arguments @('__backend') `
+    -Environment $BackendEnvironment -WorkingDirectory $BackendDir `
+    -IdentityFile $BackendIdentityFile -OutLog $BackendOutLog -ErrLog $BackendErrLog
+  $backendInfo = Wait-IsolatedListener -Supervisor $backendProc -Program $BackendBin `
+    -IdentityFile $BackendIdentityFile -Port $EffectiveBackendPort -OutLog $BackendOutLog -ErrLog $BackendErrLog
+  $BackendPid = [int]$backendInfo.ProcessId
+  Write-IsolatedMetadata -Path $Pidfile -Value "$BackendPid"
+  Write-IsolatedMetadata -Path $BackendStartedFile -Value "$($backendInfo.CreationDate.ToUniversalTime().Ticks)"
+  Write-IsolatedMetadata -Path $HomeFile -Value $IsolatedHome -Encoding ([Text.Encoding]::UTF8)
+
+  # Discovery and health each have an independent Timeout window.
+  $HealthUrl = "$BackendUrl/api/v1/system/health"
+  $deadline = (Get-Date).AddSeconds($Timeout)
+  $healthy = $false
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-IsolatedProcessInfo -Supervisor $backendProc -Program $BackendBin -IdentityFile $BackendIdentityFile)) { break }
     try {
-      $webResp = Invoke-WebRequest -Uri $webUrl -UseBasicParsing -TimeoutSec 2
-      if ($webResp.StatusCode -ge 200 -and $webResp.StatusCode -lt 500) { $webStarted = $true; break }
+      $resp = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 2
+      if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500 -and
+        (Get-IsolatedProcessInfo -Supervisor $backendProc -Program $BackendBin -IdentityFile $BackendIdentityFile)) { $healthy = $true; break }
     } catch {
       # Not ready yet.
     }
     Start-Sleep -Seconds 1
   }
-  if (-not $webStarted) {
-    Write-Host "dev-isolated: WARNING - web did not become ready within ${Timeout}s (backend is fine; see $WebErrLog)." -ForegroundColor Yellow
+  if (-not $healthy) {
+    Write-IsolatedLogs -OutLog $BackendOutLog -ErrLog $BackendErrLog
+    throw "dev-isolated: backend exited or did not become healthy within ${Timeout}s."
   }
+
+  if ($Web) {
+    Write-Host "dev-isolated: starting web (vite dev) on :$EffectiveWebPort ..."
+    $webUrl = $WebInternalUrl
+    $webOverrides = [ordered]@{
+      'TEMP'                = $RunDir
+      'TMP'                 = $RunDir
+      'KANDEV_API_BASE_URL' = $BackendUrl
+      'PORT'                = "$EffectiveWebPort"
+      'VITE_KANDEV_DEBUG'   = 'true'
+    }
+    $WebEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory (Split-Path -Parent $nodeCmd.Source) `
+      -IsolatedHome $IsolatedHome -Overrides $webOverrides
+    $WebIdentityFile = Join-Path $RunDir 'web.identity.json'
+    $webArguments = @($ViteCli, '--host', $WebHost, '--port', "$EffectiveWebPort", '--strictPort')
+    $webProc = Start-IsolatedSupervisor -Program $nodeCmd.Source -Arguments $webArguments `
+      -Environment $WebEnvironment -WorkingDirectory $WebDir `
+      -IdentityFile $WebIdentityFile -OutLog $WebOutLog -ErrLog $WebErrLog
+    $webInfo = Wait-IsolatedListener -Supervisor $webProc -Program $nodeCmd.Source `
+      -IdentityFile $WebIdentityFile -Port $EffectiveWebPort -OutLog $WebOutLog -ErrLog $WebErrLog
+    Write-IsolatedMetadata -Path $WebPidfile -Value "$($webInfo.ProcessId)"
+    Write-IsolatedMetadata -Path $WebStartedFile -Value "$($webInfo.CreationDate.ToUniversalTime().Ticks)"
+    $webDeadline = (Get-Date).AddSeconds($Timeout)
+    while ((Get-Date) -lt $webDeadline) {
+      if (-not (Get-IsolatedProcessInfo -Supervisor $webProc -Program $nodeCmd.Source -IdentityFile $WebIdentityFile)) { break }
+      try {
+        $webResp = Invoke-WebRequest -Uri $webUrl -UseBasicParsing -TimeoutSec 2
+        if ($webResp.StatusCode -ge 200 -and $webResp.StatusCode -lt 500 -and
+          (Get-IsolatedProcessInfo -Supervisor $webProc -Program $nodeCmd.Source -IdentityFile $WebIdentityFile)) { $webStarted = $true; break }
+      } catch {
+        # Not ready yet.
+      }
+      Start-Sleep -Seconds 1
+    }
+    if (-not $webStarted) {
+      Write-Host "dev-isolated: WARNING - web did not become ready within ${Timeout}s (backend is fine; see $WebErrLog)." -ForegroundColor Yellow
+    }
+  }
+} catch {
+  try {
+    Stop-IsolatedSupervisor -Supervisor $webProc
+  } finally {
+    try {
+      Stop-IsolatedSupervisor -Supervisor $backendProc
+    } finally {
+      foreach ($path in $OwnedMetadata) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+    }
+  }
+  throw
+} finally {
+  if ($webProc) { $webProc.Dispose() }
+  if ($backendProc) { $backendProc.Dispose() }
 }
 
 # --- Summary ---

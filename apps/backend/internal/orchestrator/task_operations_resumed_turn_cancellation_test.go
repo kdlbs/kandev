@@ -63,11 +63,11 @@ func (m *acceptedTurnPromptManager) PromptAgentWithAdmissionCallback(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -355,7 +355,7 @@ func TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution(t *t
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
@@ -833,7 +833,7 @@ func TestResumeAttempt_ModelSwitchFallbackTransfersAcceptance(t *testing.T) {
 	if acceptedBeforeDispatch {
 		t.Fatal("model-switch fallback transferred startup ownership before provider acceptance")
 	}
-	if err := beforeInitialAdmission(); err != nil {
+	if err := beforeInitialAdmission(t.Context(), "model-switch prompt", nil); err != nil {
 		t.Fatalf("model-switch initial prompt admission: %v", err)
 	}
 	if !cancelInFlightGuardIsHeld(svc, sessionID) {

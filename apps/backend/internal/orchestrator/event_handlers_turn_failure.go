@@ -110,6 +110,12 @@ func (s *Service) handleAutomationOwnedTurnFailure(
 	if task == nil || !models.IsAutomationTaskOrigin(task.Origin) {
 		return false
 	}
+	if s.automationOwnsRetrySession(ctx, data.TaskID, data.SessionID) {
+		// Only the captured terminal turn can release a retry's launch fence.
+		if !s.releaseRetryTurnFailureOwnership(ctx, data) {
+			return true
+		}
+	}
 	// Automation owns terminal turn handling and concurrency-slot release.
 	// Reuse that owner under the identity guard instead of parking the
 	// failure in interactive Chat state.

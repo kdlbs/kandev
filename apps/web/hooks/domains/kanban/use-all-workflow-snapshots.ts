@@ -31,6 +31,17 @@ function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boo
   return !!snapshot && snapshot.isPlaceholder !== true && snapshot.fetchFailed !== true;
 }
 
+function canUseBootSnapshots(
+  connectionStatus: string,
+  workflows: Workflow[],
+  snapshots: Record<string, WorkflowSnapshotData>,
+): boolean {
+  return (
+    connectionStatus !== "connected" &&
+    workflows.every((wf) => isBootHydratedSnapshot(snapshots[wf.id]))
+  );
+}
+
 function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
   return (
     fetchStart !== undefined &&
@@ -564,11 +575,15 @@ export function useAllWorkflowSnapshots(
       return;
     }
     const retryFailedOnly = lastFetchedRef.current === key && failedWorkflows.length > 0;
+    // Boot data predates the live subscription. A consumer mounted after the
+    // socket connects still needs one read to catch events from that gap.
     if (
       lastFetchedRef.current === "" &&
       !isRefresh &&
-      workspaceWorkflows.every((wf) =>
-        isBootHydratedSnapshot(store.getState().kanbanMulti.snapshots[wf.id]),
+      canUseBootSnapshots(
+        connectionStatus,
+        workspaceWorkflows,
+        store.getState().kanbanMulti.snapshots,
       )
     ) {
       lastFetchedRef.current = key;

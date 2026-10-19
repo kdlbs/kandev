@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionRecoveryActions } from "./use-session-recovery-actions";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 type RecoveryEligibilityState = {
   taskSessions: {
@@ -51,7 +52,8 @@ const mocks = vi.hoisted(() => ({
   appState: null as unknown as RecoveryEligibilityState,
 }));
 
-vi.mock("@/lib/services/session-recovery-service", () => ({
+vi.mock("@/lib/services/session-recovery-service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/services/session-recovery-service")>()),
   asRecoveryError: (error: unknown, fallback: string) =>
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
@@ -141,6 +143,65 @@ function eligibleRecoveryState(): RecoveryEligibilityState {
 
 // eslint-disable-next-line max-lines-per-function -- recovery retry scenarios share one hook harness.
 describe("useSessionRecoveryActions", () => {
+  it.each([false, true])(
+    "keeps cleanup evidence only for the current delivery owner (changed: %s)",
+    async (changedOwner) => {
+      const state = eligibleRecoveryState();
+      const recovery = {
+        phase: "uncertain",
+        revision: 1,
+        session_id: SESSION_ID,
+        agent_execution_id: "execution-1",
+        submission_id: "prompt:message-1",
+        stream_id: "stream-1",
+        incarnation_id: "incarnation-1",
+        harness_generation: 7,
+        prompt_generation: 1,
+      };
+      state.taskSessions.items[SESSION_ID].metadata = { agent_delivery_recovery: recovery };
+      mocks.appState = state;
+      const deferred = Promise.withResolvers<void>();
+      mocks.requestSessionRecover.mockReturnValueOnce(deferred.promise);
+      const { result, rerender } = renderHook(
+        ({ errorStamp }) =>
+          useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, errorStamp }),
+        { initialProps: { errorStamp: "previous-error" } },
+      );
+      let pending!: Promise<boolean>;
+      act(() => {
+        pending = result.current.handleRecover("resume");
+      });
+      if (changedOwner) {
+        state.taskSessions.items[SESSION_ID].metadata = {
+          agent_delivery_recovery: { ...recovery, revision: 2, stream_id: "successor-stream" },
+        };
+      }
+      rerender({ errorStamp: "cleanup-error" });
+      await act(async () => {
+        deferred.reject(
+          new WebSocketRequestError("safe cleanup failure", "INTERNAL_ERROR", {
+            kind: "runtime_cleanup_failed",
+            session_id: SESSION_ID,
+            error_stamp: "cleanup-error",
+            causes: [{ operation: "resume", code: "runtime_cleanup_failed" }],
+          }),
+        );
+        await pending;
+      });
+      if (changedOwner) {
+        expect(result.current.manualRecoveryFailure).toBeNull();
+        expect(result.current.recoveryError).toBeNull();
+      } else {
+        expect(result.current.manualRecoveryFailure).toMatchObject({
+          sessionId: SESSION_ID,
+          errorStamp: "cleanup-error",
+          causes: [{ operation: "resume", code: "runtime_cleanup_failed" }],
+        });
+        expect(result.current.recoveryError?.message).toBe("task:sessionRuntimeCleanupFailedBody");
+      }
+    },
+  );
+
   it("fences a delayed block retry result after the committed recovery identity replaces it", async () => {
     const state = eligibleRecoveryState();
     state.taskSessions.items[SESSION_ID].session_recovery_blocks = [

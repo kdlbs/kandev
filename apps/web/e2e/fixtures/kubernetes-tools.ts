@@ -833,6 +833,7 @@ export async function provisionKubernetesCluster(
         "--all",
         "--ignore-not-found",
         "--wait=true",
+        "--grace-period=1",
         "--timeout=90s",
       ],
       { quiet: true },

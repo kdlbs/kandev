@@ -46,6 +46,7 @@ type AgentDeliveryRecovery struct {
 	PromptGeneration  uint64                                 `json:"prompt_generation"`
 	Message           string                                 `json:"message,omitempty"`
 	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
+	HistoryGap        *AgentDeliveryHistoryGap               `json:"history_gap,omitempty"`
 	UpdatedAt         time.Time                              `json:"updated_at"`
 }
 
@@ -69,6 +70,12 @@ type AgentDeliveryReconstructionProvenance struct {
 // AgentDeliveryReconstructionRequest is the validated owner snapshot passed
 // to the transaction that restores one retained prompt's canonical association.
 type AgentDeliveryReconstructionRequest struct {
+	// Retirement evidence is verified through the authenticated runtime before
+	// these immutable canonical snapshots are checked under the SQL write lock.
+	VerifiedRetiredSubmissions []AgentDeliverySubmission
+	// ExistingSubmissionOnly repairs presentation from a canonical SQL row and
+	// cannot insert a missing submission or infer a user-message association.
+	ExistingSubmissionOnly    bool
 	TaskID                    string
 	SessionID                 string
 	IncarnationID             string

@@ -179,6 +179,20 @@ type taskEnvironmentMaterializationFinalizer interface {
 	FinalizeTaskEnvironmentMaterialization(context.Context, *models.TaskEnvironment, []*models.TaskEnvironmentRepo, string) error
 }
 
+// taskEnvironmentMaterializationReleaser stores failed for the creating
+// environment that a session still owns. A claim that another session took
+// over is left alone. Legacy test stores without it keep the full-row update.
+type taskEnvironmentMaterializationReleaser interface {
+	FailTaskEnvironmentMaterialization(context.Context, string) (bool, error)
+}
+
+// failedTaskEnvironmentReelector makes a session the owner of a failed task
+// environment that never created anything physical. Legacy test stores without
+// it keep refusing failed environments.
+type failedTaskEnvironmentReelector interface {
+	ReelectFailedTaskEnvironmentMaterialization(context.Context, string, string) (bool, error)
+}
+
 // taskEnvironmentTransitionPersister commits an existing environment rebind
 // and its repository inventory as one durable operation. Legacy adapters may
 // omit it and use the compatibility persistence path in executor_execute.go.
@@ -509,6 +523,8 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
+	// ResumePassthrough selects conversation resume independently of runtime ownership.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -541,6 +557,10 @@ type LaunchAgentRequest struct {
 	// conversation with the bounded prompt in TaskDescription. It is set only
 	// by the explicit continue_from_history recovery action.
 	ForceContextContinuation bool
+	// ReplaceNativeConversation marks an explicit fresh start that replaces a
+	// committed native conversation. The launch uses the next harness
+	// generation and its own delivery stream.
+	ReplaceNativeConversation bool
 	// RecoveryAction carries a server-side explicit recovery settlement through
 	// the launch boundary. It is never accepted from the client wire request.
 	RecoveryAction string
@@ -744,8 +764,8 @@ type LaunchOptions struct {
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string
-	// BeforeAgentStart admits durable first-prompt state after the execution
-	// exists and before any harness prompt can be dispatched.
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
 	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
@@ -757,7 +777,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string
@@ -1098,15 +1118,17 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	agentManager      AgentManagerClient
-	attachmentReader  AttachmentReader
-	repo              executorStore
-	secretStore       secrets.SecretStore
-	shellPrefs        ShellPreferenceProvider
-	capabilities      ExecutorTypeCapabilities
-	gitlabCredentials GitLabCredentialResolver
-	logger            *logger.Logger
-	canvasesEnabled   bool
+	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
+	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
+	agentManager              AgentManagerClient
+	attachmentReader          AttachmentReader
+	repo                      executorStore
+	secretStore               secrets.SecretStore
+	shellPrefs                ShellPreferenceProvider
+	capabilities              ExecutorTypeCapabilities
+	gitlabCredentials         GitLabCredentialResolver
+	logger                    *logger.Logger
+	canvasesEnabled           bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed

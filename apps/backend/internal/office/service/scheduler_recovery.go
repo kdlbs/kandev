@@ -95,7 +95,7 @@ func (si *SchedulerIntegration) recoverUnstartedTasks(ctx context.Context, log *
 			}
 			seen[t.ID] = struct{}{}
 			excluded = append(excluded, t.ID)
-			// The current step must accept an auto-started run before this
+			// The current step and blockers must permit assignment before this
 			// recovery wake is queued. See shared.IsAssignmentWakeEligible
 			// for the fail-open rationale.
 			if !shared.IsAssignmentWakeEligible(ctx, log, si.svc.repo, si.svc.workflowStepGetter, t.ID, "scheduler_recovery.recover_unstarted_tasks") {

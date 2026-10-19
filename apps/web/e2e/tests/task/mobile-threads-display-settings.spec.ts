@@ -91,8 +91,8 @@ test("edits wider-screen preferences in one touch drawer and keeps the phone sin
   test.setTimeout(180_000);
   const original = await captureThreadSettings(apiClient);
   try {
-    await startPresentationThread(testPage, apiClient, seedData, "A phone display");
-    await startPresentationThread(testPage, apiClient, seedData, "B phone display");
+    await startPresentationThread(apiClient, seedData, "A phone display");
+    await startPresentationThread(apiClient, seedData, "B phone display");
     await seedThreadPresentation(apiClient, { layout: "columns" });
     await testPage.goto("/threads");
     await testPage.getByTestId("mobile-topbar-page-context").tap();

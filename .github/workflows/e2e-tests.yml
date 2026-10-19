@@ -28,7 +28,7 @@ permissions:
   contents: read
   # The build/report jobs read the latest successful main timing artifact.
   actions: read
-  # Required so the containerized build / e2e shards / e2e-report jobs can
+  # Required so the containerized helper / browser / desktop jobs can
   # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
   packages: read
 
@@ -70,7 +70,10 @@ jobs:
                 {"shard":1},{"shard":2},{"shard":3},{"shard":4},
                 {"shard":5},{"shard":6},{"shard":7},{"shard":8},
                 {"shard":9},{"shard":10},{"shard":11},{"shard":12},
-                {"shard":13},{"shard":14}
+                {"shard":13},{"shard":14},{"shard":15},{"shard":16},
+                {"shard":17},{"shard":18},{"shard":19},{"shard":20},
+                {"shard":21},{"shard":22},{"shard":23},{"shard":24},
+                {"shard":25},{"shard":26},{"shard":27},{"shard":28}
               ]}
             ]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
@@ -92,6 +95,8 @@ jobs:
             .github/scripts/resolve-image-digest.sh
             .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
+            .github/actions/cache-go/**
+            .github/scripts/go-cache-identity.*
             .github/actions/download-artifact-retry/**
             .github/scripts/ci-test-only-changes.py
             .github/scripts/changed-paths.py
@@ -142,6 +147,43 @@ jobs:
           BASE_SHA: ${{ steps.detect.outputs.base }}
         run: python3 .github/scripts/ci-test-only-changes.py --base "$BASE_SHA" --event pull_request
 
+  helper_compile:
+    name: Compile remaining helper platforms
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-e2e-helpers-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-e2e-helpers-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
+            go-e2e-helpers-${{ runner.os }}-
+            go-e2e-build-${{ runner.os }}-
+            go-${{ runner.os }}-
+
+      - name: Compile remote platforms and diagnostic commands
+        run: >-
+          VERSION="0.0.0-e2e.${GITHUB_SHA}"
+          make -C apps/backend build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg build-codexdbg build-winjob
+
   build:
     name: Build
     needs: changes
@@ -149,12 +191,11 @@ jobs:
     # Build reads the GitHub API and downloads a timing artifact with the job token.
     # Keep this credential-bearing path on the GitHub-hosted boundary.
     runs-on: ubuntu-latest
-    # Pre-baked image bundles Go, Node 24, pnpm 9.15.9 — see
-    # .github/docker/ci-base/Dockerfile. Uses the `build` tag (with Go)
-    # because this job compiles the backend.
-    container: ghcr.io/kdlbs/kandev-ci:build-latest
     timeout-minutes: 20
-    # Container jobs default to `sh`; pin to bash for the few shell steps below.
+    outputs:
+      catalog_attempt: ${{ steps.e2e_catalog.outputs.attempt }}
+    env:
+      COREPACK_HOME: /tmp/kandev-corepack
     defaults:
       run:
         shell: bash
@@ -165,33 +206,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 9.15.9
+          run_install: false
 
-      # Inside the container the home dir is /root, so the pnpm store lives at
-      # /root/.local/share/pnpm/store. actions/cache resolves `~` against $HOME
-      # so the same path string works for both the host and container variants.
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+
+      - name: Set up Go
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
+
+      - name: Resolve pnpm store
+        id: pnpm_store
+        working-directory: apps
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-e2e-host-${{ runner.os }}-
 
-      # Same reasoning as the pnpm store above: the image sets GOPATH=/root/go
-      # and leaves GOCACHE at its default, and $HOME is /root, so these are the
-      # same two paths backend-tests.yml caches. Without this the backend build
-      # below starts from a cold module *and* build cache on every run.
-      - name: Cache Go modules
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Cache Go modules and compilation
+        uses: ./.github/actions/cache-go
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: go-e2e-build-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
-          restore-keys: |
-            go-e2e-build-${{ runner.os }}-
-            go-${{ runner.os }}-
+          family: e2e-build
 
       - name: Install dependencies
         working-directory: apps
@@ -202,10 +249,21 @@ jobs:
       # needs it. See apps/web/lib/i18n/bundling.ts.
       - name: Build backend and web
         run: |
+          set -euo pipefail
           # PR merge refs are untagged; helper manifests require a SemVer version.
-          VERSION="0.0.0-e2e.${GITHUB_SHA}" make build-backend
+          VERSION="0.0.0-e2e.${GITHUB_SHA}" make -C apps/backend build-kandev build-agentctl build-agentctl-linux build-mock-agent &
+          backend_pid=$!
+          make build-web-e2e &
+          web_pid=$!
+          backend_status=0
+          wait "$backend_pid" || backend_status=$?
+          web_status=0
+          wait "$web_pid" || web_status=$?
+          if (( backend_status != 0 || web_status != 0 )); then
+            echo "Build failed: backend=$backend_status web=$web_status" >&2
+            exit 1
+          fi
           make build-e2e-delivery-fixture
-          make build-web-e2e
 
       # Fixture plugin package consumed by the plugin E2E specs. Built here
       # (the build job has the Go toolchain) and shipped to the shards as its
@@ -213,11 +271,10 @@ jobs:
       - name: Build E2E fixture plugin package
         run: make -C apps/backend e2e-plugin-ui e2e-plugin-package
 
-      # Linux/amd64 helper binaries (agentctl + mock-agent) bind-mounted into
-      # containers by the Docker E2E project. Cheap to build (~1s each) so we
-      # always do it; the regular E2E job ignores them.
+      # The backend build already produced agentctl-linux-amd64. Build the
+      # remaining mock helper once for Docker, SSH and Kind scenarios.
       - name: Build Docker E2E helper binaries
-        run: make build-backend-linux-helpers
+        run: make -C apps/backend build-mock-agent-linux
 
       - name: Record immutable E2E build identity
         run: |
@@ -356,6 +413,7 @@ jobs:
           retention-days: 3
 
       - name: Generate duration-aware E2E shard manifests
+        id: e2e_catalog
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -372,6 +430,7 @@ jobs:
               --web-root "$GITHUB_WORKSPACE/apps/web" \
               --output-dir "$GITHUB_WORKSPACE/e2e-manifests"
           fi
+          printf 'attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Upload E2E shard manifests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -409,7 +468,7 @@ jobs:
           retention-days: 1
 
   e2e:
-    name: E2E Shard ${{ matrix.shard }}/14
+    name: E2E Shard ${{ matrix.shard }}/28
     needs: [changes, build]
     if: needs.changes.outputs.run == 'true'
     runs-on: ${{ matrix.runner }}
@@ -439,6 +498,7 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}
@@ -502,16 +562,37 @@ jobs:
       # executor and the SSH executor's sshd target). Without --project the
       # container-bound specs would run here too, fail seeding (Docker not
       # enabled for these shards), and spam every shard.
+      - name: Capture E2E resource budget
+        continue-on-error: true
+        run: bash .github/scripts/e2e-resource-snapshot.sh > "$RUNNER_TEMP/e2e-resource-before.txt"
+
       # Cross-job archive extraction does not preserve useful mtimes. Validate
       # the source revision and every required artifact checksum instead.
-      - name: Run planned E2E tests (shard ${{ matrix.shard }}/14)
+      - name: Run planned E2E tests (shard ${{ matrix.shard }}/28)
         working-directory: apps/web
         env:
           E2E_SHARD: ${{ matrix.shard }}
           E2E_MANIFEST_SHARD: ${{ matrix.shard }}
+          E2E_RUNNER_PROCESSES: "4"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-        run: bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"
+        run: |
+          TIMEFORMAT='e2e_resources elapsed_seconds=%R cpu_user_seconds=%U cpu_system_seconds=%S cpu_percent=%P'
+          time bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"
+
+      - name: Capture E2E resource outcome
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/e2e-resource-snapshot.sh > "$RUNNER_TEMP/e2e-resource-after.txt"
+
+      - name: Upload E2E resource snapshots
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-resources-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-resource-*.txt
+          retention-days: 3
 
       - name: Upload blob report
         if: always()
@@ -590,6 +671,8 @@ jobs:
     # browsers out of the kandev-ci image — see the extract step below.
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -1132,7 +1215,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
@@ -1165,19 +1248,18 @@ jobs:
 
   e2e-report:
     name: E2E Tests Passed
-    needs: [changes, build, playwright_image, e2e, e2e-containers, e2e-kubernetes-compatibility, desktop-e2e]
+    needs: [changes, helper_compile, build, playwright_image, e2e, e2e-containers, e2e-kubernetes-compatibility, desktop-e2e]
     if: always()
     # Report aggregation queries GitHub history and downloads artifacts with the
     # job token, so it remains on a GitHub-hosted runner during the pilot.
     runs-on: ubuntu-latest
-    # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright CLI.
-    # `runtime` tag — no Go needed for merging blob reports.
-    container: ghcr.io/kdlbs/kandev-ci:runtime-latest
     # 8 min (was 5) — the merge now also emits the JSON report used to
     # cross-check the flake count, and the flake baseline lookup walks recent
     # main runs looking for a published history artifact.
     timeout-minutes: 8
-    # Container jobs default to `sh`; pin to bash.
+    env:
+      COREPACK_HOME: /tmp/kandev-corepack
+      KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     defaults:
       run:
         shell: bash
@@ -1189,46 +1271,57 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Mark workspace safe for git
+      - name: Set up pnpm
         if: needs.changes.outputs.run == 'true'
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 9.15.9
+          run_install: false
+
+      - name: Set up Node.js
+        if: needs.changes.outputs.run == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '24'
+
+      - name: Resolve pnpm store
+        if: needs.changes.outputs.run == 'true'
+        id: pnpm_store
+        working-directory: apps
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
       - name: Cache pnpm store
         if: needs.changes.outputs.run == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm_store.outputs.path }}
+          key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-e2e-host-${{ runner.os }}-
 
       - name: Install dependencies
         if: needs.changes.outputs.run == 'true'
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
-      # The published runtime image may predate the report-tool dependency;
-      # keep older images usable while the image rebuild adds unzip permanently.
-      - name: Ensure timing report tools are installed
+      - name: Verify timing report tools
         if: needs.changes.outputs.run == 'true'
         run: |
-          if ! command -v unzip >/dev/null 2>&1; then
-            apt-get update
-            apt-get install -y --no-install-recommends unzip
-            rm -rf /var/lib/apt/lists/*
-          fi
+          command -v unzip
+          command -v gh
 
       - name: Download blob reports
         if: needs.changes.outputs.run == 'true'
-        uses: ./.github/actions/download-artifact-retry
-        with:
-          path: apps/web/e2e/blob-reports
-          pattern: blob-report-*
-          merge-multiple: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/download-e2e-blobs.py \
+            --run-id "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --output apps/web/e2e/blob-reports
 
       - name: Download E2E shard manifests
         if: needs.changes.outputs.run == 'true'
         uses: ./.github/actions/download-artifact-retry
-        continue-on-error: true
         with:
           name: e2e-shard-manifests
           path: e2e-manifests
@@ -1268,6 +1361,7 @@ jobs:
             --input e2e/blob-reports \
             --output e2e/retry-summary.json \
             --manifest-dir "$GITHUB_WORKSPACE/e2e-manifests" \
+            --catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json" \
             --attachment-output e2e/retry-artifacts \
             --artifact-name e2e-timing-diagnostics \
             --artifact-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
@@ -1524,6 +1618,7 @@ jobs:
           RUN_REQUIRED: ${{ needs.changes.outputs.run }}
           REPORT_RESULT: ${{ job.status }}
           SKIP_REASON: ${{ needs.changes.outputs.reason }}
+          HELPER_COMPILE_RESULT: ${{ needs.helper_compile.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           PLAYWRIGHT_IMAGE_RESULT: ${{ needs.playwright_image.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
@@ -1543,6 +1638,7 @@ jobs:
           expected=skipped
           if [[ "${RUN_REQUIRED}" == "true" ]]; then expected=success; fi
           for entry in \
+            "helper_compile:${HELPER_COMPILE_RESULT}" \
             "build:${BUILD_RESULT}" \
             "playwright-image:${PLAYWRIGHT_IMAGE_RESULT}" \
             "e2e:${E2E_RESULT}" \

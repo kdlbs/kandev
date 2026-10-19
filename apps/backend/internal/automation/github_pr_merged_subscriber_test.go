@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeTaskOriginLookup is a configurable stub for TaskOriginLookup.
@@ -148,6 +149,50 @@ func TestGitHubPRMergedSubscriberFiresHappyPath(t *testing.T) {
 	default:
 		t.Fatal("expected AutomationTriggered event")
 	}
+}
+
+func TestGitHubPRMergedSubscriberPersistsOnlyMatchingRetryTriggers(t *testing.T) {
+	svc := newPRMergedTestService(t)
+	lookup := &fakeTaskOriginLookup{
+		results: map[string]fakeOriginResult{
+			"t_abc123": {workspaceID: "ws-1", isAutomationRun: false, ok: true},
+		},
+	}
+	newPRMergedSubscriber(t, svc, lookup)
+
+	a, err := svc.CreateAutomation(context.Background(), &CreateAutomationRequest{
+		WorkspaceID: "ws-1", Name: "retry trigger matching",
+		AgentProfileID: "agent-1", ExecutorProfileID: "exec-1",
+		RetryPolicy: RetryPolicy{Mode: RetryModeFinite, MaxRetries: "1", DelaySeconds: "30"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAutomation() error = %v", err)
+	}
+	matchingAll := addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPRMerged,
+		GitHubPRMergedTriggerConfig{AllRepos: true})
+	matchingRepo := addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPRMerged,
+		GitHubPRMergedTriggerConfig{Repos: []github.RepoFilter{{Owner: "acme", Name: "api"}}})
+	addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPRMerged,
+		GitHubPRMergedTriggerConfig{Repos: []github.RepoFilter{{Owner: "other", Name: "repo"}}})
+
+	publishPRUpdated(t, svc, mergedPR())
+
+	runs, err := svc.store.ListRuns(context.Background(), a.ID, 50)
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("ListRuns() returned %d runs, want 1", len(runs))
+	}
+	group, err := svc.store.GetRetryGroup(context.Background(), runs[0].RetryGroupID)
+	if err != nil {
+		t.Fatalf("GetRetryGroup() error = %v", err)
+	}
+	var triggerIDs []string
+	if err := json.Unmarshal([]byte(group.TriggerIDsJSON), &triggerIDs); err != nil {
+		t.Fatalf("decode trigger IDs: %v", err)
+	}
+	require.ElementsMatch(t, []string{matchingAll.ID, matchingRepo.ID}, triggerIDs)
 }
 
 // TestGitHubPRMergedSubscriberGates verifies that each per-event gate blocks

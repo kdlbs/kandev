@@ -24,7 +24,6 @@ func TestDeliveryRetentionPersistentCorruptionBackoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer worker.Stop()
-	fireAfter(t, clock, initialDelay)
 	if failed := receiveSnapshot(t, snapshots); !failed.StructuralFailure {
 		t.Fatalf("initial corruption: %+v", failed)
 	}
@@ -34,8 +33,6 @@ func TestDeliveryRetentionPersistentCorruptionBackoff(t *testing.T) {
 		t.Fatalf("corrupt receipt cannot report recovery: %+v", failed)
 	}
 	fireAfter(t, clock, 2*time.Second)
-	fireAfter(t, clock, betweenBatches)
-	fireAfter(t, clock, betweenBatches)
 	if recovered := receiveSnapshot(t, snapshots); !recovered.ReadinessRecovered || recovered.FailedBatches != 0 {
 		t.Fatalf("successful cleanup must report recovery: %+v", recovered)
 	}

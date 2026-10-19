@@ -30,6 +30,13 @@ test.describe("Preview session tabs", () => {
   }) => {
     test.setTimeout(180_000);
 
+    // This fixture owns primary selection. Workflow automation must not replace
+    // that selection after a session finishes.
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Preview tabs");
+    const step = await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+
     // 1. Create a task — first session becomes primary.
     // Task descriptions use the scenario registry (`/e2e:<name>`), so we pick a
     // scenario with a unique, agent-only response string to avoid prompt/response
@@ -40,8 +47,8 @@ test.describe("Preview session tabs", () => {
       seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
+        workflow_id: workflow.id,
+        workflow_step_id: step.id,
         repository_ids: [seedData.repositoryId],
       },
     );
@@ -69,7 +76,7 @@ test.describe("Preview session tabs", () => {
         task_id: task.id,
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        workflow_step_id: seedData.startStepId,
+        workflow_step_id: step.id,
         prompt: 'e2e:message("secondary-session-response")',
       },
       60_000,
@@ -110,7 +117,7 @@ test.describe("Preview session tabs", () => {
 
     // 5. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
-    await kanban.goto();
+    await kanban.goto(workflow.id);
 
     const previewCard = kanban.taskCardByTitle("Preview Tabs Task");
     await expect(previewCard).toBeVisible({ timeout: 10_000 });

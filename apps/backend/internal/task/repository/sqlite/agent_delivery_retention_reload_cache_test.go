@@ -43,6 +43,7 @@ func TestDeliveryRetentionStorageReloadExactSelection(t *testing.T) {
 					 SELECT 'reload-second-stream', session_id, incarnation_id, harness_generation, received_sequence, projected_sequence, retired_sequence, updated_at FROM agent_delivery_cursors`,
 					`UPDATE agent_delivery_inbox SET stream_id='reload-second-stream' WHERE sequence % 2 = 0`,
 					`UPDATE agent_delivery_effects SET stream_id='reload-second-stream' WHERE sequence % 2 = 0`,
+					`UPDATE agent_delivery_effects SET effect_key='agent_delivery.event:' || stream_id || ':' || CAST(sequence AS TEXT) WHERE sequence % 2 = 0`,
 				} {
 					if _, err := repo.db.Exec(query); err != nil {
 						t.Fatal(err)

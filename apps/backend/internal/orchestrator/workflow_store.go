@@ -512,7 +512,7 @@ func (s *workflowStore) updateDeferredTransitionTask(
 		return err
 	}
 	if !applied {
-		return fmt.Errorf("deferred move source changed")
+		return errDeferredMoveSourceChanged
 	}
 	return nil
 }

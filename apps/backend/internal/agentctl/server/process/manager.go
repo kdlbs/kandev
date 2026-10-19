@@ -161,6 +161,7 @@ type Manager struct {
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+	passthrough      *PassthroughOwner
 	// repoTrackers holds per-repository trackers for multi-repo task roots.
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
@@ -297,6 +298,7 @@ type Manager struct {
 	// startOneShot store the freshly created channel here in the same place
 	// they assign stopCh itself.
 	stopChSnapshot atomic.Value // chan struct{}
+	shutdownIntent atomic.Pointer[atomic.Bool]
 	doneCh         chan struct{}
 	// attachedCount is the live count of backend event-stream connections
 	// (see attachment.go). Zero value correctly starts an instance detached.
@@ -449,6 +451,10 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	}
 	if cfg.DurableJournalPath != "" {
 		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
+		if m.deliveryJournalErr == nil {
+			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
+		}
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -466,6 +472,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
+	m.passthrough = newPassthroughOwner(m)
 	return m
 }
 
@@ -708,7 +715,8 @@ func (m *Manager) DispatchDeliverySubmission(
 		m.deliveryActiveID = ""
 		m.deliveryActiveMu.Unlock()
 	}()
-	return (&SubmissionDelivery{Journal: deliveryJournal}).Dispatch(ctx, id, call)
+	stopping := m.shutdownIntent.Load()
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
 }
 
 func (m *Manager) activeDeliverySubmissionID() string {
@@ -781,7 +789,7 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
 	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
 		generation != recoveryGeneration || submission.HarnessGeneration > generation ||
-		(submission.HarnessGeneration == generation && submission.State != journal.SubmissionInterruptedUnknown) {
+		(submission.HarnessGeneration == generation && !journal.HasUnprovenOutcome(submission)) {
 		return journal.ErrOwnerMismatch
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
@@ -1746,6 +1754,9 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 	defer release()
+	if m.passthrough.Live() {
+		return 0, fmt.Errorf("passthrough agent is already running")
+	}
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return 0, fmt.Errorf("agent is already running")
@@ -1828,6 +1839,7 @@ func (m *Manager) startManagedProcess() (uint64, error) {
 	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
+	m.shutdownIntent.Store(&atomic.Bool{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
@@ -1884,6 +1896,7 @@ func (m *Manager) startOneShot() error {
 	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
+	m.shutdownIntent.Store(&atomic.Bool{})
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -2469,6 +2482,7 @@ func (m *Manager) createAdapter() error {
 // forwardUpdates forwards updates from the adapter to the manager's channel
 func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-chan struct{}) {
 	defer m.wg.Done()
+	defer m.closeDeliveryEventWriter()
 
 	updatesCh := agentAdapter.Updates()
 	for {
@@ -2500,8 +2514,39 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				return
 			}
 		case <-stopCh:
+			m.drainDeliveryUpdates(updatesCh)
 			return
 		}
+	}
+}
+
+func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
+	for {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+			persisted, err := m.persistDeliveryEvent(update)
+			if err != nil {
+				m.recordDeliveryStorageFailure(err)
+				return
+			}
+			m.recordTerminalOutcome(&persisted)
+			m.signalDeliveryWakeup()
+		default:
+			return
+		}
+	}
+}
+
+func (m *Manager) closeDeliveryEventWriter() {
+	m.deliveryJournalMu.RLock()
+	writer := m.deliveryWriter
+	m.deliveryJournalMu.RUnlock()
+	if writer != nil {
+		writer.close()
 	}
 }
 
@@ -2648,7 +2693,7 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 		MCPAttachment: &evidence,
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logger.Error("failed to commit durable MCP attachment event", zap.Error(err))
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
 		return
 	} else {
 		event = persisted
@@ -2671,7 +2716,7 @@ func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttem
 		MCPAttachmentAttempt: &attempt,
 	}
 	if persisted, err := m.persistDeliveryEvent(event); err != nil {
-		m.logger.Error("failed to commit durable MCP attachment attempt", zap.Error(err))
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
 		return
 	} else {
 		event = persisted
@@ -2724,6 +2769,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
+	passthroughErr := m.passthrough.StopAll(ctx)
+	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
 		// Close durable storage even when an owner misses the drain deadline.
@@ -2732,7 +2779,7 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
-	return errors.Join(previewErr, stopErr, m.closeDeliveryJournal())
+	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
 }
 
 func (m *Manager) closeDeliveryJournal() error {
@@ -2763,6 +2810,9 @@ func (m *Manager) closeDeliveryJournal() error {
 }
 
 func (m *Manager) stop(ctx context.Context) error {
+	if err := m.passthrough.StopAll(ctx); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -2815,6 +2865,9 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.Int("pid", m.agentPID()),
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
+	if stopping := m.shutdownIntent.Load(); stopping != nil {
+		stopping.Store(true)
+	}
 
 	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
@@ -2904,11 +2957,8 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 // It reports whether this call closed stopCh, i.e. whether goroutines were just
 // released and still need draining.
 func (m *Manager) closeAdapterAndStdin() bool {
-	m.deliveryJournalMu.RLock()
-	writer := m.deliveryWriter
-	m.deliveryJournalMu.RUnlock()
-	if writer != nil {
-		writer.close()
+	if stopping := m.shutdownIntent.Load(); stopping != nil {
+		stopping.Store(true)
 	}
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
@@ -2918,7 +2968,6 @@ func (m *Manager) closeAdapterAndStdin() bool {
 	}
 	m.logger.Debug("adapter closed")
 
-	m.logger.Debug("closing stop channel")
 	closedStopCh := false
 	if m.stopCh != nil && m.stopChClosed.CompareAndSwap(false, true) {
 		close(m.stopCh)

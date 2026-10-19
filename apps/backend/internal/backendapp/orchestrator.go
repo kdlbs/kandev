@@ -272,6 +272,8 @@ func provideOrchestrator(
 	// workspace.manage, not session.prompt, to start a turn on a coordinator
 	// conversation task.
 	orchestratorSvc.SetTaskPromptChecker(taskSvc.AuthorizeTaskPromptScope)
+	orchestratorSvc.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
+	orchestratorSvc.SetAutonomousExecutorContext(taskSvc.PrepareAutonomousExecutor)
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
@@ -358,7 +360,7 @@ func startupRecoveryOwnerContext(
 	if !ok || identity.UserID != ownerID || identity.OrgID != orgID {
 		return nil, errors.New("workspace owner identity is unavailable or changed organizations")
 	}
-	return authn.WithIdentity(ctx, identity), nil
+	return authn.WithIdentity(taskmodels.WithExecutorActor(ctx, ""), identity), nil
 }
 
 type githubCredentialPolicyService interface {
@@ -799,11 +801,19 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Repositories:   repos,
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
+
+		AutomationStartOwned: req.AutomationStartOwned,
+		AutomationStartOwner: req.AutomationStartOwner,
+		ExternalID:           req.ExternalID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result.Task, nil
+}
+
+func (a *reviewTaskCreatorAdapter) GetReviewTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error) {
+	return a.svc.GetTaskByExternalID(ctx, workspaceID, externalID)
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.

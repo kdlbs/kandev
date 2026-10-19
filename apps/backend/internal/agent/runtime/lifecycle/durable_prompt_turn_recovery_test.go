@@ -13,7 +13,7 @@ import (
 )
 
 func TestDurablePromptTurnBindingPersistsBeforeProviderDispatch(t *testing.T) {
-	sm, execution, _ := initialDeliveryPersistenceFixture(t)
+	sm, execution, _, _ := initialDeliveryPersistenceFixture(t)
 	execution.DeliveryStreamID = "stream"
 	execution.setPromptTurnID("turn-initial")
 	store := NewExecutionStore()
@@ -45,7 +45,7 @@ func TestDurablePromptTurnBindingPersistsBeforeProviderDispatch(t *testing.T) {
 }
 
 func TestDurablePromptTurnBindingWriteFailurePreventsProviderDispatch(t *testing.T) {
-	sm, execution, repository := initialDeliveryPersistenceFixture(t)
+	sm, execution, repository, _ := initialDeliveryPersistenceFixture(t)
 	execution.DeliveryStreamID = "stream"
 	execution.setPromptTurnID("turn-initial")
 	writeErr := errors.New("runtime owner write failed")
@@ -63,7 +63,7 @@ func TestDurablePromptTurnBindingWriteFailurePreventsProviderDispatch(t *testing
 }
 
 func TestDurablePromptWithoutTurnClearsThePersistedPredecessorBinding(t *testing.T) {
-	sm, execution, _ := initialDeliveryPersistenceFixture(t)
+	sm, execution, _, _ := initialDeliveryPersistenceFixture(t)
 	execution.setMetadataValue("delivery_prompt_turn_binding", "predecessor")
 	persisted := false
 	sm.persistPromptTurnBinding = func(_ context.Context, current *AgentExecution) error {

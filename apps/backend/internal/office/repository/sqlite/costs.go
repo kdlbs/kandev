@@ -118,8 +118,21 @@ func (r *Repository) ListCostEvents(ctx context.Context, workspaceID string) ([]
 // group_label resolves to the agent profile's display name; empty when the
 // profile row has been deleted.
 func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+	return r.getCostsByAgentInWindow(ctx, workspaceID, time.Time{}, time.Time{})
+}
+
+// GetCostsByAgentInWindow applies a half-open event-time window to the workspace query.
+func (r *Repository) GetCostsByAgentInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
+	return r.getCostsByAgentInWindow(ctx, workspaceID, start, before)
+}
+
+func (r *Repository) getCostsByAgentInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
+	query := `
 		SELECT e.agent_profile_id AS group_key,
 			COALESCE(MAX(NULLIF(ap.name, '')), '') AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
@@ -130,7 +143,9 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 		LEFT JOIN agent_profiles ap ON ap.id = e.agent_profile_id
 		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.agent_profile_id
-	`), workspaceID)
+	`
+	query, args := costQueryWindow(query, workspaceID, start, before)
+	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +166,21 @@ func (r *Repository) GetCostsByAgent(ctx context.Context, workspaceID string) ([
 // "unassigned". group_label resolves to the project name; empty when
 // project_id is unset or the project row has been deleted.
 func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+	return r.getCostsByProjectInWindow(ctx, workspaceID, time.Time{}, time.Time{})
+}
+
+// GetCostsByProjectInWindow applies a half-open event-time window to the workspace query.
+func (r *Repository) GetCostsByProjectInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
+	return r.getCostsByProjectInWindow(ctx, workspaceID, start, before)
+}
+
+func (r *Repository) getCostsByProjectInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
+	query := `
 		SELECT COALESCE(t.project_id, '') AS group_key,
 			COALESCE(MAX(NULLIF(op.name, '')), '') AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
@@ -163,7 +191,9 @@ func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) 
 		LEFT JOIN office_projects op ON op.id = t.project_id
 		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY COALESCE(t.project_id, '')
-	`), workspaceID)
+	`
+	query, args := costQueryWindow(query, workspaceID, start, before)
+	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +211,21 @@ func (r *Repository) GetCostsByProject(ctx context.Context, workspaceID string) 
 // providers distinct (e.g. anthropic:claude-sonnet-4 vs google:claude-sonnet-4
 // — unlikely in practice but cheap to handle).
 func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+	return r.getCostsByModelInWindow(ctx, workspaceID, time.Time{}, time.Time{})
+}
+
+// GetCostsByModelInWindow applies a half-open event-time window to the workspace query.
+func (r *Repository) GetCostsByModelInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
+	return r.getCostsByModelInWindow(ctx, workspaceID, start, before)
+}
+
+func (r *Repository) getCostsByModelInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
+	query := `
 		SELECT
 			COALESCE(NULLIF(e.provider, ''), '') || ':' || COALESCE(NULLIF(e.model, ''), '') AS group_key,
 			CASE COALESCE(NULLIF(e.provider, ''), '')
@@ -199,7 +242,9 @@ func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([
 		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY e.provider, e.model
-	`), workspaceID)
+	`
+	query, args := costQueryWindow(query, workspaceID, start, before)
+	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -216,8 +261,21 @@ func (r *Repository) GetCostsByModel(ctx context.Context, workspaceID string) ([
 // provider values bucket under "(unknown)" so the row is still surfaced
 // rather than silently dropped.
 func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string) ([]*models.CostBreakdown, error) {
+	return r.getCostsByProviderInWindow(ctx, workspaceID, time.Time{}, time.Time{})
+}
+
+// GetCostsByProviderInWindow applies a half-open event-time window to the workspace query.
+func (r *Repository) GetCostsByProviderInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
+	return r.getCostsByProviderInWindow(ctx, workspaceID, start, before)
+}
+
+func (r *Repository) getCostsByProviderInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) ([]*models.CostBreakdown, error) {
 	var results []*models.CostBreakdown
-	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(`
+	query := `
 		SELECT
 			COALESCE(NULLIF(e.provider, ''), 'unknown') AS group_key,
 			CASE COALESCE(NULLIF(e.provider, ''), 'unknown')
@@ -225,7 +283,7 @@ func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string)
 				WHEN 'openai'    THEN 'OpenAI'
 				WHEN 'google'    THEN 'Gemini'
 				WHEN 'unknown'   THEN '(unknown)'
-				ELSE e.provider
+				ELSE COALESCE(NULLIF(e.provider, ''), 'unknown')
 			END AS group_label,
 			SUM(e.cost_subcents) AS total_subcents,
 			COUNT(*) AS count
@@ -234,7 +292,9 @@ func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string)
 		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
 		GROUP BY COALESCE(NULLIF(e.provider, ''), 'unknown')
-	`), workspaceID)
+	`
+	query, args := costQueryWindow(query, workspaceID, start, before)
+	err := r.ro.SelectContext(ctx, &results, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -247,14 +307,29 @@ func (r *Repository) GetCostsByProvider(ctx context.Context, workspaceID string)
 // SumCosts returns the total cost in subcents (hundredths of a cent) for a
 // workspace using SQL aggregation.
 func (r *Repository) SumCosts(ctx context.Context, workspaceID string) (int64, error) {
+	return r.sumCostsInWindow(ctx, workspaceID, time.Time{}, time.Time{})
+}
+
+// SumCostsInWindow applies a half-open event-time window to the workspace query.
+func (r *Repository) SumCostsInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) (int64, error) {
+	return r.sumCostsInWindow(ctx, workspaceID, start, before)
+}
+
+func (r *Repository) sumCostsInWindow(
+	ctx context.Context, workspaceID string, start, before time.Time,
+) (int64, error) {
 	var total int64
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	query := `
 		SELECT COALESCE(SUM(e.cost_subcents), 0)
 		FROM office_cost_events e
 		LEFT JOIN tasks t ON t.id = e.task_id
 		LEFT JOIN office_run_sessions rs ON e.task_id = '' AND rs.id = e.session_id
 		WHERE COALESCE(t.workspace_id, rs.workspace_id) = ?
-	`), workspaceID).Scan(&total)
+	`
+	query, args := costQueryWindow(query, workspaceID, start, before)
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&total)
 	return total, err
 }
 
@@ -333,4 +408,19 @@ func (r *Repository) GetCostForProjectSince(ctx context.Context, projectID strin
 		WHERE t.project_id = ? AND e.occurred_at >= ?
 	`), projectID, since.UTC()).Scan(&total)
 	return total, err
+}
+
+// costQueryWindow binds UTC event-time bounds; zero bounds retain lifetime reads.
+func costQueryWindow(query, workspaceID string, start, before time.Time) (string, []interface{}) {
+	args := []interface{}{workspaceID}
+	if before.IsZero() {
+		return query, args
+	}
+	predicate := " AND e.occurred_at >= ? AND e.occurred_at < ?\n"
+	if index := strings.Index(query, "GROUP BY"); index >= 0 {
+		query = query[:index] + predicate + query[index:]
+	} else {
+		query += predicate
+	}
+	return query, append(args, start.UTC(), before.UTC())
 }

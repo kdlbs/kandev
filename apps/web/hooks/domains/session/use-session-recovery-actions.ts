@@ -7,15 +7,18 @@ import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery
 import { isProviderRestoredResumeEligible } from "./session-recovery-eligibility";
 import {
   deliveryRecoveryRequestIdentity,
+  canResumeDeliveryBlock,
   isDeliveryRecoveryResultCurrent,
   persistedDeliveryRecoveryNotice,
 } from "./session-delivery-recovery-view";
 import {
   asRecoveryError,
+  runtimeCleanupFailureCauses,
+  runtimeCleanupFailureDetails,
+  resolveRequestErrorMessage,
   branchRecoveryDetails,
   contextContinuationDetails,
   getWorkspaceRecoveryStatus,
-  managedCloneRelocationRecoveryDetails,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   requestSessionRecover,
@@ -32,6 +35,7 @@ import {
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
 import {
   useRecoveryOperationFence,
+  recoveryFailureAssociation,
   currentRecoveryValue,
   isOlderWorkspaceRecoveryProjection,
   workspaceRecoveryMatchesFailure,
@@ -76,6 +80,8 @@ function guardOrFallbackError(
   fallback: string,
 ): Error {
   if (guard) return new Error(sessionRecoveryGuardMessage(guard, translate));
+  if (runtimeCleanupFailureDetails(cause))
+    return new Error(resolveRequestErrorMessage(cause, translate, fallback));
   return asRecoveryError(cause, fallback);
 }
 
@@ -83,48 +89,6 @@ type WorkspaceRecoveryStatusRead = {
   resolved: boolean;
   projection: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
 };
-
-type RecoveryFailureAssociation = {
-  managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
-  errorStamp: string | null;
-  requestKey: string;
-};
-
-function recoveryFailureAssociation({
-  cause,
-  operation,
-  errorStamp,
-  taskId,
-  sessionId,
-  isCurrentOperation,
-  isCurrentSession,
-  matchesLatestErrorStamp,
-}: {
-  cause: unknown;
-  operation: RecoveryOperation;
-  errorStamp?: string | null;
-  taskId: string;
-  sessionId: string;
-  isCurrentOperation: (operation: RecoveryOperation) => boolean;
-  isCurrentSession: (operation: RecoveryOperation) => boolean;
-  matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
-}): RecoveryFailureAssociation | null {
-  const managedClone = managedCloneRelocationRecoveryDetails(cause);
-  const currentOperation = isCurrentOperation(operation);
-  const isSuccessorRelocation =
-    managedClone?.kind === "managed_clone_relocation_required" &&
-    isCurrentSession(operation) &&
-    matchesLatestErrorStamp(managedClone.error_stamp);
-  if (!currentOperation && !isSuccessorRelocation) return null;
-
-  const associatedStamp = isSuccessorRelocation
-    ? (managedClone.error_stamp ?? errorStamp ?? null)
-    : (errorStamp ?? null);
-  const requestKey = currentOperation
-    ? operation.requestKey
-    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
-  return { managedClone, errorStamp: associatedStamp, requestKey };
-}
 
 /** Owns shared manual recovery state while a failed session remains visible. */
 // eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
@@ -336,6 +300,7 @@ export function useSessionRecoveryActions({
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
         operation: "resume",
+        causes: runtimeCleanupFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
         requestKey,
@@ -568,6 +533,16 @@ export function useSessionRecoveryActions({
 
   return {
     busyAction: sharedBusyAction ?? busyAction,
+    deliveryResumeAvailable: canResumeDeliveryBlock(
+      persistedDeliveryRecovery,
+      deliveryRecoveryBlock,
+    ),
+    deliveryHistoryGap:
+      persistedDeliveryRecovery?.reconstruction?.processIdentityKnown &&
+      (persistedDeliveryRecovery.phase === "uncertain" ||
+        persistedDeliveryRecovery.phase === "reconnecting")
+        ? persistedDeliveryRecovery.historyGap
+        : undefined,
     recoveryError,
     branchDetails: currentRecoveryValue(localResultIsCurrent, branchDetails),
     guardDetails: currentRecoveryValue(localResultIsCurrent, guardDetails),

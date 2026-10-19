@@ -92,19 +92,24 @@ func TestStartApprovalSweep_StopsOnContextCancel(t *testing.T) {
 
 // TestStartApprovalSweep_SecondCallIsNoop covers idempotent start: calling
 // startApprovalSweep again while one loop is already running must not spawn
-// a second goroutine (a second stop callback would fire on cancel if it had).
+// a second goroutine. Its unused ticker is released immediately and the
+// active worker releases its own ticker when joined.
 func TestStartApprovalSweep_SecondCallIsNoop(t *testing.T) {
 	_, _, _, svc := approveFixture(t)
 	tick := make(chan time.Time, 1)
-	stopCalls := make(chan struct{}, 2)
+	stopCalls := make(chan struct{}, 1)
+	unusedStops := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	svc.startApprovalSweep(ctx, tick, func() { stopCalls <- struct{}{} })
-	svc.startApprovalSweep(ctx, tick, func() { stopCalls <- struct{}{} })
+	svc.startApprovalSweep(ctx, tick, func() { unusedStops <- struct{}{} })
+	if len(unusedStops) != 1 {
+		t.Fatal("unused ticker was not released synchronously")
+	}
 	cancel()
 	svc.sweepWG.Wait()
 
 	if len(stopCalls) != 1 {
-		t.Fatalf("stop callback fired %d times, want exactly 1 (second start must be a no-op)", len(stopCalls))
+		t.Fatalf("active worker stop callback fired %d times, want exactly 1", len(stopCalls))
 	}
 }

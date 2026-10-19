@@ -678,7 +678,7 @@ func TestExecutor_PromptWithAdmissionCallback_RequiresCapableManager(t *testing.
 	onDispatchedCalled := false
 	_, err := exec.PromptWithAdmissionCallback(
 		context.Background(), "task-1", "sess-1", "hello", nil, false,
-		func() error {
+		func(context.Context, string, []v1.MessageAttachment) error {
 			beforeAdmissionCalled = true
 			return nil
 		},

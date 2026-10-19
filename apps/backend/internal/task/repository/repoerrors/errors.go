@@ -2,6 +2,10 @@ package repoerrors
 
 import "errors"
 
+// ErrWorkspaceCloneConfiguration reports a source setting that cannot be
+// copied into an independent workspace.
+var ErrWorkspaceCloneConfiguration = errors.New("workspace configuration cannot be cloned")
+
 // ErrWorkspaceNameMismatch reports that a confirmed workspace delete did not
 // match the workspace row's current name.
 var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")

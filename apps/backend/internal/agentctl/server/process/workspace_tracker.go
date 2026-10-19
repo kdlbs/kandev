@@ -162,6 +162,12 @@ type WorkspaceTracker struct {
 	monitorTickTotalNanos atomic.Int64
 	monitorStatsMu        sync.Mutex
 
+	// Slow-mode backoff counters: consecutive completed scans that observed no
+	// change, one per polling loop because each loop has its own observation.
+	// See slowPollInterval.
+	slowIdleMonitorTicks atomic.Uint32
+	slowIdleGitPollTicks atomic.Uint32
+
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
@@ -213,6 +219,9 @@ type WorkspaceTracker struct {
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
 	gitStatusBetweenQueries func(context.Context)
+	// pollTimerArmed is an optional test hook invoked each time a polling loop
+	// arms its timer, with the loop name and interval. It is nil in production.
+	pollTimerArmed func(loop string, interval time.Duration)
 
 	// Control
 	stopCh          chan struct{}

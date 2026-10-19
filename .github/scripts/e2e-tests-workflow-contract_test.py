@@ -2,6 +2,9 @@
 """Contract tests for the E2E workflow and prebuilt images."""
 
 import hashlib
+import json
+import re
+import textwrap
 import os
 from pathlib import Path
 import subprocess
@@ -41,6 +44,149 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 
 class E2EWorkflowContractTest(unittest.TestCase):
+    def test_required_report_reconciles_the_build_catalog(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        report = workflow.partition("  e2e-report:\n")[2]
+        collection = report.partition("      - name: Collect timing and retry diagnostics\n")[2].partition("      - name:")[0]
+        self.assertIn('--catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json"', collection)
+        manifest_download = report.partition("      - name: Download E2E shard manifests\n")[2].partition("      - name:")[0]
+        self.assertNotIn("continue-on-error", manifest_download)
+        for job in (job_block(workflow, "e2e", "playwright_image"), job_block(workflow, "e2e-containers", "e2e-kubernetes-compatibility"), report):
+            self.assertIn("KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}", job)
+        build = job_block(workflow, "build", "e2e")
+        self.assertIn("catalog_attempt: ${{ steps.e2e_catalog.outputs.attempt }}", build)
+        self.assertIn('"$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"', build)
+
+    def test_browser_free_jobs_bootstrap_host_tools_and_share_one_store_writer(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        build = job_block(workflow, "build", "e2e")
+        report = workflow.partition("  e2e-report:\n")[2]
+        for job in (build, report):
+            self.assertNotIn("COREPACK_HOME: ${{ runner.", job.partition("    steps:\n")[0])
+            self.assertNotRegex(job, r"(?m)^    container:")
+            self.assertIn("runs-on: ubuntu-latest", job)
+            self.assertIn("uses: pnpm/action-setup@", job)
+            self.assertIn("version: 9.15.9", job)
+            self.assertIn("uses: actions/setup-node@", job)
+            self.assertIn("node-version: '24'", job)
+            self.assertIn('pnpm store path --silent', job)
+            self.assertIn("path: ${{ steps.pnpm_store.outputs.path }}", job)
+            self.assertIn("key: pnpm-e2e-host-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}", job)
+            self.assertLess(job.index("uses: pnpm/action-setup@"), job.index("pnpm store path --silent"))
+            self.assertLess(job.index("uses: actions/setup-node@"), job.index("pnpm install --frozen-lockfile"))
+            self.assertNotIn("apt-get", job)
+        self.assertIn("uses: actions/setup-go@", build)
+        self.assertIn("go-version-file: apps/backend/go.mod", build)
+        self.assertIn("cache: false", build)
+        self.assertIn("uses: actions/cache@", build)
+        self.assertIn("uses: actions/cache/restore@", report)
+        self.assertNotIn("uses: actions/cache@", report)
+        self.assertNotIn("uses: actions/setup-go@", report)
+        self.assertNotIn("if: steps.pnpm_store", build)
+        self.assertNotIn("if: steps.pnpm_store", report)
+
+    def test_normal_matrix_matches_the_planner_and_keeps_guarded_processes(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        planner = (REPO_ROOT / "apps/web/e2e/scripts/plan-shards.ts").read_text()
+        count = int(re.search(r"NORMAL_SHARD_COUNT = (\d+)", planner).group(1))
+        self.assertEqual(count, 28)
+        families = workflow.split("families: >-\n", 1)[1].split("burst:", 1)[0]
+        family = next(f for f in json.loads(families) if f["name"] == "e2e")
+        self.assertEqual(family["instances"], [{"shard": n} for n in range(1, count + 1)])
+        self.assertIn("name: E2E Shard ${{ matrix.shard }}/28", workflow)
+
+    def test_independent_helper_cache_snapshots_refresh_after_source_changes(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        dependency = "${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}"
+        block = job_block(workflow, "helper_compile", "build")
+        prefix = f"go-e2e-helpers-{dependency}"
+        self.assertIn(f"key: {prefix}-${{{{ github.sha }}}}", block)
+        self.assertIn(f"restore-keys: |\n            {prefix}-\n", block)
+
+    def test_build_reuses_optional_daily_cache_without_conditioning_verification(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        build = job_block(workflow, "build", "e2e")
+        self.assertIn("uses: ./.github/actions/cache-go", build)
+        self.assertIn("family: e2e-build", build)
+        self.assertNotIn("key: go-e2e-build-", build)
+        self.assertNotIn("steps.cache", build)
+        self.assertIn(".github/actions/cache-go/**", workflow)
+        self.assertIn(".github/scripts/go-cache-identity.*", workflow)
+        self.assertIn("make -C apps/backend build-kandev", build)
+        self.assertIn("make build-web-e2e", build)
+        action = (REPO_ROOT / ".github/actions/cache-go/action.yml").read_text()
+        self.assertEqual(action.count("continue-on-error: true"), 4)
+        self.assertIn("key: ${{ steps.identity.outputs.buildKey }}", action)
+        self.assertIn("restore-keys: ${{ steps.identity.outputs.buildPrefix }}", action)
+        lint = LINT_WORKFLOW.read_text()
+        self.assertIn("node --test .github/scripts/go-cache-identity.test.mjs", lint)
+
+    def test_parallel_build_joins_both_children_and_preserves_each_failure(self) -> None:
+        source = E2E_WORKFLOW.read_text().split("      - name: Build backend and web\n", 1)[1]
+        script = textwrap.dedent(source.split("        run: |\n", 1)[1].split("\n      #", 1)[0])
+        # Exercise the actual shell step with independent fake make children.
+        for failing in ("", "build-kandev", "build-web-e2e"):
+            with self.subTest(failing=failing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                make = root / "make"
+                make.write_text("""#!/usr/bin/env bash
+set -eu
+if [[ "$1" == -C ]]; then shift 2; fi
+target=$1
+if [[ "$target" == build-kandev || "$target" == build-web-e2e ]]; then
+  touch "$target.started"
+  other=build-kandev
+  if [[ "$target" == build-kandev ]]; then other=build-web-e2e; fi
+  for ((i=0;i<200;i++)); do
+    [[ -f "$other.started" ]] && break
+    sleep 0.01
+  done
+  [[ -f "$other.started" ]] || exit 91
+  touch "$target.joined"
+  [[ "$FAIL_TARGET" != "$target" ]] || exit 7
+else
+  [[ -f build-kandev.joined && -f build-web-e2e.joined ]] || exit 92
+  touch fixture.built
+fi
+""")
+                make.chmod(0o755)
+                result = subprocess.run(["bash", "-c", script], cwd=root, timeout=10,
+                                        env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                                             "FAIL_TARGET": failing, "GITHUB_SHA": "test-source"},
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, not failing, result.stderr)
+                self.assertTrue((root / "build-kandev.joined").exists())
+                self.assertTrue((root / "build-web-e2e.joined").exists())
+                self.assertEqual((root / "fixture.built").exists(), not failing)
+
+    def test_browser_build_and_parallel_compile_preserve_the_original_binary_union(self) -> None:
+        workflow = E2E_WORKFLOW.read_text()
+        helpers = job_block(workflow, "helper_compile", "build")
+        build = job_block(workflow, "build", "e2e")
+        self.assertIn("needs: changes", helpers)
+        self.assertIn("runs-on: ubuntu-latest", helpers)
+        self.assertIn("if: needs.changes.outputs.run == 'true'", helpers)
+        self.assertNotIn("continue-on-error", helpers)
+        self.assertNotIn("helper_compile", job_block(workflow, "e2e", "playwright_image"))
+        host = ["build-kandev", "build-agentctl", "build-agentctl-linux", "build-mock-agent"]
+        other = ["build-agentctl-linux-arm64", "build-agentctl-darwin-arm64",
+                 "build-agentctl-darwin-amd64", "build-acpdbg", "build-codexdbg", "build-winjob"]
+        self.assertIn("make -C apps/backend " + " ".join(host) + " &", build)
+        self.assertIn("make -C apps/backend " + " ".join(other), helpers)
+        self.assertIn("run: make -C apps/backend build-mock-agent-linux", build)
+        self.assertNotIn("make build-backend", build)
+        self.assertIn("make build-e2e-delivery-fixture", build)
+        def outputs(targets):
+            result = subprocess.run(["make", "-n", "-C", str(REPO_ROOT / "apps/backend"), *targets],
+                                    capture_output=True, text=True, check=True)
+            return set(re.findall(r"-o (bin/[^ ]+)", result.stdout))
+        self.assertEqual(outputs(host + other + ["build-mock-agent-linux", "build-e2e-delivery-fixture"]),
+                         outputs(["build", "build-mock-agent-linux", "build-e2e-delivery-fixture"]))
+        report = workflow.split("  e2e-report:\n", 1)[1]
+        self.assertIn("needs: [changes, helper_compile, build,", report)
+        self.assertIn("HELPER_COMPILE_RESULT: ${{ needs.helper_compile.result }}", report)
+        self.assertIn('"helper_compile:${HELPER_COMPILE_RESULT}"', report)
+
     def run_image_digest_resolver(
         self,
         *,
@@ -193,7 +339,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
         ):
             self.assertNotIn(forbidden, desktop_job)
 
-        changes_job = job_block(workflow, "changes", "build")
+        changes_job = job_block(workflow, "changes", "helper_compile")
         for pattern in (
             ".github/docker/ci-base/**",
             ".github/scripts/resolve-image-digest.sh",
@@ -212,6 +358,51 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
+    def test_normal_resource_observation_preserves_native_execution_and_artifacts(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        normal = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn("Capture E2E resource budget", normal)
+        self.assertIn("Capture E2E resource outcome", normal)
+        self.assertIn("TIMEFORMAT=", normal)
+        self.assertIn('time bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"', normal)
+        after = normal.partition("- name: Capture E2E resource outcome")[2].partition("- name: Upload blob report")[0]
+        self.assertIn("if: always()", after)
+        self.assertIn("e2e-resource-before.txt", normal)
+        self.assertIn("e2e-resource-after.txt", after)
+        self.assertNotIn("apps/web/e2e/blob-report/", after)
+        self.assertIn("name: e2e-resources-${{ matrix.shard }}", after)
+        self.assertNotIn("KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM", normal)
+        self.assertIn('E2E_RUNNER_PROCESSES: "4"', normal)
+
+    def test_resource_timing_propagates_native_failures_and_keeps_stderr(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        step = workflow.partition("      - name: Run planned E2E tests (shard")[2].partition("\n      - name:")[0]
+        _, marker, raw_script = step.partition("        run: |\n")
+        self.assertTrue(marker, "the guarded command must remain an unconditional timed run")
+        script = textwrap.dedent(raw_script)
+        command = 'bash e2e/scripts/run-planned-shard.sh "$GITHUB_WORKSPACE/e2e-manifests/normal/${E2E_MANIFEST_SHARD}.json"'
+        self.assertEqual(script.count(command), 1)
+        for status in (0, 37):
+            with self.subTest(status=status):
+                native = f"bash -c 'printf native-stderr >&2; exit {status}'"
+                result = subprocess.run(
+                    ["bash", "-eo", "pipefail", "-c", script.replace(command, native)],
+                    text=True, capture_output=True, timeout=5,
+                )
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertIn("native-stderr", result.stderr)
+                self.assertRegex(result.stderr, r"e2e_resources elapsed_seconds=\d+\.\d+")
+                self.assertIn("cpu_user_seconds=", result.stderr)
+                self.assertIn("cpu_system_seconds=", result.stderr)
+
+    def test_only_normal_jobs_request_bounded_in_runner_processes(self) -> None:
+        workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
+        normal_job = job_block(workflow, "e2e", "playwright_image")
+        self.assertIn('E2E_RUNNER_PROCESSES: "4"', normal_job)
+        self.assertEqual(workflow.count("E2E_RUNNER_PROCESSES:"), 1)
+        wrapper = REPO_ROOT / "apps/web/e2e/scripts/run-planned-shard.sh"
+        self.assertIn('export E2E_RUNNER_MAX_SHARDS="$(e2e_max_planned_processes)"', wrapper.read_text())
+
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.2
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.3
@@ -223,7 +414,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
     def test_external_runner_tiers_are_toggleable_for_eligible_jobs(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
 
-        changes = job_block(workflow, "changes", "build")
+        changes = job_block(workflow, "changes", "helper_compile")
         self.assertIn("runs-on: ubuntu-latest", changes)
         self.assertNotIn("    needs:", changes)
         self.assertNotIn("  e2e-gate:\n", workflow)
@@ -256,11 +447,25 @@ cat "${FAKE_DOCKER_MANIFEST}"
             "python3 .github/scripts/e2e-tests-workflow-contract_test.py",
             workflow,
         )
+        self.assertIn("python3 .github/scripts/download-e2e-blobs_test.py", workflow)
         for trigger in ("push", "pull_request", "merge_group"):
             trigger_marker = f"  {trigger}:"
             _, separator, trigger_block_text = workflow.partition(trigger_marker)
             self.assertTrue(separator, f"Lint workflow has no {trigger} trigger")
             self.assertNotIn("    paths:", trigger_block_text.split("\n  ", 1)[0])
+
+    def test_blob_transfer_uses_cli_before_unchanged_native_reconciliation(self) -> None:
+        report = E2E_WORKFLOW.read_text().partition("  e2e-report:\n")[2]
+        download = report.partition("      - name: Download blob reports\n")[2].partition("      - name:")[0]
+        self.assertIn("python3 .github/scripts/download-e2e-blobs.py", download)
+        self.assertIn('GH_TOKEN: ${{ github.token }}', download)
+        self.assertIn('--run-id "$GITHUB_RUN_ID"', download)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', download)
+        self.assertIn('--output apps/web/e2e/blob-reports', download)
+        self.assertNotIn("continue-on-error", download)
+        self.assertIn('command -v gh', report)
+        self.assertIn('--input e2e/blob-reports', report)
+        self.assertIn('--catalog "$GITHUB_WORKSPACE/e2e-manifests/native-catalog.json"', report)
 
     def test_timing_lookup_requires_a_profile_artifact(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")

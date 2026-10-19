@@ -101,6 +101,7 @@ export function buildChangesPanelBodyProps(
     hasUnstaged: git.hasUnstaged,
     hasStaged: git.hasStaged,
     hasCommits: git.hasCommits,
+    commitsInitialLoading: data.commitsInitialLoading,
     hasPRFiles: data.hasPRFiles,
     hasPRCommits: data.hasPRCommits,
     relation: data.relation,

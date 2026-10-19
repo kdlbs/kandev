@@ -6,13 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 
 const HINT = /without the leading slash/i;
 
-/**
- * Mobile parity for the empty-turn notice: the notice is a regular chat message,
- * so it must render in the mobile session chat too. The triggering turn is the
- * auto-started first turn (a multi-second `/e2e:empty-turn`) rather than a
- * `sendMessage` follow-up — the live turn.completed reliably reaches the mobile
- * client while the turn is still running.
- */
+/** Open a normal completed turn before triggering the live-only empty-turn notice. */
 async function seedAndOpenChat(
   testPage: Page,
   apiClient: ApiClient,
@@ -24,7 +18,7 @@ async function seedAndOpenChat(
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:empty-turn",
+      description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -34,6 +28,10 @@ async function seedAndOpenChat(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
+  await expect(session.chat).toContainText("This is a simple mock response for e2e testing.", {
+    timeout: 30_000,
+  });
+  await session.waitForChatIdle();
   return session;
 }
 
@@ -47,6 +45,7 @@ test.describe("Mobile empty-turn notice", () => {
   }) => {
     const session = await seedAndOpenChat(testPage, apiClient, seedData, "Mobile Empty Turn Hint");
 
+    await session.sendMessageViaButton("/e2e:empty-turn");
     await expect(session.chat).toContainText(HINT, { timeout: 30_000 });
   });
 });

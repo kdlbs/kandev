@@ -89,6 +89,11 @@ the shipped lifecycle contract. Kubernetes capability pairs extend it. The
 replace session ownership. Other foundation
 security, admission, and recovery guarantees remain applicable.
 
+Optional per-user ownership of executor resources is defined by the draft
+[ownership requirements](requirements/per-user-ownership.md) and
+[design](system-design/per-user-ownership.md). The executor system owns this
+compute-admission contract; auth continues to own identity and scopes.
+
 ## Related systems
 
 - [Agents](../agents/README.md): supplies the agent command and profile.

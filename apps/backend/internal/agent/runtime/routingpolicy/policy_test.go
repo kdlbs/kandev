@@ -172,3 +172,36 @@ func itoa(value int64) string {
 	}
 	return "large"
 }
+
+func TestAccountBlockedSkipsRetryAndResetWait(t *testing.T) {
+	now := time.Date(2026, time.October, 12, 3, 0, 0, 0, time.UTC)
+	resetAt := now.Add(time.Minute)
+	failure := &routingerr.Error{
+		Code:             routingerr.CodeAccountBlocked,
+		Class:            routingerr.ClassHard,
+		CatalogueVersion: routingerr.CatalogueVersion,
+		FallbackAllowed:  true,
+		ResetHint:        &resetAt,
+	}
+	for _, outcome := range []Outcome{OutcomeSkip, OutcomeStop} {
+		document := DefaultDocument()
+		document.Hard = policyWithRetry(3)
+		document.Hard.WaitForReset = ResetWaitPolicy{Enabled: true, MaxWaitSeconds: 300}
+		document.Hard.OnExhausted = outcome
+
+		got := Evaluate(document, EvaluationInput{Failure: failure, Now: now, EffectSafe: true})
+
+		want := DecisionStop
+		if outcome == OutcomeSkip {
+			want = DecisionSkip
+		}
+		if got.Kind != want || got.PendingOutcome != outcome || got.Code != routingerr.CodeAccountBlocked ||
+			!got.Deadline.IsZero() || got.RetryOrdinal != 0 {
+			t.Fatalf("on_exhausted=%s: evaluation = %+v, want %s without retry or wait", outcome, got, want)
+		}
+	}
+	unsafe := Evaluate(DefaultDocument(), EvaluationInput{Failure: failure, Now: now, EffectSafe: false})
+	if unsafe.Kind != DecisionStop {
+		t.Fatalf("effect-unsafe account block = %s, want stop", unsafe.Kind)
+	}
+}

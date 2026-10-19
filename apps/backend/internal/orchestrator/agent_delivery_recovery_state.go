@@ -191,6 +191,9 @@ func (s *Service) persistAgentDeliveryRecoveryNotice(
 	if stored {
 		agentruntime.RecordRecoveryRequired("agent_delivery", "unknown_prompt_outcome")
 		s.publishAgentDeliveryRecoveryState(ctx, payload.SessionID)
+		if lifecycleCtx := s.recoveryLifecycleContext(); lifecycleCtx != nil {
+			s.startSilentRestoreRecovery(lifecycleCtx)
+		}
 	}
 	// A terminal may have committed between the initial read and notice write.
 	// Clearing remains submission-specific, so a racing successor is preserved.

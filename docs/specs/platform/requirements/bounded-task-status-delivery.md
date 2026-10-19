@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-08-01
-updated: 2026-08-29
+updated: 2026-10-13
 owners:
   - kandev
 ---
@@ -45,6 +45,9 @@ Task rows currently obtain compact status indicators by observing large, session
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.12:** A hidden sibling chat tab shall not acquire a rich subscription or detail loader solely because it remains mounted. One visible desktop chat shall own one session stream, two visible split chats shall own their two streams, and the phone chat shall own one.
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.13:** Hiding, revealing, moving, or restoring chat panels shall preserve drafts and selection. Hidden loaded tabs shall retain lifecycle and attention indicators through compact events. Revealing a tab shall reconcile missed detail before treating it as current.
 - **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.14:** Task switches and released panels shall release obsolete detail demand. Late results shall not update another task or restore dismissed panels. An explicitly visible preview shall retain its detail demand independently of unread acknowledgement.
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.15:** A message, turn, activity, clarification, permission, Git, or pull-request event shall not re-read a task's launch queue after the projector has observed it. Task-row, session-state, and prompt-queue events shall refresh it, so a queue change still reaches the summary through those events.
+
+- **AC-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001.16:** A lost launch-queue mutation publication shall recover through the existing periodic ceiling sweep, including enqueue and clear. Durable deferrals and persisted positive queue summaries remain eligible on each pass until an authoritative refresh succeeds. Recovery shall not depend on message/turn traffic, change task state or deferral ownership, or change the sweep cadence. Transient reload, delivery, or projection failures retain eligibility for subsequent passes.
 
 ## System design
 

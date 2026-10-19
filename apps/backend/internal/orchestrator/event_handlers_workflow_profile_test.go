@@ -83,11 +83,17 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 		t.Fatal(err)
 	}
 	current.State = models.TaskSessionStateRunning
+	if err := repo.SetSessionPrimary(ctx, current.ID); err != nil {
+		t.Fatal(err)
+	}
 	current.IsPrimary = true
 	current.AgentProfileID = "profile-old"
 	current.ExecutorID = models.ExecutorIDWorktree
 	current.TaskEnvironmentID = "environment-workflow-attach"
 	if err := repo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetSessionPrimary(ctx, current.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{

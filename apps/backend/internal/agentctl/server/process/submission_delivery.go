@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -21,6 +22,10 @@ func isKnownSubmissionFailure(err error) bool {
 	if errors.As(err, &requestErr) {
 		return true
 	}
+	return isDeterministicProviderFailure(err)
+}
+
+func isDeterministicProviderFailure(err error) bool {
 	var providerFailure deterministicPromptFailure
 	return errors.As(err, &providerFailure) && providerFailure.DeterministicPromptFailure()
 }
@@ -29,8 +34,9 @@ func isKnownSubmissionFailure(err error) bool {
 // record. It is deliberately independent of the ACP prompt call so a caller
 // can reconcile durable state before deciding whether a harness call is safe.
 type SubmissionDelivery struct {
-	Journal *journal.Journal
-	Now     func() time.Time
+	Journal  *journal.Journal
+	Now      func() time.Time
+	Stopping *atomic.Bool
 }
 
 func (d *SubmissionDelivery) Admit(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
@@ -102,21 +108,31 @@ func (d *SubmissionDelivery) prepareDispatch(ctx context.Context, id string) (jo
 }
 
 func (d *SubmissionDelivery) handleDispatchError(ctx context.Context, id string, dispatchErr error) (journal.Submission, error) {
-	submission, err := d.Journal.GetSubmission(ctx, id)
+	interrupted := ctx.Err() != nil
+	if d.Stopping != nil && d.Stopping.Load() {
+		interrupted = true
+	}
+	// Settling an external call survives cancellation of the request that made it.
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	submission, err := d.Journal.GetSubmission(settleCtx, id)
 	if err != nil {
 		return journal.Submission{}, errors.Join(ErrSubmissionUncertain, err)
 	}
 	if submission.State == journal.SubmissionCompleted && submission.TerminalEventRetained {
 		return submission, nil
 	}
-	if isKnownSubmissionFailure(dispatchErr) {
-		failed, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionFailed, d.now())
+	if submission.TerminalEventRetained && (submission.State == journal.SubmissionFailed || submission.State == journal.SubmissionCancelled) {
+		return submission, dispatchErr
+	}
+	if isDeterministicProviderFailure(dispatchErr) || (!interrupted && isKnownSubmissionFailure(dispatchErr)) {
+		failed, transitionErr := d.Journal.TransitionSubmission(settleCtx, id, journal.SubmissionFailed, d.now())
 		if transitionErr != nil {
 			return journal.Submission{}, errors.Join(ErrSubmissionUncertain, transitionErr)
 		}
 		return failed, dispatchErr
 	}
-	unknown, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionInterruptedUnknown, d.now())
+	unknown, transitionErr := d.Journal.TransitionSubmission(settleCtx, id, journal.SubmissionInterruptedUnknown, d.now())
 	journal.RecordUncertainSubmission("dispatch_error")
 	if transitionErr != nil {
 		return journal.Submission{}, errors.Join(ErrSubmissionUncertain, transitionErr)

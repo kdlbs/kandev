@@ -255,6 +255,15 @@ func registeredSettingsContract(t *testing.T, transport string) {
 			require.NoError(t, err)
 			before, err := f.repo.GetWorkspace(t.Context(), "registered-settings")
 			require.NoError(t, err)
+			_, err = f.database.ExecContext(
+				t.Context(),
+				`UPDATE workspaces SET updated_at = ? WHERE id = ?`,
+				time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+				before.ID,
+			)
+			require.NoError(t, err)
+			before, err = f.repo.GetWorkspace(t.Context(), before.ID)
+			require.NoError(t, err)
 			result := f.update(t.Context(), transport, payload)
 			requireSettingsSuccess(t, transport, result)
 			requireSettingsObservation(t, f, result.row)

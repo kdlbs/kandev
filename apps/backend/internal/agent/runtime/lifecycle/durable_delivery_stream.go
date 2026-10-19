@@ -219,6 +219,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliveryHarnessGeneration = committed.HarnessGeneration
 	event.DeliverySequence = committed.Sequence
 	event.DeliverySubmissionID = committed.SubmissionID
+	event.Recovered = true
+	event.RecoveredActivityAt = &committed.CreatedAt
 	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)
@@ -621,7 +623,7 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	}
 	payloadEvent := event
 	if payloadEvent.TurnID == "" && execution != nil {
-		payloadEvent.TurnID = execution.promptTurnIDSnapshot()
+		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
 	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 	payloadEvent.CanonicalProjection = false
@@ -701,7 +703,7 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	}
 	turnID := event.TurnID
 	if turnID == "" && execution != nil {
-		turnID = execution.promptTurnIDSnapshot()
+		turnID = execution.promptTurnIDForEvent(event)
 	}
 	scope := event.ProtocolMessageID
 	if scope == "" {
@@ -710,11 +712,20 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	if scope == "" {
 		scope = event.DeliverySubmissionID
 	}
+	if scope == "" && event.PromptGeneration == 0 && execution != nil {
+		// Older peers lack native message IDs. Keep separate dispatch eras as
+		// an opaque message scope without assigning that old turn as owner.
+		if precedingTurn := execution.promptTurnIDSnapshot(); precedingTurn != "" {
+			scope = "native-after:" + precedingTurn
+		}
+	}
 	if scope == "" {
 		scope = "prompt:" + strconv.FormatUint(event.PromptGeneration, 10)
 	}
 	if scope == "prompt:0" {
-		scope = "stream"
+		// With no grouping evidence, keep durable chunks distinct rather than
+		// merging unrelated native replies into one stream-wide transcript row.
+		scope = "sequence:" + strconv.FormatUint(event.DeliverySequence, 10)
 	}
 	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])

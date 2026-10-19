@@ -106,6 +106,10 @@ func (m *Manager) applyRecoveredTurnOutcome(
 	})
 	execution.markRecoveryTurnOutcomeApplied(outcome.TurnID)
 
+	// Retained completion uses its original observation time. Recovery context
+	// never enters the wire payload.
+	outcome.Event.Recovered = true
+	outcome.Event.RecoveredActivityAt = outcome.Event.ActivityAt
 	m.handleAgentEvent(execution, outcome.Event)
 
 	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)
@@ -185,7 +189,7 @@ func (m *Manager) prepareRecoveredAvailability(
 	}
 	var payload AgentEventPayload
 	prepared := false
-	if err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+	if err := m.executionStore.WithPromptLifecycleLock(execution.ID, func(current *AgentExecution) {
 		if current != execution {
 			return
 		}
@@ -193,7 +197,7 @@ func (m *Manager) prepareRecoveredAvailability(
 			current.Status = v1.AgentStatusReady
 		}
 		current.recoveredPromptGenerationPending.Store(false)
-		payload = newAgentEventPayload(current)
+		payload = newAgentEventPayloadPromptLocked(current)
 		payload.Status = string(v1.AgentStatusReady)
 		payload.RecoveredAvailabilityOnly = true
 		prepared = true

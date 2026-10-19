@@ -34,6 +34,8 @@ The existing [Git status contract](workspace-git-status.md) governs snapshot val
 - **AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5:** When a stable enriched result follows a brief race, launch baseline capture shall retain the observed comparison baseline.
   Unavailable enrichment shall not authorize a saved pending value or an unrelated HEAD baseline.
 - **AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.6:** For compatibility, a successful legacy status payload with all quality fields omitted may establish the baseline. If any quality field is present, the payload must describe a successful, complete, ready status.
+- **AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.7:** Each capture attempt shall resolve its comparison references through one Git process when every reference resolves.
+  A missing, unsafe, or unmappable reference shall produce the same per-reference values as resolving each reference separately, so a batch can never change the published comparison evidence.
 
 ## Out of scope
 
@@ -46,3 +48,4 @@ The existing [Git status contract](workspace-git-status.md) governs snapshot val
 
 - [System design](../system-design/workspace-git-capture-recovery.md)
 - [Implementation plan](../../../plans/runtime-log-reliability/plan.md)
+- [Comparison reference plan](../../../plans/git-polling-overhead/plan.md)

@@ -93,7 +93,9 @@ describe("Kubernetes E2E version pins", () => {
       "utf8",
     );
 
-    expect(workflow).toContain('VERSION="0.0.0-e2e.${GITHUB_SHA}" make build-backend');
+    expect(workflow).toContain(
+      'VERSION="0.0.0-e2e.${GITHUB_SHA}" make -C apps/backend build-kandev',
+    );
   });
 
   it("documents the fixture's public version and node-image pins", () => {

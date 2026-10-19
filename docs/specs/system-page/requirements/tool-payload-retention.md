@@ -2,6 +2,7 @@
 status: active
 system: system-page
 created: 2026-09-14
+updated: 2026-10-12
 owners:
   - kandev
 ---
@@ -100,6 +101,16 @@ rules, so that I understand the first cleanup and its recovery limits.
   read-only connection. This includes a Windows drive-letter path and a path
   containing a space, `#`, `%`, or, where file names allow it, `?`. Verification
   shall not create or check any other file.
+- **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.9:** When backup preparation
+  fails, the backend shall keep the underlying error message as
+  valid UTF-8, cut to at most 1,024 bytes after replacing invalid byte sequences,
+  in the stored retention record. The backend shall log the original error
+  only after committing the failure for the matching policy revision and
+  operation. Cancellation, stale completions, and failed state writes shall
+  not produce a current-preparation failure log. The status response
+  shall still report only the failure code. A later successful preparation, a
+  disable, a new pending preparation, or an interrupted preparation shall
+  clear the stored message.
 
 ### REQ-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-003: Background operation and access
 
@@ -148,5 +159,6 @@ rules, so that I understand the first cleanup and its recovery limits.
 
 - [System design](../system-design/tool-payload-retention.md)
 - [Implementation plan](../../../plans/tool-payload-retention/plan.md)
+- [Preparation failure diagnostics plan](../../../plans/database-hygiene/plan.md)
 - [Vacuum and status recovery fix](../../../plans/vacuum-compaction-status/plan.md)
 - [Database statistics resilience plan](../../../plans/database-statistics-resilience/plan.md)

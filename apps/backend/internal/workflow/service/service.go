@@ -30,15 +30,16 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	repo                 *repository.Repository
-	logger               *logger.Logger
-	workflowProvider     WorkflowProvider
-	workspaceProvider    WorkspaceProvider
-	resolveProfile       models.AgentProfileResolver
-	matchProfile         models.AgentProfileMatcher
-	importProfileCatalog ImportProfileCatalog
-	syncOps              SyncWorkflowOps
-	sessionAccessChecker func(context.Context, string) error
+	executorMutationChecker func(context.Context, string) error
+	repo                    *repository.Repository
+	logger                  *logger.Logger
+	workflowProvider        WorkflowProvider
+	workspaceProvider       WorkspaceProvider
+	resolveProfile          models.AgentProfileResolver
+	matchProfile            models.AgentProfileMatcher
+	importProfileCatalog    ImportProfileCatalog
+	syncOps                 SyncWorkflowOps
+	sessionAccessChecker    func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
 	// per-user visibility rule into this package (see access.go).
 	workflowAccessChecker  func(context.Context, string) error
@@ -496,6 +497,10 @@ func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) err
 // CreateStepWithStartStepUpdates creates a new workflow step and returns any
 // other workflow steps whose start-step flag was cleared.
 func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+
 	if err := models.ValidateWorkflowStep(step); err != nil {
 		return nil, err
 	}
@@ -516,6 +521,10 @@ func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *mode
 func (s *Service) CreateStepWithStartStepUpdatesIfWorkflowUnchanged(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow time.Time,
 ) ([]*models.WorkflowStep, error) {
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+
 	if err := s.AuthorizeWorkflow(ctx, step.WorkflowID); err != nil {
 		return nil, err
 	}
@@ -548,6 +557,10 @@ func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *mode
 
 // UpdateStepWithStartStepIntent preserves the saved start flag when intent is omitted.
 func (s *Service) UpdateStepWithStartStepIntent(ctx context.Context, step *models.WorkflowStep, isStartStep *bool) ([]*models.WorkflowStep, error) {
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+
 	if err := models.ValidateWorkflowStep(step); err != nil {
 		return nil, err
 	}
@@ -565,6 +578,10 @@ func (s *Service) UpdateStepWithStartStepIntent(ctx context.Context, step *model
 func (s *Service) UpdateStepWithStartStepUpdatesIfUnchanged(
 	ctx context.Context, step *models.WorkflowStep, expectedWorkflow, expectedStep time.Time,
 ) ([]*models.WorkflowStep, error) {
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+
 	if err := s.AuthorizeWorkflow(ctx, step.WorkflowID); err != nil {
 		return nil, err
 	}
@@ -596,6 +613,9 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 		return err
 	}
 
+	if err := s.authorizeExecutorMutation(ctx, step.WorkflowID); err != nil {
+		return err
+	}
 	// Clear any move_to_step references to this step
 	if err := s.repo.ClearStepReferences(ctx, step.WorkflowID, stepID); err != nil {
 		s.logger.Error("failed to clear step references",
@@ -619,6 +639,10 @@ func (s *Service) DeleteStep(ctx context.Context, stepID string) error {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs []string) error {
+	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+		return err
+	}
+
 	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
 		return err
 	}
@@ -639,6 +663,10 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 func (s *Service) ReorderStepsIfUnchanged(
 	ctx context.Context, workflowID string, stepIDs []string, expectedWorkflow time.Time, expectedByID map[string]time.Time,
 ) error {
+	if err := s.authorizeExecutorMutation(ctx, workflowID); err != nil {
+		return err
+	}
+
 	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
 		return err
 	}
@@ -1007,4 +1035,14 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
 	}
 	return step
+}
+
+func (s *Service) SetExecutorMutationChecker(check func(context.Context, string) error) {
+	s.executorMutationChecker = check
+}
+func (s *Service) authorizeExecutorMutation(ctx context.Context, workflowID string) error {
+	if s.executorMutationChecker == nil {
+		return nil
+	}
+	return s.executorMutationChecker(ctx, workflowID)
 }

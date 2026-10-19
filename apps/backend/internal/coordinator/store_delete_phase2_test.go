@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var phase2Tables = []string{"coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"}
+var phase2Tables = []string{"coordinator_watches", "coordinator_watch_projects", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"}
 
 func seedPhase2Rows(t *testing.T, store *Store, c *Coordinator) {
 	t.Helper()
@@ -20,6 +20,7 @@ func seedPhase2Rows(t *testing.T, store *Store, c *Coordinator) {
 		}
 	}
 	q(`INSERT INTO coordinator_watches (coordinator_id, workflow_id, workspace_id, created_at) VALUES (?, 'wf', ?, ?)`, c.ID, c.WorkspaceID, now)
+	q(`INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, 'repository', 'repo', ?, ?)`, c.ID, c.WorkspaceID, now)
 	q(`INSERT INTO coordinator_standing_orders (id, coordinator_id, workspace_id, text, created_by, created_at) VALUES ('so-'||?, ?, ?, 't', 'u', ?)`, c.ID, c.ID, c.WorkspaceID, now)
 	q(`INSERT INTO coordinator_goals (id, coordinator_id, workspace_id, name, status, baseline_json, set_at, created_at, updated_at) VALUES ('g-'||?, ?, ?, 'n', 'active', '{}', ?, ?, ?)`, c.ID, c.ID, c.WorkspaceID, now, now, now)
 	row := validRow(c.ID)

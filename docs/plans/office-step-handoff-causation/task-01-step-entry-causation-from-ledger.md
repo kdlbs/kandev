@@ -122,3 +122,42 @@ This behavior-preserving extraction
 requires no public documentation, specification, screenshot, or mobile-layout
 change. Earlier integration-head CI evidence is superseded by the remediation
 push; the new head must pass required CI before merge.
+
+
+## Resumed Integration Verification
+
+Actual current-main conflicts were resolved while retaining trusted causing-run
+identity, passthrough launch fields, native-conversation replacement, the newer
+executor-admission path, and ownership-schema initialization before the nullable
+causing-run migration. The canonical main secrets hook already contains the
+previous size-limit extraction and newer failure publication behavior, so that
+implementation is retained without an additional frontend delta.
+
+All 48 transition test functions plus
+`TestDeliveryRetentionStorageSteadyStateMinimumQuantum` passed under race with a
+disposable local PostgreSQL 16 DSN configured. This covers both SQLite and
+PostgreSQL transition paths and the previously failing retention regression.
+The full agent settings store package also passed under race with that DSN,
+and `go run ./cmd/sqlguard ./internal` passed. The owned disposable database
+container was removed after both runs completed.
+
+The earlier local full-retention-suite timeout remains historical; it is not
+represented as a passing full-package run. Fresh remote checks must validate
+the new integration head before delivery.
+
+The four owning secrets hook files passed all 44 tests. Full frontend lint and
+full typecheck passed; typecheck required the same 8 GiB Node heap used in CI
+after the default 4 GiB heap exhausted locally. Harness lint/tests, specification
+lint/tests, and documentation catalog validation also passed for the integration.
+
+All eleven affected backend packages passed the combined race run:
+
+```bash
+cd apps/backend
+go test -trimpath -race -p 2 ./internal/steptelemetry \
+  ./internal/runs/repository/sqlite ./internal/office/repository/sqlite \
+  ./internal/office/service ./internal/orchestrator/watcher \
+  ./internal/orchestrator ./internal/workflow/engine ./internal/runs/service \
+  ./internal/backendapp ./internal/agent/runtime/lifecycle \
+  ./internal/orchestrator/executor
+```

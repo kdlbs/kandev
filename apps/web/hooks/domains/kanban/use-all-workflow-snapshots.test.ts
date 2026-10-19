@@ -72,35 +72,48 @@ function resetMocks(workflows: Workflow[] = []) {
   mockStoreApi = { getState: () => mockState };
 }
 
+it("refreshes boot snapshots when mounted after the socket connects, without a rerender loop", async () => {
+  resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  const bootSnapshot = { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] };
+  mockState.kanbanMulti.snapshots = { "wf-A": bootSnapshot };
+  let resolveSnapshot!: (value: { steps: never[]; tasks: never[] }) => void;
+  mockFetchWorkflowSnapshot.mockReturnValue(
+    new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    }),
+  );
+  const { rerender } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
+  await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+  expect(mockState.kanbanMulti.snapshots["wf-A"]).toBe(bootSnapshot);
+  expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  await act(async () => {
+    resolveSnapshot({ steps: [], tasks: [] });
+  });
+  rerender();
+  expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1);
+  expect(mockSetWorkflowSnapshot).toHaveBeenCalled();
+});
+
 describe("useAllWorkflowSnapshots — workspace scoping", () => {
   beforeEach(() => {
     resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
   });
 
   it("does not clear snapshots on initial mount (SSR preservation)", async () => {
-    renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      {
-        initialProps: { workspaceId: "ws-A" },
-      },
-    );
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     // Allow the effect + Promise.all to settle.
     await waitFor(() => expect(mockSetKanbanMultiLoading).toHaveBeenCalledWith(true));
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
 
-  it("does not fetch on initial mount when all workflow snapshots are boot-hydrated", () => {
+  it("preserves boot-hydrated snapshots before the live connection is ready", () => {
+    mockState.connection.status = "connecting";
     mockState.kanbanMulti.snapshots = {
       "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
     };
 
-    renderHook(
-      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
-      {
-        initialProps: { workspaceId: "ws-A" },
-      },
-    );
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockSetKanbanMultiLoading).not.toHaveBeenCalledWith(true);
@@ -150,7 +163,8 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     };
 
     renderHook(() => useAllWorkflowSnapshots("ws-A"));
-    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    mockFetchWorkflowSnapshot.mockClear();
 
     act(() => window.dispatchEvent(new Event("focus")));
 

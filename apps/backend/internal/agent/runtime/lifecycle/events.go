@@ -161,8 +161,17 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 	return nil
 }
 
+// newAgentEventPayload takes execution.promptLifecycleMu to snapshot the turn.
+// Never call it while the execution store lock is held; use
+// ExecutionStore.WithPromptLifecycleLock with newAgentEventPayloadPromptLocked.
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnIDSnapshot())
+}
+
+// newAgentEventPayloadPromptLocked is newAgentEventPayload for callers that
+// already hold execution.promptLifecycleMu.
+func newAgentEventPayloadPromptLocked(execution *AgentExecution) AgentEventPayload {
+	return newAgentEventPayloadWithTurnID(execution, execution.promptTurnID)
 }
 
 func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
@@ -345,24 +354,28 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 		attemptID = execution.currentStartupAttemptID()
 	}
 
-	payload := ACPSessionCreatedPayload{
-		TaskID:                    execution.TaskID,
-		SessionID:                 execution.SessionID,
-		AgentProfileID:            execution.ID,
-		AgentExecutionID:          execution.ID,
-		AttemptID:                 attemptID,
-		ACPSessionID:              sessionID,
-		DeliveryStreamID:          execution.DeliveryStreamID,
-		DeliveryIncarnationID:     execution.DeliveryIncarnationID,
-		DeliveryHarnessGeneration: execution.DeliveryHarnessGeneration,
-	}
-
+	payload := newACPSessionCreatedPayload(execution, sessionID, attemptID)
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
 	if err := p.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
 		p.logger.Error("failed to publish ACP session event",
 			zap.String("event_type", events.AgentACPSessionCreated),
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
+	}
+}
+
+func newACPSessionCreatedPayload(execution *AgentExecution, sessionID, attemptID string) ACPSessionCreatedPayload {
+	return ACPSessionCreatedPayload{
+		TaskID:                             execution.TaskID,
+		SessionID:                          execution.SessionID,
+		AgentProfileID:                     execution.ID,
+		AgentExecutionID:                   execution.ID,
+		AttemptID:                          attemptID,
+		ACPSessionID:                       sessionID,
+		DeliveryStreamID:                   execution.DeliveryStreamID,
+		DeliveryIncarnationID:              execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:          execution.DeliveryHarnessGeneration,
+		DeliveryReplacesNativeConversation: execution.ReplacesNativeConversation,
 	}
 }
 

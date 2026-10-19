@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { listSecrets } from "@/lib/api/domains/secrets-api";
+import { ApiError } from "@/lib/api/client";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { SecretListItem, SecretScope } from "@/lib/types/http-secrets";
 
@@ -9,14 +10,27 @@ export function filterGlobalSecrets(items: SecretListItem[]): SecretListItem[] {
   return items.filter((item) => item.scope !== "workspace");
 }
 
-function visibleSecretItems(
+function selectSecretItems(
   scope: SecretScope,
+  scopedCurrent: boolean,
   globalItems: SecretListItem[],
   scopedItems: SecretListItem[],
-  scopedCurrent: boolean,
 ): SecretListItem[] {
   if (scope === "global") return filterGlobalSecrets(globalItems);
   return scopedCurrent ? scopedItems : [];
+}
+
+function failureItems(
+  error: unknown,
+  initialItems: SecretListItem[],
+  currentItems: SecretListItem[],
+): SecretListItem[] {
+  return error instanceof ApiError &&
+    error.status >= 500 &&
+    error.status < 600 &&
+    currentItems !== initialItems
+    ? currentItems
+    : [];
 }
 
 export function useSecrets(
@@ -52,7 +66,7 @@ export function useSecrets(
         const currentItems = store.getState().secrets.items;
         setSecrets(currentItems === initialItems ? (response ?? []) : currentItems);
       })
-      .catch(() => setSecrets([]))
+      .catch((err) => setSecrets(failureItems(err, initialItems, store.getState().secrets.items)))
       .finally(() => setSecretsLoading(false));
   }, [scope, globalLoaded, globalLoading, setSecrets, setSecretsLoading, store]);
 
@@ -96,7 +110,7 @@ export function useSecrets(
   }, [initialItems, scope, scopedKey, workspaceId]);
 
   const scopedCurrent = loadedScopedKey === scopedKey;
-  const items = visibleSecretItems(scope, globalItems, scopedItems, scopedCurrent);
+  const items = selectSecretItems(scope, scopedCurrent, globalItems, scopedItems);
   const loaded = scope === "global" ? globalLoaded : scopedCurrent && scopedLoaded;
   const loading = scope === "global" ? globalLoading : scopedCurrent && scopedLoading;
 

@@ -89,11 +89,16 @@ jobs:
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
             scripts/check-agentctl-deps.sh
+            scripts/*.ps1
+            scripts/*.psm1
+            scripts/tests/isolated-*
+            .gitattributes
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
             scripts/check-make-shells
             .github/workflows/backend-tests.yml
+            .github/scripts/repository-test-shard.py
             .github/scripts/changed-paths.py
             .github/scripts/runner-plan.py
             .github/actions/plan-external-runners/**
@@ -222,12 +227,15 @@ jobs:
       - name: Check Makefile shell dispatch
         run: make check-make-shells
 
+      - name: Check backend lint workflow contract
+        run: node --test ../../scripts/backend-lint-workflow.test.mjs
+
       - name: Resolve base SHA
         shell: bash
         working-directory: ${{ github.workspace }}
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
         run: |
@@ -245,6 +253,8 @@ jobs:
             BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
             BASE_SHA="${MERGE_GROUP_BASE_SHA}"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           else
             BASE_SHA="${PUSH_BEFORE}"
           fi
@@ -262,7 +272,7 @@ jobs:
           set -euo pipefail
 
           CHANGED_GO_FILES="$(
-            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}...${{ github.sha }}" -- apps/backend \
+            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}...${{ github.sha }}" -- ':(top)apps/backend' \
             | grep -E '^apps/backend/.*\.go$' \
             || true
           )"
@@ -288,7 +298,7 @@ jobs:
         run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
 
   test_shards:
-    name: Backend Tests (${{ matrix.shard }}/2)
+    name: Backend Tests (${{ matrix.shard }}/4)
     needs: changes
     if: needs.changes.outputs.run == 'true'
     # Checkout receives the short-lived job token. Keep this credential-bearing
@@ -302,6 +312,10 @@ jobs:
             index: 0
           - shard: 2
             index: 1
+          - shard: 3
+            index: 2
+          - shard: 4
+            index: 3
     # Pre-baked image bundles Go and jq, so test shards can start immediately
     # without repeating tool installation.
     container: ghcr.io/kdlbs/kandev-ci:build-latest
@@ -348,34 +362,34 @@ jobs:
           mapfile -t all_packages <<<"${package_list}"
           shard_packages=()
           for package in "${all_packages[@]}"; do
-            # Stable hashing keeps package assignments unchanged when another
-            # package is added or removed.
-            checksum="$(cksum <<<"${package}")"
-            checksum="${checksum%% *}"
-            if (( checksum % 2 == SHARD_INDEX )); then
+            # The required repository matrix owns this package's complete inventory.
+            if [[ "${package}" == github.com/kandev/kandev/internal/task/repository/sqlite ]]; then continue; fi
+            # Keep measured heavy integration packages on the otherwise light
+            # third shard. All other packages retain stable hash allocation.
+            case "${package}" in
+              github.com/kandev/kandev/internal/backendapp|github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp|github.com/kandev/kandev/internal/coordinator)
+                package_shard=2 ;;
+              *)
+                checksum="$(cksum <<<"${package}")"
+                checksum="${checksum%% *}"
+                package_shard=$(( checksum % 4 )) ;;
+            esac
+            if (( package_shard == SHARD_INDEX )); then
               shard_packages+=("${package}")
             fi
           done
 
           if (( ${#shard_packages[@]} == 0 )); then
-            echo "Shard ${SHARD_NUMBER}/2 selected no packages"
+            echo "Shard ${SHARD_NUMBER}/4 selected no packages"
             exit 1
           fi
 
-          echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/2"
-          # Covered million-event fixtures share a two-hour package budget.
-          # Per-batch deadlines and preservation assertions remain independent.
-          test_timeout=10m
-          for package in "${shard_packages[@]}"; do
-            if [[ "${package}" == github.com/kandev/kandev/internal/task/repository/sqlite ]]; then
-              test_timeout=120m
-            fi
-          done
+          echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/4"
           # Keep complete JSON for reports/artifacts while limiting live output
           # to compiler/process lines and package-level pass/fail summaries.
           go test \
             -race \
-            -timeout="${test_timeout}" \
+            -timeout=10m \
             -coverprofile="coverage-${SHARD_NUMBER}.out" \
             -covermode=atomic \
             -json \
@@ -443,6 +457,59 @@ jobs:
             apps/backend/coverage-${{ matrix.shard }}.out
             apps/backend/test-results-${{ matrix.shard }}.json
           retention-days: 30
+
+  repository_tests:
+    name: Backend Repository (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-repository-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-repository-${{ matrix.shard }}-${{ runner.os }}-
+            go-${{ runner.os }}-
+
+      - name: Run repository cohort
+        env:
+          REPOSITORY_SHARD: ${{ matrix.shard }}
+        run: >-
+          python3 ../../.github/scripts/repository-test-shard.py
+          --mode normal --shard "$REPOSITORY_SHARD"
+          --output ".build/ci-repository-$REPOSITORY_SHARD"
+
+      - name: Upload repository cohort evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backend-repository-${{ matrix.shard }}
+          path: apps/backend/.build/ci-repository-${{ matrix.shard }}/
+          if-no-files-found: error
+          retention-days: 14
 
   test_ambient_env:
     name: Backend (ambient integration env)
@@ -517,6 +584,7 @@ jobs:
       - changes
       - static_checks
       - test_shards
+      - repository_tests
       - test_ambient_env
       - postgres-boot
       - postgres-18
@@ -533,6 +601,7 @@ jobs:
           SIDEBAR_REQUIRED: ${{ needs.changes.outputs.sidebar_resources }}
           STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
+          REPOSITORY_TESTS_RESULT: ${{ needs.repository_tests.result }}
           TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
           POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
           POSTGRES_18_RESULT: ${{ needs['postgres-18'].result }}
@@ -553,6 +622,7 @@ jobs:
           for entry in \
             "static_checks:${STATIC_CHECKS_RESULT}" \
             "test_shards:${TEST_SHARDS_RESULT}" \
+            "repository_tests:${REPOSITORY_TESTS_RESULT}" \
             "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
             "postgres-boot:${POSTGRES_BOOT_RESULT}" \
             "postgres-18:${POSTGRES_18_RESULT}" \
@@ -575,10 +645,14 @@ jobs:
           done
 
   postgres-boot:
-    name: Backend Postgres
+    name: Backend Postgres (${{ matrix.cohort }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: [packages, 1, 2, 3]
     permissions:
       contents: read
       packages: read
@@ -621,7 +695,23 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-postgres-${{ matrix.cohort }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-postgres-${{ matrix.cohort }}-${{ runner.os }}-
+            go-${{ runner.os }}-
+
       - name: Run fixed PostgreSQL 16 persistence gates
+        env:
+          POSTGRES_COHORT: ${{ matrix.cohort }}
         run: |
           set -euo pipefail
           # Keep this package list explicit. PostgreSQL coverage is a reviewed
@@ -634,6 +724,7 @@ jobs:
             ./internal/azuredevops
             ./internal/backendapp
             ./internal/coordinator
+            ./internal/coordinator/ledger
             ./internal/db
             ./internal/delivery
             ./internal/github
@@ -663,11 +754,28 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          # SQLite million-event fixtures run in test_shards. Keep all other
-          # SQLite cases and every PostgreSQL case in this persistence gate.
-          go test -v -race -timeout 90m \
-            -skip '^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$' \
-            "${POSTGRES_PACKAGES[@]}"
+          if [[ "$POSTGRES_COHORT" != packages ]]; then
+            python3 ../../.github/scripts/repository-test-shard.py \
+              --mode postgres --shard "$POSTGRES_COHORT" \
+              --output ".build/ci-postgres-$POSTGRES_COHORT"
+            exit 0
+          fi
+          # The required repository cohorts own this package, including the
+          # existing -skip '^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$'.
+          ordinary_packages=()
+          for package in "${POSTGRES_PACKAGES[@]}"; do
+            [[ "${package}" == ./internal/task/repository/sqlite ]] || ordinary_packages+=("${package}")
+          done
+          go test -v -race -timeout 90m "${ordinary_packages[@]}"
+
+      - name: Upload PostgreSQL repository evidence
+        if: always() && matrix.cohort != 'packages'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postgres-repository-${{ matrix.cohort }}
+          path: apps/backend/.build/ci-postgres-${{ matrix.cohort }}/
+          if-no-files-found: error
+          retention-days: 14
 
   sidebar-resources:
     name: Sidebar resource bounds (${{ matrix.mode }})
@@ -678,7 +786,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [memory, timing]
+        mode: [memory-1, memory-2, memory-3, timing]
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -710,15 +818,36 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+      - name: Restore sidebar Go compilation
+        id: sidebar_go_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-sidebar-resources-${{ runner.os }}-
       - name: Measure isolated native memory and pooled retention
-        if: matrix.mode == 'memory'
+        if: startsWith(matrix.mode, 'memory-')
         env:
           KANDEV_SIDEBAR_MEMORY_MATRIX: "1"
+          SIDEBAR_RESOURCE_MODE: ${{ matrix.mode }}
         run: |
           set -euo pipefail
+          case "$SIDEBAR_RESOURCE_MODE" in
+            memory-1)
+              selection=(-run '^TestSidebarQuery(PreparationMemory|PoolMemoryPlateau|MaximumInputMemory)$'
+                -skip '^TestSidebarQueryPoolMemoryPlateau$/(state|updatedAt|createdAt|title|custom)$') ;;
+            memory-2)
+              selection=(-run '^TestSidebarQueryPoolMemoryPlateau$/(state|updatedAt)$') ;;
+            memory-3)
+              selection=(-run '^TestSidebarQueryPoolMemoryPlateau$/(createdAt|title|custom)$') ;;
+            *) echo "Unknown memory group: $SIDEBAR_RESOURCE_MODE" >&2; exit 1 ;;
+          esac
           go test -tags sqlite_fts5 -p 1 ./internal/task/repository/sqlite \
-            -run '^TestSidebarQuery(PreparationMemory|PoolMemoryPlateau|MaximumInputMemory)$' \
-            -timeout 45m -count=1 -v 2>&1 | tee sidebar-memory.log
+            "${selection[@]}" -timeout 45m -count=1 -json 2>&1 | tee sidebar-memory.log
       - name: Measure populated SQLite and PostgreSQL pages
         if: matrix.mode == 'timing'
         run: |
@@ -734,6 +863,17 @@ jobs:
           name: sidebar-resource-evidence-${{ matrix.mode }}
           path: apps/backend/sidebar-*.log
           retention-days: 30
+      # Every mode compiles the same package. One writer avoids duplicate
+      # compression/uploads; cached compilation never replaces native execution.
+      - name: Save sidebar Go compilation
+        if: success() && matrix.mode == 'memory-1' && steps.sidebar_go_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-sidebar-resources-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
 
   postgres-18:
     name: Backend Postgres 18
@@ -773,6 +913,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Run PostgreSQL 18 repository contract gates
+        run: |
+          set -euo pipefail
+          output_file="$(mktemp)"
+          go test -v -race \
+            ./internal/task/repository/sqlite ./internal/office/repository/sqlite \
+            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership|TestPostgresQuickChatHistoryCAS|TestPostgresPrimaryPromotionAndStaleWrite|TestPostgresTurnEntryStampAcrossRevisit|TestPostgresTurnEntryReceiptStampAcrossRevisit|TestPostgresStateRepairRequiresCurrentEntry)$' \
+            2>&1 | tee "${output_file}"
+
+          for test_name in \
+            TestPostgresMaterializationSerializesAndRechecksOwner \
+            TestPostgresWorkspaceGroupOwnershipRoundTrip \
+            TestWorkspaceBindingRetryOwnership \
+            TestPostgresQuickChatHistoryCAS \
+            TestPostgresPrimaryPromotionAndStaleWrite \
+            TestPostgresTurnEntryStampAcrossRevisit \
+            TestPostgresTurnEntryReceiptStampAcrossRevisit \
+            TestPostgresStateRepairRequiresCurrentEntry; do
+            if ! grep -q "^=== RUN   ${test_name}$" "${output_file}" || \
+               ! grep -q "^--- PASS: ${test_name} " "${output_file}"; then
+              echo "::error::PostgreSQL 18 repository gate did not run and pass ${test_name}"
+              exit 1
+            fi
+          done
+
       - name: Run PostgreSQL 18 boot and upgrade gates
         run: |
           set -euo pipefail
@@ -792,17 +957,25 @@ jobs:
           done
 
   test-windows:
-    name: Backend (windows, ${{ matrix.suite }})
+    name: Backend (windows, ${{ matrix.label }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # Isolate the large process suite from build/vet and targeted native checks.
+    # Keep compilation, process, platform, persistence and settings work independent.
     # A cold Windows race build and test can exceed 60 minutes before cleanup.
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        suite: [process, native]
+        include:
+          - {suite: process, cohort: 1, label: process 1/4}
+          - {suite: process, cohort: 2, label: process 2/4}
+          - {suite: process, cohort: 3, label: process 3/4}
+          - {suite: process, cohort: 4, label: process 4/4}
+          - {suite: native, label: native}
+          - {suite: compile, label: compile}
+          - {suite: persistence, label: persistence}
+          - {suite: settings, label: settings}
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.
@@ -825,10 +998,62 @@ jobs:
         run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0 + upstream dependency refresh
         with:
           go-version-file: apps/backend/go.mod
-          cache-dependency-path: apps/backend/go.sum
+          cache: false
+
+      - name: Resolve Windows Go build cache
+        id: windows_go_cache
+        run: |
+          $cachePath = go env GOCACHE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $goVersion = go env GOVERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $modulePath = go env GOMODCACHE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "path=$cachePath" >> $env:GITHUB_OUTPUT
+          "version=$goVersion" >> $env:GITHUB_OUTPUT
+          "modulePath=$modulePath" >> $env:GITHUB_OUTPUT
+          "day=$([DateTime]::UtcNow.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture))" >> $env:GITHUB_OUTPUT
+
+      - name: Cache Windows Go modules
+        id: windows_module_cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.modulePath }}
+          key: go-windows-modules-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+
+      - name: Cache Windows compiled packages
+        id: windows_build_cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.path }}
+          key: go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-${{ steps.windows_go_cache.outputs.day }}
+          restore-keys: |
+            go-windows-build-${{ matrix.suite }}-${{ runner.arch }}-${{ steps.windows_go_cache.outputs.version }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}-
+
+      - name: Compile Windows settings test packages
+        if: matrix.suite == 'settings'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: >-
+          go test -trimpath -tags fts5 -race -p=2 -run '^$' -count=1 -timeout=30s
+          ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/agent/settings/store ./internal/backendapp ./internal/mcp/handlers ./internal/mcp/server ./internal/workflow/controller ./internal/workflow/handlers ./internal/workflow/repository
+
+      - name: Compile Windows persistence test packages
+        if: matrix.suite == 'persistence'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: >-
+          go test -trimpath -tags fts5 -race -p=2 -run '^$' -count=1 -timeout=30s
+          ./internal/backendapp ./internal/orchestrator/executor ./internal/persistence/storeconformance ./internal/task/handlers ./internal/task/repository/sqlite ./internal/task/service
 
       - name: Test Windows copy-file glob tokenization
         if: matrix.suite == 'native'
@@ -840,11 +1065,11 @@ jobs:
       # launcher, shell, signals, sysprocattr, vscode cleanup, …). The rest of
       # the suite is build-tag-gated out automatically.
       - name: Build
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'compile'
         run: go build ./...
 
       - name: Vet
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'compile'
         run: go vet ./...
 
       - name: Test Windows process cohort runner
@@ -853,7 +1078,9 @@ jobs:
 
       - name: Test Windows process package
         if: matrix.suite == 'process'
-        run: go run ./cmd/windows-process-tests
+        env:
+          WINDOWS_PROCESS_COHORT: ${{ matrix.cohort }}
+        run: go run ./cmd/windows-process-tests -cohorts 4 -cohort $env:WINDOWS_PROCESS_COHORT
 
       # Scope to packages with non-trivial Windows-specific code paths.
       # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
@@ -863,11 +1090,23 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
+
+      - name: Test Windows Git executable memo
+        if: matrix.suite == 'native'
+        run: go test -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run '^TestNewGitCommand'
+
+      - name: Test Windows Hermes ACP detection
+        if: matrix.suite == 'native'
+        timeout-minutes: 10
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 2GiB
+        run: go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'
 
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.
@@ -896,6 +1135,16 @@ jobs:
           go test -race -v ./internal/agentctl/server/instance -run '^TestAllocatePortAndListenerRetriesAddressInUse$'
           go test -race -v ./internal/gateway/websocket -run '^TestResolveAndBindReportsOccupiedPort$'
 
+      - name: Test Windows loopback listeners
+        if: matrix.suite == 'native'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -v -timeout 10m ./internal/common/portutil ./internal/common/netprobe ./internal/agentctl/server/config ./cmd/plugin-fixture
+          go test -race -v -timeout 10m ./internal/gateway/websocket -run 'Tunnel|ResolveAndBind|ConcurrentFailingStarts'
+          go test -race -v -timeout 10m ./internal/launcher -run 'TestPickPorts|TestPickDevPorts|TestCanBind|TestWaitForHealthBypassesHTTPProxyForSpecificBind'
+          go test -race -v -timeout 10m ./internal/agentctl/server/api -run '^(TestHandleVscodeStart_Success|TestHandleVscodeStatus_AfterStart|TestVscodeOpenFile_WaitsForRunning_E2E)$'
+
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
       - name: Test Windows path semantics
@@ -906,29 +1155,29 @@ jobs:
           ./internal/task/service
 
       - name: Test Windows document attachment publication
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'persistence'
         timeout-minutes: 6
         run: |
           $env:GOMAXPROCS = '2'
-          $env:GOMEMLIMIT = '512MiB'
+          $env:GOMEMLIMIT = '2GiB'
           go test -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^TestDocumentAttachment.*$' -count=1 -timeout=4m -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Windows profile enabled omission
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'settings'
         timeout-minutes: 6
         run: |
           $env:GOMAXPROCS = '2'
-          $env:GOMEMLIMIT = '512MiB'
+          $env:GOMEMLIMIT = '2GiB'
           go test -trimpath -tags fts5 -race -p 1 -count=1 -timeout=4m -v ./internal/agent/settings/store ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/mcp/server ./internal/backendapp -run '^(TestProfileEnabledIntent(Caller|OwnCommit|Controls|DynamicCaller|DynamicRejection|Storage|HTTP|MCP|Compact)|TestUpdateAgentProfileModelIfEmptyIsConditional|TestUpdateAgentProfile_DoesNotOverwriteWorkingOwner|TestAgentProfileEnabled_RoundTrip|TestDynamicProfileCreateAndUpdatePersistsCandidates|TestSQLiteRepositoryDynamicProfileCRUDUsesOptimisticVersions)$'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Windows executor profile scripts
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'persistence'
         timeout-minutes: 6
         run: |
           $env:GOMAXPROCS = '2'
-          $env:GOMEMLIMIT = '512MiB'
+          $env:GOMEMLIMIT = '2GiB'
           go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=4m -v -run '^(TestExecutorProfileScripts(IndependentSQLite|Presence|OwnCommit|Storage|Failures|Compatibility|SettingsDomain|ApplyProfile|StoreConformance)|TestRegisteredExecutorProfileScripts(HTTP|WS))$' ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers ./internal/backendapp ./internal/orchestrator/executor ./internal/persistence/storeconformance
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -942,32 +1191,32 @@ jobs:
           go test -race -tags fts5 -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
 
       - name: Test Windows workspace settings persistence
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'persistence'
         timeout-minutes: 30
         env:
           GOMAXPROCS: '2'
-          GOMEMLIMIT: 512MiB
+          GOMEMLIMIT: 2GiB
         run: >-
           go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=5m
           -run '^Test(WorkspaceFieldUpdates(ConcurrentSQLite|PresenceAndDefaults|ExactFenceSQLite|AdmissionAndFailures|Storage)|RegisteredWorkspaceFieldUpdates(HTTP|WS))$'
           ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
 
       - name: Test Windows workflow start selection
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'settings'
         timeout-minutes: 6
         env:
           GOMAXPROCS: '2'
-          GOMEMLIMIT: 512MiB
+          GOMEMLIMIT: 2GiB
         run: |
           go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^TestWorkflowStartSelection(ControllerOmission|ControllerControls|SQLiteIndependentStores|RepositoryRollback|LegacyAndExact|RegisteredREST|AccessFailures|RegisteredMCP)$' ./internal/workflow/controller ./internal/workflow/repository ./internal/workflow/handlers ./internal/mcp/handlers
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Windows repository checkout defaults
-        if: matrix.suite == 'native'
+        if: matrix.suite == 'persistence'
         timeout-minutes: 6
         env:
           GOMAXPROCS: '2'
-          GOMEMLIMIT: 512MiB
+          GOMEMLIMIT: 2GiB
         run: |
           go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^Test(RepositoryCheckoutDefaults(ConcurrentSQLite|Presence|CompanionAtomicity|OwnMutationProjection|Failures|Storage|LegacyAndExact)|RegisteredRepositoryCheckoutDefaults(HTTP|WS))$' ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -981,3 +1230,19 @@ jobs:
       - name: Test Windows agent-survival flag availability
         if: matrix.suite == 'native'
         run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags
+
+      - name: Save Windows Go modules
+        if: success() && matrix.suite == 'compile' && steps.windows_module_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.modulePath }}
+          key: ${{ steps.windows_module_cache.outputs.cache-primary-key }}
+
+      - name: Save Windows compiled packages
+        if: success() && steps.windows_build_cache.outputs.cache-hit != 'true' && (matrix.suite != 'process' || matrix.cohort == 1)
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.windows_go_cache.outputs.path }}
+          key: ${{ steps.windows_build_cache.outputs.cache-primary-key }}

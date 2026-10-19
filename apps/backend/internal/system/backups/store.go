@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
@@ -159,7 +160,10 @@ const staleTmpAge = 10 * time.Minute
 
 // sweepStaleTmpFiles removes abandoned legacy sidecars and private staging
 // directories. Creation owns maintenance admission while this sweep runs.
+// Boot staging debris from an interrupted pre-migration backup is reclaimed
+// here too, under the boot staging liveness window owned by persistence.
 func (s *Service) sweepStaleTmpFiles() {
+	persistence.SweepStaleBootStaging(s.backupsDir(), s.log)
 	entries, err := os.ReadDir(s.backupsDir())
 	if err != nil {
 		return
@@ -213,6 +217,10 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 	if err := s.writeStagedRestore(snapshotPath, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
+	}
+	if _, err := verifySnapshot(ctx, stagedPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("verify staged restore: %w", err)
 	}
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
@@ -372,9 +380,14 @@ func (s *Service) writeStagedRestore(snapshotPath, stagedPath string) error {
 	if err != nil {
 		return fmt.Errorf("create staged db: %w", err)
 	}
-	if _, err := io.Copy(dst, src); err != nil {
+	written, err := io.Copy(dst, src)
+	if err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("copy snapshot: %w", err)
+	}
+	if written == 0 {
+		_ = dst.Close()
+		return errors.New("restore snapshot is empty")
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()

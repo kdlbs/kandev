@@ -24,7 +24,7 @@ test("preserves phone history and touch recovery after actual delivery cleanup",
       apiClient,
       seedData,
       backend,
-      { profileId: capacity.profileId },
+      { profileId: capacity.profileId, historicalGap: true },
     );
     taskId = task.id;
     await assertCapacityContinuationAfterPruning(apiClient, backend, session, {

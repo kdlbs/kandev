@@ -12,6 +12,7 @@ import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
 import { readManagedCloneRecoveryConsumers } from "./session-resume-recovery";
 import { waitForSessionState } from "./session";
+import { holdLegacyRecoveryReads } from "./legacy-recovery-read-hold";
 
 type SqliteTestDatabase = {
   prepare(sql: string): {
@@ -61,6 +62,7 @@ export type MultiRepoRelocationSlot = {
 };
 
 export type MultiRepoRelocationFixture = {
+  page: Page;
   task: CreateTaskResponse;
   session: SessionPage;
   environment: Awaited<ReturnType<ApiClient["getTaskEnvironment"]>> & {};
@@ -408,7 +410,7 @@ export async function seedMultiRepoManagedCloneRelocationFixture(
       };
     }) as [MultiRepoRelocationSlot, MultiRepoRelocationSlot];
 
-    return { task, session, environment, originalSeedRepository, slots };
+    return { page, task, session, environment, originalSeedRepository, slots };
   } catch (setupError) {
     const cleanup = [
       () => apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
@@ -670,6 +672,8 @@ export async function stopAndSeedLegacySessionFailure(
   fixture: MultiRepoRelocationFixture,
   reason: string,
 ) {
+  // These fixtures exercise explicit recovery, with no competing open-time resume.
+  await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
   const sessionId = fixture.task.session_id!;
   const response = await apiClient.stopSession({ session_id: sessionId, reason, force: true });
   expect(response.success).toBe(true);
@@ -686,6 +690,7 @@ export async function stopAndSeedLegacySessionFailure(
       message: "Waiting for the stopped multi-repository recovery execution to be removed",
     })
     .toBe(false);
+  await holdLegacyRecoveryReads(fixture.page, sessionId);
   seedLegacyGenericSessionError(tmpDir, sessionId);
 }
 

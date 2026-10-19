@@ -49,6 +49,7 @@ export type ManagedRuntimePreparationOptions = {
   startupMode?: ManagedRuntimeStartupFixtureMode;
   launchId?: string;
   hostSubprocess?: boolean;
+  retryReleaseFile?: string;
 };
 
 /**
@@ -136,6 +137,9 @@ export async function prepareManagedRuntimeProfile(
   if (options.startupMode) {
     envVars.push({ key: "E2E_NPX_MODE", value: options.startupMode });
     envVars.push({ key: "E2E_NPX_LAUNCH_ID", value: options.launchId ?? randomUUID() });
+  }
+  if (options.retryReleaseFile) {
+    envVars.push({ key: "E2E_NPX_RETRY_RELEASE_FILE", value: options.retryReleaseFile });
   }
   if (options.hostSubprocess) {
     envVars.push({

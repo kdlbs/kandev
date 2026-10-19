@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
@@ -159,6 +160,7 @@ test.describe("Project repository picker", () => {
     officeSeed: _,
   }) => {
     await testPage.goto("/office/projects");
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Projects/i, { timeout: 10_000 });
     await testPage
       .getByRole("button", { name: /New Project|Create your first project/ })
       .first()

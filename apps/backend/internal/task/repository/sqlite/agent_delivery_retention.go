@@ -129,6 +129,7 @@ func (r *Repository) RunAgentDeliveryRetentionBatch(
 	); err != nil {
 		return models.AgentDeliveryRetentionBatchResult{}, err
 	}
+	result.DiscoveryAdvanced = agentDeliveryDiscoveryAdvanced(progress, candidates, prompts, wrapped)
 	return result, nil
 }
 

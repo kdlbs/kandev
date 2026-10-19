@@ -18,6 +18,7 @@ import (
 const (
 	setupStepIdentity = "identity"
 	setupStepWatches  = "watches"
+	setupStepProjects = "projects"
 	setupStepGoal     = "goal"
 	setupStepContext  = "context"
 	setupStepMayDo    = "may-do"
@@ -28,15 +29,19 @@ const (
 // owners' validators.
 type setupRequest struct {
 	name, agentProfileID, executorProfileID, context string
-	watches, policy, goal                            json.RawMessage
+	taskAgentProfileID, taskExecutorProfileID        string
+	watches, projects, policy, goal                  json.RawMessage
 }
 
 // setupPlan is a fully validated setup, ready to insert.
 type setupPlan struct {
 	name, agentProfileID, executorProfileID, context string
+	taskAgentProfileID, taskExecutorProfileID        string
 	watches                                          *watchesRequest
+	projects                                         *projectsRequest
 	policy                                           Policy
 	goal                                             *goalInput
+	goalOpenTasks                                    int64
 }
 
 func stepError(step string, err error) error {
@@ -67,7 +72,7 @@ func stringMember(top map[string]json.RawMessage, key string) (string, error) {
 
 // decodeSetupRequest checks the body's top-level shape: a JSON object whose
 // members have the right JSON type. Nothing here needs a read.
-func decodeSetupRequest(body []byte) (setupRequest, error) {
+func decodeSetupRequest(body []byte, phase31 bool) (setupRequest, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil || top == nil {
 		return setupRequest{}, bodyErr("", "body must be a JSON object")
@@ -76,7 +81,8 @@ func decodeSetupRequest(body []byte) (setupRequest, error) {
 	for _, m := range []struct {
 		key string
 		dst *string
-	}{{PatchFieldName, &req.name}, {PatchFieldAgentProfileID, &req.agentProfileID}, {PatchFieldExecutorProfileID, &req.executorProfileID}, {PatchFieldContext, &req.context}} {
+	}{{PatchFieldName, &req.name}, {PatchFieldAgentProfileID, &req.agentProfileID}, {PatchFieldExecutorProfileID, &req.executorProfileID}, {PatchFieldContext, &req.context},
+		{PatchFieldTaskAgentProfileID, &req.taskAgentProfileID}, {PatchFieldTaskExecutorProfileID, &req.taskExecutorProfileID}} {
 		v, err := stringMember(top, m.key)
 		if err != nil {
 			return setupRequest{}, err
@@ -84,6 +90,9 @@ func decodeSetupRequest(body []byte) (setupRequest, error) {
 		*m.dst = v
 	}
 	req.watches, _ = presentMember(top, "watches")
+	if phase31 {
+		req.projects, _ = presentMember(top, fieldProjects)
+	}
 	req.policy, _ = presentMember(top, "policy")
 	req.goal, _ = presentMember(top, "goal")
 	if req.watches != nil {
@@ -92,7 +101,7 @@ func decodeSetupRequest(body []byte) (setupRequest, error) {
 		}
 	}
 	if req.policy != nil {
-		if _, err := parsePolicyMember(req.policy); isInvalidBody(err) {
+		if _, err := parsePolicyMember(req.policy, false); isInvalidBody(err) {
 			return setupRequest{}, err
 		}
 	}
@@ -110,8 +119,8 @@ func isInvalidBody(err error) bool {
 	return errors.As(err, &se) && se.Code == codeInvalidBody
 }
 
-// validateSetup runs the ordered validation: identity, watches, goal,
-// context, may-do. The first failure is returned. A part's reads happen when
+// validateSetup runs the ordered validation: identity, watches, projects,
+// goal, context, may-do. The first failure is returned. A part's reads happen when
 // that part is reached.
 func (s *Service) validateSetup(ctx context.Context, workspaceID string, req setupRequest) (*setupPlan, error) {
 	plan := &setupPlan{agentProfileID: req.agentProfileID, executorProfileID: req.executorProfileID}
@@ -125,7 +134,13 @@ func (s *Service) validateSetup(ctx context.Context, workspaceID string, req set
 	if err = s.validator.ValidateExecutorProfile(ctx, req.executorProfileID); err != nil {
 		return nil, stepError(setupStepIdentity, err)
 	}
+	if plan.taskAgentProfileID, plan.taskExecutorProfileID, err = s.validateTaskPair(ctx, workspaceID, req.taskAgentProfileID, req.taskExecutorProfileID); err != nil {
+		return nil, stepError(setupStepIdentity, err)
+	}
 	if plan.watches, err = s.validateSetupWatches(ctx, workspaceID, req.watches); err != nil {
+		return nil, err
+	}
+	if plan.projects, err = s.validateSetupProjects(ctx, workspaceID, req.projects); err != nil {
 		return nil, err
 	}
 	if plan.goal, err = validateSetupGoal(req.goal); err != nil {
@@ -166,6 +181,35 @@ func (s *Service) validateSetupWatches(ctx context.Context, workspaceID string, 
 	return w, nil
 }
 
+// validateSetupProjects validates the optional projects member of a setup. An
+// absent member leaves every project in scope. Nothing is stored for it
+// beyond the scope, entries and toggle of the new coordinator.
+func (s *Service) validateSetupProjects(ctx context.Context, workspaceID string, raw json.RawMessage) (*projectsRequest, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	p, err := parseProjectsMember(raw)
+	if err != nil {
+		return nil, stepError(setupStepProjects, err)
+	}
+	if p.scope == watchScopeAll {
+		return nil, nil
+	}
+	if len(p.entries) == 0 && !p.includeNoRepo {
+		return nil, stepError(setupStepProjects, errProjectsEmpty())
+	}
+	existing, err := s.existingProjectEntries(ctx, workspaceID, p.entries)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range p.entries {
+		if _, ok := existing[e]; !ok {
+			return nil, stepError(setupStepProjects, projectsErr(codeProjectsForeignEntry, e.Kind+" "+e.ID+" is not in this workspace"))
+		}
+	}
+	return p, nil
+}
+
 func validateSetupGoal(raw json.RawMessage) (*goalInput, error) {
 	if raw == nil {
 		return nil, nil
@@ -189,7 +233,7 @@ func validateSetupPolicy(raw json.RawMessage) (Policy, error) {
 	if raw == nil {
 		return Policy{}, stepError(setupStepMayDo, policyFieldErr(codeActionMissing, string(AllActions[0]), "policy.actions must name every action"))
 	}
-	p, err := parsePolicyMember(raw)
+	p, err := parsePolicyMember(raw, false)
 	if err != nil {
 		return Policy{}, stepError(setupStepMayDo, err)
 	}
@@ -206,13 +250,18 @@ func (s *Service) CreateSetup(ctx context.Context, workspaceID string, body []by
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
-	req, err := decodeSetupRequest(body)
+	req, err := decodeSetupRequest(body, s.phase31)
 	if err != nil {
 		return nil, err
 	}
 	plan, err := s.validateSetup(ctx, workspaceID, req)
 	if err != nil {
 		return nil, err
+	}
+	if plan.goal != nil {
+		if plan.goalOpenTasks, err = s.setupOpenTasks(ctx, workspaceID, plan); err != nil {
+			return nil, fmt.Errorf("guided setup: %w", err)
+		}
 	}
 	created, err := s.insertSetup(ctx, workspaceID, plan)
 	if err != nil {
@@ -222,6 +271,17 @@ func (s *Service) CreateSetup(ctx context.Context, workspaceID string, body []by
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", created.ID))
 	s.publishCoordinatorUpdated(ctx, workspaceID, created.ID)
 	return created, nil
+}
+
+// setupOpenTasks counts the open tasks the new coordinator's Watches cover,
+// read before the setup transaction opens because the project scope's
+// listings may write.
+func (s *Service) setupOpenTasks(ctx context.Context, workspaceID string, plan *setupPlan) (int64, error) {
+	set := WatchSet{All: plan.watches.scope == watchScopeAll, WorkflowIDs: plan.watches.ids}
+	if plan.projects != nil {
+		set.Projects = storedScope(projectState{scope: watchScopeSelected, entries: plan.projects.entries, includeNoRepo: plan.projects.includeNoRepo})
+	}
+	return s.store.CountOpenWatchedTasks(ctx, s.store.ro, workspaceID, set)
 }
 
 // insertSetup writes the coordinator row, its Watches and its goal in one
@@ -237,6 +297,7 @@ func (s *Service) insertSetup(ctx context.Context, workspaceID string, plan *set
 	c := &Coordinator{
 		ID: uuid.NewString(), WorkspaceID: workspaceID, Name: plan.name,
 		AgentProfileID: plan.agentProfileID, ExecutorProfileID: plan.executorProfileID, Context: plan.context,
+		TaskAgentProfileID: plan.taskAgentProfileID, TaskExecutorProfileID: plan.taskExecutorProfileID,
 		CreatedAt: now, UpdatedAt: now, PolicyJSON: &policy, PolicyRevision: 1, WatchScope: plan.watches.scope,
 	}
 	tx, err := s.store.db.BeginTxx(ctx, nil)
@@ -256,9 +317,9 @@ func (s *Service) insertSetup(ctx context.Context, workspaceID string, plan *set
 func (s *Service) insertSetupRows(ctx context.Context, tx coordinatorExec, c *Coordinator, plan *setupPlan, now time.Time) error {
 	if _, err := tx.ExecContext(ctx, s.store.db.Rebind(`
 		INSERT INTO coordinators (`+insertCoordinatorColumns+`, policy_json, policy_revision, watch_scope)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		c.ID, c.WorkspaceID, c.Name, c.AgentProfileID, c.ExecutorProfileID, c.Context,
-		nullableString(c.ConversationTaskID), c.ConfigRevision, now, now, *c.PolicyJSON, c.PolicyRevision, c.WatchScope); err != nil {
+		nullableString(c.ConversationTaskID), c.ConfigRevision, now, now, c.TaskAgentProfileID, c.TaskExecutorProfileID, *c.PolicyJSON, c.PolicyRevision, c.WatchScope); err != nil {
 		return fmt.Errorf("insert coordinator: %w", err)
 	}
 	if plan.watches.scope == watchScopeSelected {
@@ -269,9 +330,15 @@ func (s *Service) insertSetupRows(ctx context.Context, tx coordinatorExec, c *Co
 			}
 		}
 	}
+	if plan.projects != nil {
+		next := projectState{scope: watchScopeSelected, entries: plan.projects.entries, includeNoRepo: plan.projects.includeNoRepo}
+		if err := s.store.writeProjectState(ctx, tx, c.WorkspaceID, c.ID, next); err != nil {
+			return err
+		}
+	}
 	if plan.goal == nil {
 		return nil
 	}
-	_, err := s.createGoal(ctx, tx, c, *plan.goal)
+	_, err := s.createGoal(ctx, tx, c, *plan.goal, plan.goalOpenTasks)
 	return err
 }

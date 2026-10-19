@@ -255,7 +255,7 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 ### Duration-aware CI sharding
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
-The normal cohort has 14 shards and runs `chromium` plus `mobile-chrome`; the
+The normal cohort has 28 shards and runs `chromium` plus `mobile-chrome`; the
 container cohort has 6 shards and runs `containers`. The independent
 `kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
@@ -272,6 +272,20 @@ multiplier. If the artifact is missing, the planner records
 The runner validates the manifest against the checkout before launching
 Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
 failure; it cannot silently fall back to ordinal sharding.
+
+Concurrent processes within a planned shard receive separate, invocation-owned
+Playwright transform caches. The supervisor removes only those caches after all
+children close, including failed children; an inherited `PWTEST_CACHE_DIR` and
+other runner invocations remain untouched.
+
+Build collects the native inventory once and includes `native-catalog.json`
+in the manifest artifact. CI parents verify its checkout, run and successful
+Build attempt, then validate their complete manifest without importing every
+spec again. Rerunning a consumer retains the original successful producer
+attempt. Local runs still collect the current working tree natively.
+The required report compares every actual project, owning spec and native test
+ID with that catalog, retaining skips and retries while rejecting missing,
+extra or duplicated attempts. A missing or stale CI catalog fails the run.
 
 To dry-run the planner locally:
 
@@ -396,7 +410,9 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 
 Every Playwright worker gets:
 
-- A unique backend port in `BACKEND_BASE_PORT + workerIndex` (default `18080+`).
+- A backend port owned by the shard offset and stable `parallelIndex` slot
+  (default `18080+`). Replacement workers reuse that slot after teardown;
+  increasing `workerIndex` values never move into a sibling shard's ports.
 - A unique frontend port in `FRONTEND_BASE_PORT + workerIndex` (default `13000+`).
 - A fresh tmpdir (`HOME`, `KANDEV_HOME_DIR`, worktree base, repo clone base — all under that tmpdir).
 - A unique agentctl instance port range (`30001 + E2E_PORT_OFFSET * 1000 + workerIndex * 200`).
@@ -435,6 +451,13 @@ because the backend round trip that would flip it was late. Raising the number
 buys time, it does not remove the race, and when it does fail it tells you
 nothing about what was missing. Three of the four flakes measured in one recent
 green CI run were exactly this, with budgets of 5s, 10s and 30s.
+
+A mock turn that must remain active across a restart can use
+`e2e:await_file("/absolute/release-marker")` between its started and completed
+messages. Put the unique marker under the worker's `backend.tmpDir`, write it
+only after the in-flight assertions, and also release it in `finally`. The
+wait honors prompt cancellation; the worker's temp-directory cleanup owns the
+marker. The survival restart specs demonstrate this controlled completion.
 
 `helpers/causal-waits.ts` has one primitive per transport the app actually uses.
 Arm the wait **before** the action, await it after, then assert the UI with its
@@ -787,12 +810,19 @@ for a result it could never receive.
 
 ## CI
 
-`.github/workflows/e2e-tests.yml` defines two test cohorts and a report job:
+`.github/workflows/e2e-tests.yml` builds the test runtime, runs the test cohorts,
+and joins their required results:
 
-- `e2e` — a 14-entry matrix executing the generated normal manifests.
+- `build` — builds the Linux browser prerequisites and generates manifests.
+- `helper_compile` — compiles the remaining helper platforms and diagnostic
+  commands in parallel, and remains required by the report gate.
+- `e2e` — a 28-entry matrix executing the generated normal manifests.
 - `e2e-containers` — a 6-entry matrix executing the generated container
   manifests and requiring Docker. A shard assigned `tests/kubernetes/**`
   installs checksum-pinned Kind/kubectl, then performs exact-name teardown.
+  Shared Kubernetes control-plane files are scheduled together to reuse their
+  worker-scoped Kind cluster. The worker-image lifecycle file owns one existing
+  container job; per-test cleanup and optional scenario gates remain.
 - `e2e-kubernetes-compatibility` — a two-version matrix running the single
   API-only compatibility smoke on Kubernetes `v1.34.8` and `v1.36.1`.
 - `e2e-report` — merges blob reports, publishes timing/retry artifacts, and
@@ -800,6 +830,32 @@ for a result it could never receive.
 
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.
+Container global setup prepares one canonical helper manifest for the invocation;
+each worker still validates its identity and digest and owns a private bundle
+and helper cache. Global teardown removes the shared temporary manifest.
+
+Normal CI jobs request up to four independent Playwright processes through
+`E2E_RUNNER_PROCESSES`. Each keeps one worker and a disjoint set of whole files.
+Planned execution reserves two GiB, then budgets two GiB per process from the
+lower of host available memory and the current cgroup's remaining memory.
+Four processes require at least ten GiB available and four CPUs. Smaller CPU
+hosts retain one spare core; unknown resources select one process. Container
+jobs always use one. The managed local runner retains its separate maximum of
+three shards and its existing six/twelve-GiB thresholds. Set
+`E2E_RUNNER_PROCESSES=1` to compare or restore serial planned execution without
+changing the manifest or test selection.
+Separate port slots, result directories and blob files preserve isolation
+across project changes and retries. All children finish before the parent
+writes its single metadata record; a child failure or missing CI report fails
+the job.
+
+Normal CI jobs retain optional `e2e-resources-<shard>` snapshots and print
+`e2e_resources` shell timing in the test-step log. Raw cgroup counters are the
+CPU-use authority because shell timing can miss orphaned descendants. Memory
+peak includes container setup; missing counters remain unknown. Resource
+artifacts never replace native blob reports or their missing-report checks.
+The four-process request is a measured rollout, not evidence by itself that
+full CI meets its elapsed-time target.
 
 Keep the default at `workers: 1` until the controlled worker-concurrency
 experiment shows a repeatable wall-time improvement without retries. Record

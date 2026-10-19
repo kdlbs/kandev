@@ -242,7 +242,7 @@ func (m *Manager) handleCompleteEventMarkState(
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
 	if err := m.markReadyEventForExecution(
-		context.Background(), execution, events.AgentReady, false, event.AttemptID,
+		context.Background(), execution, events.AgentReady, false, event.AttemptID, event,
 	); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
@@ -311,6 +311,12 @@ func (m *Manager) claimPromptCompletion(
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
 			current.promptGeneration = event.PromptGeneration
+			if event.TurnID != "" {
+				if current.promptTurnIDs == nil {
+					current.promptTurnIDs = make(map[uint64]string)
+				}
+				current.promptTurnIDs[event.PromptGeneration] = event.TurnID
+			}
 		}
 		if current.promptGeneration != event.PromptGeneration {
 			return
@@ -595,7 +601,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
-		event.TurnID = execution.promptTurnIDSnapshot()
+		event.TurnID = execution.promptTurnIDForEvent(*event)
 	}
 	isError, stopReason := completeEventResult(event)
 	if isError && isUninitializedStartupFailure(execution, event) {
@@ -630,7 +636,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")
 
-	execution.markAgentActivity()
+	if event.Recovered {
+		execution.markRecoveredAgentActivity(event.RecoveredActivityAt)
+	} else {
+		execution.markAgentActivity()
+	}
 
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
@@ -857,7 +867,12 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	if isTurnContent {
 		execution.lastActivityAtMu.Lock()
-		execution.lastActivityAt = time.Now()
+		if event.Recovered {
+			execution.setRecoveredActivityAtLocked(event.RecoveredActivityAt)
+		} else {
+			execution.lastActivityAt = time.Now()
+			execution.lastLiveActivityAt = execution.lastActivityAt
+		}
 		if isProviderDiagnostic {
 			execution.providerDiagnosticCandidate = true
 			if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {
@@ -1562,7 +1577,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			if event.PromptGeneration != 0 {
 				event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
 			} else {
-				event.TurnID = execution.promptTurnIDSnapshot()
+				event.TurnID = execution.promptTurnIDForEvent(event)
 			}
 		}
 	case "tool_call":

@@ -512,5 +512,12 @@
   "user": "Ũśēŕ",
   "usesTheLocalDockerDaemonOn": "Ũśēś ţĥē ĺōćàĺ Ďōćķēŕ ďàēḿōń ōń ţĥĩś ḿàćĥĩńē.",
   "value": "Vàĺũē",
-  "verifyingConnection": "Vēŕĩƒŷĩńĝ ćōńńēćţĩōń..."
+  "verifyingConnection": "Vēŕĩƒŷĩńĝ ćōńńēćţĩōń...",
+  "ownershipProfile": "Ƥŕōƒĩĺē àććēśś",
+  "ownershipExecutor": "Ēxēćũţōŕ àććēśś",
+  "ownershipShared": "Śĥàŕēď",
+  "ownershipMe": "Ōńĺŷ ḿē",
+  "ownershipDescription": "Ōńĺŷ ţĥē ōŵńēŕ àńď àďḿĩńĩśţŕàţōŕś ćàń vĩēŵ ōŕ ũśē ƥŕĩvàţē ćōḿƥũţē. Śĥàŕēď àććēśś ƥŕēśēŕvēś ēxĩśţĩńĝ ƥēŕḿĩśśĩōńś.",
+  "ownershipInherited": "Ţĥē ēxēćũţōŕ ĩś ƥŕĩvàţē. Ĩţś ōŵńēŕ àńď àďḿĩńĩśţŕàţōŕś ŕēţàĩń àććēśś ēvēń ŵĥēń ţĥĩś ƥŕōƒĩĺē ĩś śĥàŕēď.",
+  "ownershipUnavailable": "Ţĥĩś ēxēćũţōŕ ƥŕōƒĩĺē ĩś ũńàvàĩĺàƀĺē. Ćĥōōśē àń àććēśśĩƀĺē ƥŕōƒĩĺē ƀēƒōŕē śţàŕţĩńĝ."
 }

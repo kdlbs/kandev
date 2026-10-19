@@ -98,6 +98,9 @@ func (h *Handlers) wsRouteAction(ctx context.Context, msg *ws.Message) (*ws.Mess
 		if errors.Is(err, orchestrator.ErrRouteActionActiveTurn) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		}
+		if errors.Is(err, orchestrator.ErrRouteActionRequiresDynamicProfile) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		h.logger.Warn("route action failed", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "route action failed", nil)
 	}
@@ -146,6 +149,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
@@ -157,6 +163,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		}
 		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
 			return archivedResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
@@ -241,6 +250,9 @@ func (h *Handlers) wsEnsureSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		AutoStart: req.AutoStart, ActivationSource: req.ActivationSource,
 	})
 	if err != nil {
+		if response, responseErr := workspaceReuseUnsupportedConflictResponse(msg, err); response != nil || responseErr != nil {
+			return response, responseErr
+		}
 		h.logger.Error("failed to ensure session",
 			zap.String("task_id", req.TaskID),
 			zap.Error(err))
@@ -509,6 +521,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr

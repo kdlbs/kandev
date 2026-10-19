@@ -31,8 +31,8 @@ func TestDeliveryRetentionWorkerBackgroundQuantum(t *testing.T) {
 }
 
 func TestDeliveryRetentionWorkerProductivePhases(t *testing.T) {
-	repo := &productivePhaseRepository{calls: map[string]int{}}
 	now := time.Now()
+	repo := &productivePhaseRepository{calls: map[string]int{}, onCall: func() { now = now.Add(20 * time.Millisecond) }}
 	worker := New(repo, db.NewPool(nil, nil), Options{
 		Now: func() time.Time { return now },
 		After: func(delay time.Duration) <-chan time.Time {
