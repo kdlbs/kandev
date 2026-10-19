@@ -26,7 +26,7 @@ In the costs overview, **MTD** covers the current month from its start in UTC, w
 
 ![Office Budgets tab showing the default spend ceiling and budget policy controls](../screenshots/office-budgets.png)
 
-The built-in ceiling is **50 USD of priced spend per workspace per UTC day** for unattended runs. It blocks new unattended launches on reaching the limit; it does not block attended work. Edit the default ceiling in the Budgets tab when that bound is inappropriate for your evaluation.
+The built-in ceiling defaults to **50 USD of priced spend per workspace per UTC day** for unattended runs. It blocks new unattended launches on reaching the limit; it does not block attended work. Check the effective value and edit the default ceiling in the Budgets tab when that bound is inappropriate for your evaluation.
 
 To add a policy, select **Add Policy** and choose:
 

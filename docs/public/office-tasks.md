@@ -22,7 +22,7 @@ Changing the project's sources later does not change existing task attachments. 
 
 1. Select **New Task**.
 2. Enter a title and a description with the expected result and acceptance checks.
-3. Choose a **Project**. The current Office task dialog requires a project and a non-empty title before enabling Create.
+3. Choose a **Project**. The Office task dialog requires a project and a non-empty title before enabling Create.
 4. Choose an **Assignee**, status, and priority. Choose an Office team member as the assignee; its runtime execution profile is configured separately.
 5. Create the task and open its detail page to inspect the saved properties and activity.
 
@@ -76,9 +76,11 @@ The default workflow moves Work → Review → Approval → Done. Work requires 
 
 1. Open the task and inspect its current workflow step and waiting-decision indicator.
 2. Check the participant list for the required reviewer or approver. An automatic seat can exist before a concrete agent claims it; select or register the intended agent when necessary.
-3. Read the output and record the decision through the relevant approval or request-changes action. A comment saying “looks good” is useful context but is not a recorded approval.
-4. Follow the resulting transition. All required approvals allow advancement; a rejection returns the task to Work for revision.
+3. Read the output and guide the assigned reviewer or approver agent through the task conversation. Give concrete instructions, such as “Check the acceptance tests and record your review decision; request changes if the expired-link case is missing.” The agent records the workflow approval or request for changes.
+4. Inspect the recorded decision and resulting transition. All required approvals allow advancement; a rejection returns the task to Work for revision.
 5. After revision, review again. Entering a new review or approval round clears previous decisions so stale approvals cannot finish a changed task.
+
+Workflow participants are Office agents; human users have no workflow approval or request-changes buttons. A human comment saying “looks good” provides guidance but does not satisfy the workflow gate. Confirm that the intended agent recorded a decision rather than treating its conversational reply as an approval.
 
 The primary assignee, reviewer, and approver are distinct capacities. A team member can hold more than one capacity on a task; removing one does not necessarily end its session while it still holds another.
 
@@ -86,7 +88,7 @@ Task-completion approval is also a workspace setting. Marking a task Done can be
 
 ## Handle human requests
 
-Open **Inbox** to review pending approval requests and items needing attention. Inspect the linked task or agent before approving or rejecting an action. Workspace governance requests, such as hiring an agent or changing skills, are separate from a workflow participant's review decision.
+Open **Inbox** to review pending approval requests and items needing attention. Inspect the linked task or agent before approving or rejecting an action. Workspace governance requests, such as hiring an agent or changing skills, have their own human approval controls. Workflow review requests link back to the task, where you guide the reviewer or approver agent as described above.
 
 Answer a task question in the place it was asked. When granting partial approval, state the allowed scope explicitly. After a decision, revisit the task to confirm that the requested action or next workflow step occurred.
 
