@@ -125,10 +125,16 @@ also found repeated Radix focus restoration in the Rename dialog. A scoped
 selection hook now retains the range through that sequence and discards it
 on user interaction or unmount.
 
-The final combined unit run passed 114 tests in 10 files. All task 01 browser
+The final combined unit run passed 116 tests in 10 files. All task 01 browser
 cases passed within the 18-test desktop and six-test phone runs. The dialog
 native-focus case also passed three consecutive repetitions. Changed-file
 ESLint, full web typecheck, and the i18n changed-line ratchet passed. Exact
 commands are above; the browser runs used `--host`, with `--no-build` after
 the final managed build. See [the plan](plan.md#verification-results) for the
 shared environment notes and evidence boundary.
+
+PR review remediation: the interactive title omits the default
+`aria-disabled="false"` attribute. The existing accessibility test was changed
+first and failed before the fix. The focus observer comment also clarifies why
+an explicit body focus event differs from an ambiguous deferred active element.
+See the plan's PR review remediation section for commands and results.

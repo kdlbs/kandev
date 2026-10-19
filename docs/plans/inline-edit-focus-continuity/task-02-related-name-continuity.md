@@ -122,9 +122,14 @@ Chat, and file completion on external blur. Separate regressions reproduced
 Escape followed by file creation and repeated Enter causing two tab commits.
 The focus hook and completion guards now prevent these failures.
 
-The final combined unit run passed 114 tests in 10 files. The desktop suite
+The final combined unit run passed 116 tests in 10 files. The desktop suite
 passed 18 cases and the phone suite passed six cases, including the related
 editor flows named above. The focused terminal-tab rename test passed
 separately. Changed-file ESLint, full web typecheck, and the i18n changed-line
 ratchet passed. See [the plan](plan.md#verification-results) for shared command
 and environment details. No temporary diagnostic code remains.
+
+PR review remediation: the shared focus observer now ignores outside pointer
+and focus events until initial editor focus. Both new regressions failed before
+the guard and pass after it. The nine file-create and file-rename browser cases
+passed. See the plan's PR review remediation section for commands and results.

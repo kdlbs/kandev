@@ -109,7 +109,7 @@ Execution is sequential. No delegation is authorized.
 
 Implementation checks on 2026-10-19:
 
-- Targeted Vitest: 10 files and 114 tests passed after the final source edit.
+- Targeted Vitest: 10 files and 116 tests passed after the final source edit.
   This includes native-input selection ordering, repeat restoration, external
   draft retention, explicit completion, stale cleanup, and existing clamp tests.
 - Rename dialog native focus regression: three consecutive runs passed. The
@@ -150,6 +150,25 @@ Design checks passed on 2026-10-18:
 
 The design turn made no production changes. Implementation was authorized
 on 2026-10-19 and runs in isolated browser/backend fixtures.
+
+## PR review remediation
+
+Review of PR #4588 found that document listeners could finish a new file editor
+before its delayed initial focus. Two failing hook regressions reproduced
+outside pointer and focus events during that interval. The listener guard now
+arms on initial focus and remains armed across external focus loss.
+
+Claude's suggestions clarified why an explicit focus event on the document body
+is an internal move and removed redundant `aria-disabled="false"` from an
+interactive task title. The title test first failed on the old attribute.
+
+Focused verification uses the same 10-file Vitest command (116 tests), plus
+`pnpm exec eslint --max-warnings 0` on the four changed TypeScript files.
+`pnpm run typecheck` and `pnpm run build:vite` passed. The managed Chromium
+command for `tests/task/file-tree-create.spec.ts` and
+`tests/task/file-tree-rename.spec.ts` passed all nine cases with
+`E2E_PORT_OFFSET=27 KANDEV_SERVER_HOST=127.0.0.1` and the temporary Nix browser
+library environment. CI and review completion remain externally pending.
 
 ## Risks
 

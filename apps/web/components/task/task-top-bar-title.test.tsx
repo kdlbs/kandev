@@ -48,7 +48,7 @@ describe("TaskTopBarTitle — idle state", () => {
     expect(getTitle()).toBeTruthy();
     expect(queryInput()).toBeNull();
     // Not aria-disabled, so pointer-actionability checks treat it as interactive.
-    expect(getTitle().getAttribute("aria-disabled")).toBe("false");
+    expect(getTitle().getAttribute("aria-disabled")).toBeNull();
     // Keyboard-operable: reachable via Tab.
     expect(getTitle().getAttribute("tabindex")).toBe("0");
     // The crumb wrapper carries the breadcrumb semantics; this element is the

@@ -154,7 +154,7 @@ function TaskTitleControl({
           data-testid="task-topbar-title"
           className="block min-w-0 max-w-full truncate text-sm rounded-sm font-medium outline-none focus-visible:ring-[2px] focus-visible:ring-ring/35"
           role={canRename ? "button" : undefined}
-          aria-disabled={!canRename}
+          aria-disabled={canRename ? undefined : true}
           tabIndex={canRename ? 0 : undefined}
           onDoubleClick={onStart}
           onKeyDown={canRename ? onKeyDown : undefined}

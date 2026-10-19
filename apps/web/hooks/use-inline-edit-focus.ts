@@ -15,6 +15,7 @@ function observeEditFocus(input: HTMLInputElement, container: HTMLElement, onLea
   let timer: ReturnType<typeof setTimeout> | undefined;
   let finished = false;
   let outsidePointer = false;
+  let engaged = doc.activeElement === input;
 
   const clearPending = () => {
     clearTimeout(timer);
@@ -48,14 +49,18 @@ function observeEditFocus(input: HTMLInputElement, container: HTMLElement, onLea
     else defer();
   };
   const pointerDown = (event: PointerEvent) => {
+    if (!engaged) return;
     clearPending();
     if (contains(event.target)) return;
     outsidePointer = true;
     defer();
   };
+  // A focus event on body is an internal move; body alone in the deferred check is ambiguous.
   const focusIn = (event: globalThis.FocusEvent) => {
-    if (contains(event.target)) clearPending();
-    else leave();
+    if (contains(event.target)) {
+      engaged = true;
+      clearPending();
+    } else if (engaged) leave();
   };
   doc.addEventListener("pointerdown", pointerDown, true);
   doc.addEventListener("focusin", focusIn);

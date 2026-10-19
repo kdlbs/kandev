@@ -59,7 +59,10 @@ as an internal move, without inspecting cross-origin frame contents.
 Do not use visibility alone: another application or browser chrome can take
 focus while the document remains visible. Do not remove all blur behavior:
 that would change existing click-away and keyboard navigation contracts.
-Install listeners only during editing. Cancel queued work on explicit
+Install listeners only during editing. Ignore outside pointer and focus events
+until the input first receives focus. This preserves editors that focus after
+a frame or passive effect. Keep that guard armed through external focus loss.
+Cancel queued work on explicit
 completion, identity change, and unmount. Use an edit-generation check to
 prevent stale callbacks from resolving a later edit. Preserve each consumer's
 at-most-once completion guard and add missing guards where event ordering

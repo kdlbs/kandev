@@ -3,7 +3,15 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useInlineEditFocus } from "./use-inline-edit-focus";
 
-function Editor({ onLeave, identity = "first" }: { onLeave: () => void; identity?: string }) {
+function Editor({
+  onLeave,
+  identity = "first",
+  autoFocus = true,
+}: {
+  onLeave: () => void;
+  identity?: string;
+  autoFocus?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { onBlur, cancelPendingBlur } = useInlineEditFocus({
@@ -16,7 +24,13 @@ function Editor({ onLeave, identity = "first" }: { onLeave: () => void; identity
   return (
     <>
       <div ref={containerRef}>
-        <input aria-label="Draft" ref={inputRef} onBlur={onBlur} onKeyDown={cancelPendingBlur} />
+        <input
+          aria-label="Draft"
+          ref={inputRef}
+          autoFocus={autoFocus}
+          onBlur={onBlur}
+          onKeyDown={cancelPendingBlur}
+        />
         <button>Inside</button>
       </div>
       <button>Outside</button>
@@ -41,6 +55,22 @@ function flush() {
 }
 
 // @covers AC-UI-EDIT-FOCUS-001.1, AC-UI-EDIT-FOCUS-001.3, AC-UI-EDIT-FOCUS-001.4
+it.each(["pointer", "focus"])("ignores outside %s events until initial focus", (kind) => {
+  const leave = vi.fn();
+  render(<Editor onLeave={leave} autoFocus={false} />);
+  const outside = screen.getByRole("button", { name: "Outside" });
+  const moveOutside = () => {
+    if (kind === "pointer") fireEvent.pointerDown(outside);
+    else fireEvent.focusIn(outside);
+    flush();
+  };
+  moveOutside();
+  expect(leave).not.toHaveBeenCalled();
+  act(() => screen.getByRole("textbox").focus());
+  moveOutside();
+  expect(leave).toHaveBeenCalledTimes(1);
+});
+
 describe("inline edit focus ownership", () => {
   it.each(["visible", "hidden"] as const)("preserves an external blur while %s", (visibility) => {
     vi.spyOn(document, "visibilityState", "get").mockReturnValue(visibility);
