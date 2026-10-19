@@ -690,6 +690,11 @@ deletion is not success.
 
 ## Find and organize tasks
 
+To include tasks without a repository, open the sidebar filters and select
+**None** in a **Repository** filter. With the **in** operator, select **None**
+together with named repositories to include both. Save the view to retain the
+selection.
+
 In **List** view, compact and detailed task rows show critical, high, and low
 priority indicators after the task title on desktop and phones. Medium priority
 remains unmarked.
