@@ -170,3 +170,22 @@ includes zero-byte and 128-byte truncation under modern and legacy hooks.
 Earlier local evidence above is historical; the corrective backup GREEN and
 scoped lint results are recorded in Task 01. No new schema or repository logic
 requires repeating earlier sqlguard/conformance checks.
+
+### Required CI fixture compatibility
+
+Backend shard 3/4 exposed an additional stale success fixture in
+`internal/backendapp/startup_database_test.go`:
+`TestBootstrapRestoreKeepsProcessAliveUntilResultAndShutdown` uses non-SQLite
+backup bytes and fails before quiescence under the new integrity contract.
+Task 01 now owns its valid-SQLite fixture correction, exact targeted regression,
+and changed-Go lint. Preserve all lifecycle assertions; no startup production
+behavior or contract changes. Exact current-head CI evidence and lease gating
+are checkpointed externally; the earlier local passing package evidence does
+not imply this newly identified integration fixture passed.
+
+Fixture compatibility local validation completed after ROOT review/release:
+targeted startup test exit0 (1.156s); scoped changed-Go lint exit0/zero issues;
+catalog/spec/diff and actual11-path coverage passed. Hosted original failure is
+the causal RED and was not replayed. Separate ledger diagnosis and current-head
+hosted gates remain in the external operational record; local task completion
+does not claim that the PR is ready or that the ledger cause is established.

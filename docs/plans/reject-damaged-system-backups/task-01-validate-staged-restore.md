@@ -106,6 +106,7 @@ After the later explicit implementation release and heavy-lease grant:
 - A `apps/backend/internal/system/backups/restore_integrity_test.go`: invalid matrix and distinct-data valid control.
 - M `apps/backend/internal/system/backups/store_test.go`: strengthen wrong-confirmation control.
 - M `apps/backend/internal/system/backups/path_test.go`: valid SQLite fixtures and checkpoint-specific assertion.
+- M `apps/backend/internal/backendapp/startup_database_test.go`: replace the bootstrap restore success fixture with a valid SQLite snapshot while preserving process/readiness/quiescence/result/shutdown assertions.
 - M `docs/public/operations.md`: validation-before-shutdown order and rejection recovery.
 - M `docs/public/configuration.md`: matching configured-path restore order and rejection behavior.
 - M `docs/specs/system-page/requirements/system-page.md`: owning AC amendment.
@@ -220,3 +221,44 @@ with Go 1.26.0/race/trimpath/fts5/p1/GOMAX2/GOMEM512MiB, inner240/GNU280/kill10.
 Scoped changed-Go lint over `store.go` and `restore_integrity_test.go` exit 0,
 zero issues (GNU360/kill10). Earlier passing sqlguard/conformance are retained for this local
 pre-disruption guard; no SQL/schema/repository changes were introduced.
+
+### Required CI startup-fixture correction
+
+Current-head CI identified an additional affected owner:
+`TestBootstrapRestoreKeepsProcessAliveUntilResultAndShutdown` writes non-SQLite
+`after` bytes into `manual-restore.db`. Integrity admission correctly rejects
+that placeholder before the test's blocked quiesce boundary. The existing
+lifecycle assertion fails at line 367, so it is not valid success-path evidence
+until the fixture becomes a real SQLite database. No lifecycle policy change is
+required. Preserve all process/readiness/shutdown assertions; do not weaken the
+barrier or bypass restore verification.
+
+ROOT accepted the exact hosted startup failure as causal RED. Do not replay
+the invalid fixture locally. After the focused local-heavy grant, validate the
+prepared real SQLite snapshot fixture, created through production persistence
+helpers with cleanup registered immediately, using the same targeted test
+and scoped changed-Go lint. Add no production seam. Commands from repo root:
+
+```bash
+(cd apps/backend && GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p 1 ./internal/backendapp -run '^TestBootstrapRestoreKeepsProcessAliveUntilResultAndShutdown$' -count=1 -timeout=240s)
+bash scripts/lint-go-changed apps/backend/internal/backendapp/startup_database_test.go
+```
+
+Use GNU timeout 280 seconds/kill-after 10 for the targeted test and 360 seconds
+for lint. Retain earlier unchanged backups, sqlguard, and conformance evidence.
+The fixture-only edit does not change the startup lifecycle contract or require
+a second product specification. ROOT reviewed and released this fixture correction. The original hosted
+failure is accepted as causal RED; no invalid fixture was replayed locally.
+Targeted startup GREEN passed (1.156s), bounded Go 1.26.0 local/race/trimpath/
+fts5/p1/GOMAX2/GOMEM512MiB, inner240/GNU280/kill10. Canonical scoped changed-Go
+lint passed with zero issues, GNU360/kill10, default3GiB after checking actual
+capacity (~8GiB available). Catalog/spec/diff and actual full-candidate 11-path
+documentation coverage passed. No backup/sqlguard/conformance replay or reinstall.
+
+The separate hosted ledger cap failure remains diagnostically unresolved;
+no ledger file is changed by this work order. Exact CI-tested merge/current-main/
+candidate source comparison is byte-identical for calls, its test, fixtures,
+queue/lifecycle helpers. No-op fixture logging limits inference from absent
+write-error logs. One bounded local diagnostic is tracked externally; its result
+cannot establish a hosted root cause. Subsequent hosted CI/review evidence stays
+external and must pass before READY.
