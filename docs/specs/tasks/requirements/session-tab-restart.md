@@ -53,6 +53,14 @@ separate [replacement behavior](configuration-chat-restart.md).
   localized. Keyboard activation and focus return shall follow the existing
   menus. Phone and coarse-pointer action targets shall measure at least 44px.
   Menus shall remain within the viewport without horizontal page overflow.
+- **AC-TASKS-SESSION-TAB-RESTART-001.6:** While Restart session is pending,
+  every composer for that target shall prevent submission through Send,
+  keyboard shortcuts, and the shared submit handler. The draft shall remain
+  editable and retain its text and attachments. A visible, localized status
+  shall explain the temporary block. Other sessions shall remain usable.
+  After the restart requests settle, normal input readiness and recovery rules
+  shall determine whether submission is available. Restart shall not bypass a
+  recovery block or submit the unsent draft automatically.
 
 ## Out of scope
 

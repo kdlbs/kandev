@@ -25,6 +25,15 @@ function getPendingStore(owner: object) {
   return store;
 }
 
+export function isSessionRestartPending(owner: object, sessionId: string | null | undefined) {
+  return !!sessionId && getPendingStore(owner).getState().has(sessionId);
+}
+
+export function useSessionRestarting(sessionId: string | null | undefined) {
+  const owner = useAppStoreApi();
+  return useStore(getPendingStore(owner), (sessions) => !!sessionId && sessions.has(sessionId));
+}
+
 function restoreRestartSelection(
   owner: ReturnType<typeof useAppStoreApi>,
   taskId: string,
@@ -44,10 +53,10 @@ function restoreRestartSelection(
 export function useSessionRestart(sessionId: string | null | undefined, taskId: string | null) {
   const owner = useAppStoreApi();
   const pending = getPendingStore(owner);
-  const isRestarting = useStore(pending, (sessions) => !!sessionId && sessions.has(sessionId));
+  const isRestarting = useSessionRestarting(sessionId);
   const isRestartPending = useCallback(
-    () => !!sessionId && pending.getState().has(sessionId),
-    [pending, sessionId],
+    () => isSessionRestartPending(owner, sessionId),
+    [owner, sessionId],
   );
   const { t } = useTranslation();
   const { toast, updateToast } = useToast();

@@ -3,12 +3,62 @@ import { test } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { routeNavigationResponses } from "../../helpers/navigation-response-hold";
 import {
   createRestartScenario,
   captureRestartBaseline,
   assertRestartRetained,
   assertRestartDataRetained,
+  assertRestartSubmissionBlocked,
 } from "./session-tab-restart-helpers";
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.6
+test("blocks sending throughout restart while keeping the draft editable", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  const gate = await routeNavigationResponses(testPage);
+  const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
+  const draftText = "Keep this draft while the session restarts";
+  await fixture.session.fillMessage(draftText);
+  gate.hold((request) => request.action === "session.stop");
+  const stopped = fixture.wire.waitForResponse("session.stop");
+  const launched = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stopped });
+  try {
+    await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
+    await expect.poll(() => gate.heldCount()).toBe(1);
+    await assertRestartSubmissionBlocked(testPage, fixture, draftText);
+    await waitForFiniteAnimations(testPage.locator("body"));
+    await prCapture.screenshot("desktop-restarting-composer", {
+      caption: "Keep editing the draft while Restart session temporarily blocks Send.",
+    });
+    gate.release();
+    gate.hold((request) => request.action === "session.launch");
+    await expect.poll(() => gate.heldCount()).toBe(1);
+    await assertRestartSubmissionBlocked(testPage, fixture, draftText);
+    gate.release();
+    await launched;
+    await assertRestartRetained(apiClient, fixture.task.id, fixture.sessionId, before);
+    await expect(testPage.getByTestId("session-restart-status")).not.toBeVisible();
+    const send = fixture.session.activeChat().getByTestId("submit-message-button");
+    await expect(send).toBeEnabled();
+    const submitted = fixture.wire.waitForResponse("message.add");
+    await send.click();
+    await submitted;
+    expect(
+      fixture.traffic.frames.filter(
+        (frame) => frame.direction === "sent" && frame.action === "message.add",
+      ),
+    ).toHaveLength(1);
+  } finally {
+    gate.release();
+  }
+});
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.3, AC-TASKS-SESSION-TAB-RESTART-001.5
 test("keeps history and recovery available after restarting an interrupted turn", async ({
@@ -95,6 +145,7 @@ for (const restartSelected of [false, true]) {
     const action = testPage.getByRole("menuitem", { name: "Restart session", exact: true });
     await expect(action).toBeVisible();
     if (restartSelected) {
+      await waitForFiniteAnimations(testPage.getByRole("menu"));
       await prCapture.screenshot("desktop-session-restart-menu", {
         caption: "Restart the selected session while a live sibling remains available.",
       });

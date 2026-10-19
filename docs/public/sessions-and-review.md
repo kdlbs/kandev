@@ -70,6 +70,11 @@ Restart is available while a session is starting, running, or waiting for input.
 Restart keeps the selected conversation open. If you select another conversation
 while restart is pending, Kandev keeps your later selection.
 
+While a session restarts, you can edit its draft, but you cannot send it.
+**Restarting session...** appears above the composer until the restart requests
+finish. Other sessions remain usable. Sending becomes available under the normal
+readiness rules. If restart requires recovery, use the recovery actions first.
+
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
 When a turn, startup, or resume fails:

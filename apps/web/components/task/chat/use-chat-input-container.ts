@@ -30,6 +30,7 @@ type UseChatInputContainerParams = {
   workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
+  isRestarting?: boolean;
   /** True when the selected startup session has a complete queue identity. */
   canQueueWhileStarting: boolean;
   /** True only during a real Docker/Sprites prepare phase. Different from
@@ -131,8 +132,19 @@ export function shouldShowChatFocusHint(args: {
   );
 }
 
+function getSubmitDisabledReason(
+  isRestarting: boolean,
+  inputBlocked: boolean,
+  isPreparingEnvironment: boolean,
+) {
+  if (isRestarting) return t("task:sessionActionRestart");
+  if (inputBlocked && isPreparingEnvironment) return t("task:agentStillBeingSetUp");
+  return undefined;
+}
+
 function computeDerivedState(params: {
   isStarting: boolean;
+  isRestarting: boolean;
   isPreparingEnvironment: boolean;
   isMoving: boolean;
   isSending: boolean;
@@ -164,15 +176,20 @@ function computeDerivedState(params: {
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = isDisabled || startupSubmitDisabled || params.hasPendingAttachmentUploads;
+  const submitDisabled =
+    params.isRestarting ||
+    isDisabled ||
+    startupSubmitDisabled ||
+    params.hasPendingAttachmentUploads;
   // The "agent still being set up" tooltip is only meaningful while a
   // container/sandbox is actively bootstrapping. The brief STARTING
   // transition for local quick-chat sessions doesn't deserve its own
   // tooltip. The disabled send action is sufficient feedback.
-  const submitDisabledReason =
-    (isDisabled || startupSubmitDisabled) && params.isPreparingEnvironment
-      ? t("task:agentStillBeingSetUp")
-      : undefined;
+  const submitDisabledReason = getSubmitDisabledReason(
+    params.isRestarting,
+    isDisabled || startupSubmitDisabled,
+    params.isPreparingEnvironment,
+  );
   const hasPendingComments = !!(
     params.pendingCommentsByFile && Object.keys(params.pendingCommentsByFile).length > 0
   );
@@ -298,6 +315,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
 
   const derived = computeDerivedState({
     isStarting,
+    isRestarting: params.isRestarting ?? false,
     isPreparingEnvironment,
     isMoving,
     isSending,

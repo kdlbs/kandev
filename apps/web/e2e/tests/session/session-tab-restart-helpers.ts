@@ -37,6 +37,29 @@ export async function createRestartScenario(page: Page, api: ApiClient, seed: Se
   return { task, sessionId, session, wire, traffic };
 }
 
+export async function assertRestartSubmissionBlocked(
+  page: Page,
+  fixture: Awaited<ReturnType<typeof createRestartScenario>>,
+  draftText: string,
+) {
+  await expect(page.getByTestId("session-restart-status")).toHaveText("Restarting session...");
+  const editor = fixture.session.activeChat().locator(".tiptap.ProseMirror:visible").first();
+  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await editor.fill(draftText);
+  const send = fixture.session.activeChat().getByTestId("submit-message-button");
+  await expect(send).toBeDisabled();
+  await send.evaluate((button: HTMLButtonElement) => button.click());
+  await fixture.session.submitMessageWithKeyboard(editor);
+  await expect(editor).toContainText(draftText);
+  expect(
+    fixture.traffic.frames.filter(
+      (frame) =>
+        frame.direction === "sent" &&
+        ["message.add", "message.queue.add"].includes(frame.action ?? ""),
+    ),
+  ).toEqual([]);
+}
+
 export async function captureRestartBaseline(api: ApiClient, taskId: string, sessionId: string) {
   const sessions = (await api.listTaskSessions(taskId)).sessions;
   const target = sessions.find((s) => s.id === sessionId);

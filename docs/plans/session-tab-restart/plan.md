@@ -138,6 +138,20 @@ the controlled failure tests above.
 ## Work orders
 
 - [x] [Task 01: Add the session restart action](task-01-session-restart.md)
+- [x] [Task 02: Guard composer submission during restart](task-02-composer-restart-guard.md)
+
+### Composer follow-up
+
+The user approved blocking submission while a session restarts. Task 02 connects
+the existing pending state to the composer and its shared submit handler. The
+draft stays editable, the pending status remains visible, and other sessions
+remain usable. Normal readiness and recovery rules apply after the attempt.
+Task 01 results below remain historical evidence for the earlier implementation.
+
+Task 02 local verification passed: 144 targeted unit tests, 5 desktop browser
+tests, and 2 phone browser tests. Its [results](task-02-composer-restart-guard.md#results)
+record the guard, failure behavior, and checks. Screenshot publication and fresh
+remote CI/review for the new commit remain delivery steps.
 
 ## Verification results
 

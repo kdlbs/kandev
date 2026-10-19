@@ -97,6 +97,7 @@ type ChatInputContainerProps = {
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
   isStarting: boolean;
+  isRestarting?: boolean;
   /** True when startup submission can be persisted to this session's queue. */
   canQueueWhileStarting?: boolean;
   /** True only while a containerized executor is bootstrapping (Docker
@@ -351,10 +352,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       workspaceId: props.workspaceId,
       isSending,
       isStarting,
+      isRestarting: props.isRestarting,
       isPreparingEnvironment: props.isPreparingEnvironment ?? false,
       canQueueWhileStarting: props.canQueueWhileStarting ?? false,
       isMoving,
-      isFailed: p.isFailed,
+      isFailed: p.isFailed && !props.isRestarting,
       needsRecovery: props.needsRecovery ?? false,
       executorUnavailable,
       isAgentBusy,
@@ -389,6 +391,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     });
 
     if (
+      !props.isRestarting &&
       shouldHideChatInputForLaunchError({
         isFailed: p.isFailed,
         launchErrorOwned: p.launchErrorOwned,
@@ -398,7 +401,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       return null;
     }
 
-    if (composerRecovery?.model && taskId && !useUncertainDeliveryControls) {
+    if (!props.isRestarting && composerRecovery?.model && taskId && !useUncertainDeliveryControls) {
       return (
         <>
           <SessionRecoveryCard
@@ -420,6 +423,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     }
 
     if (
+      !props.isRestarting &&
       shouldRenderStoppedSessionBanner({
         isFailed: p.isFailed,
         isCompleted: p.isCompleted,

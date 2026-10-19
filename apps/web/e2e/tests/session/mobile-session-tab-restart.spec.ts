@@ -2,11 +2,69 @@ import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { routeNavigationResponses } from "../../helpers/navigation-response-hold";
 import {
   createRestartScenario,
   captureRestartBaseline,
   assertRestartRetained,
+  assertRestartSubmissionBlocked,
 } from "./session-tab-restart-helpers";
+
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.6
+test("mobile: blocks Send during restart and preserves an editable draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  const gate = await routeNavigationResponses(testPage);
+  const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
+  const draftText = "Keep this phone draft during restart";
+  await fixture.session.fillMessage(draftText);
+  gate.hold((request) => request.action === "session.stop");
+  const stopped = fixture.wire.waitForResponse("session.stop");
+  const launched = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stopped });
+  try {
+    await testPage.getByTestId("mobile-sessions-pill").tap();
+    const sheet = testPage.getByRole("dialog", { name: "Sessions", exact: true });
+    const row = sheet.getByTestId(`mobile-session-row-${fixture.sessionId}`);
+    await row.getByRole("button", { name: "Session actions" }).tap();
+    await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).tap();
+    await expect.poll(() => gate.heldCount()).toBe(1);
+    await testPage
+      .locator('[data-slot="drawer-overlay"][data-state="open"]')
+      .tap({ position: { x: 16, y: 16 } });
+    await expect(sheet).not.toBeVisible();
+    await assertRestartSubmissionBlocked(testPage, fixture, draftText);
+    await waitForFiniteAnimations(testPage.locator("body"));
+    await prCapture.screenshot("phone-restarting-composer", {
+      caption: "The phone composer keeps its draft editable while Send is blocked during restart.",
+    });
+    await assertNoDocumentHorizontalOverflow(testPage, "phone restarting composer");
+    gate.release();
+    gate.hold((request) => request.action === "session.launch");
+    await expect.poll(() => gate.heldCount()).toBe(1);
+    await assertRestartSubmissionBlocked(testPage, fixture, draftText);
+    gate.release();
+    await launched;
+    await assertRestartRetained(apiClient, fixture.task.id, fixture.sessionId, before);
+    await expect(testPage.getByTestId("session-restart-status")).not.toBeVisible();
+    const send = fixture.session.activeChat().getByTestId("submit-message-button");
+    await expect(send).toBeEnabled();
+    const submitted = fixture.wire.waitForResponse("message.add");
+    await send.tap();
+    await submitted;
+    expect(
+      fixture.traffic.frames.filter(
+        (frame) => frame.direction === "sent" && frame.action === "message.add",
+      ),
+    ).toHaveLength(1);
+  } finally {
+    gate.release();
+  }
+});
 
 // @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.5
 test("mobile: restarts from the session actions sheet and retains the conversation", async ({

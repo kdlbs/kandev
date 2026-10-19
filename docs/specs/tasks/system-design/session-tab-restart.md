@@ -21,6 +21,7 @@ The shared UI primitives retain menu geometry, keyboard handling, and focus.
 | AC-TASKS-SESSION-TAB-RESTART-001.2 | Action sequence |
 | AC-TASKS-SESSION-TAB-RESTART-001.3 | Failure and recovery |
 | AC-TASKS-SESSION-TAB-RESTART-001.4 | Pending state and feedback |
+| AC-TASKS-SESSION-TAB-RESTART-001.6 | Composer submission guard |
 
 ## Current implementation
 
@@ -87,6 +88,24 @@ Use wording that reports the request outcome, such as "Session restart requested
 The existing session state indicates when the agent becomes ready.
 Ensure progress has a live announcement. Keep the Restart session accessible
 name stable when its pending menu item is visible.
+
+## Composer submission guard
+
+Expose a reactive read and a synchronous query of the same store-scoped pending
+set. `ChatInputArea` passes the reactive value to the shared composer. Disable
+submission while retaining the editor and its draft. Show the existing localized
+`sessionActionRestart` status above the composer on desktop and phone.
+
+`useSubmitHandler` checks the current pending set before it sends, queues, or
+consumes context. This check also rejects callbacks captured before Restart
+began. Return `false` so rejected submission preserves the draft and attachments.
+Do not rely on a disabled button alone.
+
+During the pending sequence, the temporary CANCELLED projection must not replace
+the editor with the ordinary stopped-session surface. Once the requests settle,
+normal startup queue admission and recovery presentation apply again. A launch
+acknowledgment alone does not prove agent readiness. Other sessions use their own
+pending entries and remain usable. No server admission contract changes.
 
 ## Menu integration
 
