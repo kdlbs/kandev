@@ -218,6 +218,10 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
+	if _, err := verifySnapshot(ctx, stagedPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("verify staged restore: %w", err)
+	}
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
 	}
