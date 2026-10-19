@@ -67,3 +67,25 @@ The shared DOM hook now pairs mouse-down origin with document-level mouse releas
 Touch capture remains independent. After remediation, all 21 focused tests,
 five desktop browser cases, and two mobile browser cases passed. Typecheck,
 changed-file ESLint, formatting, translation checks, and specification lint passed.
+
+## CI remediation
+
+E2E shard 4 exposed a readiness race in the existing keyboard queue-reorder test.
+The test tried to focus a disabled handle during a queue refresh. The handle later became
+enabled but remained unfocused. The helper now waits for the enabled state before
+focusing. Queue behavior and the comment UI do not change.
+
+The CI trace supplied the failing sequence. A standalone Chromium check confirmed
+that a focus attempt on a disabled button does not take effect after enabling it. The
+original keyboard case passed three isolated runs. With the readiness assertion,
+both queue-reorder cases passed three runs each, without retries, on the same
+base-plus-head source tree as CI. Changed-file ESLint and formatting passed.
+
+Run from `apps/web` with a current E2E build:
+
+```bash
+pnpm e2e:run --host --no-build e2e/tests/chat/message-queue-reorder.spec.ts -- --repeat-each 3 --retries 0
+pnpm exec eslint --max-warnings 0 e2e/tests/chat/message-queue-reorder.spec.ts
+```
+
+Remote CI and review results are tracked on the PR.

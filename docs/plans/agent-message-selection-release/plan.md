@@ -29,3 +29,7 @@ commands. Public documentation already describes the intended selection flow.
 The repair changes mouse input handling only. Touch capture and the phone drawer
 remain unchanged. The main risk is accepting another message's selection or
 replacing an open editor's quote; focused tests cover those boundaries.
+
+CI also exposed a keyboard queue-reorder test that tried to focus a disabled
+handle. Its helper now waits for readiness. Both queue-reorder cases passed three
+runs each with retries disabled; the work order records that test-only correction.
