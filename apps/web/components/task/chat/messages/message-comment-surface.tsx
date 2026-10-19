@@ -359,6 +359,14 @@ function useCommentTargetState(
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
 
+  useEffect(() => {
+    if (!isSelectable || composerOpen) return;
+    const ownerDocument = rootRef.current?.ownerDocument;
+    // A valid message selection can end with the pointer outside its body.
+    ownerDocument?.addEventListener("mouseup", captureSelection);
+    return () => ownerDocument?.removeEventListener("mouseup", captureSelection);
+  }, [captureSelection, composerOpen, isSelectable, rootRef]);
+
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
     [setNewSelection],
@@ -531,7 +539,6 @@ export function MessageCommentSurface({
         data-agent-message-body="true"
         data-message-id={message.id}
         data-agent-message-highlight-name={highlightName}
-        onMouseUp={captureSelection}
         onTouchEnd={captureSelection}
         onClick={handleDecorationClick}
       >
