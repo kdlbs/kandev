@@ -12,7 +12,7 @@ owners:
 
 Local and worktree agent work needs to outlive backend restarts, including
 under a native service manager. This draft owns process lifetime and re-tracking;
-it does not establish that every guarantee below has shipped.
+it does not certify all guarantees as shipped.
 [Session state and gating](agent-survival-session-state.md),
 [control-server ownership](standalone-control-server-ownership.md), and
 [single driver and unowned lifetime](standalone-control-server-single-driver.md)
@@ -117,6 +117,13 @@ without stopping my running agents, so a routine restart discards no in-flight w
   control server and agents, and backend crash or parent death shall retain the
   existing parent-liveness termination protections. Native service installation
   shall not enable the capability.
+
+- **AC-EXECUTORS-SURVIVAL-001.13:** Under a generated Linux service, a
+  healthy backend shall remain tied to its native launcher: abrupt launcher death
+  shall terminate that backend whether agent survival is enabled or disabled.
+  This shall preserve the enabled retention and disabled termination behavior of
+  the backend's agents. Returning from the code that starts a backend shall not
+  terminate a backend whose launcher remains alive.
 
 ### REQ-EXECUTORS-SURVIVAL-002: Re-tracking reconstructs a usable execution
 

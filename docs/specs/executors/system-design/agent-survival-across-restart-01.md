@@ -127,38 +127,40 @@ rather than shortening it, and the ordering constraint has nothing left to order
 
 ### Native Linux service lifetime
 
-For AC-EXECUTORS-SURVIVAL-001.11 and .12, `renderSystemdUnit` generates
-`KillMode=process` in both scopes; all other unit properties, identity and launchd
-output stay unchanged. systemd terminates the backend; Kandev owns agent lifetime.
-The policy is fixed: install-time flag selection cannot reflect later startup
-resolution, including SQLite overrides, without regenerating the service.
+For AC-EXECUTORS-SURVIVAL-001.11-.13, emit `KillMode=process` in both Linux scopes,
+with other properties and launchd unchanged. `runManagedApp` starts `__backend`
+through `restartableBackend.start`/`startProcess`. systemd owns the launcher;
+it owns the backend; Kandev owns retained agents. Install-time flags cannot
+reflect runtime overrides.
 
 [systemd.kill](https://www.freedesktop.org/software/systemd/man/latest/systemd.kill.html#KillMode=)
-warns against process mode generally: children can outlive a stopped service in
-its cgroup. This deliberately permits application-retained agents, with no new
-scope, resource isolation, or survival guarantee for logout/reboot/host cgroup
-kills. Removing the final group kill means defective children may remain alive.
+warns that process mode lets children outlive a stopped service in its cgroup.
+Retained agents deliberately can; a healthy backend cannot. Linux starts with label `backend` and existing
+`KANDEV_SERVICE_MANAGER=systemd` arm `Pdeathsig=SIGTERM`, preserving
+`Setpgid` and other attributes. Agentctl and other labels are excluded.
 
-Keep existing controls: Linux `buildSysProcAttr(false)` sets `Pdeathsig=SIGTERM`;
-the disabled launcher arms the liveness pipe; agentctl `waitForShutdown` handles
-parent death/SIGTERM with its 30-second cleanup context. Disabled launcher `Stop`
-closes the pipe, signals and escalates on timeout. The manager detaches eligible
-standalone work only for enabled backend shutdown; explicit task Stop and
-`StopReasonLaunchRollback` still terminate. Registered cleanup keeps its enabled
-no-op and disabled stop. Existing ownership expiry and adoption are unchanged.
+`startManagedCommand` returns one Wait function to `startProcess`.
+For those starts, one goroutine locks its OS thread, starts the command,
+reports start success/error, and performs the sole `cmd.Wait` on that thread.
+A buffered result feeds existing exit accounting. Unlock/exit only after Wait
+or start failure; returning from the caller must not retire that thread. This
+follows Go's [thread-scoped Pdeathsig contract](https://pkg.go.dev/syscall@go1.26.0#SysProcAttr).
+Other contexts retain ordinary Start/Wait; no new handoff/configuration is needed.
+
+Preserve disabled agentctl Pdeathsig/pipe/Stop escalation, manager explicit Stop,
+rollback and enabled detach, registered cleanup, expiry and adoption. Backend
+SIGTERM remains graceful; defective children can still outlive a stopped unit
+without the group sweep. Logout/reboot/host cgroup kills and provider continuation
+remain outside this proof. Flag metadata, availability and all-off profiles stay.
 
 Keeping `mixed` defeats retention; disabling final SIGKILL can block restart;
-install-time flag selection freezes a runtime decision; separate scopes add a
-process-management protocol. This applies existing application lifetime ownership.
-Flag key/env, experimental status,
-restart/mutability, Linux/macOS availability, Windows exclusion and all-off
-profiles remain unchanged. Existing units change only by normal install/update
-regeneration, explained in the service how-to; no live migration is added.
+separate scopes or replacing ExecStart expand startup/ownership contracts.
+Old units change through
+normal install/update regeneration, explained in the how-to.
 
-Portable renderer tests cover both Linux scopes and launchd. Guarded real-user-
-systemd actors prove the cgroup boundary. Actual runtime guard and manager
-stop/detach controls prove their respective layers, not full agentctl adoption
-or provider continuation.
+Test the actual managed launcher -> backend -> agent boundary, launcher death
+with survival on/off, and return of the spawning goroutine. Verify PID birth/SID/cgroup, bounded cleanup and portable renderer/launchd plus
+existing agentctl/manager controls separately.
 
 ### Ownership identity and credential
 

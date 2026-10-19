@@ -10,6 +10,7 @@ requirements:
 acceptance_criteria:
   - AC-EXECUTORS-SURVIVAL-001.11
   - AC-EXECUTORS-SURVIVAL-001.12
+  - AC-EXECUTORS-SURVIVAL-001.13
 system_design:
   - ../../specs/executors/system-design/agent-survival-across-restart-01.md
 ---
@@ -19,10 +20,21 @@ system_design:
 ## Summary
 
 Make generated Linux services honor application-owned agent lifetime while
-preserving ordinary cleanup. Deliver the renderer correction, behavioral
-regressions and service how-to together.
+preserving ordinary cleanup and backend ownership by the native launcher.
+Deliver the renderer, bounded Linux backend guard, regressions and how-to together.
 
 ## In scope
+
+Complete the Linux service backend guard in `startProcess` through private
+`startManagedCommand` implementations. The Linux implementation selects only
+label `backend` plus existing `KANDEV_SERVICE_MANAGER=systemd`, preserves process
+attributes and arms `Pdeathsig=SIGTERM`. A dedicated goroutine pins the creating
+OS thread across Start and the sole Wait. Return the start error or a single Wait
+function/result to existing exit accounting. Release the thread on Start failure
+or Wait completion. Other labels/platforms retain the ordinary Start/Wait path.
+No caller-thread pin may outlive a start call, and no backend may depend on a
+short-lived calling goroutine keeping its own OS thread alive.
+
 
 Write portable renderer regressions first; run them red against `mixed`. Add a
 Linux-only real-manager regression, then change the renderer to `process` and run
@@ -34,8 +46,9 @@ Update `docs/public/run-as-a-service.md` (how-to): explain that service stop/res
 stops the backend while eligible agents can remain under experimental opt-in
 survival, that disabled shutdown and explicit task Stop still terminate agents,
 and that old generated units need normal reinstall/update regeneration. Do not
-promise host-reboot survival or complete provider continuation. Public docs ship
-with implementation, not with speculative design alone.
+promise host-reboot survival or complete provider continuation. Correct the service-main terminology: the native launcher is the main PID;
+its backend child remains launcher-owned. Public docs ship with implementation,
+not with speculative design alone.
 
 ## Out of scope
 
@@ -45,14 +58,38 @@ service mutation. Do not modify design part 3 or adjacent wrapper work.
 
 ## Acceptance
 
-1. Both generated Linux scopes use process-only termination, with unrelated unit
+1. Both generated Linux scopes use process-only termination, and the native
+   backend terminates after abrupt launcher death in either survival mode.
+   Returning from the starting caller must leave a healthy backend alive. Keep unrelated unit
    output and launchd controls unchanged; regression fails on the original renderer.
 2. Guarded real-manager retained/ordinary controls and actual disabled kernel,
    pipe, launcher stop and manager stop/detach controls pass at their stated layers.
 3. Public how-to and owning internal pair agree on policy, opt-in limits and normal
    regeneration; manifest/results record actual commands and integration skip state.
 
-## Integration fixture contract
+## Launcher/backend regression
+
+New `managed_start_linux_test.go` must exercise the existing production
+`startProcess` path, not merely inspect a proposed attribute or call a new helper.
+Name the regression `TestManagedBackendLifetimeFollowsLauncher`. A private
+launcher actor starts a healthy backend actor from a short-lived goroutine that
+locks its own OS thread and then returns without unlocking. That thread retires;
+the backend must remain alive for a two-second observation, exceeding the
+race helper's default one-second exit delay. Arm the backend actor's SIGTERM
+handler before readiness and publish a signal-receipt marker immediately; the
+healthy control requires both continued liveness and no marker. Do not infer
+absence of SIGTERM from a non-zombie process at 200ms. SIGKILL the exact
+verified launcher PID and require backend exit within three seconds. Current
+production should fail because the healthy backend remains alive after its
+launcher dies, not because compilation, readiness or cleanup failed. The pinned
+short-lived caller and signal marker catch a naive thread-scoped Pdeathsig fix.
+
+Cover the service-manager metadata present/absent boundary and a nonexistent
+command returning its start error promptly. Preserve the existing Wait/exit code
+behavior. Every actor self-expires within 20 seconds, uses guarded helper argv/env,
+and is captured with birth identity; register cleanup before assertions and join
+all original handles. This needs no actual backend, providers or credentials.
+
 
 In `service_survival_linux_test.go`, require explicit test-only
 `KANDEV_TEST_SYSTEMD_SURVIVAL=1`; otherwise skip. With opt-in, preflight Linux,
@@ -69,8 +106,19 @@ Use uniquely random `kandev-issue4552-<nonce>-<case>.service` transient user uni
 Verify exact unit identity, main PID, actor PID/start identity, distinct SID and
 same service cgroup before stop. Register cleanup before every failure path.
 
-Exercise retained under rendered policy, retained under explicit `mixed` as a
-causal control, and ordinary SIGTERM-parent-bound under rendered policy. Real
+Use the actual native production boundary: fixture launcher calls `startProcess`
+with label `backend` and existing systemd service metadata; the backend actor
+starts the agent actor. On normal fixture launcher SIGTERM, use the existing
+supervisor termination path. On abrupt launcher death, signal only the exact
+verified owned main PID after unit/MainPID identity checks. Verify all three
+process births, the backend process group, and the agent's distinct SID in the
+same service cgroup.
+
+Exercise retained and ordinary agents under the rendered policy, explicit
+`mixed` as a causal control, and abrupt launcher death with survival enabled and
+disabled. The native backend must exit in both crash cases; only the enabled
+retained agent may remain. Keep the existing 200ms retained/three-second ordinary
+settlement windows and extend ownership/cleanup logs to all three actors. Real
 production `buildSysProcAttr` is tested separately in its owning package. Pin the spawning parent thread while testing Linux Pdeathsig, whose binding is
 thread-sensitive. Use readiness handshakes rather than startup sleeps. Await terminal main/unit state
 and observe retained identity for at least 200ms; ordinary actor exit gets up to
@@ -85,7 +133,30 @@ No daemon-reload, global reset-failed, prune or broad kill. If user-manager
 constraints prevent safe fixture isolation, report the exact boundary instead
 of expanding production scope.
 
-## Verification
+## Correction verification
+
+The earlier renderer/control commands below already have completed evidence.
+For this backend-only correction, do not replay unchanged manager, pipe,
+reversal or agentctl-launcher suites. Use the same Go 1.26/Node 24 PATH,
+GOTOOLCHAIN=local, GOMAXPROCS=2, test GOMEMLIMIT=512MiB and empty PostgreSQL DSN.
+Each run-quiet call receives its own directory. First run the new real-start
+regression red, then after correction run the complete launcher package and the
+forced real-manager fixture:
+
+```bash
+export PATH="/home/jcfs/.local/share/mise/installs/go/1.26.0/bin:/home/jcfs/.local/share/mise/installs/node/24.21.0/bin:$PATH"
+export GOTOOLCHAIN=local GOMAXPROCS=2 GOMEMLIMIT=512MiB KANDEV_TEST_POSTGRES_DSN=
+KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/issue4552-backend-red-XXXXXX)" scripts/run-quiet go -- timeout -k 10s 300s sh -c 'cd apps/backend && go test -race -trimpath -tags=fts5 -p=1 -count=1 -timeout=120s ./internal/launcher -run "^TestManagedBackendLifetimeFollowsLauncher$"'
+KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/issue4552-backend-green-XXXXXX)" scripts/run-quiet go -- timeout -k 10s 300s sh -c 'cd apps/backend && go test -race -trimpath -tags=fts5 -p=1 -count=1 -v -timeout=120s ./internal/launcher'
+KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/issue4552-backend-systemd-XXXXXX)" KANDEV_TEST_SYSTEMD_SURVIVAL=1 scripts/run-quiet go -- timeout -k 10s 180s sh -c 'cd apps/backend && go test -race -trimpath -tags=fts5 -p=1 -count=1 -v -timeout=120s ./internal/launcher -run "^TestSystemdServiceAgentLifetime$"'
+KANDEV_RUN_QUIET_DIR="$(mktemp -d /tmp/issue4552-backend-lint-XXXXXX)" GOMEMLIMIT=3GiB scripts/run-quiet lint -- timeout -k 10s 360s bash scripts/lint-go-changed apps/backend/internal/launcher/service.go apps/backend/internal/launcher/service_test.go apps/backend/internal/launcher/service_survival_linux_test.go apps/backend/internal/launcher/process.go apps/backend/internal/launcher/managed_start_linux.go apps/backend/internal/launcher/managed_start_other.go apps/backend/internal/launcher/managed_start_linux_test.go apps/backend/internal/agent/runtime/agentctl/launcher/sysprocattr_linux_test.go apps/backend/internal/agent/runtime/lifecycle/manager_stop_detach_test.go
+```
+
+Use the existing cheap documentation/coverage/diff commands after the final docs
+edit. Lint arguments must match the final PR's changed Go paths. No new dependency
+install is required; the existing frozen install remains present.
+
+## Earlier renderer/control verification
 
 Run from repository root, sequentially. Use task-local PATH selection for existing
 Go 1.26.0 and Node 24.21.0, with no global mise mutation. No pnpm command is needed
@@ -147,6 +218,11 @@ that result from actual implementation coverage.
 
 ## Files likely touched
 
+- `apps/backend/internal/launcher/process.go`
+- `apps/backend/internal/launcher/managed_start_linux.go` (new)
+- `apps/backend/internal/launcher/managed_start_other.go` (new)
+- `apps/backend/internal/launcher/managed_start_linux_test.go` (new)
+
 - `apps/backend/internal/launcher/service.go`
 - `apps/backend/internal/launcher/service_test.go`
 - `apps/backend/internal/launcher/service_survival_linux_test.go` (new)
@@ -175,7 +251,7 @@ work order.
 
 ## Inputs
 
-- [Requirements](../../specs/executors/requirements/agent-survival-across-restart.md), AC 001.11/.12.
+- [Requirements](../../specs/executors/requirements/agent-survival-across-restart.md), AC 001.11-.13.
 - [Lifetime design](../../specs/executors/system-design/agent-survival-across-restart-01.md#native-linux-service-lifetime).
 - Existing `service_test.go`, `survival_kill_path_test.go`,
   `launcher_pipe_unix_test.go`, `cmd/agentctl/main_test.go`,
@@ -183,8 +259,15 @@ work order.
 
 ## Results
 
-Completed. Production change is the single `KillMode` value; flag metadata,
-profiles, adoption and provider protocols are unchanged.
+The launcher/backend guard is implemented. The real-start regression first failed
+because the backend survived launcher SIGKILL. After correction, the full launcher
+package passed (25.996s), including immediate SIGTERM-marker checks and two-second
+healthy caller-return observation, absent-metadata/other-label controls and start
+failure. The forced real-systemd test executed all five three-actor cases without
+skips (8.76s; package 9.839s), covering normal stop, mixed control and abrupt launcher
+death with survival enabled/disabled. All 15 actors were absent and all five units
+inactive/unloaded after cleanup. Flag metadata, profiles, adoption and provider
+protocols remain unchanged.
 
 - Renderer regression first failed on both generated scopes because the original
   output was `mixed`, not `process`.
@@ -199,7 +282,7 @@ profiles, adoption and provider protocols are unchanged.
   (package 4.876s). Distinct SID/shared cgroup and process birth identity were
   verified. All six actors were absent and all three owned units inactive/unloaded
   after cleanup. This proves the service boundary, not provider continuation.
-- Canonical `lint-go-changed` with the five listed Go paths passed with zero issues.
+- Canonical `lint-go-changed` with all nine final changed Go paths passed with zero issues.
 - Catalog validation passed (388 decisions, 1656 specs); all 36 specification-tool
   tests and all-spec lint passed. Public-doc validator tests passed 63/63 and
   validated 48 published pages. Delivery-reference preflight returned

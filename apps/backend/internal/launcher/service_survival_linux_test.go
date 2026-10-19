@@ -56,18 +56,20 @@ func TestSystemdServiceAgentLifetime(t *testing.T) {
 		t.Fatal("generated service has no explicit KillMode")
 	}
 	for _, tc := range []struct {
-		name, mode         string
-		ordinary, survives bool
+		name, mode                string
+		ordinary, survives, crash bool
 	}{
-		{"retained", mode, false, true},
-		{"ordinary", mode, true, false},
-		{"mixed-control", "mixed", false, false},
+		{"retained", mode, false, true, false},
+		{"ordinary", mode, true, false, false},
+		{"mixed-control", "mixed", false, false, false},
+		{"crash-retained", mode, false, true, true},
+		{"crash-ordinary", mode, true, false, true},
 	} {
-		t.Run(tc.name, func(t *testing.T) { runServiceLifetimeCase(t, tc.name, tc.mode, tc.ordinary, tc.survives) })
+		t.Run(tc.name, func(t *testing.T) { runServiceLifetimeCase(t, tc.name, tc.mode, tc.ordinary, tc.survives, tc.crash) })
 	}
 }
 
-func runServiceLifetimeCase(t *testing.T, name, mode string, ordinary, survives bool) {
+func runServiceLifetimeCase(t *testing.T, name, mode string, ordinary, survives, crash bool) {
 	t.Helper()
 	dir := t.TempDir()
 	nonce := rand.Text()
@@ -75,15 +77,18 @@ func runServiceLifetimeCase(t *testing.T, name, mode string, ordinary, survives 
 	description := "issue4552-owned-" + nonce
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var parent, child serviceActorIdentity
+	var parent, backend, child serviceActorIdentity
 	t.Cleanup(func() {
 		if parent.Process.PID == 0 {
 			parent = readServiceActor(filepath.Join(dir, "parent.json"))
 		}
+		if backend.Process.PID == 0 {
+			backend = readServiceActor(filepath.Join(dir, "backend.json"))
+		}
 		if child.Process.PID == 0 {
 			child = readServiceActor(filepath.Join(dir, "child.json"))
 		}
-		cleanupServiceActors(t, unit, description, parent, child)
+		cleanupServiceActors(t, unit, description, parent, backend, child)
 	})
 	binary, err := os.Executable()
 	if err != nil {
@@ -92,28 +97,37 @@ func runServiceLifetimeCase(t *testing.T, name, mode string, ordinary, survives 
 	args := []string{"--user", "--quiet", "--collect", "--unit=" + unit,
 		"--property=Description=" + description, "--property=KillMode=" + mode,
 		"--property=Type=simple", "--property=TimeoutStopSec=3s", "--property=RuntimeMaxSec=20s",
-		"--setenv=" + serviceActorEnv + "=" + dir, binary, "-test.run=^TestSystemdServiceActor$", "--", "issue4552", "parent", dir, strconv.FormatBool(ordinary)}
+		"--setenv=" + serviceActorEnv + "=" + dir, "--setenv=KANDEV_SERVICE_MANAGER=" + nativeServiceManagerSystemd, binary, "-test.run=^TestSystemdServiceActor$", "--", "issue4552", "parent", dir, strconv.FormatBool(ordinary)}
 	if out, err := exec.CommandContext(ctx, "systemd-run", args...).CombinedOutput(); err != nil {
 		t.Fatalf("create %s: %v: %s", unit, err, out)
 	}
 	parent = awaitServiceActor(t, ctx, filepath.Join(dir, "parent.json"))
+	backend = awaitServiceActor(t, ctx, filepath.Join(dir, "backend.json"))
 	child = awaitServiceActor(t, ctx, filepath.Join(dir, "child.json"))
 	properties := ownedServiceProperties(t, unit, description)
 	if properties["MainPID"] != strconv.Itoa(parent.Process.PID) || properties["Id"] != unit {
 		t.Fatalf("unit identity mismatch: %v parent=%+v", properties, parent)
 	}
-	if parent.Cgroup != child.Cgroup || !strings.Contains(child.Cgroup, "/"+unit) || child.Process.SessionID == parent.Process.SessionID {
-		t.Fatalf("fixture must share service cgroup with a separate SID: parent=%+v child=%+v", parent, child)
+	if parent.Cgroup != backend.Cgroup || backend.Cgroup != child.Cgroup || !strings.Contains(child.Cgroup, "/"+unit) || child.Process.SessionID == backend.Process.SessionID || backend.Process.GroupID != backend.Process.PID {
+		t.Fatalf("fixture must share service cgroup with a separate SID: parent=%+v backend=%+v child=%+v", parent, backend, child)
 	}
 	if state, err := processidentity.Inspect(child.Process); err != nil || state != processidentity.StateAlive {
 		t.Fatalf("child not live before stop: %s %v", state, err)
 	}
-	t.Logf("unit=%s mode=%s parent=%+v child=%+v", unit, mode, parent, child)
-	serviceCommand(t, ctx, "stop", unit)
-	if got := ownedServiceProperties(t, unit, description)["ActiveState"]; got != "inactive" && got != "failed" && got != "" {
-		t.Fatalf("unit still active: %s", got)
+	t.Logf("unit=%s mode=%s crash=%t parent=%d birth=%s backend=%d birth=%s child=%d birth=%s cgroup=%s", unit, mode, crash, parent.Process.PID, parent.Process.BirthToken, backend.Process.PID, backend.Process.BirthToken, child.Process.PID, child.Process.BirthToken, child.Cgroup)
+	if crash {
+		killServiceActor(t, parent.Process)
+	} else {
+		serviceCommand(t, ctx, "stop", unit)
 	}
 	awaitServiceProcessExit(t, ctx, parent.Process)
+	backendCtx, backendCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer backendCancel()
+	awaitServiceProcessExit(t, backendCtx, backend.Process)
+	if _, err := os.Stat(filepath.Join(dir, "backend-term")); err != nil {
+		t.Fatalf("backend must receive SIGTERM: %v", err)
+	}
+	awaitServiceUnitStopped(t, ctx, unit, description)
 	if survives {
 		assertServiceProcessRetained(t, child.Process)
 	} else {
@@ -205,14 +219,14 @@ func assertServiceProcessRetained(t *testing.T, identity processidentity.Identit
 	}
 }
 
-func cleanupServiceActors(t *testing.T, unit, description string, parent, child serviceActorIdentity) {
+func cleanupServiceActors(t *testing.T, unit, description string, parent, backend, child serviceActorIdentity) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	if properties := ownedServiceProperties(t, unit, description); properties["ActiveState"] == "active" || properties["ActiveState"] == "activating" {
 		serviceCommand(t, ctx, "stop", unit)
 	}
-	for _, actor := range []serviceActorIdentity{child, parent} {
+	for _, actor := range []serviceActorIdentity{child, backend, parent} {
 		if actor.Process.PID == 0 {
 			continue
 		}
@@ -232,7 +246,24 @@ func cleanupServiceActors(t *testing.T, unit, description string, parent, child 
 	if state := ownedServiceProperties(t, unit, description)["ActiveState"]; state != "" && state != "inactive" && state != "failed" {
 		t.Errorf("cleanup left unit active: %s", state)
 	}
-	t.Logf("cleanup unit=%s actors=%d,%d complete", unit, parent.Process.PID, child.Process.PID)
+	t.Logf("cleanup unit=%s actors=%d,%d,%d complete", unit, parent.Process.PID, backend.Process.PID, child.Process.PID)
+}
+
+func awaitServiceUnitStopped(t *testing.T, ctx context.Context, unit, description string) {
+	t.Helper()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		state := ownedServiceProperties(t, unit, description)["ActiveState"]
+		if state == "" || state == "inactive" || state == "failed" {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("unit did not stop: %s", unit)
+		case <-tick.C:
+		}
+	}
 }
 
 // TestSystemdServiceActor only runs as an explicitly selected fixture subprocess.
@@ -241,14 +272,42 @@ func TestSystemdServiceActor(t *testing.T) {
 		t.Skip("isolated service actor only")
 	}
 	role, dir := os.Args[4], os.Args[5]
-	if role != "parent" && role != "child" {
+	runtime.LockOSThread()
+	signals := make(chan os.Signal, 1)
+	if role == "parent" || role == managedBackendLabel {
+		signal.Notify(signals, syscall.SIGTERM)
+	}
+	var backend *managedProcess
+	switch role {
+	case "parent":
+		backend = startServiceBackend(t, dir, os.Args[6])
+	case managedBackendLabel:
+		startServiceChild(t, dir, os.Args[6])
+	case "child":
+	default:
 		t.Fatal("invalid actor role")
 	}
-	runtime.LockOSThread()
-	// The locked spawning thread remains alive until the parent process exits.
-	if role == "parent" {
-		startServiceChild(t, dir, os.Args[6])
+	recordServiceActor(t, dir, role)
+	select {
+	case <-signals:
+		if role == managedBackendLabel {
+			if err := os.WriteFile(filepath.Join(dir, "backend-term"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if backend != nil {
+			result := backend.kill()
+			if result.err != nil {
+				t.Fatal(result.err)
+			}
+		}
+	case <-time.After(19 * time.Second):
 	}
+	os.Exit(0)
+}
+
+func recordServiceActor(t *testing.T, dir, role string) {
+	t.Helper()
 	identity, err := processidentity.Capture(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
@@ -264,15 +323,16 @@ func TestSystemdServiceActor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, role+".json"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	signals := make(chan os.Signal, 1)
-	if role == "parent" {
-		signal.Notify(signals, syscall.SIGTERM)
+}
+
+func startServiceBackend(t *testing.T, dir, ordinary string) *managedProcess {
+	t.Helper()
+	env := upsertEnv(os.Environ(), backendPIDFileEnv, "")
+	proc, _, err := startProcess(os.Args[0], []string{"-test.run=^TestSystemdServiceActor$", "--", "issue4552", managedBackendLabel, dir, ordinary}, "", env, true, managedBackendLabel, newSupervisor())
+	if err != nil {
+		t.Fatal(err)
 	}
-	select {
-	case <-signals:
-	case <-time.After(20 * time.Second):
-	}
-	os.Exit(0)
+	return proc
 }
 
 func startServiceChild(t *testing.T, dir, ordinary string) {

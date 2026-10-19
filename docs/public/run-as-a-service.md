@@ -94,7 +94,9 @@ recursively chown the data tree or add a broad Git `safe.directory` exception.
 ## Agent lifetime on Linux
 
 Generated Linux user and system units use `KillMode=process`: systemd stops the
-backend main process, and Kandev manages its agents. With experimental
+native launcher, which owns the backend child process. If the launcher dies
+abruptly, the backend receives a termination signal; Kandev manages agent lifetime.
+With experimental
 `features.agentSurvival` enabled, eligible local and worktree agents can remain
 running across a backend stop or restart. The feature remains off by default;
 normal disabled shutdown, explicit task Stop, and launch rollback still terminate
