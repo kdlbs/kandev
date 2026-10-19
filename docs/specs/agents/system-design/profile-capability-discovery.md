@@ -102,6 +102,14 @@ Discovery creates no Kandev task/session and sends no model prompt.
 A provider can internally allocate a temporary protocol session during the handshake, as it does today.
 Cleanup terminates the owned process tree on success, timeout, cancellation, and failure.
 
+The proposed [missing bundled Codex dependency extension](managed-npm-runtime-recovery.md#missing-bundled-codex-dependency)
+qualifies the no-install rule only for an independently verified incomplete
+managed runtime. Its retry must preserve this document's launch context,
+single-flight and late-result guards, and profile-only publication. Both
+baseline discovery and dependent model-option resolution use that same bounded
+recovery helper. It does not run a general runtime update or select another
+binary.
+
 ## Cache identity and refresh
 
 Separate profile observations from the existing agent-wide capability cache.
