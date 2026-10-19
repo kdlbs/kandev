@@ -270,9 +270,10 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 	// ordering must be done here over the full fetched set. Default order is a
 	// no-op for sortIssues, so paginating a default watch buys nothing but
 	// extra Linear calls and larger dispatch bursts — keep it on the legacy
-	// single-page fetch.
+	// single-page fetch. A watch that holds blocked issues back still pages,
+	// so issues it can start are not hidden behind a full page of blocked ones.
 	maxPages := issueWatchMaxPages
-	if w.SortBy == SortByDefault {
+	if w.SortBy == SortByDefault && !w.Filter.RequireBlockersDone {
 		maxPages = 1
 	}
 	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
@@ -308,6 +309,14 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		pageToken = res.NextPageToken
 	}
+	if w.Filter.RequireBlockersDone {
+		var held int
+		out, held = dropBlockedIssues(out)
+		if held > 0 {
+			s.log.Debug("linear: issue watch holding issues with open blockers",
+				zap.String("watch_id", w.ID), zap.Int("held", held))
+		}
+	}
 	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
 		if err := attachProjectDescriptions(ctx, client, out); err != nil {
 			return nil, err
@@ -316,6 +325,35 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 	// Order dispatch so the most important issues win the in-flight slots.
 	sortIssues(out, w.SortBy)
 	return out, nil
+}
+
+// dropBlockedIssues removes issues that still have an open blocker and
+// returns the remaining issues with the number removed. A removed issue is not
+// reserved, so a later poll considers it again.
+func dropBlockedIssues(issues []*LinearIssue) ([]*LinearIssue, int) {
+	kept := issues[:0]
+	for _, issue := range issues {
+		if issueBlocked(issue) {
+			continue
+		}
+		kept = append(kept, issue)
+	}
+	return kept, len(issues) - len(kept)
+}
+
+// issueBlocked reports whether an issue has a blocker that is not completed.
+// An issue whose relation list was truncated counts as blocked, because an
+// unseen blocker may still be open.
+func issueBlocked(issue *LinearIssue) bool {
+	if issue.BlockersTruncated {
+		return true
+	}
+	for _, b := range issue.Blockers {
+		if !b.Done() {
+			return true
+		}
+	}
+	return false
 }
 
 // attachProjectDescriptions fills ProjectDescription on every issue that
@@ -549,6 +587,8 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 		CreatorID:   strings.TrimSpace(f.CreatorID),
 		EstimateMin: f.EstimateMin,
 		EstimateMax: f.EstimateMax,
+
+		RequireBlockersDone: f.RequireBlockersDone,
 	}
 	out.StateIDs = trimIDs(f.StateIDs)
 	out.LabelIDs = trimIDs(f.LabelIDs)
