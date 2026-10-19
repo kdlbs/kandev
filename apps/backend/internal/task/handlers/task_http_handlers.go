@@ -2165,9 +2165,7 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
 		case isCascadePostCommitError(err):
 			if mode == models.WorkspaceCleanupRetain {
-				result := h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs)
-				result.RuntimeStopPending = true
-				c.JSON(http.StatusOK, result)
+				c.JSON(http.StatusOK, h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs))
 				return
 			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",

@@ -114,25 +114,31 @@ func (inventory *Inventory) addSnapshot(saved snapshot) {
 		if runtime == nil {
 			continue
 		}
-		inventory.ResourceIDs[runtime.AgentExecutionID] = struct{}{}
-		inventory.ResourceIDs[runtime.ContainerID] = struct{}{}
+		addRetentionID(inventory.ResourceIDs, runtime.AgentExecutionID)
+		addRetentionID(inventory.ResourceIDs, runtime.ContainerID)
 		inventory.addPath(runtime.WorktreePath)
-		inventory.WorktreeIDs[runtime.WorktreeID] = struct{}{}
+		addRetentionID(inventory.WorktreeIDs, runtime.WorktreeID)
 	}
 	for _, wt := range saved.Worktrees {
-		inventory.WorktreeIDs[wt.ID] = struct{}{}
+		addRetentionID(inventory.WorktreeIDs, wt.ID)
 		inventory.addPath(wt.Path)
 	}
 	if env := saved.TaskEnvironment; env != nil {
-		inventory.ResourceIDs[env.ID] = struct{}{}
-		inventory.ResourceIDs[env.ContainerID] = struct{}{}
-		inventory.ResourceIDs[env.SandboxID] = struct{}{}
+		addRetentionID(inventory.ResourceIDs, env.ID)
+		addRetentionID(inventory.ResourceIDs, env.ContainerID)
+		addRetentionID(inventory.ResourceIDs, env.SandboxID)
 		inventory.addPath(env.WorkspacePath)
 		for _, repo := range env.Repos {
 			if repo != nil {
 				inventory.addPath(repo.WorktreePath)
-				inventory.WorktreeIDs[repo.WorktreeID] = struct{}{}
+				addRetentionID(inventory.WorktreeIDs, repo.WorktreeID)
 			}
 		}
+	}
+}
+
+func addRetentionID(ids map[string]struct{}, id string) {
+	if id != "" {
+		ids[id] = struct{}{}
 	}
 }

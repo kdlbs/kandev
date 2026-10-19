@@ -32,5 +32,6 @@ func (r *Repository) HasRetainedWorkspaceResource(ctx context.Context, taskID st
 			return true, nil
 		}
 	}
+	// Without an identifiable scope, cleanup cannot exclude retained resources.
 	return !known && len(inventory.TaskIDs) > 0, nil
 }

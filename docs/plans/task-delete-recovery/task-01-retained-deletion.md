@@ -324,3 +324,22 @@ Local logs are under `/tmp/task-delete-*.log`. The final regression, retention,
 race, UI, lint, localization, desktop, and phone logs include the pass summaries.
 These temporary files are diagnostic evidence for this session, not repository
 artifacts or a requirement for a future test run.
+
+
+### PR review regressions
+
+Retain preparation now publishes its mode only with a complete snapshot.
+Cleanup waits for runtime shutdown before acquiring the physical mutation lease,
+then rechecks retention. Saved task/session/execution identity admits safe local
+shutdown for shared tasks without an owned environment. Unknown or destructive
+runtimes remain pending. Post-commit responses preserve the computed shutdown
+status, and retention maps omit empty IDs.
+
+Regression tests cover failed inventory capture and snapshot writes, independent
+stop admission, retention published during shutdown, shared runtime identity,
+and completed versus pending shutdown in HTTP responses. Missing prior-cleanup
+inventory still blocks deletion because earlier stop handles must survive.
+The focused eight-package regression command above passed with the added
+`FailedRetain`, `CleanupShutdownDoesNotHold`, `CleanupRechecksRetention`, and
+`HTTPRetainedDelete` test prefixes. The prior-inventory guard test and retention
+race suite also passed. CI and review completion are tracked on the PR.

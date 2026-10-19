@@ -22,6 +22,8 @@ func TestRetainedInventorySurvivesEveryJobState(t *testing.T) {
 			require.True(t, inv.Protects("", "worktree", ""))
 			require.True(t, inv.Protects("", "", "/tasks/kept/repo"))
 			require.Contains(t, inv.ResourceIDs, "container")
+			require.NotContains(t, inv.ResourceIDs, "")
+			require.NotContains(t, inv.WorktreeIDs, "")
 		})
 	}
 }

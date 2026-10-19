@@ -166,6 +166,13 @@ The attempted broad Go sweep stalled in SQLite test-fixture schema setup.
 Its completion is not claimed. The focused deletion, storage, repository, and
 lifecycle checks passed. The production instance was not restarted or updated.
 
+PR review remediation adds atomic publication of complete retention inventory,
+shutdown before the physical-cleanup lease, and safe shared-local shutdown from
+saved runtime identity. It also preserves the computed runtime status after
+post-commit errors and omits empty retention IDs. Focused checks passed across
+eight backend packages. Current-head CI and review resolution remain external
+completion gates.
+
 ## Risks
 
 - A forgotten cleanup consumer can remove retained files after task deletion.

@@ -86,8 +86,10 @@ the lifecycle reservation. Do not invent a HEAD or repair a marker.
 
 Preparation in retain mode skips `captureWorktreeCleanupHeadOIDs`, adoption
 audits, source-manifest capture, and all other physical cleanup preparation.
-Retain snapshots must survive job progress saves. Persist the snapshot before
-removing any live owner row. If persistence fails, compensate preparation and
+Reserve preparation without a retention disposition. Publish retain mode and
+the complete inventory together, so failed preparation cannot leave an incomplete
+retention record. Retain snapshots must survive job progress saves. Persist the
+snapshot before removing any live owner row. If persistence fails, compensate preparation and
 leave the task. If cascade deletion commits only some members, retain the
 snapshots for committed members and report the exact partial outcome. Preserve
 existing recovery for members that did not commit.
@@ -127,7 +129,10 @@ claim with the same resource/lifecycle guards. Recheck retention before I/O:
 a scan made before the deletion is not permission to remove resources after it.
 Serialize retention publication and destructive cleanup through the shared
 context-aware mutation lease in `task/retention`. Acquire it before path and
-repository locks. Nested cleanup calls inherit the lease through their context.
+repository locks. Runtime shutdown must finish before the cleanup worker takes
+this lease. Each provider stop guards its own destructive I/O after taking its
+execution lock. The worker rechecks retention under the lease before file cleanup.
+Nested cleanup calls inherit the lease through their context.
 Older workers finish their physical operation before publication, or read the
 retained disposition when they acquire the lease. An already
 completed cleanup cannot be reversed or described as newly preserved.
@@ -142,7 +147,10 @@ are unsupported while retained snapshots exist. Document this operational limit.
 
 Retain mode still requests shutdown of the deleted task's agents using
 persisted execution and ownership handles. Stop only that task's agents in a
-shared environment. Keep runtime stop separate from environment destruction.
+shared environment. A saved standalone runtime with matching task, session, and
+execution IDs permits local shutdown even when the task has no owned environment.
+A known remote runtime overrides a local environment fallback. Keep runtime stop
+separate from environment destruction.
 If a provider's stop operation also destroys files, preserve the resource and
 record shutdown pending instead of invoking that operation.
 

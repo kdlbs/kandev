@@ -1269,28 +1269,14 @@ func (s *Service) executeTaskResourceCleanupJob(
 	job *models.TaskResourceCleanupJob,
 	snapshot *taskResourceCleanupSnapshot,
 ) error {
-	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
-	if retentionErr != nil {
-		return retentionErr
-	}
-	defer releaseRetention()
-
 	if snapshot == nil {
 		return errors.New("resource cleanup snapshot is nil")
 	}
 	if snapshot.WorkspaceCleanup == models.WorkspaceCleanupRetain {
 		return s.executeRetainedTaskShutdown(ctx, job, snapshot)
 	}
-	if reader, ok := s.tasks.(interface {
-		HasRetainedTaskWorkspace(context.Context, string) (bool, error)
-	}); ok {
-		retained, err := reader.HasRetainedTaskWorkspace(ctx, job.TaskID)
-		if err != nil {
-			return err
-		}
-		if retained {
-			return errors.New("workspace retained; resource cleanup is disabled")
-		}
+	if err := s.checkTaskWorkspaceCleanupAllowed(ctx, job.TaskID); err != nil {
+		return err
 	}
 	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: job.Attempts})
 	var (
@@ -1317,6 +1303,16 @@ func (s *Service) executeTaskResourceCleanupJob(
 		taskResourceCleanupDeletesTask(job.Trigger),
 		true,
 	)
+	// Runtime stops acquire their own retention lease after their execution lock.
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+
+	if err := s.checkTaskWorkspaceCleanupAllowed(ctx, job.TaskID); err != nil {
+		return err
+	}
 	failedStops := stopOutcome.failed
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
@@ -1744,9 +1740,10 @@ func (s *Service) PrepareTaskResourceCleanupWithDeleteOptions(ctx context.Contex
 	// Reserve the durable lifecycle barrier BEFORE capturing the inventory.
 	// Session and worktree creation serialize against the owning task row and
 	// reject new ownership while this prepared barrier is active, so the
-	// snapshot below cannot miss a resource admitted mid-preparation.
+	// snapshot below cannot miss a resource admitted mid-preparation. Retain mode
+	// is published only with the complete inventory in the snapshot update.
 	job, err := s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
-		nil, nil, nil, nil, taskEnvironmentCleanup{discardWorktreeChanges: options.DiscardWorktreeChanges, workspaceCleanup: options.WorkspaceCleanup}, true, false, "")
+		nil, nil, nil, nil, taskEnvironmentCleanup{discardWorktreeChanges: options.DiscardWorktreeChanges}, true, false, "")
 	if err != nil {
 		return err
 	}

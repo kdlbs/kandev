@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -29,15 +31,19 @@ func (s *Service) executeRetainedTaskShutdown(ctx context.Context, job *models.T
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Provider stop may destroy file-bearing compute. Unknown providers stay pending.
-	env := snapshot.TaskEnvironment
-	if env == nil || (models.ExecutorType(env.ExecutorType) != models.ExecutorTypeLocal && models.ExecutorType(env.ExecutorType) != models.ExecutorTypeWorktree) {
-		return fmt.Errorf("workspace retained; safe runtime shutdown unavailable")
+	// Provider stop may destroy file-bearing compute. Unknown targets stay pending.
+	safeTargets := make([]taskStopTarget, 0, len(targets))
+	for _, target := range targets {
+		if retainedTargetCanStop(job.TaskID, target, snapshot) {
+			safeTargets = append(safeTargets, target)
+		}
 	}
+	pending := len(targets) - len(safeTargets)
+	targets = safeTargets
 	s.registerTaskRuntimeStopOwners(targets, true)
 	outcome := s.stopTaskRuntimeTargetsWithTaskDeleted(ctx, job.TaskID, targets, taskResourceCleanupStopReason(job.Trigger), "retained task runtime stop failed", true, true)
-	if len(outcome.failed) > 0 {
-		return fmt.Errorf("workspace retained; %d runtime stops pending", len(outcome.failed))
+	if pending += len(outcome.failed); pending > 0 {
+		return fmt.Errorf("workspace retained; %d runtime stops pending", pending)
 	}
 	return ctx.Err()
 }
@@ -81,5 +87,37 @@ func (s *Service) capturePriorRetainedStopTargets(ctx context.Context, taskID st
 		targets = mergeTaskStopTargets(targets, restoreStopTargets(previous.StopTargets))
 	}
 	snapshot.StopTargets = persistStopTargets(targets)
+	return nil
+}
+
+func retainedTargetCanStop(taskID string, target taskStopTarget, snapshot *taskResourceCleanupSnapshot) bool {
+	runtime := target.runtime
+	if runtime == "" {
+		for _, saved := range snapshot.RetainedExecutors {
+			if saved != nil && saved.TaskID == taskID && saved.SessionID == target.sessionID && saved.AgentExecutionID == target.executionID {
+				runtime = saved.Runtime
+				break
+			}
+		}
+	}
+	if runtime != "" {
+		return runtime == agentruntime.RuntimeStandalone
+	}
+	env := snapshot.TaskEnvironment
+	return env != nil && (models.ExecutorType(env.ExecutorType) == models.ExecutorTypeLocal || models.ExecutorType(env.ExecutorType) == models.ExecutorTypeWorktree)
+}
+
+func (s *Service) checkTaskWorkspaceCleanupAllowed(ctx context.Context, taskID string) error {
+	if reader, ok := s.tasks.(interface {
+		HasRetainedTaskWorkspace(context.Context, string) (bool, error)
+	}); ok {
+		retained, err := reader.HasRetainedTaskWorkspace(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if retained {
+			return fmt.Errorf("workspace retained; resource cleanup is disabled")
+		}
+	}
 	return nil
 }
