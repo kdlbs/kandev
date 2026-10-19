@@ -123,11 +123,17 @@ func resolveDynamicRouteAction(
 }
 
 // resolverRouteAction names the resolver action for a request. The
-// orchestrator's unattended Try next selects like try_next but records its
-// own route reason; every client request keeps its submitted action.
+// orchestrator's unattended Try next and Retry select like try_next and retry
+// but record their own route reasons; every client request keeps its
+// submitted action.
 func resolverRouteAction(request orchestrator.RouteActionRequest) string {
-	if request.Automatic && request.Action == orchestrator.RouteActionTryNext {
-		return agentruntime.RouteActionAutoTryNext
+	if request.Automatic {
+		switch request.Action {
+		case orchestrator.RouteActionTryNext:
+			return agentruntime.RouteActionAutoTryNext
+		case orchestrator.RouteActionRetry:
+			return agentruntime.RouteActionAutoRetry
+		}
 	}
 	return string(request.Action)
 }

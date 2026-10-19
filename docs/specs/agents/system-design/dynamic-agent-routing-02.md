@@ -81,7 +81,9 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | `retry_wait` or `waiting_for_reset` | Skip now                                             | `switching`                      |
 | `retry_wait` or `waiting_for_reset` | Cancel wait or Stop                                  | `action_required` or `stopped`   |
 | `waiting`                           | reset, probe success, or Retry now                   | `selecting`                      |
+| `waiting`                           | opted-in automatic retry is due                      | `selecting`                      |
 | `action_required`                   | settings or credentials change, or explicit retry    | `selecting`                      |
+| `action_required`                   | opted-in automatic retry is due                      | `retrying`                       |
 | any nonterminal state               | user stops session                                   | `stopped`                        |
 
 Only one transition owner can commit a new route generation. Candidate
@@ -189,6 +191,36 @@ require the current exclusive probe lease.
   surface in place. The chain is process-local: a restart forgets it, which can
   allow at most one further handoff per remaining candidate and never replays a
   turn.
+- If a provider-capacity failure (the same five codes) leaves a task route in
+  `action_required` or in `waiting` without an eligible candidate, and the
+  workspace enables `dynamic_failed_route_auto_retry_enabled` (default off),
+  the failure handler records one pending retry in the route's durable policy
+  state (`failed_route_retry.pending`: generation, due time, and the failed
+  candidate and code). The due time is the later of one minute and the
+  earliest expiry of an open circuit of a candidate the retry could use: the
+  route's own candidate for `action_required`, every enabled candidate for
+  `waiting`. A route whose usable candidates are all held is not scheduled. The
+  write is fenced on the observed status and policy snapshot, and a pending
+  retry for the same generation is reused, so a redelivered failure schedules
+  once. The shared dynamic recovery timer, which also runs policy waits, fires
+  at the due time; at startup it is re-armed from every `action_required` and
+  `waiting` route that holds a pending retry. The run takes the same
+  route-action lock and settled-turn check as a manual action, requires the
+  session to be WAITING_FOR_INPUT, and consumes the pending retry in the same
+  fenced write that counts the attempt, before it submits `retry` with
+  `Automatic` set to the backend route-action transaction. The resolver resumes
+  an `action_required` route or reselects a `waiting` route in candidate order
+  and records `auto_failed_route_retry`. Consuming first makes the retry at
+  most once: a crash between the write and the action leaves the route in its
+  recovery state. The chain's attempt count and retried failures are carried to
+  every later generation, so the workspace limit (1 to 3,
+  `dynamic_failed_route_auto_retry_max`) and the repeated same-candidate,
+  same-code stop survive the retry's own claims and a restart; a successful
+  turn clears the chain. A moved generation, a busy or settled session, or the
+  setting turned off makes the run do nothing. When mid-turn failover is also
+  enabled, its automatic Try next runs first; only when that handoff ends in
+  `waiting` does the retry schedule. A person's Retry on a `waiting` route
+  reselects the same way, instead of reporting a pending recovery.
 - If a trusted reset is beyond the configured maximum wait, Kandev does not
   wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
@@ -356,6 +388,15 @@ require the current exclusive probe lease.
   not resent. **WHEN** that chain returns to Fable and it hits the same rate
   limit again, **THEN** no further automatic handoff runs and the session keeps
   its recovery controls.
+
+- **GIVEN** a workspace with automatic failed-route retry enabled and a dynamic
+  task whose two candidates are both rate limited before any result, **WHEN**
+  the route is left waiting and the earliest candidate limit resets four
+  minutes later, **THEN** Kandev submits one automatic Retry at that time and
+  the recovered candidate starts with the continuation package. **WHEN** that
+  candidate fails the same way again, or the workspace limit is reached,
+  **THEN** no further automatic retry runs and the session keeps its recovery
+  controls.
 
 ## Out of scope
 

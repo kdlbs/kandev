@@ -182,6 +182,8 @@ describe("accepted identity and descriptors", () => {
         "acp_idle_suspension_enabled",
         "acp_idle_timeout_minutes",
         "dynamic_midturn_failover_enabled",
+        "dynamic_failed_route_auto_retry_enabled",
+        "dynamic_failed_route_auto_retry_max",
         "office_workflow_id",
       ] as const)
         delete response[key];
@@ -204,6 +206,8 @@ describe("accepted identity and descriptors", () => {
       acp_idle_suspension_enabled: shape === "complete",
       acp_idle_timeout_minutes: shape === "complete" ? 45 : 120,
       dynamic_midturn_failover_enabled: shape === "complete",
+      dynamic_failed_route_auto_retry_enabled: shape === "complete",
+      dynamic_failed_route_auto_retry_max: shape === "complete" ? 2 : 1,
       office_workflow_id: shape === "complete" ? "office-workflow" : null,
       created_at: "2026-10-01T00:00:00Z",
       updated_at: "2026-10-02T00:00:00Z",

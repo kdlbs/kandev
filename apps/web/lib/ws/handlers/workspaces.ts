@@ -37,12 +37,42 @@ function workspaceIdlePolicyUpdate(
 function workspaceDynamicRoutingUpdate(
   item: WorkspaceItem,
   payload: WorkspacePayload,
-): Pick<WorkspaceItem, "dynamic_midturn_failover_enabled"> {
+): Pick<
+  WorkspaceItem,
+  | "dynamic_midturn_failover_enabled"
+  | "dynamic_failed_route_auto_retry_enabled"
+  | "dynamic_failed_route_auto_retry_max"
+> {
   return {
     dynamic_midturn_failover_enabled:
       "dynamic_midturn_failover_enabled" in payload
         ? (payload.dynamic_midturn_failover_enabled ?? false)
         : item.dynamic_midturn_failover_enabled,
+    dynamic_failed_route_auto_retry_enabled:
+      "dynamic_failed_route_auto_retry_enabled" in payload
+        ? (payload.dynamic_failed_route_auto_retry_enabled ?? false)
+        : item.dynamic_failed_route_auto_retry_enabled,
+    dynamic_failed_route_auto_retry_max:
+      "dynamic_failed_route_auto_retry_max" in payload
+        ? (payload.dynamic_failed_route_auto_retry_max ?? 1)
+        : item.dynamic_failed_route_auto_retry_max,
+  };
+}
+
+/** Dynamic routing opt-ins of a newly created workspace; all default off. */
+function newWorkspaceDynamicRouting(
+  payload: WorkspacePayload,
+): Pick<
+  WorkspaceItem,
+  | "dynamic_midturn_failover_enabled"
+  | "dynamic_failed_route_auto_retry_enabled"
+  | "dynamic_failed_route_auto_retry_max"
+> {
+  return {
+    dynamic_midturn_failover_enabled: payload.dynamic_midturn_failover_enabled ?? false,
+    dynamic_failed_route_auto_retry_enabled:
+      payload.dynamic_failed_route_auto_retry_enabled ?? false,
+    dynamic_failed_route_auto_retry_max: payload.dynamic_failed_route_auto_retry_max ?? 1,
   };
 }
 
@@ -116,7 +146,7 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
           unit_id: payload.unit_id ?? "",
           acp_idle_suspension_enabled: payload.acp_idle_suspension_enabled ?? false,
           acp_idle_timeout_minutes: payload.acp_idle_timeout_minutes ?? 120,
-          dynamic_midturn_failover_enabled: payload.dynamic_midturn_failover_enabled ?? false,
+          ...newWorkspaceDynamicRouting(payload),
           created_at: payload.created_at ?? new Date().toISOString(),
           updated_at: payload.updated_at ?? new Date().toISOString(),
         };

@@ -265,6 +265,9 @@ type UpdateWorkspaceRequest struct {
 	ACPIdleSuspensionEnabled      *bool      `json:"acp_idle_suspension_enabled,omitempty"`
 	ACPIdleTimeoutMinutes         *int       `json:"acp_idle_timeout_minutes,omitempty"`
 	DynamicMidTurnFailoverEnabled *bool      `json:"dynamic_midturn_failover_enabled,omitempty"`
+	// DynamicFailedRouteAutoRetryMax must be 1-3 when present.
+	DynamicFailedRouteAutoRetryEnabled *bool `json:"dynamic_failed_route_auto_retry_enabled,omitempty"`
+	DynamicFailedRouteAutoRetryMax     *int  `json:"dynamic_failed_route_auto_retry_max,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

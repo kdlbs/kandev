@@ -16,6 +16,8 @@ const saved: SavedState = {
   idleSuspensionEnabled: false,
   idleTimeoutMinutes: 120,
   midTurnFailoverEnabled: false,
+  failedRouteAutoRetryEnabled: false,
+  failedRouteAutoRetryMax: 1,
 };
 
 const current: Workspace = {
@@ -42,6 +44,8 @@ function saveWith(midTurnFailoverEnabled: boolean) {
       idleSuspensionEnabled: false,
       idleTimeoutMinutes: "120",
       midTurnFailoverEnabled,
+      failedRouteAutoRetryEnabled: false,
+      failedRouteAutoRetryMax: "1",
     },
     savedState: saved,
     isDirty: true,

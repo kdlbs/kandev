@@ -461,32 +461,7 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 // returned after restart because dispatch may already have crossed the
 // process boundary and must remain a manual recovery decision.
 func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT COALESCE(route_id, session_id), logical_profile_id, execution_profile_id,
-			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
-		FROM dynamic_route_states
-		WHERE session_id IS NOT NULL AND state IN (?, ?) ORDER BY updated_at ASC
-	`), string("retry_wait"), string("waiting_for_reset"))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	states := make([]dynamicruntime.RouteState, 0)
-	for rows.Next() {
-		var state dynamicruntime.RouteState
-		if err := rows.Scan(
-			&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
-			&state.Generation, &state.ProfileVersion, &state.Status,
-			&state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		states = append(states, state)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return states, nil
+	return r.listRouteStatesInStatus(ctx, "retry_wait", "waiting_for_reset")
 }
 
 // ListStartingRouteStates returns every route whose durable status is still
@@ -495,12 +470,29 @@ func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicrunti
 // only a safe orphan signal once the caller has confirmed there is no live
 // session backing the row (see Service.reconcileOrphanedDynamicStartingRoutes).
 func (r *Repository) ListStartingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	return r.listRouteStatesInStatus(ctx, unclassifiedRouteStateStarting)
+}
+
+// ListRecoveryRouteStates returns every route left in manual recovery
+// (action_required, or waiting without an eligible candidate). Startup uses it
+// to re-arm opted-in automatic failed-route retries recorded in the policy
+// state; rows without a schedule are ignored by the caller.
+func (r *Repository) ListRecoveryRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
+	return r.listRouteStatesInStatus(ctx, "action_required", "waiting")
+}
+
+func (r *Repository) listRouteStatesInStatus(ctx context.Context, statuses ...string) ([]dynamicruntime.RouteState, error) {
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(statuses)), ", ")
+	args := make([]any, 0, len(statuses))
+	for _, status := range statuses {
+		args = append(args, status)
+	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT COALESCE(route_id, session_id), logical_profile_id, execution_profile_id,
 			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
 		FROM dynamic_route_states
-		WHERE session_id IS NOT NULL AND state = ? ORDER BY updated_at ASC
-	`), unclassifiedRouteStateStarting)
+		WHERE session_id IS NOT NULL AND state IN (`+placeholders+`) ORDER BY updated_at ASC
+	`), args...)
 	if err != nil {
 		return nil, err
 	}

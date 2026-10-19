@@ -50,6 +50,16 @@ repair.
   Missing or stale evidence, every other code, and a repeated same-code failure
   on a candidate already tried in that chain still fail closed into manual
   recovery. See `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.17`.
+- A second, independent per-workspace setting, also off by default, retries a
+  route that such a provider-capacity failure left in `action_required` or in
+  `waiting` with no eligible candidate. It submits the same Retry route action
+  a person would, no earlier than one minute and no earlier than the earliest
+  candidate circuit expiry, at most the workspace limit (1 to 3) of times
+  between successful turns, and never after the same candidate fails with the
+  same code again. It never replaces a provider after output or effects by
+  itself: it only resumes or reselects a route that is already in recovery, and
+  the successor receives the bounded continuation package. Every declined case
+  keeps the recovery controls. See `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.23`.
 - Before a cross-provider launch, the conductor builds and persists a bounded
   continuation package. The downstream adapter delivers that package in the
   replacement prompt and never reuses the predecessor ACP identity.

@@ -46,6 +46,12 @@ func (r *Repository) UpdateWorkspaceFields(ctx context.Context, id string, updat
 	if update.DynamicMidTurnFailoverEnabled != nil {
 		appendValue("dynamic_midturn_failover_enabled", *update.DynamicMidTurnFailoverEnabled)
 	}
+	if update.DynamicFailedRouteAutoRetryEnabled != nil {
+		appendValue("dynamic_failed_route_auto_retry_enabled", *update.DynamicFailedRouteAutoRetryEnabled)
+	}
+	if update.DynamicFailedRouteAutoRetryMax != nil {
+		appendValue("dynamic_failed_route_auto_retry_max", *update.DynamicFailedRouteAutoRetryMax)
+	}
 	args = append(args, id)
 	query := "UPDATE workspaces SET " + strings.Join(assignments, ", ") + " WHERE id = ?"
 	if expected != nil {

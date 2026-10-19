@@ -79,6 +79,8 @@ export function mapWorkspaceItem(ws: WorkspaceItem): WorkspaceState["items"][num
     acp_idle_suspension_enabled: ws.acp_idle_suspension_enabled ?? false,
     acp_idle_timeout_minutes: ws.acp_idle_timeout_minutes ?? 120,
     dynamic_midturn_failover_enabled: ws.dynamic_midturn_failover_enabled ?? false,
+    dynamic_failed_route_auto_retry_enabled: ws.dynamic_failed_route_auto_retry_enabled ?? false,
+    dynamic_failed_route_auto_retry_max: ws.dynamic_failed_route_auto_retry_max ?? 1,
     office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,

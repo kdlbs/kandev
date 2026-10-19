@@ -29,6 +29,8 @@ export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
 import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-api";
+import type { WorkspacePayload } from "./workspace-events";
+export type { WorkspacePayload } from "./workspace-events";
 
 import type {
   Agent,
@@ -271,30 +273,6 @@ export type RuntimeUpdateSummaryMember = {
   display_name: string;
   previous_version: string;
   version: string;
-};
-
-export type WorkspacePayload = {
-  id: string;
-  name: string;
-  description?: string;
-  owner_id?: string;
-  unit_id?: string;
-  default_executor_id?: string | null;
-  default_environment_id?: string | null;
-  default_agent_profile_id?: string | null;
-  default_config_agent_profile_id?: string | null;
-  /**
-   * Idle-suspension policy carried on workspace lifecycle events. Both keys
-   * are absent from payloads sent by older backends; each consumer checks
-   * key presence rather than reading the value, so it can keep its current
-   * state when an older backend omits them.
-   */
-  acp_idle_suspension_enabled?: boolean;
-  acp_idle_timeout_minutes?: number;
-  /** Absent from older backends; consumers check key presence like the idle policy. */
-  dynamic_midturn_failover_enabled?: boolean;
-  created_at?: string;
-  updated_at?: string;
 };
 
 export type WorkflowPayload = {

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,7 +32,9 @@ const (
 	midTurnFailoverAdmissionDelay    = 100 * time.Millisecond
 )
 
-var errMidTurnFailoverNotAdmissible = errors.New("mid-turn provider failover is no longer admissible")
+// errAutomaticRouteActionNotAdmissible reports that the trigger of an
+// unattended route action no longer holds under the route-action lock.
+var errAutomaticRouteActionNotAdmissible = errors.New("automatic route action is no longer admissible")
 
 // midTurnProviderCapacityFailure reports whether a classified failure is a
 // provider-capacity condition another candidate can serve. The set matches
@@ -182,15 +185,25 @@ func (s *Service) resetMidTurnFailoverChain(sessionID string) {
 // workspaceAllowsMidTurnFailover reads the per-workspace opt-in. Any lookup
 // failure keeps the default (off).
 func (s *Service) workspaceAllowsMidTurnFailover(ctx context.Context, taskID string) bool {
+	workspace := s.taskWorkspace(ctx, taskID)
+	return workspace != nil && workspace.DynamicMidTurnFailoverEnabled
+}
+
+// taskWorkspace returns the workspace of a task, or nil when any lookup
+// fails, so per-workspace dynamic routing opt-ins keep their default (off).
+func (s *Service) taskWorkspace(ctx context.Context, taskID string) *models.Workspace {
 	if taskID == "" || s.repo == nil {
-		return false
+		return nil
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || task.WorkspaceID == "" {
-		return false
+		return nil
 	}
 	workspace, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
-	return err == nil && workspace != nil && workspace.DynamicMidTurnFailoverEnabled
+	if err != nil {
+		return nil
+	}
+	return workspace
 }
 
 // scheduleMidTurnProviderFailover runs after the ordinary failure route
@@ -227,16 +240,22 @@ func (s *Service) scheduleMidTurnProviderFailover(
 	s.dynamicSuccessorWorkers.Add(1)
 	s.dynamicSuccessorMu.Unlock()
 	sessionID, executionID := session.ID, data.AgentExecutionID
+	failure := midTurnFailoverFailure{executionProfileID: session.ExecutionProfileID, code: classified.Code}
 	go func() {
 		defer s.dynamicSuccessorWorkers.Done()
 		runCtx, cancel := context.WithTimeout(workerCtx, dynamicSuccessorDetachedTimeout)
 		defer cancel()
-		s.runMidTurnProviderFailover(runCtx, sessionID, executionID, generation)
+		s.runMidTurnProviderFailover(runCtx, sessionID, executionID, generation, failure)
 	}()
 	return true
 }
 
-func (s *Service) runMidTurnProviderFailover(ctx context.Context, sessionID, executionID string, generation int64) {
+func (s *Service) runMidTurnProviderFailover(
+	ctx context.Context,
+	sessionID, executionID string,
+	generation int64,
+	failure midTurnFailoverFailure,
+) {
 	request := RouteActionRequest{
 		SessionID: sessionID, Action: RouteActionTryNext, ExpectedGeneration: generation, Automatic: true,
 	}
@@ -261,8 +280,16 @@ func (s *Service) runMidTurnProviderFailover(ctx context.Context, sessionID, exe
 			zap.String("session_id", sessionID), zap.Int64("route_generation", generation), zap.Error(err))
 		return
 	}
-	if result != nil {
-		s.midTurnFailovers.recordSuccessor(sessionID, generation, result.RouteGeneration)
+	if result == nil {
+		return
+	}
+	s.midTurnFailovers.recordSuccessor(sessionID, generation, result.RouteGeneration)
+	if result.State == dynamicRouteStatusWaiting {
+		// No candidate could take over: the route is exhausted, which is
+		// where an opted-in automatic failed-route retry applies.
+		s.scheduleFailedRouteAutoRetry(ctx, sessionID, dynamicruntime.FailedRouteFailure{
+			ExecutionProfileID: failure.executionProfileID, Code: failure.code,
+		})
 	}
 }
 
@@ -299,7 +326,7 @@ func (s *Service) applyAutomaticRouteAction(
 		return nil, err
 	}
 	if admit != nil && !admit(ctx) {
-		return nil, errMidTurnFailoverNotAdmissible
+		return nil, errAutomaticRouteActionNotAdmissible
 	}
 	return s.routeActionHandler(withAutomaticRouteAction(ctx), request)
 }

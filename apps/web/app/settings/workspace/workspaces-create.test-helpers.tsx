@@ -39,6 +39,8 @@ export function descriptor(id: string, values: Partial<Item> = {}): Item {
     acp_idle_suspension_enabled: true,
     acp_idle_timeout_minutes: 45,
     dynamic_midturn_failover_enabled: true,
+    dynamic_failed_route_auto_retry_enabled: true,
+    dynamic_failed_route_auto_retry_max: 2,
     office_workflow_id: null,
     created_at: "2026-10-01T00:00:00Z",
     updated_at: "2026-10-02T00:00:00Z",

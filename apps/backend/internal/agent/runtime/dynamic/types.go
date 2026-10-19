@@ -84,6 +84,9 @@ type PolicyState struct {
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
 	SelectionChain   *SelectionChain           `json:"selection_chain,omitempty"`
+	// FailedRouteRetry is the opt-in automatic retry chain; see
+	// failed_route_retry.go. It is carried to every new route generation.
+	FailedRouteRetry *FailedRouteRetryChain `json:"failed_route_retry,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of

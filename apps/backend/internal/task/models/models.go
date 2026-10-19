@@ -1957,9 +1957,16 @@ type Workspace struct {
 	// DynamicMidTurnFailoverEnabled lets a dynamic task route try the next
 	// candidate once after a classified provider-capacity failure that happens
 	// after output or effects. Off by default; see dynamic_midturn_failover.go.
-	DynamicMidTurnFailoverEnabled bool      `json:"dynamic_midturn_failover_enabled"`
-	CreatedAt                     time.Time `json:"created_at"`
-	UpdatedAt                     time.Time `json:"updated_at"`
+	DynamicMidTurnFailoverEnabled bool `json:"dynamic_midturn_failover_enabled"`
+	// DynamicFailedRouteAutoRetryEnabled lets a dynamic task route that a
+	// classified provider-capacity failure left in recovery retry itself
+	// after its candidates' circuits recover. Off by default; see
+	// dynamic_failed_route_retry.go. DynamicFailedRouteAutoRetryMax caps the
+	// automatic retries between successful turns (1-3, default 1).
+	DynamicFailedRouteAutoRetryEnabled bool      `json:"dynamic_failed_route_auto_retry_enabled"`
+	DynamicFailedRouteAutoRetryMax     int       `json:"dynamic_failed_route_auto_retry_max"`
+	CreatedAt                          time.Time `json:"created_at"`
+	UpdatedAt                          time.Time `json:"updated_at"`
 
 	// Office extensions
 	TaskPrefix       string `json:"task_prefix,omitempty"`        // e.g. "KAN"

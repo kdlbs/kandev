@@ -26,6 +26,7 @@ import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { buildWorkspaceSaveHandler, type SavedState } from "./workspace-edit-save";
 import { useWorkspaceIdlePolicyDraft } from "./workspace-edit-idle-policy-draft";
+import { useWorkspaceFormSaveContributor } from "./workspace-edit-save-contributor";
 
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
@@ -33,7 +34,6 @@ import { useToast } from "@/components/toast-provider";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SettingsGroup } from "@/components/settings/settings-group";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
@@ -41,6 +41,11 @@ import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspa
 import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
+import {
+  failedRouteAutoRetryControls,
+  savedFailedRouteAutoRetryState,
+  useWorkspaceFailedRouteAutoRetryDraft,
+} from "./workspace-edit-auto-retry-draft";
 import { WorkspaceDynamicRoutingSection } from "@/components/settings/workspaces/workspace-dynamic-routing-card";
 
 type WorkspaceEditClientProps = {
@@ -360,6 +365,23 @@ function useWorkspaceDeleteDraft(
   };
 }
 
+function workspaceFieldsDirty(
+  draft: {
+    workspaceNameDraft: string;
+    defaultExecutorId: string;
+    defaultAgentProfileId: string;
+    midTurnFailoverEnabled: boolean;
+  },
+  saved: SavedState,
+) {
+  return (
+    draft.workspaceNameDraft.trim() !== saved.name ||
+    draft.defaultExecutorId !== saved.executorId ||
+    draft.defaultAgentProfileId !== saved.agentProfileId ||
+    draft.midTurnFailoverEnabled !== saved.midTurnFailoverEnabled
+  );
+}
+
 function useWorkspaceEditForm(workspace: Workspace) {
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
@@ -377,6 +399,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     idleSuspensionEnabled: workspace.acp_idle_suspension_enabled ?? false,
     idleTimeoutMinutes: workspace.acp_idle_timeout_minutes ?? 120,
     midTurnFailoverEnabled: workspace.dynamic_midturn_failover_enabled ?? false,
+    ...savedFailedRouteAutoRetryState(workspace),
   });
   const [midTurnFailoverEnabled, setMidTurnFailoverEnabled] = useState(
     workspace.dynamic_midturn_failover_enabled ?? false,
@@ -389,6 +412,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     timeoutValid: idleTimeoutValid,
     isDirty: idlePolicyIsDirty,
   } = useWorkspaceIdlePolicyDraft(workspace, savedState);
+  const autoRetry = useWorkspaceFailedRouteAutoRetryDraft(workspace, savedState);
   const executors = useAppStore((state) => state.executors.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const deleteDraft = useWorkspaceDeleteDraft(currentWorkspace, storeApi);
@@ -396,12 +420,11 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
 
   const activeExecutors = executors.filter((executor: Executor) => executor.status === "active");
-  const isDirty =
-    workspaceNameDraft.trim() !== savedState.name ||
-    defaultExecutorId !== savedState.executorId ||
-    defaultAgentProfileId !== savedState.agentProfileId ||
-    midTurnFailoverEnabled !== savedState.midTurnFailoverEnabled;
-  const isWorkspaceDirty = isDirty || idlePolicyIsDirty;
+  const isDirty = workspaceFieldsDirty(
+    { workspaceNameDraft, defaultExecutorId, defaultAgentProfileId, midTurnFailoverEnabled },
+    savedState,
+  );
+  const isWorkspaceDirty = isDirty || idlePolicyIsDirty || autoRetry.isDirty;
 
   const handleSave = buildWorkspaceSaveHandler({
     currentWorkspace,
@@ -412,6 +435,8 @@ function useWorkspaceEditForm(workspace: Workspace) {
       idleSuspensionEnabled,
       idleTimeoutMinutes,
       midTurnFailoverEnabled,
+      failedRouteAutoRetryEnabled: autoRetry.enabled,
+      failedRouteAutoRetryMax: autoRetry.max,
     },
     savedState,
     isDirty: isWorkspaceDirty,
@@ -430,6 +455,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setIdleSuspensionEnabled(savedState.idleSuspensionEnabled);
     setIdleTimeoutMinutes(String(savedState.idleTimeoutMinutes));
     setMidTurnFailoverEnabled(savedState.midTurnFailoverEnabled);
+    autoRetry.reset();
   };
 
   return {
@@ -446,6 +472,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setIdleTimeoutMinutes,
     midTurnFailoverEnabled,
     setMidTurnFailoverEnabled,
+    autoRetry,
     activeExecutors,
     executors,
     agentProfiles,
@@ -459,52 +486,6 @@ function useWorkspaceEditForm(workspace: Workspace) {
   };
 }
 
-type WorkspaceFormSaveOptions = {
-  workspaceId: string;
-  workspaceNameDraft: string;
-  defaultExecutorId: string;
-  defaultAgentProfileId: string;
-  idleSuspensionEnabled: boolean;
-  idleTimeoutMinutes: string;
-  midTurnFailoverEnabled: boolean;
-  idleTimeoutValid: boolean;
-  isDirty: boolean;
-  save: () => Promise<void>;
-  discard: () => void;
-};
-
-function useWorkspaceFormSaveContributor(options: WorkspaceFormSaveOptions) {
-  const { t } = useTranslation();
-  const hasWorkspaceName = Boolean(options.workspaceNameDraft.trim());
-  const invalidReason = workspaceDraftInvalidReason(hasWorkspaceName, options.idleTimeoutValid, t);
-  useSettingsSaveContributor({
-    id: `workspace:${options.workspaceId}`,
-    revision: JSON.stringify({
-      workspaceNameDraft: options.workspaceNameDraft,
-      defaultExecutorId: options.defaultExecutorId,
-      defaultAgentProfileId: options.defaultAgentProfileId,
-      idleSuspensionEnabled: options.idleSuspensionEnabled,
-      idleTimeoutMinutes: options.idleTimeoutMinutes,
-      midTurnFailoverEnabled: options.midTurnFailoverEnabled,
-    }),
-    isDirty: options.isDirty,
-    canSave: hasWorkspaceName && options.idleTimeoutValid,
-    invalidReason,
-    save: options.save,
-    discard: options.discard,
-  });
-}
-
-function workspaceDraftInvalidReason(
-  hasWorkspaceName: boolean,
-  timeoutValid: boolean,
-  t: ReturnType<typeof useTranslation>["t"],
-) {
-  if (!hasWorkspaceName) return t("workspaces:workspaceNameIsRequired");
-  if (!timeoutValid) return t("workspaces:idleTimeoutMustBePositive");
-  return undefined;
-}
-
 // The form registers its own draft with the settings save bar.
 function useSavedWorkspaceEditForm(workspace: Workspace) {
   const form = useWorkspaceEditForm(workspace);
@@ -516,7 +497,10 @@ function useSavedWorkspaceEditForm(workspace: Workspace) {
     idleSuspensionEnabled: form.idleSuspensionEnabled,
     idleTimeoutMinutes: form.idleTimeoutMinutes,
     midTurnFailoverEnabled: form.midTurnFailoverEnabled,
+    failedRouteAutoRetryEnabled: form.autoRetry.enabled,
+    failedRouteAutoRetryMax: form.autoRetry.max,
     idleTimeoutValid: form.idleTimeoutValid,
+    autoRetryMaxValid: form.autoRetry.maxValid,
     isDirty: form.isDirty,
     save: form.handleSave,
     discard: form.handleDiscard,
@@ -539,6 +523,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setIdleTimeoutMinutes,
     midTurnFailoverEnabled,
     setMidTurnFailoverEnabled,
+    autoRetry,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deleteConfirmText,
@@ -592,6 +577,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         enabled={midTurnFailoverEnabled}
         savedEnabled={savedState.midTurnFailoverEnabled}
         onEnabledChange={setMidTurnFailoverEnabled}
+        autoRetry={failedRouteAutoRetryControls(autoRetry, savedState)}
       />
       {/*
         Reads the live store item rather than the form's captured snapshot:

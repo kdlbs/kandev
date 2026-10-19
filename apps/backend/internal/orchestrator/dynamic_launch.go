@@ -881,6 +881,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	// healthy session), and only fires for a route genuinely stranded
 	// mid-launch.
 	generation := session.RouteGeneration
+	// Registered before the action_required guard so it runs after it and
+	// sees the route's final recovery state.
+	defer s.scheduleFailedRouteAutoRetryAfterFailure(ctx, session.ID, session.ExecutionProfileID, classified)
 	handled := false
 	defer func() {
 		if !handled {

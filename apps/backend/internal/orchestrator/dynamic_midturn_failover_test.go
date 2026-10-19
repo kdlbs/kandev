@@ -386,7 +386,7 @@ func TestApplyAutomaticRouteActionRejectsInadmissibleTrigger(t *testing.T) {
 	})
 	_, err := svc.applyAutomaticRouteAction(context.Background(), RouteActionRequest{SessionID: "s"},
 		func(context.Context) bool { return false })
-	if !errors.Is(err, errMidTurnFailoverNotAdmissible) || called {
+	if !errors.Is(err, errAutomaticRouteActionNotAdmissible) || called {
 		t.Fatalf("err = %v called = %v, want inadmissible without calling the handler", err, called)
 	}
 }

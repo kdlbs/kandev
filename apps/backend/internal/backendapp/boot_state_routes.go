@@ -782,9 +782,11 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"acp_idle_suspension_enabled":      workspace.ACPIdleSuspensionEnabled,
 		"acp_idle_timeout_minutes":         workspace.ACPIdleTimeoutMinutes,
 		"dynamic_midturn_failover_enabled": workspace.DynamicMidTurnFailoverEnabled,
-		"office_workflow_id":               nullString(workspace.OfficeWorkflowID),
-		"created_at":                       workspace.CreatedAt,
-		"updated_at":                       workspace.UpdatedAt,
+		"dynamic_failed_route_auto_retry_enabled": workspace.DynamicFailedRouteAutoRetryEnabled,
+		"dynamic_failed_route_auto_retry_max":     workspace.DynamicFailedRouteAutoRetryMax,
+		"office_workflow_id":                      nullString(workspace.OfficeWorkflowID),
+		"created_at":                              workspace.CreatedAt,
+		"updated_at":                              workspace.UpdatedAt,
 	}
 }
 

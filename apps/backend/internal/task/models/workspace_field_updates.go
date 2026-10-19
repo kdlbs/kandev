@@ -13,5 +13,9 @@ type WorkspaceFieldUpdate struct {
 	ACPIdleSuspensionEnabled      *bool
 	ACPIdleTimeoutMinutes         *int
 	DynamicMidTurnFailoverEnabled *bool
-	UnitID                        *string
+	// DynamicFailedRouteAutoRetryEnabled and DynamicFailedRouteAutoRetryMax
+	// change the failed-route automatic retry policy.
+	DynamicFailedRouteAutoRetryEnabled *bool
+	DynamicFailedRouteAutoRetryMax     *int
+	UnitID                             *string
 }

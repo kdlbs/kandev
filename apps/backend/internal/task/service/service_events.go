@@ -946,17 +946,19 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 	}
 
 	data := map[string]interface{}{
-		"id":                               workspace.ID,
-		"name":                             workspace.Name,
-		"description":                      workspace.Description,
-		"owner_id":                         workspace.OwnerID,
-		"default_executor_id":              workspace.DefaultExecutorID,
-		"default_environment_id":           workspace.DefaultEnvironmentID,
-		"default_agent_profile_id":         workspace.DefaultAgentProfileID,
-		"default_config_agent_profile_id":  workspace.DefaultConfigAgentProfileID,
-		"acp_idle_suspension_enabled":      workspace.ACPIdleSuspensionEnabled,
-		"acp_idle_timeout_minutes":         workspace.ACPIdleTimeoutMinutes,
-		"dynamic_midturn_failover_enabled": workspace.DynamicMidTurnFailoverEnabled,
+		"id":                                      workspace.ID,
+		"name":                                    workspace.Name,
+		"description":                             workspace.Description,
+		"owner_id":                                workspace.OwnerID,
+		"default_executor_id":                     workspace.DefaultExecutorID,
+		"default_environment_id":                  workspace.DefaultEnvironmentID,
+		"default_agent_profile_id":                workspace.DefaultAgentProfileID,
+		"default_config_agent_profile_id":         workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":             workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":                workspace.ACPIdleTimeoutMinutes,
+		"dynamic_midturn_failover_enabled":        workspace.DynamicMidTurnFailoverEnabled,
+		"dynamic_failed_route_auto_retry_enabled": workspace.DynamicFailedRouteAutoRetryEnabled,
+		"dynamic_failed_route_auto_retry_max":     workspace.DynamicFailedRouteAutoRetryMax,
 		// Placement is reach: moving a workspace between units is what grants
 		// and withdraws access now, so an access-changed event that omitted it
 		// would tell clients something changed without telling them what.

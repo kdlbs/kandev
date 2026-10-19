@@ -21,6 +21,7 @@ const (
 	routeStatusActive         = "active"
 	routeStatusActionRequired = "action_required"
 	routeStatusRetrying       = "retrying"
+	routeStatusWaiting        = "waiting"
 )
 
 func WithClock(now func() time.Time) EngineOption {
@@ -216,7 +217,7 @@ func (e *Engine) selectContext(
 			state.ProfileVersion == profile.Version {
 			nextState.PolicyStateJSON = carryUnclassifiedStreak(state.PolicyStateJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified)
 		}
-		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(candidate.ID))
+		nextState.PolicyStateJSON = carryFailedRouteRetry(state.PolicyStateJSON, e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(candidate.ID)))
 		if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
 			delete(e.states, sessionID)
 			return RouteDecision{}, err
@@ -230,8 +231,8 @@ func (e *Engine) selectContext(
 		LogicalProfileID: profile.ID,
 		Generation:       generation,
 		ProfileVersion:   profile.Version,
-		Status:           "waiting",
-		PolicyStateJSON:  e.orderedPolicyState("", plan.chain),
+		Status:           routeStatusWaiting,
+		PolicyStateJSON:  carryFailedRouteRetry(state.PolicyStateJSON, e.orderedPolicyState("", plan.chain)),
 		UpdatedAt:        now,
 	}
 	return e.persistNoEligibleDecision(ctx, expectedGeneration, nextState)
@@ -656,6 +657,7 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	if e.orderedTiers {
 		nextState.PolicyStateJSON = e.orderedPolicyState(nextState.PolicyStateJSON, plan.chain.withCandidate(successor.ID))
 	}
+	nextState.PolicyStateJSON = carryFailedRouteRetry(state.PolicyStateJSON, nextState.PolicyStateJSON)
 	if persistedDecision, err := e.recordUnclassifiedSuccessor(
 		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
 	); err != nil {

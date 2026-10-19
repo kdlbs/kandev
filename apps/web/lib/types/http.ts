@@ -325,6 +325,10 @@ export type Workspace = {
   acp_idle_timeout_minutes: number;
   /** Opt-in automatic Try next after a mid-turn provider-capacity failure. */
   dynamic_midturn_failover_enabled?: boolean;
+  /** Opt-in automatic Retry of a route a provider-capacity failure left in recovery. */
+  dynamic_failed_route_auto_retry_enabled?: boolean;
+  /** Automatic retries allowed between successful turns, 1-3. */
+  dynamic_failed_route_auto_retry_max?: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;

@@ -616,6 +616,8 @@ const infraSchemaDDL = `
 		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		dynamic_midturn_failover_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		dynamic_failed_route_auto_retry_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		dynamic_failed_route_auto_retry_max INTEGER NOT NULL DEFAULT 1 CHECK (dynamic_failed_route_auto_retry_max BETWEEN 1 AND 3),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
