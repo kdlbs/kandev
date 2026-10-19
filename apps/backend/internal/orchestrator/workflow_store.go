@@ -320,8 +320,7 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 
 // applyTransitionReportingApplied is ApplyTransition for callers that run the
 // target step's lifecycle after the commit. applied=false means the task row
-// was not written (the workflow delivery effect carried by ctx was already
-// consumed), so the caller must not treat the move as done.
+// was not written, so the caller must not treat the move as done.
 func (s *workflowStore) applyTransitionReportingApplied(
 	ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
 ) (bool, error) {

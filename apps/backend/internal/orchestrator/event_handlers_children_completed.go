@@ -215,10 +215,7 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	if parentID == "" || s.workflowEngine == nil || s.workflowStore == nil || s.workflowStepGetter == nil {
 		return false
 	}
-	// The last child often completes inside its own agent turn, so ctx can
-	// still carry that turn's workflow delivery effect. The child's move has
-	// already consumed it; reusing it for the parent's commit would make the
-	// parent move a no-op.
+	// The parent transition must not carry the child turn's workflow delivery effect.
 	ctx = withoutWorkflowEffect(ctx)
 
 	rows, ok := s.readyChildCompletionRows(ctx, parentID)
