@@ -63,6 +63,15 @@ export async function assertRestartRetained(
       { message: "Waiting for the restarted agent to become ready", timeout: 30_000 },
     )
     .toBe("WAITING_FOR_INPUT");
+  await assertRestartDataRetained(api, taskId, sessionId, before);
+}
+
+export async function assertRestartDataRetained(
+  api: ApiClient,
+  taskId: string,
+  sessionId: string,
+  before: Awaited<ReturnType<typeof captureRestartBaseline>>,
+) {
   const after = await captureRestartBaseline(api, taskId, sessionId);
   expect(after.sessions.map((s) => s.id).sort()).toEqual(before.sessions.map((s) => s.id).sort());
   const promotedSibling = before.target.is_primary

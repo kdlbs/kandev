@@ -58,6 +58,12 @@ archive restrictions, admission, and recovery policy remain authoritative.
 `maybePromotePrimary` in `event_handlers_streaming.go` can promote an active
 sibling when Stop cancels the current primary. Keep this existing Stop behavior.
 Restart does not send `session.set_primary` to reverse that promotion.
+
+Capture whether the target is selected and the current user navigation revision
+before Stop. After the attempt settles, restore that target only if the user
+still views the same task and the navigation revision is unchanged. Automatic
+sibling adoption does not advance this revision. A later explicit selection does.
+Restore selection after a failed Resume too, so the target's recovery stays visible.
 WebSocket projections retain responsibility for runtime state and readiness.
 The action does not write an optimistic RUNNING state or claim readiness from
 the launch acknowledgment alone.
@@ -113,6 +119,9 @@ catalogs and refresh pseudo through repository scripts.
 
 Stop rejection ends the sequence. Resume rejection ends the sequence and
 leaves ordinary Resume or existing recovery controls available as projected.
+Stopping an in-flight durable prompt can require explicit recovery because its
+outcome is uncertain. Restart must preserve that safety boundary and must not
+replay the prompt to make Resume succeed.
 Do not roll back a completed Stop by claiming that the agent remains running.
 Report a missing connection explicitly rather than returning silent success.
 

@@ -13,9 +13,26 @@ test("mobile: restarts from the session actions sheet and retains the conversati
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
   const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  await apiClient.launchSession({
+    task_id: fixture.task.id,
+    agent_profile_id: seedData.agentProfileId,
+    prompt: "/e2e:simple-message",
+  });
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
+          (session) => session.state === "WAITING_FOR_INPUT",
+        ).length,
+    )
+    .toBe(2);
+  await testPage.getByTestId("mobile-sessions-pill").tap();
+  await testPage.getByTestId(`mobile-session-row-${fixture.sessionId}`).tap();
+  await expect(testPage.getByRole("dialog", { name: "Sessions", exact: true })).not.toBeVisible();
   const draft = await fixture.session.fillMessage("Keep this phone draft");
   const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
   await testPage.getByTestId("mobile-sessions-pill").tap();
@@ -32,6 +49,9 @@ test("mobile: restarts from the session actions sheet and retains the conversati
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
   await assertNoDocumentHorizontalOverflow(testPage, "mobile restart menu");
+  await prCapture.screenshot("phone-session-restart-menu", {
+    caption: "Restart the selected conversation from the phone session menu.",
+  });
   const stop = fixture.wire.waitForResponse("session.stop");
   const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
   await action.tap();

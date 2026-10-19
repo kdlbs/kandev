@@ -25,6 +25,22 @@ function getPendingStore(owner: object) {
   return store;
 }
 
+function restoreRestartSelection(
+  owner: ReturnType<typeof useAppStoreApi>,
+  taskId: string,
+  sessionId: string,
+  navigationRevision: number,
+) {
+  const current = owner.getState();
+  if (
+    current.tasks.activeTaskId === taskId &&
+    current.tasks.activeSessionId !== sessionId &&
+    current.taskRemoval.navigationRevision === navigationRevision
+  ) {
+    current.setActiveSession(taskId, sessionId);
+  }
+}
+
 export function useSessionRestart(sessionId: string | null | undefined, taskId: string | null) {
   const owner = useAppStoreApi();
   const pending = getPendingStore(owner);
@@ -50,6 +66,10 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
       return false;
     }
 
+    const initial = owner.getState();
+    const wasSelected =
+      initial.tasks.activeTaskId === taskId && initial.tasks.activeSessionId === sessionId;
+    const navigationRevision = initial.taskRemoval.navigationRevision;
     pending.setState(new Set([...pending.getState(), sessionId]), true);
     const toastId = toast({ title: t("task:sessionActionRestart"), variant: "loading" });
     try {
@@ -71,6 +91,7 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
       });
       return false;
     } finally {
+      if (wasSelected) restoreRestartSelection(owner, taskId, sessionId, navigationRevision);
       const next = new Set(pending.getState());
       next.delete(sessionId);
       pending.setState(next, true);

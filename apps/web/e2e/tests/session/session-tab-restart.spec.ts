@@ -7,10 +7,11 @@ import {
   createRestartScenario,
   captureRestartBaseline,
   assertRestartRetained,
+  assertRestartDataRetained,
 } from "./session-tab-restart-helpers";
 
-// @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.5
-test("restarts a running agent from its tab without losing history", async ({
+// @covers AC-TASKS-SESSION-TAB-RESTART-001.1, AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.3, AC-TASKS-SESSION-TAB-RESTART-001.5
+test("keeps history and recovery available after restarting an interrupted turn", async ({
   testPage,
   apiClient,
   seedData,
@@ -24,12 +25,28 @@ test("restarts a running agent from its tab without losing history", async ({
   const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
   expect(before.target.state).toBe("RUNNING");
   const stop = fixture.wire.waitForResponse("session.stop");
-  const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
+  const launch = fixture.wire
+    .waitForResponse("session.launch", { timeoutAfter: stop })
+    .catch((error: unknown) => error);
   const wireStart = fixture.traffic.frames.length;
   await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
   await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
-  await Promise.all([stop, launch]);
-  await assertRestartRetained(apiClient, fixture.task.id, fixture.sessionId, before);
+  await stop;
+  const launchOutcome = await launch;
+  if (launchOutcome instanceof Error) {
+    expect(launchOutcome.message).toContain("unknown_prompt_outcome");
+  }
+  await expect
+    .poll(async () =>
+      (await apiClient.getTaskSession(fixture.sessionId)).session.session_recovery_blocks?.some(
+        (block) => block.reason === "unknown_prompt_outcome",
+      ),
+    )
+    .toBe(true);
+  const recovery = testPage.getByTestId("failed-session-banner");
+  await expect(recovery).toContainText("The prompt outcome is uncertain.");
+  await expect(recovery.getByTestId("recovery-resume-button")).toBeEnabled();
+  await assertRestartDataRetained(apiClient, fixture.task.id, fixture.sessionId, before);
   await expect(
     fixture.session.chat.getByText("simple mock response", { exact: false }),
   ).toBeVisible();
@@ -44,42 +61,53 @@ test("restarts a running agent from its tab without losing history", async ({
   ]);
 });
 
-test("restarts a non-active tab while preserving the selected session and draft", async ({
-  testPage,
-  apiClient,
-  seedData,
-}) => {
-  test.setTimeout(120_000);
-  const fixture = await createRestartScenario(testPage, apiClient, seedData);
-  await fixture.session.openNewSessionDialog();
-  await fixture.session.newSessionPromptInput().fill("/e2e:simple-message");
-  await fixture.session.newSessionStartButton().click();
-  await expect(fixture.session.newSessionDialog()).not.toBeVisible();
-  await expect
-    .poll(
-      async () =>
-        (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
-          (s) => s.state === "WAITING_FOR_INPUT",
-        ).length,
-      { message: "Waiting for both sessions to become idle", timeout: 30_000 },
-    )
-    .toBe(2);
-  const sessions = (await apiClient.listTaskSessions(fixture.task.id)).sessions;
-  const sibling = sessions.find((s) => s.id !== fixture.sessionId)!;
-  await fixture.session.sessionTabBySessionId(sibling.id).click();
-  const editor = await fixture.session.fillMessage("Keep this unsent draft");
-  const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
-  const stop = fixture.wire.waitForResponse("session.stop");
-  const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
-  await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
-  await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
-  await Promise.all([stop, launch]);
-  await assertRestartRetained(apiClient, fixture.task.id, fixture.sessionId, before);
-  await expect(editor).toContainText("Keep this unsent draft");
-  await expect
-    .poll(() => testPage.evaluate("window.__KANDEV_E2E_STORE__.getState().tasks.activeSessionId"))
-    .toBe(sibling.id);
-});
+for (const restartSelected of [false, true]) {
+  test(`restarts ${restartSelected ? "the selected" : "a non-active"} tab with a live sibling and preserves the draft`, async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const fixture = await createRestartScenario(testPage, apiClient, seedData);
+    await fixture.session.openNewSessionDialog();
+    await fixture.session.newSessionPromptInput().fill("/e2e:simple-message");
+    await fixture.session.newSessionStartButton().click();
+    await expect(fixture.session.newSessionDialog()).not.toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
+            (s) => s.state === "WAITING_FOR_INPUT",
+          ).length,
+        { message: "Waiting for both sessions to become idle", timeout: 30_000 },
+      )
+      .toBe(2);
+    const sessions = (await apiClient.listTaskSessions(fixture.task.id)).sessions;
+    const sibling = sessions.find((s) => s.id !== fixture.sessionId)!;
+    await fixture.session.sessionTabBySessionId(sibling.id).click();
+    const editor = await fixture.session.fillMessage("Keep this unsent draft");
+    const targetId = restartSelected ? sibling.id : fixture.sessionId;
+    const before = await captureRestartBaseline(apiClient, fixture.task.id, targetId);
+    const stop = fixture.wire.waitForResponse("session.stop");
+    const launch = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stop });
+    await fixture.session.sessionTabBySessionId(targetId).click({ button: "right" });
+    const action = testPage.getByRole("menuitem", { name: "Restart session", exact: true });
+    await expect(action).toBeVisible();
+    if (restartSelected) {
+      await prCapture.screenshot("desktop-session-restart-menu", {
+        caption: "Restart the selected session while a live sibling remains available.",
+      });
+    }
+    await action.click();
+    await Promise.all([stop, launch]);
+    await assertRestartRetained(apiClient, fixture.task.id, targetId, before);
+    await expect(editor).toContainText("Keep this unsent draft");
+    await expect
+      .poll(() => testPage.evaluate("window.__KANDEV_E2E_STORE__.getState().tasks.activeSessionId"))
+      .toBe(sibling.id);
+  });
+}
 
 test("offers keyboard restart from the preview tab and preserves phone boundary sizing", async ({
   testPage,

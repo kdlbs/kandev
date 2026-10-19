@@ -67,6 +67,9 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 
 Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
 
+Restart keeps the selected conversation open. If you select another conversation
+while restart is pending, Kandev keeps your later selection.
+
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
 When a turn, startup, or resume fails:

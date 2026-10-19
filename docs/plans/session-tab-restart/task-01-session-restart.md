@@ -156,3 +156,39 @@ active sibling, consistent with the user's confirmed stop-and-resume sequence.
 The restart action never sends `session.set_primary`.
 
 Public docs updated: `docs/public/sessions-and-review.md`.
+
+## PR remediation results
+
+The action restores selection after successful or failed Resume when Stop
+caused automatic sibling adoption. Later user navigation takes precedence.
+The regression first failed because session `s2` remained selected instead of `s1`.
+Desktop and phone coverage now includes a selected target with a live sibling.
+Public session guidance explains how restart preserves the user's selection.
+
+Local verification completed on 2026-10-19:
+
+- The four-file Vitest command in Verification passed: 97 tests.
+- Changed-file ESLint and Prettier passed, including the restart E2E helpers.
+- `NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck` passed.
+- `pnpm run i18n:check` and `pnpm run i18n:ratchet` passed.
+- `pnpm e2e:run --host --no-build --project chromium tests/session/session-tab-restart.spec.ts -- --retries=0`
+  passed all 4 desktop tests after a fresh managed build.
+- `pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-session-tab-restart.spec.ts tests/chat/mobile-chat-status-bar.spec.ts tests/system/mobile-logs-bundle.spec.ts -- --retries=0`
+  passed all 8 phone tests, including the previously failing workflow and
+  diagnostic drawer checks.
+- Focused Playwright discovery for the six files with CI discovery errors passed:
+  31 tests. Fresh CI remains the final evidence for that shard.
+- Public-doc validation passed for 48 pages. Specification catalog validation,
+  full specification lint, and whitespace checks passed.
+
+The browser environment removed inherited Kandev launch configuration and used
+the installed Chromium library paths. These were local runner settings.
+The running-turn test now checks retained data and recovery after an uncertain
+prompt outcome. A launch acknowledgment alone does not prove readiness.
+It covers the existing recovery boundary without replaying the prompt.
+
+Public documentation type: how-to guidance for session selection.
+Menu geometry and motion follow the existing shared primitives.
+The checks found no actionable UI polish issue.
+Final commit verification, screenshot publication, remote CI, and review remain
+delivery steps. Exact-head remote evidence belongs in the PR and handoff.

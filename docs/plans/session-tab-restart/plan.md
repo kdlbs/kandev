@@ -155,7 +155,17 @@ record the exact final commands: 93 targeted tests, 3 desktop E2E tests, and
 1 phone E2E test passed. Typecheck, lint, localization, public documentation,
 specification, coverage, formatting, and whitespace checks passed.
 
-The active requirements and current design match the delivered action.
+### PR remediation
+
+The review found that Stop could select a live sibling during restart.
+The action now restores the original selection after the attempt settles,
+unless a later user navigation changes the task or navigation revision.
+Backend primary promotion remains unchanged. Desktop and phone regressions
+cover a selected target with a live sibling.
+
+The [work order results](task-01-session-restart.md#pr-remediation-results)
+record the final local checks. Remote CI and review remain pending until the
+remediation reaches the PR and its checks complete.
 
 ## Risks
 
