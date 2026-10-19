@@ -468,6 +468,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		TurnID:                      event.TurnID,
 		Data:                        event.Data,
 		CanonicalProjection:         event.CanonicalProjection,
+		ShellOutputHasContent:       event.ShellOutputHasContent,
 		MessageID:                   event.CanonicalMessageID,
 		IsAppend:                    event.CanonicalMessageAppend,
 		MessageType:                 canonicalMessageType(event),

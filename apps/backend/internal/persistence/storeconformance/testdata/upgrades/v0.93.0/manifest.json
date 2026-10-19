@@ -462,7 +462,9 @@
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
-      "task_workflow_session_bindings"
+      "task_workflow_session_bindings",
+      "task_message_shell_output",
+      "task_message_shell_output_chunks"
     ]
   }
 }

@@ -440,9 +440,19 @@ Structured shell-command activity keeps the command, working directory, status, 
 For foreground ACP commands, consecutive output-only updates are grouped into
 periodic snapshots, normally no more frequently than once every 250 ms while
 delivery is available. Ordered boundaries can flush sooner.
-The first output and final result remain immediate. This avoids repeatedly saving
-the accumulated transcript for every small output chunk; command state changes,
-conversation text and committed replay records keep their normal ordering.
+The first output and final result remain immediate. With delivery protocol v2,
+Kandev saves incremental changes and bounded checkpoints instead of repeatedly
+saving the accumulated tail. This also bounds repeated output writes for slow,
+hours-long commands after the retained tail fills. Each supported output field
+keeps up to 256 KiB of UTF-8 text; truncation and authoritative final results keep
+their existing meaning. Command state changes, conversation text and committed
+replay records keep their normal ordering.
+
+An already-running v1 runtime remains supported and continues saving full
+snapshots until it is safely replaced through normal session handling. Its
+storage cost does not gain the v2 bound merely because the backend was upgraded.
+See [incremental shell delivery](operations.md#incremental-shell-delivery) for
+upgrade and recovery limits.
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total

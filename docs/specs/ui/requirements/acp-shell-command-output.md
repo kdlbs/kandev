@@ -62,7 +62,12 @@ Agent chat shows that a shell command ran, but ACP agents encode terminal output
 
 ## Data model
 
-No table or migration is added. The existing persisted tool-message metadata carries:
+The original v1 representation uses persisted tool-message metadata as follows.
+Delivery v2 adds canonical chunk storage under the
+[platform incremental-delivery design](../../platform/system-design/incremental-shell-delivery.md);
+the projected summary and authorized detail API below remain the UI contract.
+
+Legacy persisted tool-message metadata carries:
 
 ```text
 metadata.normalized.shell_exec.output
@@ -178,7 +183,7 @@ Live output updates use the existing tool-message update path and are persisted 
 - Fixing provider-side output loss before an ACP frame reaches Kandev.
 - Adding a terminal emulator, ANSI replay, command re-run action, download action, or searchable output viewer to chat.
 - Changing non-ACP adapters or the standalone terminal panel.
-- Moving shell output into a new table, object store, or streaming/chunked output protocol.
+- Owning the durable transport/storage representation. Platform incremental delivery extends that representation while preserving this UI contract.
 
 ## Implementation plan
 

@@ -71,6 +71,11 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 		delete(root, "result")
 		paths = append(paths, "result")
 	}
+	storedBytes := incrementalShellPayloadBytes(root, body, kind)
+	if storedBytes > 0 {
+		delete(root, ShellOutputStorageKey)
+		paths = append(paths, ShellOutputStorageKey)
+	}
 	if len(paths) == 0 {
 		result.Reason = "no_payload"
 		return result, nil
@@ -78,7 +83,7 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 	if err := updateReducedPayload(root, norm, body, kind); err != nil {
 		return result, err
 	}
-	return encodePayloadRemoval(root, paths, metadata, removedAt)
+	return encodePayloadRemoval(root, paths, metadata, removedAt, storedBytes)
 }
 
 func supportedPayload(kind, messageType string, norm rawPayloadObject) bool {
@@ -100,7 +105,7 @@ func updateReducedPayload(root, norm, body rawPayloadObject, kind string) error 
 	return nil
 }
 
-func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte, removedAt time.Time) (PayloadReduction, error) {
+func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte, removedAt time.Time, storedBytes int64) (PayloadReduction, error) {
 	marker := map[string]any{"version": 1, "removed_at": removedAt.UTC().Format(time.RFC3339Nano), "removed_fields": paths}
 	// Fixed-width numeric notation keeps the receipt size independent of the
 	// positive byte count's decimal width, including power-of-ten boundaries.
@@ -114,7 +119,7 @@ func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte
 	if err != nil {
 		return PayloadReduction{Metadata: metadata}, err
 	}
-	delta := int64(len(metadata) - len(encoded))
+	delta := int64(len(metadata)-len(encoded)) + storedBytes
 	if delta <= 0 {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
 	}
@@ -128,7 +133,7 @@ func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte
 	if err != nil {
 		return PayloadReduction{Metadata: metadata}, err
 	}
-	delta = int64(len(metadata) - len(encoded))
+	delta = int64(len(metadata)-len(encoded)) + storedBytes
 	if delta <= 0 {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
 	}
@@ -266,4 +271,26 @@ func removeOutputPayloads(kind string, body rawPayloadObject, prefix string) ([]
 	}
 	body["output"] = encoded
 	return paths, true, nil
+}
+
+func incrementalShellPayloadBytes(root, body rawPayloadObject, kind string) int64 {
+	if kind != "shell_exec" {
+		return 0
+	}
+	var version int
+	if json.Unmarshal(root[ShellOutputStorageKey], &version) != nil || version != 1 {
+		return 0
+	}
+	output, ok := payloadObject(body["output"])
+	if !ok {
+		return 0
+	}
+	var stdout, stderr int64
+	if json.Unmarshal(output["stdout_bytes"], &stdout) != nil || json.Unmarshal(output["stderr_bytes"], &stderr) != nil {
+		return 0
+	}
+	if stdout < 0 || stderr < 0 || stdout > 256*1024 || stderr > 256*1024 {
+		return 0
+	}
+	return stdout + stderr
 }

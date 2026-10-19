@@ -99,6 +99,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// starting the new instance's agent. Missing header is allowed for
 	// backward compatibility with curl/tests; mismatch is rejected.
 	s.router.Use(instanceIDGuard(cfg.InstanceID))
+	s.router.Use(s.deliveryProtocolGuard())
 
 	s.setupRoutes()
 	return s

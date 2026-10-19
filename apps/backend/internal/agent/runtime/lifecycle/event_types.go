@@ -233,6 +233,7 @@ type AgentStreamEventData struct {
 	TurnID                      string                           `json:"turn_id,omitempty"`
 	Data                        interface{}                      `json:"data,omitempty"`
 	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
+	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

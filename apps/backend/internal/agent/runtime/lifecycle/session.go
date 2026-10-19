@@ -232,7 +232,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		}
 	}
 	deliveryDecision := NegotiateDurableDelivery(
-		journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+		journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true},
 		peerVersion,
 		peerDurable,
 		peerUnresolved,

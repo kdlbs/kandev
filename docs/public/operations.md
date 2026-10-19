@@ -242,6 +242,33 @@ deleted. The worker runs after the database transaction and retries after a
 restart. Do not delete `<home>/plugins/webapps/` files while their release rows
 or cleanup jobs still exist.
 
+### Incremental shell delivery
+
+New compatible agentctl runtimes use delivery protocol v2 for supported foreground
+ACP shell output. Incremental output and progress-based checkpoints reduce repeated
+journal, inbox and canonical-output writes while preserving the existing output
+viewer on desktop and phones. Retained v1 runtimes continue using their original
+snapshot contract and storage cost. Backend delivery cleanup still uses the existing
+payload grace and projection proof; unacknowledged output does not expire.
+
+A new agentctl validates and upgrades an owned v1 journal to format v2 atomically.
+Existing event bytes, sequence numbers and submission evidence remain unchanged.
+An old backend cannot consume compact records: v2 data and submission endpoints
+require explicit reader support. Status and Stop remain available when a reader
+is incompatible. Do not delete recovery evidence or resend an uncertain prompt
+as a workaround.
+
+Use forward repair with compatible binaries for recovery. There is no transparent
+in-place downgrade: older backends do not understand the new canonical output
+chunks, and older agentctl binaries reject the newer journal format. Rollback
+requires an offline, verified, matched pre-upgrade database and journal backup.
+That backup restores only the state it captured; work accepted afterward and
+external tool effects need explicit reconciliation.
+
+The change reduces new repeated writes. It does not shrink existing SQLite files:
+free pages can remain allocated after cleanup. Physical file reclamation and
+manual database compaction are separate maintenance operations.
+
 ## Storage maintenance
 
 > **Destructive:** **Force clear all** permanently removes eligible quarantine entries and discards their restore windows.

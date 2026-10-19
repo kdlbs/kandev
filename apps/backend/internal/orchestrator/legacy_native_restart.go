@@ -138,5 +138,5 @@ func legacyNativeOwnerMatches(identity *agentruntime.AgentDeliveryRecoveryIdenti
 }
 
 func legacyNativeDescriptorIdle(d journal.RecoveryDescriptor) bool {
-	return d.Durable && d.Version == journal.CurrentVersion && !d.SubmissionsTruncated && d.SubmissionCount == 0 && len(d.Submissions) == 0 && !d.Unresolved
+	return d.Durable && journal.SupportsDeliveryVersion(d.Version) && !d.SubmissionsTruncated && d.SubmissionCount == 0 && len(d.Submissions) == 0 && !d.Unresolved
 }

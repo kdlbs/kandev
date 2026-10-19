@@ -16,6 +16,9 @@ const (
 	// EventTypeToolUpdate indicates a tool status update (running, completed, etc.).
 	EventTypeToolUpdate = "tool_update"
 
+	// EventTypeShellOutputUpdate carries a versioned bounded shell output patch.
+	EventTypeShellOutputUpdate = "shell_output_update"
+
 	// EventTypePlan indicates agent plan/task list updates.
 	EventTypePlan = "plan"
 
@@ -293,6 +296,14 @@ type AgentEvent struct {
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.
 	NormalizedPayload *NormalizedPayload `json:"normalized,omitempty"`
+
+	// ShellOutput carries compact output only on a negotiated delivery stream.
+	ShellOutput *ShellOutputPatch `json:"shell_output,omitempty"`
+
+	// ShellOutputEligible is adapter-owned provenance for known output-only carriers.
+	ShellOutputEligible bool `json:"-"`
+	// ShellOutputHasContent preserves substantive output after duplicate carriers are removed.
+	ShellOutputHasContent bool `json:"shell_output_has_content,omitempty"`
 
 	// Diff contains unified diff content for file changes.
 	// Populated when tools modify files, providing the aggregated diff.
