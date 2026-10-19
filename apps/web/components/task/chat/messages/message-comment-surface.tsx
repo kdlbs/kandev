@@ -45,6 +45,7 @@ import {
   supportsCustomHighlights,
   useMessageCommentDecorations,
   useMessageCommentShortcut,
+  useMessageCommentMouseSelection,
 } from "./use-message-comment-dom";
 import {
   MessageCommentDecorationOverlay,
@@ -359,13 +360,7 @@ function useCommentTargetState(
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
 
-  useEffect(() => {
-    if (!isSelectable || composerOpen) return;
-    const ownerDocument = rootRef.current?.ownerDocument;
-    // A valid message selection can end with the pointer outside its body.
-    ownerDocument?.addEventListener("mouseup", captureSelection);
-    return () => ownerDocument?.removeEventListener("mouseup", captureSelection);
-  }, [captureSelection, composerOpen, isSelectable, rootRef]);
+  useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
 
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),

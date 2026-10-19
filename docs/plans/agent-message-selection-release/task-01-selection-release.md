@@ -23,6 +23,7 @@ system_design:
   surrounding padding, in Task Chat and Quick Chat.
 - Outside, cross-message, active-turn, and sessionless selections remain rejected.
 - Mouse release inside an open editor preserves the selected quote and feedback.
+- An unrelated control cannot restore a dismissed trigger from a preserved selection.
 
 Touch capture, layout, persistence, and delivery are outside the repair scope.
 
@@ -31,6 +32,8 @@ Touch capture, layout, persistence, and delivery are outside the repair scope.
 - `apps/web/components/task/chat/messages/message-comment-surface.tsx`
 - `apps/web/components/task/chat/messages/message-comment-surface.test.tsx`
 - `apps/web/e2e/tests/chat/agent-message-comments.spec.ts`
+- `apps/web/e2e/tests/chat/agent-message-comments-helpers.ts`
+- `apps/web/components/task/chat/messages/use-message-comment-dom.ts`
 
 ## Verification
 
@@ -41,7 +44,7 @@ pnpm exec vitest run components/task/chat/messages/message-comment-surface.test.
 pnpm e2e:run --host e2e/tests/chat/agent-message-comments.spec.ts
 pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-agent-message-comments.spec.ts
 NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck
-pnpm exec eslint --max-warnings 0 components/task/chat/messages/message-comment-surface.tsx components/task/chat/messages/message-comment-surface.test.tsx e2e/tests/chat/agent-message-comments.spec.ts
+pnpm exec eslint --max-warnings 0 components/task/chat/messages/message-comment-surface.tsx components/task/chat/messages/message-comment-surface.test.tsx e2e/tests/chat/agent-message-comments.spec.ts e2e/tests/chat/agent-message-comments-helpers.ts components/task/chat/messages/use-message-comment-dom.ts
 pnpm run i18n:ratchet
 ```
 
@@ -55,3 +58,12 @@ to allow the quotation marks rendered around the selected text.
 
 Local browser runs used `KANDEV_SERVER_HOST=127.0.0.1`, IPv4-first DNS, and the
 installed Nix browser libraries. These are runner settings, not product changes.
+
+## Review remediation
+
+CodeRabbit identified stale selection capture after an unrelated mouse click.
+The unit and browser regressions reproduced the trigger returning after dismissal.
+The shared DOM hook now pairs mouse-down origin with document-level mouse release.
+Touch capture remains independent. After remediation, all 21 focused tests,
+five desktop browser cases, and two mobile browser cases passed. Typecheck,
+changed-file ESLint, formatting, translation checks, and specification lint passed.

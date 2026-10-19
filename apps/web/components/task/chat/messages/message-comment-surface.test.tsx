@@ -126,6 +126,7 @@ describe("MessageCommentSurface selection capture", () => {
       const selection = window.getSelection()!;
       selection.removeAllRanges();
       selection.addRange(range);
+      fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
       fireEvent.mouseUp(document.body);
 
       expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
@@ -153,6 +154,7 @@ describe("MessageCommentSurface selection capture", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId("message-padding"));
 
     fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
@@ -165,6 +167,43 @@ describe("MessageCommentSurface selection capture", () => {
       selectedText: "The settled answer",
       text: COMMENT_TEXT,
     });
+  });
+});
+
+describe("MessageCommentSurface selection dismissal", () => {
+  it("does not restore a dismissed trigger after an unrelated mouse click", () => {
+    const content = "The settled answer includes context.";
+    render(
+      <>
+        <MessageCommentSurface
+          message={message(content)}
+          sessionId={SESSION_ID}
+          isTurnActive={false}
+        >
+          <span data-testid={MESSAGE_TEXT_TEST_ID}>{content}</span>
+        </MessageCommentSurface>
+        <button onMouseDown={(event) => event.preventDefault()}>Unrelated control</button>
+      </>,
+    );
+    const text = screen.getByTestId(MESSAGE_TEXT_TEST_ID);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseDown(text);
+    fireEvent.mouseUp(text);
+    expect(screen.getByTestId(COMMENT_TRIGGER_TEST_ID)).not.toBeNull();
+
+    const control = screen.getByRole("button", { name: "Unrelated control" });
+    fireEvent.pointerDown(control);
+    expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
+    fireEvent.mouseDown(control);
+    fireEvent.mouseUp(control);
+    fireEvent.click(control);
+
+    expect(selection.toString()).toBe(content);
+    expect(screen.queryByTestId(COMMENT_TRIGGER_TEST_ID)).toBeNull();
   });
 });
 
@@ -190,6 +229,7 @@ describe("MessageCommentSurface", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
     fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
 
@@ -245,6 +285,7 @@ describe("MessageCommentSurface", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
     fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
 
@@ -281,6 +322,7 @@ describe("MessageCommentSurface layering", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
+    fireEvent.mouseDown(screen.getByTestId(MESSAGE_TEXT_TEST_ID));
     fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
 
     expect(
@@ -314,7 +356,7 @@ describe("MessageCommentSurface mobile drawer", () => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
     selection.addRange(range);
-    fireEvent.mouseUp(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
+    fireEvent.touchEnd(screen.getByTestId(MESSAGE_TEXT_TEST_ID).parentElement!);
     fireEvent.click(screen.getByTestId(COMMENT_TRIGGER_TEST_ID));
     const input = screen.getByTestId("agent-message-comment-input");
     fireEvent.change(input, { target: { value: COMMENT_TEXT } });

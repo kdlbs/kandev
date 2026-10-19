@@ -55,6 +55,35 @@ test.describe("Agent message comments", () => {
     });
   }
 
+  test("keeps the comment action dismissed after an unrelated selection-preserving click", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { body } = await openSeededWaitingAgentReply(
+      testPage,
+      apiClient,
+      seedData,
+      "Selection dismissal",
+    );
+    // Model a toolbar control that preserves the native selection on mousedown.
+    await body.evaluate((element) => {
+      const button = document.createElement("button");
+      button.textContent = "Unrelated selection-preserving control";
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      element.parentElement!.append(button);
+    });
+    await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
+    const trigger = testPage.getByTestId("agent-message-comment-trigger");
+    await expect(trigger).toBeVisible();
+    await testPage.getByRole("button", { name: "Unrelated selection-preserving control" }).click();
+
+    expect(await testPage.evaluate(() => window.getSelection()?.toString())).toBe(
+      SELECTED_REPLY_TEXT,
+    );
+    await expect(trigger).not.toBeVisible();
+  });
+
   test("adds pending context and restores the highlight after reload", async ({
     testPage,
     apiClient,

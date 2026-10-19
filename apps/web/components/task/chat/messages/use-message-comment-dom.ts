@@ -67,6 +67,34 @@ export function useMessageCommentShortcut(
   }, [isSelectable, onSelect, rootRef]);
 }
 
+export function useMessageCommentMouseSelection(
+  rootRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  onSelect: () => void,
+) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!enabled || !root) return;
+    const ownerDocument = root.ownerDocument;
+    let startedInMessage = false;
+    const onMouseDown = (event: MouseEvent) => {
+      startedInMessage = event.target instanceof Node && root.contains(event.target);
+    };
+    const onMouseUp = () => {
+      if (!startedInMessage) return;
+      startedInMessage = false;
+      onSelect();
+    };
+    // Selection drags can end outside the message, but must start inside it.
+    ownerDocument.addEventListener("mousedown", onMouseDown, true);
+    ownerDocument.addEventListener("mouseup", onMouseUp);
+    return () => {
+      ownerDocument.removeEventListener("mousedown", onMouseDown, true);
+      ownerDocument.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [enabled, onSelect, rootRef]);
+}
+
 type HighlightRegistry = {
   set: (name: string, highlight: unknown) => void;
   delete: (name: string) => void;

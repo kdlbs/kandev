@@ -11,7 +11,9 @@ system_design:
 
 The message-local mouse-release handler missed valid selections when the
 pointer ended in surrounding padding. The repair captures mouse release at the
-document boundary and preserves message-local selection validation.
+document boundary and preserves message-local selection validation. It requires
+the mouse interaction to start inside the message so unrelated clicks cannot
+restore a dismissed trigger.
 
 ## Work order
 
@@ -19,7 +21,7 @@ document boundary and preserves message-local selection validation.
 
 ## Verification and scope
 
-Twenty focused tests and six browser cases passed, including real drags in Task
+Twenty-one focused tests and seven browser cases passed, including real drags in Task
 Chat and Quick Chat and the existing mobile drawer flows. Typecheck, changed-file
 lint, formatting, and the translation ratchet passed. The work order records the
 commands. Public documentation already describes the intended selection flow.
