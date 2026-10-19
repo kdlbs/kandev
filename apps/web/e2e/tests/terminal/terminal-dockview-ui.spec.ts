@@ -1,3 +1,4 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -12,6 +13,8 @@ import { dwell } from "../../helpers/causal-waits";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
+
+test.use({ channel: "chromium" });
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -739,6 +742,11 @@ test.describe("Terminals — dockview UI", () => {
     const input = testPage.getByTestId("terminal-tab-rename-input");
     await expect(input).toBeVisible({ timeout: 5_000 });
     await input.fill("build watcher");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("build watcher");
+      await expect(input).toBeVisible();
+    });
     await input.press("Enter");
 
     // Tab title now reads "build watcher" — proves the rename committed

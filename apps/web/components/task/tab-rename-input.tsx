@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 
 /**
  * Inline rename input rendered in place of a dockview tab body.
@@ -30,6 +31,16 @@ export function TabRenameInput({
   // stale onCommit (and Enter can't commit twice).
   const doneRef = useRef(false);
 
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: true,
+    inputRef,
+    onLeave: () => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      onCommit(value);
+    },
+  });
+
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
@@ -53,22 +64,21 @@ export function TabRenameInput({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
+          e.stopPropagation();
+          if (doneRef.current) return;
           if (e.key === "Enter") {
             e.preventDefault();
+            cancelPendingBlur();
             doneRef.current = true;
             onCommit(value);
           } else if (e.key === "Escape") {
             e.preventDefault();
+            cancelPendingBlur();
             doneRef.current = true;
             onCancel();
           }
-          // Don't let dockview see typed keys as shortcuts.
-          e.stopPropagation();
         }}
-        onBlur={() => {
-          if (doneRef.current) return;
-          onCommit(value);
-        }}
+        onBlur={onBlur}
         maxLength={maxLength}
         data-testid={testId}
         className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"

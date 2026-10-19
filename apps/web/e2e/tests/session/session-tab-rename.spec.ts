@@ -1,5 +1,8 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+
+test.use({ channel: "chromium" });
 
 test.describe("Session tab rename", () => {
   // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1 through .3
@@ -40,6 +43,11 @@ test.describe("Session tab rename", () => {
     await input.click();
     await expect(input).toBeFocused();
     await input.fill("implementation");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("implementation");
+      await expect(input).toBeVisible();
+    });
     await input.dblclick();
     await expect(maximizeButton.locator(".tabler-icon-arrows-maximize")).toBeVisible();
     const selection = await input.evaluate((element: HTMLInputElement) => ({
@@ -61,6 +69,8 @@ test.describe("Session tab rename", () => {
     await input.fill("implementation");
     await input.dblclick();
     await expect(maximizeButton.locator(".tabler-icon-arrows-minimize")).toBeVisible();
-    await testPage.keyboard.press("Escape");
+    await testPage.keyboard.press("Enter");
+    await expect(input).not.toBeVisible();
+    await expect(tab).toContainText("implementation");
   });
 });
