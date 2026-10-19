@@ -403,7 +403,11 @@ func newFixtureExecutorTransport(dataDir string) (*fixtureExecutorTransport, err
 	if err := os.WriteFile(filepath.Join(dataDir, "executor-test-ca.pem"), certificatePEM, 0o600); err != nil {
 		return nil, fmt.Errorf("plugin-fixture: persist HTTPS test certificate: %w", err)
 	}
-	listener, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", "0"))
+	listenHost := "0.0.0.0"
+	if address.IsLoopback() {
+		listenHost = "127.0.0.1"
+	}
+	listener, err := net.Listen("tcp4", net.JoinHostPort(listenHost, "0"))
 	if err != nil {
 		return nil, fmt.Errorf("plugin-fixture: start HTTPS listener: %w", err)
 	}
@@ -481,6 +485,9 @@ func fixtureExecutorTLSCertificate(address net.IP) (tls.Certificate, *x509.Certi
 }
 
 func fixtureAdvertisedAddress() (net.IP, error) {
+	if os.Getenv("KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK") == "1" {
+		return net.IPv4(127, 0, 0, 1), nil
+	}
 	connection, err := net.DialTimeout("udp4", "1.1.1.1:53", time.Second)
 	if err == nil {
 		address := connection.LocalAddr().(*net.UDPAddr).IP.To4()

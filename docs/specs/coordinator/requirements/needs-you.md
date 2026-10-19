@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-27
+last_updated: 2026-09-29
 ---
 
 # Needs you and Queue Requirements
@@ -108,11 +108,16 @@ Mockup:
   shall increase while the screen is open.
 - **AC-COORDINATOR-NEEDS-YOU-002.4:** Items shall be ordered by reference time
   ascending (oldest first), then by kind in the order proposal, question or
-  permission, stall, error, then by item id ascending (proposal id or task id,
-  compared bytewise).
+  permission, stall, error, then autonomy (phase 3,
+  [`AC-COORDINATOR-WAKE-006.2`](wake.md#req-coordinator-wake-006-seeing-what-autonomy-is-doing)),
+  then by item id ascending (proposal id, task id or `autonomy:<coordinator
+  id>`, compared bytewise).
 - **AC-COORDINATOR-NEEDS-YOU-002.5:** A question or permission item shall say
   "The agent is waiting for your answer. Answer it on the task." and offer
-  **Open task**; it shall not offer an answer control.
+  **Open task**; it shall not offer an answer control. While
+  `features.coordinatorPhase3` is effective, managers instead get the answer
+  control of [relay](relay.md) (`AC-COORDINATOR-RELAY-001.1`,
+  `AC-COORDINATOR-RELAY-002.1`).
 - **AC-COORDINATOR-NEEDS-YOU-002.6:** A stall item shall offer **Open task** and
   **Show the evidence**, which reveals stalled for, last event at, detected at,
   and whether an agent is running now from the task's primary session state.

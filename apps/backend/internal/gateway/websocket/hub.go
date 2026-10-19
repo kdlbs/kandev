@@ -462,7 +462,7 @@ func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
 
 // BroadcastToWorkspaceOrDrop is the fail-closed sibling of
 // BroadcastToWorkspace: when per-user auth is enforced it DROPS the message
-// unless the workspace is non-empty AND resolves to a known owner — it never
+// unless the workspace is non-empty and its readers or owner resolve — it never
 // falls back to a global broadcast. Every notification using this path is
 // workspace-scoped, so a payload whose workspace could not be resolved must
 // never cross user boundaries. With auth disabled (single
@@ -475,6 +475,13 @@ func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
 	}
 	if workspaceID == "" {
 		return // fail closed: no unattributed workspace fan-out under auth
+	}
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+		}
+		return
 	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil {

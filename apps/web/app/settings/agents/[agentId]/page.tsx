@@ -218,11 +218,12 @@ function useAgentSaveHandlers({
       currentAgentModelConfig,
       permissionSettings,
       resolveDisplayName,
-      upsertAgent: ((agent, creation) =>
+      upsertAgent: ((agent, creation, allowMissingAgent) =>
         upsertAgent(
           agent,
           creation,
           profileVersionAtSaveStart,
+          allowMissingAgent,
         )) satisfies SaveAgentCallbacks["upsertAgent"],
       setDraftAgent,
       ensureProfiles,

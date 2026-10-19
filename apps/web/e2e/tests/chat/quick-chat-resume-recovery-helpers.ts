@@ -3,7 +3,8 @@ import {
   expectJournalRetirement,
   readRecovery,
 } from "../../helpers/interrupted-prompt-recovery";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Locator } from "@playwright/test";
+import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { watchWs } from "../../helpers/causal-waits";
@@ -26,6 +27,22 @@ async function openExistingQuickChat(page: Page, mobile: boolean) {
   return dialog;
 }
 
+async function expectResumeReachable(resume: Locator, mobile: boolean) {
+  if (mobile) {
+    const box = await resume.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await resume.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
@@ -34,6 +51,7 @@ export async function verifyQuickChatResumeRecovery(
   apiClient: ApiClient,
   tmpDir: string,
   mobile: boolean,
+  capture?: PrAssetCapture,
 ) {
   const recoveryMessages = captureSessionRecoveryMessages(page);
   const ws = watchWs(page);
@@ -57,8 +75,7 @@ export async function verifyQuickChatResumeRecovery(
     timeout: 30_000,
   });
   await expect(dialog.getByText("simple mock response", { exact: false })).toBeVisible();
-  const { sessions } = await apiClient.listTaskSessions(started.task_id);
-  const original = sessions.find((session) => session.id === started.session_id)!;
+  const { session: original } = await apiClient.getTaskSession(started.session_id);
   const nativeIdentity = original.metadata?.acp;
   expect(nativeIdentity).toBeTruthy();
   await apiClient.stopSession({ session_id: started.session_id, force: true });
@@ -78,12 +95,6 @@ export async function verifyQuickChatResumeRecovery(
     tmpDir,
     started.session_id,
   );
-  const restored = await apiClient.wsRequest<{ success: boolean }>("session.launch", {
-    task_id: started.task_id,
-    session_id: started.session_id,
-    intent: "restore_workspace",
-  });
-  expect(restored.success).toBe(true);
   expect(readRecovery(tmpDir, blockId, submissionId)).toMatchObject({
     block: { state: "open" },
     submission: { state: "interrupted_unknown" },
@@ -92,8 +103,15 @@ export async function verifyQuickChatResumeRecovery(
   await page.waitForLoadState("networkidle");
   dialog = await openExistingQuickChat(page, mobile);
   await dialog.locator(`[data-tab-reference="conversation:${started.session_id}"]`).click();
+  const resume = dialog.getByTestId("recovery-resume-button");
+  await expect(resume).toBeVisible();
+  await expect(resume).toBeEnabled();
+  await expectResumeReachable(resume, mobile);
+  await capture?.screenshot(mobile ? "phone-existing-resume" : "desktop-existing-resume", {
+    caption: "Existing Resume remains available for interrupted Quick Chat.",
+  });
   const recovered = ws.waitForResponse("session.recover", { timeout: 60_000 });
-  await dialog.getByTestId("recovery-resume-button").click();
+  await resume.click();
   await recovered;
   await expect.poll(() => recoveryMessages.requestCounts.resume ?? 0).toBe(1);
   await waitForSessionState(apiClient, {
@@ -108,9 +126,7 @@ export async function verifyQuickChatResumeRecovery(
     submission: { state: "interrupted_unknown" },
   });
   await expectJournalRetirement(journalPath, submission);
-  const resumed = (await apiClient.listTaskSessions(started.task_id)).sessions.find(
-    (session) => session.id === started.session_id,
-  )!;
+  const { session: resumed } = await apiClient.getTaskSession(started.session_id);
   expect(resumed.metadata?.acp).toEqual(nativeIdentity);
   await expect(dialog.getByText("simple mock response", { exact: false })).toHaveCount(1);
   await sendQuickChatMessage(dialog, page, "/e2e:bulk:3");

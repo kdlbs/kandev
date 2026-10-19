@@ -149,20 +149,17 @@ qualifies as a successful hook receipt.
    second commit attempt while the first is live. Retain the exact temporary
    log path from that single attempt for the hook receipt. Capture the normal
    hook stream in a temporary log while committing and use that log to record
-   each hook ID and result. RTK can condense `rtk git commit`
-   output, so use `rtk proxy git commit` when preserving raw hook output. Do not
-   infer hook results from a condensed launcher summary. For example:
+   each hook ID and result. Run `git commit` directly and preserve its full
+   output; do not infer hook results from a condensed launcher summary. For example:
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   rtk proxy git commit -m "type(scope): description" 2>&1 | rtk proxy tee "$COMMIT_LOG" >/dev/null
+   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG" >/dev/null
    ```
-   Both the commit and `tee` stages must use raw-output mode when the log is
-   parsed; normal `rtk git commit` output may contain only `ok <sha>` and is not
-   hook evidence. Read the log to extract every hook ID/result and confirm the receipt still
-   says `bypass: false`, rather than printing the full stream again. Remove the
-   exact temporary file after copying the receipt into
-   the handoff:
+   Keep the commit and `tee` output unmodified when parsing the log. Read it
+   to extract every hook ID/result and confirm the receipt still says
+   `bypass: false`, rather than printing the full stream again. Remove the
+   exact temporary file after copying the receipt into the handoff:
    ```bash
    unlink "$COMMIT_LOG"
    ```

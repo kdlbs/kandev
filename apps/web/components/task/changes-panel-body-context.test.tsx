@@ -123,6 +123,7 @@ function panelProps(): BodyTestProps {
     hasUnstaged: false,
     hasStaged: false,
     hasCommits: true,
+    commitsInitialLoading: false,
     hasPRFiles: false,
     hasPRCommits: false,
     relation: { presentation: "combined" } as unknown as ChangesPanelBodyProps["relation"],
@@ -354,6 +355,7 @@ describe("ChangesPanelBody history context ownership", () => {
 });
 
 describe("ChangesPanelBody Git status presentation", () => {
+  const EMPTY_MESSAGE = "Your changed files will appear here";
   it("keeps refresh failure feedback out of the Changes body", () => {
     render(
       <TooltipProvider>
@@ -369,11 +371,11 @@ describe("ChangesPanelBody Git status presentation", () => {
 
     expect(screen.queryByTestId("git-status-notice")).toBeNull();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
-    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
   });
 
-  it("shows the clean message only after complete membership is ready", () => {
-    const renderPanel = (gitStatusMembershipReady: boolean) =>
+  it("shows the clean message only after initial commits and membership are ready", () => {
+    const renderPanel = (gitStatusMembershipReady: boolean, commitsInitialLoading = false) =>
       render(
         <TooltipProvider>
           <StateProvider>
@@ -381,6 +383,7 @@ describe("ChangesPanelBody Git status presentation", () => {
               {...panelProps()}
               hasAnything={false}
               hasCommits={false}
+              commitsInitialLoading={commitsInitialLoading}
               gitStatus={{
                 ...panelProps().gitStatus,
                 membershipReady: gitStatusMembershipReady,
@@ -393,11 +396,16 @@ describe("ChangesPanelBody Git status presentation", () => {
       );
 
     const view = renderPanel(false);
-    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
     view.unmount();
 
+    const pending = renderPanel(true, true);
+    expect(screen.queryByText(EMPTY_MESSAGE)).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Loading changes...");
+    pending.unmount();
+
     renderPanel(true);
-    expect(screen.getByText("Your changed files will appear here")).toBeTruthy();
+    expect(screen.getByText(EMPTY_MESSAGE)).toBeTruthy();
   });
 });
 

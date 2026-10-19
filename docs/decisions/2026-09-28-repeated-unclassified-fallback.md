@@ -4,6 +4,14 @@
 **Date:** 2026-09-28
 **Area:** backend
 
+## Amendment (2026-10-12)
+
+[Issue #4325](https://github.com/kdlbs/kandev/issues/4325) adds one origin: a normal `end_turn` completion with trusted evidence of no output, reasoning, or tool activity.
+It has no diagnostic text, so it uses a fixed, text-free identity instead of a matching diagnostic.
+It is admitted only when the candidate policy is enabled and the workflow step allows it.
+Otherwise the completion keeps its existing behavior.
+All other rules in this decision still apply, including the threshold, attempt deduplication, resets, and fenced successor launch.
+
 ## Context
 
 [Issue #4015](https://github.com/kdlbs/kandev/issues/4015) proposes recovery from repeated unknown failures in task dynamic routing.

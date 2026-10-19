@@ -91,6 +91,29 @@ already exists, is not a symlink, and is owned by the selected account before re
 restarting the service. Missing or mismatched ownership fails with guidance; Kandev does not
 recursively chown the data tree or add a broad Git `safe.directory` exception.
 
+## Agent lifetime on Linux
+
+Generated Linux user and system units use `KillMode=process`: systemd stops the
+native launcher, which owns the backend child process. If the launcher dies
+abruptly, the backend receives a termination signal; Kandev manages agent lifetime.
+With experimental
+`features.agentSurvival` enabled, eligible local and worktree agents can remain
+running across a backend stop or restart. The feature remains off by default;
+normal disabled shutdown, explicit task Stop, and launch rollback still terminate
+the affected agents.
+
+A stopped service can therefore still have retained agents consuming resources
+in its cgroup. systemd does not perform a final sweep of all descendants;
+application cleanup and parent-liveness guards remain responsible for ordinary
+agent termination. A host reboot or host-level cgroup kill still ends
+those processes.
+
+Existing generated units acquire this policy only when regenerated through the
+normal install or managed update flow. After upgrading, reinstall with the same
+service scope and account options you used originally; a backend restart alone
+does not rewrite an old unit. See [Install](#install). macOS service behavior is
+unchanged.
+
 ## Bind safely
 
 The backend config loader searches `config.yaml` in its working directory,
@@ -169,7 +192,7 @@ On Linux, installation writes the unit, runs `daemon-reload`, and normally runs 
 
 - executes the absolute native `kandev --headless` path;
 - records `KANDEV_HOME_DIR`, `KANDEV_LOG_LEVEL=info`, a service `PATH`, the release bundle, and package version;
-- uses `Restart=on-failure`, a five-second restart delay, `KillMode=mixed`, and a 30-second stop timeout;
+- uses `Restart=on-failure`, a five-second restart delay, `KillMode=process`, and a 30-second stop timeout;
 - orders startup after `network-online.target`.
 
 On macOS, installation writes the plist, removes an already loaded job, bootstraps the new plist, and enables it. Standard output and error go to `<KANDEV_HOME_DIR>/logs/service.out` and `service.err`. The plist always has `KeepAlive=true`; `--no-boot-start` changes only `RunAtLoad` and adds an immediate kick-start.

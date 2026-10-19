@@ -960,10 +960,12 @@ test.describe("Sidebar filter — task-row presentation", () => {
     const savedSettings = await apiClient.getUserSettings();
     const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
       .views as Array<{
+      id: string;
       name?: string;
       task_row?: { details_enabled?: boolean };
     }>;
-    expect(savedViews.find((view) => view.name === "Compact task rows")?.task_row).toMatchObject({
+    const savedView = savedViews.find((view) => view.name === "Compact task rows");
+    expect(savedView?.task_row).toMatchObject({
       details_enabled: false,
     });
 
@@ -973,7 +975,7 @@ test.describe("Sidebar filter — task-row presentation", () => {
     const secondTrailingTime = secondRow.getByTestId("sidebar-task-trailing-time");
     await expect(trailingTime).toBeVisible();
     await expect(secondTrailingTime).toBeVisible();
-    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator('[aria-hidden="true"]')).not.toContainText(/ago|yesterday/i);
     await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const [timeBox, secondTimeBox] = await Promise.all([
       trailingTime.boundingBox(),
@@ -1013,6 +1015,12 @@ test.describe("Sidebar filter — task-row presentation", () => {
       })
       .toBe(true);
 
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return settings.sidebar_views_by_workspace[seedData.workspaceId].active_view_id;
+      })
+      .toBe(savedView!.id);
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
     const reloadedFilters = new SidebarFilterPopoverPage(testPage);

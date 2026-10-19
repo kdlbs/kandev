@@ -1,5 +1,6 @@
 "use client";
 
+import { ExecutorOwnershipCard } from "./executor-ownership";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
@@ -295,6 +296,7 @@ export function PluginExecutorProfilePage({
           </Button>
         }
       />
+      <ExecutorOwnershipCard executor={executor} profile={profile} />
       <ProfileEditorForm data={data} save={save} deletion={deletion} />
       <fieldset
         disabled={

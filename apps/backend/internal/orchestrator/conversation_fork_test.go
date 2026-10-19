@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
@@ -57,10 +58,15 @@ func (m *forkTestAgentManager) ForkSessionBySessionID(context.Context, string, s
 	return m.forkID, m.forkErr
 }
 
-func newForkTestService(t *testing.T, manager executor.AgentManagerClient, active *models.Turn) (*Service, *sqliterepo.Repository, *models.TaskSession) {
+func newForkTestService(t *testing.T, manager executor.AgentManagerClient, active *models.Turn, existing ...*sqliterepo.Repository) (*Service, *sqliterepo.Repository, *models.TaskSession) {
 	t.Helper()
 	ctx := context.Background()
-	repo := setupTestRepo(t)
+	var repo *sqliterepo.Repository
+	if len(existing) == 0 {
+		repo = setupTestRepo(t)
+	} else {
+		repo = existing[0]
+	}
 	seedSession(t, repo, "task-fork", "session-fork", "step1")
 	source, err := repo.GetTaskSession(ctx, "session-fork")
 	require.NoError(t, err)
@@ -252,4 +258,33 @@ func TestForkConversationRequiresSessionPromptScope(t *testing.T) {
 	source, err := repo.GetTaskSession(context.Background(), "session-fork")
 	require.NoError(t, err)
 	require.NotContains(t, source.Metadata, models.SessionMetaKeyCodexForkRequestPrefix+requestID)
+}
+
+func TestForkConversationRetiredRetryRequiresExplicitCreationAndBlocksPendingOwnership(t *testing.T) {
+	ctx := context.Background()
+	base := setupAutomationRetentionFixture(t)
+	manager := &forkTestAgentManager{mockAgentManager: &mockAgentManager{}, forkID: "fork-thread"}
+	svc, repo, source := newForkTestService(t, manager, nil, base.repo)
+	svc.SetAutomationService(base.autoSvc)
+	_, err := base.db.Exec(`INSERT INTO automation_retry_launch_protocols(run_id,task_id,version) VALUES ('retired-retry',?,-1)`, source.TaskID)
+	require.NoError(t, err)
+	response, err := svc.ForkConversation(ctx, ForkConversationRequest{TaskID: source.TaskID, SourceSessionID: source.ID, TurnID: "turn-fork", RequestID: uuid.NewString()})
+	require.NoError(t, err)
+	require.NotEmpty(t, response.SessionID)
+	require.Equal(t, 1, manager.forkCalls)
+	var permits int
+	require.NoError(t, base.db.Get(&permits, `SELECT COUNT(*) FROM task_creation_authorizations`))
+	require.Zero(t, permits)
+	a := &automation.Automation{WorkspaceID: "workspace", Name: "pending retry", Enabled: true}
+	require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+	run := &automation.AutomationRun{ID: "pending-fork-retry", AutomationID: a.ID, TaskID: source.TaskID, SessionID: source.ID, TurnID: "turn-fork", Status: automation.RunStatusTaskCreated, RetryGroupID: "pending-fork-group", RetryGroupGeneration: 1, RetryState: automation.RetryStateTriggered}
+	require.NoError(t, base.autoStore.CreateRetryGroup(ctx, &automation.RetryGroup{ID: run.RetryGroupID, AutomationID: a.ID, Generation: 1, State: automation.RetryGroupLive}))
+	require.NoError(t, base.autoStore.CreateRun(ctx, run))
+	requestID := uuid.NewString()
+	_, err = svc.ForkConversation(ctx, ForkConversationRequest{TaskID: source.TaskID, SourceSessionID: source.ID, TurnID: "turn-fork", RequestID: requestID})
+	require.ErrorIs(t, err, automation.ErrRetryLaunchUncertain)
+	require.Equal(t, 1, manager.forkCalls, "unresolved ownership cannot fork at the provider boundary")
+	updated, err := repo.GetTaskSession(ctx, source.ID)
+	require.NoError(t, err)
+	require.NotContains(t, updated.Metadata, models.SessionMetaKeyCodexForkRequestPrefix+requestID)
 }

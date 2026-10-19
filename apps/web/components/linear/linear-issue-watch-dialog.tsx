@@ -26,7 +26,6 @@ import { FilterFields, SelectField } from "./linear-issue-watch-filter-fields";
 import { linearIssueWatchPlaceholders } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
-import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import {
   type FormState,
@@ -34,6 +33,7 @@ import {
   formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
+  switchWatchWorkspace,
 } from "./linear-issue-watch-form";
 import type {
   CreateLinearIssueWatchInput,
@@ -288,7 +288,7 @@ export function LinearIssueWatchDialog({
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
+            onChange={(v) => setForm((p) => switchWatchWorkspace(p, v))}
             disabled={workspaceLocked}
           />
           {/* Hairlines separate the five conceptual blocks (Destination /

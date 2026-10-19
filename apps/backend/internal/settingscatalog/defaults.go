@@ -400,7 +400,7 @@ func workflowEventsField(owner string) FieldDescriptor {
 	triggers := []string{
 		"on_enter", "on_turn_start", "on_turn_complete", "on_exit", "on_comment",
 		"on_blocker_resolved", "on_children_completed", "on_approval_resolved", "on_heartbeat",
-		"on_budget_alert", "on_agent_error",
+		"on_budget_alert", "on_agent_error", "on_pr_merged", "on_pr_closed",
 	}
 	properties := make(map[string]any, len(triggers))
 	for _, trigger := range triggers {
@@ -475,6 +475,7 @@ func repositorySetDomain() DomainDescriptor {
 func executorDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor", "Executors", "Execution target settings.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor", "name", "Name", "Executor name.", "string", owner, "execution.manage"),
 		domainWritable("executor", "type", "Type", "Executor runtime type.", "string", owner, "execution.manage"),
 		domainWritable("executor", "status", "Status", "Whether the executor accepts work.", "string", owner, "execution.manage"),
@@ -486,6 +487,7 @@ func executorDomain() DomainDescriptor {
 func executorProfileDomain() DomainDescriptor {
 	owner := "execution"
 	return supportedDomain("execution", "executor_profile", "Executor profiles", "Named executor presets.", owner, ScopeResource, TargetRules{Scope: ScopeResource, RequiresResourceID: true},
+		integrationNullableWritable("executor_profile", "owner_user_id", "Owner", "Optional personal executor owner; null shares the resource.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "name", "Name", "Profile name.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "mcp_policy", "MCP policy", "MCP policy for this executor profile.", "string", owner, "execution.manage"),
 		domainWritable("executor_profile", "config", "Configuration", "Validated executor profile configuration.", "object", owner, "execution.manage"),

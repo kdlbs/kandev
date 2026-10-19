@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -167,27 +169,37 @@ func (r *Repository) UpsertBackgroundWorkload(ctx context.Context, workload *mod
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		) ON CONFLICT (session_id, id) DO UPDATE SET
 			title = excluded.title,
-			state = excluded.state,
+			state = CASE WHEN task_session_background_work.state IN (?) AND excluded.state NOT IN (?)
+  THEN task_session_background_work.state ELSE excluded.state END,
 			parent_work_id = excluded.parent_work_id,
 			origin_turn_id = CASE WHEN task_session_background_work.origin_turn_id = '' THEN excluded.origin_turn_id ELSE task_session_background_work.origin_turn_id END,
 			source_message_id = excluded.source_message_id,
 			source_call_id = excluded.source_call_id,
-			exit_code = excluded.exit_code,
+			exit_code = CASE WHEN task_session_background_work.state IN (?) AND excluded.state NOT IN (?)
+  THEN task_session_background_work.exit_code ELSE excluded.exit_code END,
 			output = excluded.output,
 			output_truncated = excluded.output_truncated,
 			output_offset = excluded.output_offset,
 			started_at = COALESCE(task_session_background_work.started_at, excluded.started_at),
-			finished_at = excluded.finished_at,
+			finished_at = CASE WHEN task_session_background_work.state IN (?) AND excluded.state NOT IN (?)
+  THEN task_session_background_work.finished_at ELSE excluded.finished_at END,
 			revision = excluded.revision,
 			updated_at = excluded.updated_at
 		WHERE excluded.revision >= task_session_background_work.revision`
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+	query, args, err := sqlx.In(query,
 		workload.ID, workload.TaskID, workload.SessionID, workload.Kind, workload.Title, workload.State,
 		workload.ParentWorkID, workload.OriginTurnID, workload.SourceMessageID, workload.SourceCallID,
 		workload.ExitCode, workload.Output, workload.OutputTruncated, workload.OutputOffset,
 		workload.StartedAt, workload.FinishedAt, workload.Revision, workload.CreatedAt, workload.UpdatedAt,
+		streams.TerminalRunStates, streams.TerminalRunStates,
+		streams.TerminalRunStates, streams.TerminalRunStates,
+		streams.TerminalRunStates, streams.TerminalRunStates,
 	)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
 }
 
@@ -240,6 +252,21 @@ func (r *Repository) ListBackgroundWorkloadsBySession(ctx context.Context, sessi
 	return workloads, nil
 }
 
+// ListSessionIDsWithOpenBackgroundWork returns the sessions that still have a
+// workload in a non-terminal state.
+func (r *Repository) ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error) {
+	query, args, err := sqlx.In(`SELECT session_id FROM task_session_background_work WHERE state NOT IN (?)
+ UNION SELECT session_id FROM task_session_background_runs WHERE state NOT IN (?)`, streams.TerminalRunStates, streams.TerminalRunStates)
+	if err != nil {
+		return nil, err
+	}
+	var sessionIDs []string
+	if err := r.ro.SelectContext(ctx, &sessionIDs, r.ro.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return sessionIDs, nil
+}
+
 func (r *Repository) DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error {
 	const (
 		q1 = `DELETE FROM task_session_background_action_receipts WHERE session_id = ?`
@@ -264,6 +291,18 @@ func (r *Repository) UpsertBackgroundRun(ctx context.Context, run *models.Backgr
 		run.CreatedAt = now
 	}
 	run.UpdatedAt = now
+	tx, err := r.beginBackgroundWorkTx(ctx, run.SessionID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	write, err := reconcileBackgroundRun(ctx, tx, run)
+	if err != nil {
+		return err
+	}
+	if !write {
+		return tx.Commit()
+	}
 
 	query := `INSERT INTO task_session_background_runs (
 			id, workload_id, session_id, provider_run_key, state, exit_code,
@@ -277,11 +316,14 @@ func (r *Repository) UpsertBackgroundRun(ctx context.Context, run *models.Backgr
 			finished_at = excluded.finished_at,
 			updated_at = excluded.updated_at`
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+	_, err = tx.ExecContext(ctx, tx.Rebind(query),
 		run.ID, run.WorkloadID, run.SessionID, run.ProviderRunKey, run.State, run.ExitCode,
 		run.StartedAt, run.FinishedAt, run.CreatedAt, run.UpdatedAt,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error) {

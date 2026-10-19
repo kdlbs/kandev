@@ -66,6 +66,8 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		events.OnHeartbeat = appendGenericActions(step.Events.OnHeartbeat)
 		events.OnBudgetAlert = appendGenericActions(step.Events.OnBudgetAlert)
 		events.OnAgentError = appendGenericActions(step.Events.OnAgentError)
+		events.OnPRMerged = appendGenericActions(step.Events.OnPRMerged)
+		events.OnPRClosed = appendGenericActions(step.Events.OnPRClosed)
 		result.Events = events
 	}
 	return result
@@ -82,7 +84,9 @@ func hasStepEvents(events wfmodels.StepEvents) bool {
 		len(events.OnApprovalResolved) > 0 ||
 		len(events.OnHeartbeat) > 0 ||
 		len(events.OnBudgetAlert) > 0 ||
-		len(events.OnAgentError) > 0
+		len(events.OnAgentError) > 0 ||
+		len(events.OnPRMerged) > 0 ||
+		len(events.OnPRClosed) > 0
 }
 
 func appendGenericActions(actions []wfmodels.GenericAction) []StepActionDTO {

@@ -237,8 +237,8 @@ test("hides the whole composer except CI and preserves drafts through hover and 
 }, testInfo) => {
   test.setTimeout(180_000);
   await testPage.setViewportSize({ width: 1440, height: 1100 });
-  const task = await startPresentationThread(testPage, apiClient, seedData, "A disclosure");
-  const sibling = await startPresentationThread(testPage, apiClient, seedData, "B disclosure");
+  const task = await startPresentationThread(apiClient, seedData, "A disclosure");
+  const sibling = await startPresentationThread(apiClient, seedData, "B disclosure");
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: task.id,
     workspace_id: seedData.workspaceId,
@@ -302,12 +302,7 @@ test("reveals and collapses immediately with reduced motion", async ({
   seedData,
 }) => {
   await testPage.emulateMedia({ reducedMotion: "reduce" });
-  const task = await startPresentationThread(
-    testPage,
-    apiClient,
-    seedData,
-    "Reduced motion composer",
-  );
+  const task = await startPresentationThread(apiClient, seedData, "Reduced motion composer");
   await seedThreadPresentation(apiClient, { layout: "columns", autoHideComposer: true });
   await testPage.mouse.move(0, 0);
   await testPage.goto("/threads");
@@ -339,13 +334,8 @@ test("preserves history and bottom following while the footer changes height", a
 }) => {
   test.setTimeout(180_000);
   await testPage.setViewportSize({ width: 1250, height: 1000 });
-  const task = await startPresentationThread(
-    testPage,
-    apiClient,
-    seedData,
-    "A anchored transcript",
-  );
-  await startPresentationThread(testPage, apiClient, seedData, "B stable sibling");
+  const task = await startPresentationThread(apiClient, seedData, "A anchored transcript");
+  await startPresentationThread(apiClient, seedData, "B stable sibling");
   await apiClient.seedAgentMessages(task.session_id!, 35, "History marker");
   await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
   await testPage.mouse.move(0, 0);
@@ -467,12 +457,7 @@ test("preserves a rejected draft and native cancellation feedback after retry", 
   seedData,
 }) => {
   test.setTimeout(120_000);
-  const task = await startPresentationThread(
-    testPage,
-    apiClient,
-    seedData,
-    "Recoverable composer send",
-  );
+  const task = await startPresentationThread(apiClient, seedData, "Recoverable composer send");
   let reject = true;
   let rejected = 0;
   await testPage.routeWebSocket(/\/ws$/, (socket) => {
@@ -527,7 +512,7 @@ test("keeps the native model picker and attachment-only draft available after po
   seedData,
 }) => {
   const ws = watchWs(testPage);
-  const task = await startPresentationThread(testPage, apiClient, seedData, "Composer controls");
+  const task = await startPresentationThread(apiClient, seedData, "Composer controls");
   await apiClient.seedAgentMessages(task.session_id!, 1, "Composer controls readiness");
   await seedThreadPresentation(apiClient, { layout: "columns", autoHideComposer: true });
   await testPage.goto("/threads");

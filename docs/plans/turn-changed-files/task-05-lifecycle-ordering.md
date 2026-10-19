@@ -102,3 +102,19 @@ go test -tags fts5 ./internal/agent/runtime/agentctl -run TestTurnCheckpointClie
 ```
 
 The typed-nil agentctl regression passed normally and under the race detector. Both affected Go packages passed, the lifecycle race suite passed, and the PR-watcher cleanup E2E passed against the rebuilt backend.
+
+### Conflict integration (2026-10-19)
+
+Merged main `72e9eec9b300918863f7d1da89f80303bf694335` while preserving durable
+prompt ownership before capture admission and provider dispatch. Shutdown retains
+both retry registration fencing and manager-context cancellation. Required-store
+and upgrade inventories retain the turn tables alongside main's new tables.
+
+The durable-binding regression assertions reject capture before the binding write
+and reject capture after a failed write. The focused lifecycle race selection
+(`TurnChange|DurablePromptTurnBinding|StopWaitsForRetriedTerminalCapture|StopPreservesActiveTurn|Cancel|SessionTurnSettlement`)
+passed. A reversed-order mutation failed both binding assertions as expected.
+Twenty-nine focused frontend tests and specification/catalog checks passed.
+Longer local checks were interrupted; their incomplete runs are not pass evidence.
+Updated-head required CI remains the delivery gate. Work order 09's qualification
+limits remain unchanged.

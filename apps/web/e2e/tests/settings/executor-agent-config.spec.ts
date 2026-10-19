@@ -59,7 +59,7 @@ test.describe("portable agent configuration settings", () => {
           .getByRole("checkbox"),
       ).toBeChecked();
 
-      await testPage.getByRole("button", { name: "Mock Codex Not Configured" }).click();
+      await expect(agentTrigger).toHaveAttribute("aria-expanded", "true");
       const authChoice = testPage.getByRole("checkbox", { name: "Copy auth files" }).first();
       await expect(authChoice).toBeVisible();
       await authChoice.click();

@@ -9,7 +9,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
+	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -107,8 +109,9 @@ func gatewayAuthPolicy(
 	authSvc *auth.Service, taskSvc *taskservice.Service, taskRepo *sqliterepo.Repository, officeRepo *officesqlite.Repository,
 ) gateways.AuthPolicy {
 	return gateways.AuthPolicy{
-		Enforced:     func() bool { return authSvc.Mode() != auth.ModeDisabled },
-		ResolveToken: authSvc.ResolveBearer,
+		ExecutorConfiguration: taskSvc.AuthorizeExecutorConfiguration,
+		Enforced:              func() bool { return authSvc.Mode() != auth.ModeDisabled },
+		ResolveToken:          authSvc.ResolveBearer,
 		// A restored subtree-capability identity must pass the same live
 		// account gate as cookie/PAT auth: IdentityForUser fails when the
 		// account is missing or no longer active.
@@ -205,4 +208,16 @@ func warnIfExposedWithoutAuth(cfg *config.Config, svc *auth.Service, log *logger
 		"enable the Authentication feature toggle (Settings > System > Feature Toggles) "+
 		"or set KANDEV_FEATURES_AUTH=true",
 		zap.Strings("binds", binds))
+}
+
+func wireExecutorAdmission(authSvc *auth.Service, taskSvc *taskservice.Service, manager interface {
+	SetExecutorAdmission(func(context.Context, string, string, string) (context.Context, error))
+}) {
+	taskSvc.SetExecutorIdentityResolver(func(ctx context.Context, userID string) (authn.Identity, bool) {
+		if authSvc.Mode() == auth.ModeDisabled {
+			return authhttpmw.SyntheticIdentity(), true
+		}
+		return authSvc.IdentityForUser(ctx, userID)
+	})
+	manager.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
 }

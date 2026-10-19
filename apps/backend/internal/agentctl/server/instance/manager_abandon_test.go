@@ -13,8 +13,8 @@ import (
 )
 
 // TestCreateInstanceAbandonsWhenCallerGaveUp covers the leak that made instance
-// creation collapse under load. Creation is serialised on m.mu and the control
-// client gives up after 30s, so a queue fills with requests nobody awaits; each
+// creation collapse under load. Callers give up at their client deadline and
+// retry, so requests nobody awaits pile up behind admission; each
 // one used to build a full instance — port, HTTP server, workspace trackers —
 // that no caller could ever stop, and the polling those trackers did made the
 // next creation slower still.

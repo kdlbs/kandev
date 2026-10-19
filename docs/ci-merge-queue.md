@@ -87,7 +87,7 @@ forever -- the exact failure the shim exists to prevent, reintroduced by the
 shim. Making the inversion correct would mean hand-deriving a second pattern
 list per workflow and keeping the two in sync by eye. Worse, the shim needs a
 job whose *name* matches the real check, which for `e2e-tests.yml` would mean
-reproducing fourteen shard names and six container shard names.
+reproducing twenty-eight shard names and six container shard names.
 
 So: the trigger-level `paths:` filters are gone, and each expensive workflow
 grew a cheap `changes` job that applies the same list one level down.
@@ -136,9 +136,17 @@ rejects stale, duplicated, and overlapping entries.
 
 Run `pnpm run test scripts/vitest-project-selection.test.ts` from `apps/web`
 after editing the manifest. Preserve the configured worker budget, production
-environment guard, test isolation, and complete identity set. The current
-frontend workflow remains unsharded until hosted timing and occupancy evidence
-satisfy the [CI performance plan](plans/ci-performance/plan.md).
+environment guard, test isolation, and complete identity set. The frontend workflow runs two built-in Vitest shards in parallel with static
+checks. Every shard retains the production environment guard and uploads its
+JSON report; the required gate joins every result. Adoption measurements and
+identity comparisons live in the [CI performance plan](plans/ci-performance/plan.md).
+
+Frontend typechecking has a step-scoped 8 GiB Node old-space limit. The full
+program exceeds Node 24's default heap on the 16 GiB hosted runner; this limit
+leaves room for native memory and runner/container overhead. The command still
+checks the complete TypeScript program, and unit tests and builds retain their
+own settings. Verify physical and container memory capacity when changing the
+standard runner tier.
 
 ### External CI runner capacity
 
@@ -160,9 +168,10 @@ level. The two tier variables stay configured between bursts, so changing the
 instance type requires only an Actions variable update.
 
 The 20% pilot sends a stable cohort of eligible instances to the configured
-tiers. For E2E this assigns two of fourteen normal shards per run because matrix
-allocation uses a floor. The frontend verification and gate jobs use singleton
-hash cohorts. Backend checkout, static checks,
+tiers. For E2E this assigns five of twenty-eight normal shards per run because matrix
+allocation uses a floor. The frontend static verification and gate jobs use singleton
+hash cohorts; its two unit-test shards use matrix allocation (zero external
+shards at 20%, because allocation uses a floor). Backend checkout, static checks,
 service jobs, Windows, and the protected test shards remain on GitHub-hosted
 runners. Singleton jobs use a stable hash cohort, so their share approaches the
 percentage across workflow runs.
@@ -188,7 +197,8 @@ invalid label and rerun the workflow. Jobs already queued or running keep their
 original runner. New jobs use the current variables.
 
 The eligible families are the E2E normal-shard matrix, the backend aggregate
-test gate, the unsharded frontend verification job, and the frontend gate.
+test gate, the frontend static verification job, its two unit-test shards,
+and the frontend gate.
 All change-detection jobs run allocation during their existing hosted checkout.
 The E2E report job publishes `E2E Tests Passed` after validating every dependency
 and the required report files. This removes a separate post-report queue wait.

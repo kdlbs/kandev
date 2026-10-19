@@ -45,6 +45,8 @@ backend log files).
 - **AC-SYSTEM-PAGE-SYSTEM-PAGE-001.7:** SQLite-only **VACUUM** button — safe, reclaims space; shows progress and final size delta.
 - **AC-SYSTEM-PAGE-SYSTEM-PAGE-001.8:** SQLite-only **Optimize** button — runs `PRAGMA optimize`; shows progress.
 
+- **AC-SYSTEM-PAGE-SYSTEM-PAGE-001.9:** When a selected SQLite System backup is damaged, truncated, or not a SQLite database, restore shall fail before interrupting database-backed work or replacing the working database. Current data, database files and sidecars, and the live database connection shall remain usable and unchanged by the rejected restore; temporary restore data shall be removed. A valid snapshot shall remain restorable with the existing required-restart outcome.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/system-page-01.md), [part 2](../system-design/system-page-02.md).

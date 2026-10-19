@@ -104,8 +104,8 @@ The planner applies these rules:
    percentage assigns all instances to `ubuntu-latest` and emits a planner
    warning. It never emits an unvalidated external label for invalid input.
 
-Each job family is allocated independently. At 50 percent, the fourteen E2E
-shards receive seven external assignments. Protected backend checkout jobs
+Each job family is allocated independently. At 50 percent, the twenty-eight E2E
+shards receive fourteen external assignments. Protected backend checkout jobs
 remain hosted; the backend aggregate gate and frontend jobs are still
 eligible. Singleton jobs use a stable hash cohort, so their share approaches
 50 percent across runs. The planner does not promise an exact percentage of
@@ -142,12 +142,12 @@ non-empty configured runner label still remains visible.
 | --- | --- | --- |
 | `E2E changes` | `ubuntu-latest` | Change detection and allocation share one hosted checkout. |
 | `E2E build`, `e2e-report` | `ubuntu-latest` | They query GitHub history or download artifacts with the job token. |
-| `e2e` | Standard tier with GitHub fallback | The fourteen normal shards need comparable CPU and memory and do not use explicit repository-token inputs. |
-| `Backend changes`, `static_checks`, `test_shards`, `test_ambient_env` | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
+| `e2e` | Standard tier with GitHub fallback | The twenty-eight normal shards need comparable CPU and memory and do not use explicit repository-token inputs. |
+| `Backend changes`, `static_checks`, `test_shards`, `repository_tests`, `test_ambient_env` | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
 | `Backend test` gate | Light tier with GitHub fallback | The aggregate gate is short and has no checkout or service dependency. |
 | `Frontend changes` | `ubuntu-latest` | Change detection and allocation share one hosted checkout. |
 | `frontend-gate` | Light tier with GitHub fallback | The aggregate gate remains short and queue-sensitive. |
-| `Frontend frontend` | Standard tier with GitHub fallback | The single frontend test job is a recurring queue bottleneck. |
+| `Frontend frontend`, `frontend_tests` | Standard tier with GitHub fallback | Static verification and two unit-test shards retain the eligible frontend boundary. |
 | `Architecture lint`, action-pinning, harness-lint | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
 | `playwright_image` | `ubuntu-latest` | Retains the reviewed host-Docker and GHCR metadata path during the pilot. |
 | `e2e-containers` | `ubuntu-latest` | Requires direct host Docker and creates Kind resources. |

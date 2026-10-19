@@ -102,7 +102,7 @@ The workflow summary reports stage durations and the final generation result. It
 
 ## Runner and hosting configuration
 
-Generation remains independently gated by `PR_WALKTHROUGH_ENABLED`. CI owns same-repository and approved-contributor eligibility. The model remains `opencode/muse-spark-1.3-contributor-free` with the `high` variant. Its accepted training policy covers the patch and prepared head context. This package does not change that policy or the pinned setup action.
+Generation remains independently gated by `PR_WALKTHROUGH_ENABLED`. CI owns same-repository and approved-contributor eligibility. The model is `opencode/deepseek-v4.1-flash-free` with the `high` variant. The provider has zero retention and does not use the patch or prepared head context for training. The setup action remains pinned.
 
 The artifact retains JSON and HTML. Only HTML is uploaded to the `kandev-pr-walkthroughs` R2 bucket. The canonical object URL remains `https://walkthrough.kandev.ai/pr/<number>/<head-sha[0:12]>.html`. Lifecycle retention remains 180 days from upload.
 

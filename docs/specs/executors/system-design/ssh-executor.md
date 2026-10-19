@@ -14,6 +14,10 @@ owners:
 
 This design preserves the technical source detail for `REQ-EXECUTORS-SSH-EXECUTOR-001` during migration.
 
+The proposed [SSH passthrough design](ssh-passthrough.md) extends this controller
+lifecycle with remote CLI terminal execution. Its
+[requirements](../requirements/ssh-passthrough.md) own that mode's behavior.
+
 ## Requirement mapping
 
 | Requirement                                                               | Design section                                                      |

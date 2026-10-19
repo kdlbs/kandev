@@ -66,6 +66,7 @@ function useQueueState(sessionId: string | null) {
 
 type QueueActionsArgs = {
   identity: QueueSessionIdentity | null;
+  detailActive: boolean;
   entries: QueuedMessage[];
   setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"];
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
@@ -145,6 +146,7 @@ function useBooleanQueueAction(
 /** Build an action set bound to the supplied session + slice setters. */
 function useQueueActions({
   identity,
+  detailActive,
   entries,
   setQueueEntries,
   removeQueueEntry,
@@ -159,6 +161,7 @@ function useQueueActions({
     setQueueEntries,
     beginQueueOperation,
     finishQueueOperation,
+    detailActive,
   );
 
   const queue = useQueueAdmissionAction(
@@ -536,26 +539,27 @@ function useQueueRefresh(
   sessionId: string | null,
   connectionStatus: string,
   refetch: QueueRefetch,
+  detailActive: boolean,
 ) {
   useEffect(() => {
-    if (!sessionId || connectionStatus !== "connected") return;
+    if (!detailActive || !sessionId || connectionStatus !== "connected") return;
     void refetch(sessionId).catch((error) => {
       console.error("Failed to fetch queue status:", error);
     });
-  }, [sessionId, connectionStatus, refetch]);
+  }, [sessionId, connectionStatus, refetch, detailActive]);
   useForegroundRefresh(
     () => {
-      if (!sessionId || connectionStatus !== "connected") return;
+      if (!detailActive || !sessionId || connectionStatus !== "connected") return;
       return refetch(sessionId).catch((error) => {
         console.error("Failed to fetch queue status after foreground refresh:", error);
       });
     },
-    Boolean(sessionId),
+    detailActive && Boolean(sessionId),
     sessionId,
   );
   return useCallback(
-    () => (sessionId ? refetch(sessionId) : Promise.resolve()),
-    [sessionId, refetch],
+    () => (detailActive && sessionId ? refetch(sessionId) : Promise.resolve()),
+    [detailActive, sessionId, refetch],
   );
 }
 
@@ -579,7 +583,8 @@ function queueSummary(meta: QueueMeta | undefined, entries: QueuedMessage[]) {
  * - Edit and remove rely on entry-level UUIDs: when a drain wins the race, the
  *   server returns `entry_not_found` and we refetch to resync the local list.
  */
-export function useQueue(sessionId: string | null) {
+export function useQueue(sessionId: string | null, options: { detailActive?: boolean } = {}) {
+  const detailActive = options.detailActive ?? true;
   const state = useQueueState(sessionId);
   const { entries, meta, isLoading, cancellationPending, taskSession } = state;
   const identity = useCurrentQueueIdentity(sessionId, taskSession);
@@ -597,6 +602,7 @@ export function useQueue(sessionId: string | null) {
     reorderEntries,
   } = useQueueActions({
     identity,
+    detailActive,
     entries,
     setQueueEntries: state.setQueueEntries,
     removeQueueEntry: state.removeQueueEntry,
@@ -606,7 +612,7 @@ export function useQueue(sessionId: string | null) {
     metaMergeEnabled: meta?.mergeEnabled,
     metaAutoRun: meta?.autoRun,
   });
-  const refetchBound = useQueueRefresh(sessionId, connectionStatus, refetch);
+  const refetchBound = useQueueRefresh(sessionId, connectionStatus, refetch, detailActive);
 
   return {
     entries,

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: platform
 created: 2026-08-07
 owners:
@@ -28,6 +28,13 @@ owners:
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.7:** **GIVEN** interface enumeration returns an error, **WHEN** the launcher starts, **THEN** it continues startup and prints the localhost URL without a `network:` line.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.8:** **GIVEN** `KANDEV_SERVER_HOST` is a loopback or specific bind address, **WHEN** the startup banner is printed, **THEN** it omits unrelated network addresses.
 - **AC-PLATFORM-GO-DEV-LAUNCHER-001.9:** **WHEN** the `dev`, `start`, or `run` launcher prints its startup banner, it shall include a `version:` line whose value is the same build version printed by `--version` for that binary. An unstamped build shall print `dev`.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.10:** Before dev starts against an existing production SQLite database, its automatic snapshot shall be a transactionally consistent, independently openable database containing the schema and committed data at the snapshot point, including uncheckpointed WAL content. This applies both to an open WAL database and a stable offline database image with committed WAL remaining after an interrupted shutdown. No source sidecars shall be needed to read the published snapshot.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.11:** Snapshot preparation shall preserve the source schema, records, main database file and WAL content. It shall not create a missing source, migrate or initialize application state, checkpoint the source, or change its journal mode. Ordinary SQLite reader locking and transient shared-memory bookkeeping are permitted.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.12:** An invalid or unreadable source, copy or integrity-verification failure, cancellation, expired snapshot deadline, or publication failure shall return an error and abort dev startup before any backend or web child starts. A failed attempt shall not announce a successful backup.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.13:** A failed attempt shall preserve all existing snapshots and remove only its own incomplete artifacts. An existing destination with the same timestamp shall be preserved and cause failure. A successful snapshot shall keep the existing `dev-prod-db-<timestamp>.db` naming and timestamp, private `0700` backup directory and `0600` file permissions where supported.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.14:** A missing source shall continue to produce no snapshot and no backup error, without creating the source or backup artifacts. A database inside a `.kandev-dev` segment shall continue to skip the production snapshot guard.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.15:** Only after a new snapshot succeeds shall retention keep the five newest `dev-prod-db-*.db` files by modification time. Other backup families and unrelated files shall remain untouched. Failure to remove an old snapshot shall remain non-fatal.
+- **AC-PLATFORM-GO-DEV-LAUNCHER-001.16:** During production snapshot admission, an ordinary interrupt or termination signal shall cancel the attempt, finish its owned cleanup and abort dev with a non-zero exit before child launch. Temporary snapshot signal handling shall end before the existing supervisor takes ownership; other launch modes and supervised second-signal behavior shall remain unchanged. SIGKILL and power loss cannot guarantee deferred cleanup; automatic reclamation of abandoned staging is excluded.
 
 ## Migrated source detail
 
@@ -120,14 +127,15 @@ concrete dev defaults stay in `profiles.yaml`. The launcher must not restate the
 
 ### Production databases are backed up before dev touches them
 
-When the resolved DB path is not under a `.kandev-dev` segment, the launcher snapshots it
-to `~/.kandev/data/backups/dev-prod-db-<timestamp>.db` before starting the backend,
-retaining the five newest such snapshots and leaving other backup families
-(`kandev-*`, `manual-*`) untouched. This is what makes `make dev-prod-db` safe.
+AC-PLATFORM-GO-DEV-LAUNCHER-001.10 through .15 define the automatic snapshot
+guard for a resolved path outside a `.kandev-dev` segment. Snapshots remain in
+`~/.kandev/data/backups/`, including for custom database paths.
 
-A backup failure aborts startup with a non-zero exit. The guard exists precisely to
-protect production state before dev mode touches it; continuing past a failed backup
-would remove the guarantee that justified it.
+These criteria strengthen the previously documented raw-main-file safeguard;
+that implementation did not guarantee WAL completeness. `make dev-prod-db`
+still deliberately runs development code against production data. A complete
+automatic snapshot does not authorize that choice, concurrent runtime ownership,
+or automatic restoration; an independent backup remains recommended.
 
 ### The Vite dev server is a supervised child
 

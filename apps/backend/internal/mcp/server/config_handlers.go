@@ -320,6 +320,7 @@ func (s *Server) registerConfigExecutorTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_executor_profile_kandev",
+			mcp.WithString("owner_user_id", mcp.Description("Optional owner user ID; use an empty string to share the profile")),
 			mcp.WithDescription("Create a new executor profile."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
@@ -332,6 +333,7 @@ func (s *Server) registerConfigExecutorTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_executor_profile_kandev",
+			mcp.WithString("owner_user_id", mcp.Description("Optional owner user ID; use an empty string to share the profile")),
 			mcp.WithDescription("Update an existing executor profile."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID")),
 			mcp.WithString("name", mcp.Description("New profile name")),
@@ -363,12 +365,12 @@ func (s *Server) registerConfigTaskTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
+			mcp.WithDescription(`Move a task to a different workflow step. A request naming the task's current workflow and step, without entry options, returns "applied" with the stored task because the destination already holds; no retry is needed. Only an actual step change is deferred to turn-end while the source session is RUNNING or STARTING. Idle-session and admin step changes apply immediately. Returns a move-result envelope: "disposition" is "applied" for a completed move or current-step no-op, or "deferred" when a step change was recorded for turn-end; "task" is the stored or moved task. An optioned step change also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry. Moving to a manual step that does not start an agent on entry (for example Waiting, Blocked, or Done) must not carry a prompt or entry_options; such a call is rejected with a validation error. Record the instruction in the task description or plan instead.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Requested position (0-based); the server determines arrival order, and a current-step request preserves the stored position.")),
-			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions. Optional hand-off message applied once for a new step. Supplying both this and entry_options.instructions is rejected; non-empty prompts are invalid for a current-step request.")),
+			mcp.WithString("prompt", mcp.Description("Legacy alias for entry_options.instructions. Optional hand-off message applied once for a new step. Supplying both this and entry_options.instructions is rejected; non-empty prompts are invalid for a current-step request. Omit it when the target step does not start an agent on entry.")),
 			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
@@ -855,6 +857,9 @@ func (s *Server) createExecutorProfileHandler() server.ToolHandlerFunc {
 			payload["cleanup_script"] = cleanupScript
 		}
 		args := req.GetArguments()
+		if owner, present := args["owner_user_id"]; present {
+			payload["owner_user_id"] = owner
+		}
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}
@@ -882,6 +887,9 @@ func (s *Server) updateExecutorProfileHandler() server.ToolHandlerFunc {
 			payload["cleanup_script"] = cleanupScript
 		}
 		args := req.GetArguments()
+		if owner, present := args["owner_user_id"]; present {
+			payload["owner_user_id"] = owner
+		}
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}

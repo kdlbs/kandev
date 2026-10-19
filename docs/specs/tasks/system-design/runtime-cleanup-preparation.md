@@ -25,6 +25,12 @@ filesystem errors, symbolic links, and non-directory replacements. An existing
 checkout supplies its commit identity through the bounded Git inspection path.
 An absent checkout requires an exact local branch inspection in the parent
 repository. A surviving branch supplies its commit identity for later audits.
+A directory without checkout-local `.git` metadata counts as an absent
+checkout: Git would otherwise discover an enclosing repository and report its
+HEAD as this worktree's identity. The HEAD inspection pins Git to that
+`.git`, so metadata removed after the presence check fails the inspection
+instead of reaching an enclosing repository. The pin resolves from the
+command's checkout directory, including when its recorded path is relative.
 
 Only a successful inspection that finds no exact branch permits omission of
 that worktree's commit identity. Git exit 128, diagnostic text, cancellation,

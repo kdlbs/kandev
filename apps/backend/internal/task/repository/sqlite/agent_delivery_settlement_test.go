@@ -58,7 +58,7 @@ func TestDeliveryTerminalBeforeRecoveryBlockResolvesExactSubmission(t *testing.T
 	if err := repo.CreateTask(ctx, &models.Task{ID: "task-delivery-terminal-first", Title: "Terminal first"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-delivery-terminal-first", TaskID: "task-delivery-terminal-first"}); err != nil {
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-delivery-terminal-first", TaskID: "task-delivery-terminal-first", QueueIncarnationID: "incarnation-delivery-terminal-first"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
@@ -312,7 +312,7 @@ func seedDeliverySettlement(t *testing.T, repo *Repository, ctx context.Context,
 	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Delivery"}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, QueueIncarnationID: incarnationID}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 	submission := &models.AgentDeliverySubmission{

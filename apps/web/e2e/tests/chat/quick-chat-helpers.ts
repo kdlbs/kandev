@@ -29,9 +29,7 @@ export function quickChatTabReferences(dialog: Locator): Promise<string[]> {
 }
 
 /**
- * Establish a backend-confirmed settle point before arming waits for the next
- * turn. The WS watcher does not replay notifications, so the startup settle
- * must be observed through the session snapshot rather than a guessed delay.
+ * A Quick Chat baseline requires a settled session and a completed opening turn.
  */
 export async function waitForSessionSettledBaseline(
   apiClient: ApiClient,
@@ -41,9 +39,16 @@ export async function waitForSessionSettledBaseline(
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
+        const [{ sessions }, { turns }] = await Promise.all([
+          apiClient.listTaskSessions(taskId),
+          apiClient.listSessionTurns(sessionId),
+        ]);
         const session = sessions.find((candidate) => candidate.id === sessionId);
-        return session ? SETTLED_SESSION_STATES.has(session.state) : false;
+        return (
+          !!session &&
+          SETTLED_SESSION_STATES.has(session.state) &&
+          turns.some((turn) => !!turn.completed_at)
+        );
       },
       {
         timeout: 30_000,

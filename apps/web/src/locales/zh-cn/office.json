@@ -583,6 +583,7 @@
   "pauseAgent": "暂停智能体",
   "pauseReasonPlaceholder": "为什么要暂停此工作区？",
   "pauseRequestFailed": "更新暂停状态失败，请重试。",
+  "pauseStateLoading": "正在读取暂停状态...",
   "pauseStateStale": "可能已过期",
   "pauseStateUnavailable": "暂停状态不可用。该工作区可能已暂停，也可能未暂停。",
   "pauseUnavailable": "未选择工作区。",

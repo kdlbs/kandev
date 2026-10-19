@@ -46,6 +46,12 @@ func TestDeleteTaskSessionDoesNotDeleteReplacementIncarnation(t *testing.T) {
 	if err := repo.DeleteTaskSession(ctx, original); err != nil {
 		t.Fatalf("DeleteTaskSession initial: %v", err)
 	}
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		DELETE FROM agent_delivery_cleanup_jobs
+		WHERE session_id = ? AND incarnation_id = ?
+	`), original.ID, original.QueueIncarnationID); err != nil {
+		t.Fatalf("complete empty delivery-retirement purge: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
 		t.Fatalf("CreateTaskSession replacement: %v", err)
 	}
@@ -56,4 +62,5 @@ func TestDeleteTaskSessionDoesNotDeleteReplacementIncarnation(t *testing.T) {
 	if _, err := repo.GetTaskSession(ctx, sessionID); err != nil {
 		t.Fatalf("replacement session was deleted: %v", err)
 	}
+	assertRetentionRowCount(t, repo, "agent_delivery_cleanup_jobs", "session_id = ?", sessionID, 0)
 }

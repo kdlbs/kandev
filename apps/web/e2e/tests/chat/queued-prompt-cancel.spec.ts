@@ -14,11 +14,15 @@ import {
 } from "./queued-prompt-cancel.helpers";
 
 test.describe("queued prompt pause", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
   let releaseBackendEnv: (() => Promise<void>) | undefined;
 
   test.beforeEach(async ({ backend }) => {
-    releaseBackendEnv = await backend.useEnv({ KANDEV_E2E_CANCEL_HOLD_DURATION: "300ms" });
+    // Keep provider acknowledgement pending while the progress controls are inspected.
+    releaseBackendEnv = await backend.useEnv({
+      KANDEV_E2E_CANCEL_HOLD_DURATION: "8s",
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
+    });
   });
 
   test.afterEach(async () => {

@@ -339,6 +339,22 @@ describe("freshness and window membership", () => {
     expect(result.oldestCursor).toBe(older.id);
   });
 
+  it("retires absent rows inside an overlapping interval while retaining its cached tail", () => {
+    const older = message("older", 1);
+    const shared = message("shared", 2);
+    const retired = message("retired", 3);
+    const reply = message("reply", 4);
+    const tail = message("tail", 5);
+    const result = reconcileLatestMessageWindow({
+      cachedAtRequest: [older, shared, retired, tail],
+      cachedAtResponse: [older, shared, retired, tail],
+      fetched: [shared, reply],
+      authoritative: "overlap",
+    });
+    expect(result.messages.map(({ id }) => id)).toEqual(["older", "shared", "reply", "tail"]);
+    expect(result.oldestCursor).toBe(older.id);
+  });
+
   it("clears completed and newly arrived rows on authoritative empty history while retaining pending locals", () => {
     const baseline = toolRevision(SERVER_RUNNING, FIRST_REVISION);
     const live = toolRevision("completed result", SECOND_REVISION);
@@ -353,15 +369,22 @@ describe("freshness and window membership", () => {
     expect(result).toEqual({ messages: [pending], oldestCursor: pending.id });
   });
 
-  it("retains the changed cache and its identity for non-authoritative empty history", () => {
-    const baseline = toolRevision(SERVER_RUNNING, FIRST_REVISION);
-    const cache = [toolRevision("completed result", SECOND_REVISION), message("live-addition", 5)];
-    const result = reconcileLatestMessageWindow({
-      cachedAtRequest: [baseline],
-      cachedAtResponse: cache,
-      fetched: [],
-    });
-    expect(result.messages).toBe(cache);
-    expect(result.oldestCursor).toBe(baseline.id);
-  });
+  it.each([false, "overlap"] as const)(
+    "retains the changed cache for empty history with %s authority",
+    (authoritative) => {
+      const baseline = toolRevision(SERVER_RUNNING, FIRST_REVISION);
+      const cache = [
+        toolRevision("completed result", SECOND_REVISION),
+        message("live-addition", 5),
+      ];
+      const result = reconcileLatestMessageWindow({
+        cachedAtRequest: [baseline],
+        cachedAtResponse: cache,
+        fetched: [],
+        authoritative,
+      });
+      expect(result.messages).toBe(cache);
+      expect(result.oldestCursor).toBe(baseline.id);
+    },
+  );
 });

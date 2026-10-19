@@ -64,7 +64,18 @@ type TasksConfig struct {
 	// session reconciliation sweep classifies an active session with no live
 	// execution as stalled (issue #3712). The orphaned-session healing grace
 	// window is twice this value.
-	StallDetectionThreshold time.Duration `mapstructure:"stallDetectionThreshold"`
+	StallDetectionThreshold time.Duration           `mapstructure:"stallDetectionThreshold"`
+	DeliveryRetention       DeliveryRetentionConfig `mapstructure:"deliveryRetention"`
+}
+
+// DeliveryRetentionConfig bounds the backend's redundant durable-delivery evidence.
+type DeliveryRetentionConfig struct {
+	PayloadGrace time.Duration `mapstructure:"payloadGrace"`
+	ReplayAge    time.Duration `mapstructure:"replayAge"`
+	ReplayEvents int           `mapstructure:"replayEvents"`
+	Interval     time.Duration `mapstructure:"interval"`
+	BatchRows    int           `mapstructure:"batchRows"`
+	BatchBytes   int           `mapstructure:"batchBytes"`
 }
 
 // CredentialsConfig contains operator-managed credential file settings.
@@ -493,6 +504,8 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
+	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.
@@ -567,6 +580,17 @@ type FeaturesConfig struct {
 	// watches, standing orders, goals, activity log and the new proposal
 	// kinds). It only takes effect together with Coordinator.
 	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
+	// CoordinatorPhase3 gates coordinator autonomy (unattended wakes, the
+	// spend ceiling, automatic decisions). It only takes effect together
+	// with Coordinator and CoordinatorPhase2.
+	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
+
+	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
+	// the Projects scope editor, and everything that reads or acts on the
+	// recorded turn ledger. Recording itself runs without it. It only takes
+	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
@@ -888,6 +912,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applyDeliveryRetentionEnvironment(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

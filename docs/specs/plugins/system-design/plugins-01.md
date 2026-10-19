@@ -18,6 +18,7 @@ This design preserves the technical source detail for `REQ-PLUGINS-PLUGINS-001` 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLUGINS-PLUGINS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLUGINS-PLUGINS-001` (`AC-PLUGINS-PLUGINS-001.14`) | [Host release compatibility](#host-release-compatibility) |
 
 ## Migrated source detail
 
@@ -267,8 +268,11 @@ uploaded tarball:
 4. Kandev parses and validates `manifest.yaml` **before any code runs**: schema, `id`
    pattern, capability vocabulary, and that `runtime.executables` contains an entry
    for the host's OS/arch.
-5. Kandev extracts the package to `~/.kandev/plugins/<id>/<version>/` and records the
-   installation (`id`, `version`, `install_path`, capabilities, status).
+5. Kandev extracts the package to `~/.kandev/plugins/<id>/<version>/`, checks
+   [host release compatibility](#host-release-compatibility), and records the
+   installation (`id`, `version`, `install_path`, capabilities, status). A
+   compatibility rejection removes the fresh version before recording,
+   registration, or activation.
 6. Kandev spawns the platform-matched binary via `hashicorp/go-plugin`, completes the
    handshake (§2 of GRPC-CONTRACT.md) — status `registered` while this is pending.
 7. Handshake succeeds → status `active`. Handshake/spawn failure → status `error`
@@ -280,6 +284,43 @@ Uninstall stops the subprocess and removes the record, all installed versions, a
 plugin state (no 24-hour grace period in v1). `POST /api/plugins/register` is removed;
 there is no operator-supplied manifest, no generated credentials, and no cleartext
 secret returned at install time.
+
+### Host release compatibility
+
+`internal/plugins/manifest.CheckMinimumKandevVersion` owns the shared
+install-time comparison. `internal/plugins.Service.Install` invokes it after
+verified extraction and before installation persistence, registration, or runtime
+activation. Rejection removes only the freshly extracted version directory.
+`internal/canvas.DistributionService.validateInstallCompatibility` reuses the
+checker before staging an install preparation and wraps failures with
+`ErrInstallIncompatible`; canvas lifecycle and authorization remain unchanged.
+`internal/backendapp/services.go` supplies the stamped host version to both
+services through `SetKandevVersion`.
+
+Keep `NormalizeReleaseVersion` and manifest minimum validation unchanged. The
+running-version path additionally recognizes the published Nightly form
+`vX.Y.Z-nightly.sha<12-lowercase-hex>` (also its unprefixed value), with exactly
+three canonical nonnegative numeric segments. Trim surrounding whitespace as
+for stable host values. No other prerelease, build-metadata, git-describe, or
+malformed Nightly shape becomes a release boundary. This form comes from the
+[npm Nightly decision](../../../decisions/2026-07-31-npm-nightly-release-channel.md),
+`scripts/release/nightly-version.mjs`, and the `tag` emitted by
+`scripts/release/nightly-release.sh`; `release.yml` stamps that tag into
+`main.Version`.
+
+Retain the Nightly suffix for the existing `CompareVersions` comparison against
+the stable minimum. This preserves prerelease ordering: `1.2.4-nightly.sha123456789abc`
+is below `1.2.4` and above `1.2.3`. Do not change the marketplace comparator or
+strip the suffix into a stable version. Validate the minimum through the existing
+stable parser once the host is recognized. Empty minimums and exempt host values
+keep their existing early-return behavior, including the existing validation
+order; independent capability floors remain enforced by manifest validation.
+
+The existing
+[task-dependency floor criterion](../requirements/task-dependency-projection.md#req-plugins-task-deps-001-dependency-projection-on-the-plugin-task-read-model)
+(`AC-PLUGINS-TASK-DEPS-001.16`) already relies on older-host rejection without
+partial registration. The general Nightly criterion closes the shared version
+recognition gap without adding a capability floor or a runtime capability signal.
 
 ### `plugin_state` (SQLite)
 

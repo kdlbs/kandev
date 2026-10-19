@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"sync"
 	"time"
 
@@ -135,7 +136,7 @@ func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentc
 		return err
 	}
 	if prepared.duplicate {
-		p.manager.scheduleDurableDeliveryAck(p.client, prepared.event)
+		p.manager.scheduleDurableDeliveryAck(p.execution, p.client, prepared.event)
 		return nil
 	}
 	if !p.batchable(prepared) {
@@ -196,7 +197,7 @@ func (p *streamEventProcessor) batchable(prepared preparedAgentEvent) bool {
 	if _, ok := p.delivery.(canonicalAgentDeliveryBatchProjector); !ok {
 		return false
 	}
-	return prepared.durableEvent != nil && canonicalAgentDeliveryEvent(prepared.event)
+	return prepared.durableEvent != nil && prepared.event.Type != streams.EventTypeShellOutputUpdate && prepared.event.Type != streams.EventTypeToolCall && canonicalAgentDeliveryEvent(prepared.event)
 }
 
 func compatibleCanonicalBatch(previous, next preparedAgentEvent, execution *AgentExecution) bool {
@@ -218,7 +219,9 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	startupGeneration uint64,
 ) error {
 	if prepared.duplicate {
-		sm.scheduleDurableDeliveryAck(client, prepared.event)
+		if !prepared.skipAcknowledgement {
+			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
+		}
 		return nil
 	}
 	if prepared.durableEvent != nil && prepared.durableEvent.Terminal {
@@ -227,7 +230,9 @@ func (sm *StreamManager) processPreparedAgentEvent(
 		); err != nil {
 			return fmt.Errorf("project durable terminal agent event: %w", err)
 		}
-		sm.scheduleDurableDeliveryAck(client, prepared.event)
+		if !prepared.skipAcknowledgement {
+			sm.scheduleDurableDeliveryAck(execution, client, prepared.event)
+		}
 		if !prepared.skipCallback {
 			sm.notifyAgentEvent(execution, prepared.event, startupGeneration)
 		}
@@ -235,6 +240,7 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	}
 	event, canonicalProjected, err := sm.projectCanonicalAgentEvent(
 		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
+		!prepared.skipAcknowledgement,
 	)
 	if err != nil {
 		return fmt.Errorf("canonical agent event projection: %w", err)
@@ -250,6 +256,8 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	); err != nil {
 		return fmt.Errorf("project durable agent event: %w", err)
 	}
-	sm.scheduleDurableDeliveryAck(client, event)
+	if !prepared.skipAcknowledgement {
+		sm.scheduleDurableDeliveryAck(execution, client, event)
+	}
 	return nil
 }

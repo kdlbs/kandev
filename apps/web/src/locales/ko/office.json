@@ -579,6 +579,7 @@
   "pauseAgent": "에이전트 일시 중지",
   "pauseReasonPlaceholder": "이 워크스페이스를 일시 중지하는 이유는 무엇입니까?",
   "pauseRequestFailed": "일시 중지 상태를 업데이트하지 못했습니다. 다시 시도하세요.",
+  "pauseStateLoading": "일시 중지 상태를 읽는 중...",
   "pauseStateStale": "오래되었을 수 있음",
   "pauseStateUnavailable": "일시 중지 상태를 사용할 수 없습니다. 워크스페이스가 일시 중지되었을 수도 아닐 수도 있습니다.",
   "pauseUnavailable": "선택된 워크스페이스가 없습니다.",

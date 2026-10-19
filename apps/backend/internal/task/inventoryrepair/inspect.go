@@ -22,7 +22,12 @@ func Preview(ctx context.Context, p Plan) (*Report, error) {
 		return nil, err
 	}
 	defer func() { _ = db.Close() }()
-	in, err := inspect(ctx, p, db)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	in, err := inspect(ctx, p, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -30,6 +35,9 @@ func Preview(ctx context.Context, p Plan) (*Report, error) {
 }
 
 func inspect(ctx context.Context, p Plan, db queryer) (*inspection, error) {
+	if p.Version == 2 {
+		return inspectAliases(ctx, p, db)
+	}
 	in := &inspection{report: &Report{Plan: p}, db: db, rows: map[string]string{}, git: map[string]GitState{}, slots: map[string]row{}, envs: map[string]row{}, tasks: map[string]row{}, jobs: map[string]row{}}
 	for _, r := range p.Repairs {
 		if err := in.inspectRepair(ctx, r); err != nil {
@@ -59,7 +67,7 @@ func (in *inspection) inspectRepair(ctx context.Context, r Repair) error {
 		return err
 	}
 	in.slots[r.WorktreeID] = slot
-	if stringValue(slot, "task_environment_id") != r.EnvironmentID || stringValue(slot, "worktree_path") != r.SourcePath || stringValue(slot, "status") != "active" || slot["deleted_at"] != nil {
+	if stringValue(slot, environmentIDColumn) != r.EnvironmentID || stringValue(slot, "worktree_path") != r.SourcePath || stringValue(slot, "status") != "active" || slot["deleted_at"] != nil {
 		return errors.New("worktree slot does not match the selected active path/environment")
 	}
 	env, err := in.inspectEnvironment(ctx, r.EnvironmentID)
@@ -139,6 +147,10 @@ func (in *inspection) inspectConsumers(ctx context.Context, id, taskID string) e
 	}
 	for _, s := range sessions {
 		switch stringValue(s, "state") {
+		case "CREATED", sessionWaitingState:
+			if in.report.Plan.Version != 2 {
+				in.report.Blockers = append(in.report.Blockers, "nonterminal session "+stringValue(s, "id"))
+			}
 		case "COMPLETED", "CANCELLED", "FAILED":
 		default:
 			in.report.Blockers = append(in.report.Blockers, "nonterminal session "+stringValue(s, "id"))

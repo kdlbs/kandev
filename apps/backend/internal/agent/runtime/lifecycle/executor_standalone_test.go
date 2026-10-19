@@ -761,66 +761,6 @@ func TestStandaloneExecutorRecoverInstancesJointStopFailureRetainsSessionUnstopp
 	}
 }
 
-// TestStandaloneExecutorRecoverInstancesDeadlineDropsPendingSessionAndFinishesInBackground
-// pins AC-EXECUTORS-SURVIVAL-003.7: once ctx's deadline elapses, a session
-// whose losing duplicate hasn't finished stopping yet is treated as
-// not-re-tracked immediately -- RecoverInstances returns without waiting for
-// it -- but the in-flight stop, and the consequent joint winner-stop and
-// AC-EXECUTORS-SURVIVAL-002.16 unstoppable report it triggers, are not
-// aborted: they run to completion in the background and still get recorded.
-func TestStandaloneExecutorRecoverInstancesDeadlineDropsPendingSessionAndFinishesInBackground(t *testing.T) {
-	control := newStandaloneControlServer(t, true)
-	control.listInstances = []*agentctlclient.InstanceInfo{
-		{ID: "winner", Port: 5001, SessionID: "session-1"},
-		{ID: "loser", Port: 5002, SessionID: "session-1"},
-	}
-	control.deleteFailures["loser"] = 999  // never succeeds within its retry budget
-	control.deleteFailures["winner"] = 999 // never succeeds either, once tried
-	control.deleteDelay["loser"] = 150 * time.Millisecond
-	exec := control.executor(t)
-	exec.SetRecoveryRetryConfig(20*time.Millisecond, 0)
-	recorder := &fakeUnstoppableRecorder{}
-	exec.SetUnstoppableSessionRecorder(recorder)
-
-	records := []*models.ExecutorRunning{{SessionID: "session-1", AgentExecutionID: "winner"}}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-
-	start := time.Now()
-	recovered, err := exec.RecoverInstances(ctx, records)
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("RecoverInstances: %v", err)
-	}
-	if len(recovered) != 0 {
-		t.Fatalf("recovered = %+v, want none: the session's loser stop was still unresolved at the deadline", recovered)
-	}
-	if elapsed > 100*time.Millisecond {
-		t.Fatalf("RecoverInstances took %s, want it to return promptly at the deadline instead of waiting for the in-flight stop", elapsed)
-	}
-
-	pollDeadline := time.Now().Add(2 * time.Second)
-	for {
-		recorder.mu.Lock()
-		retained := len(recorder.retained)
-		recorder.mu.Unlock()
-		if retained == 1 {
-			break
-		}
-		if time.Now().After(pollDeadline) {
-			t.Fatal("timed out waiting for the background drain to finish joint-failure handling")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	recorder.mu.Lock()
-	defer recorder.mu.Unlock()
-	if recorder.retained[0] != "session-1" {
-		t.Fatalf("retained = %v, want session-1", recorder.retained)
-	}
-}
-
 // TestStandaloneExecutorRecoverInstancesDeadlineMarksGuardInFlightAndReleasesOnResolution
 // pins Review round 2 finding 3 (AC-EXECUTORS-SURVIVAL-002.8/003.7): a
 // session dropped at the recovery deadline because its loser's stop is still

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { getAgentProfileMcpConfigAction } from "@/app/actions/agents";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { readJourneyMcpConfig } from "@/hooks/journey-metadata-resources";
 
 const EMPTY_SERVERS: string[] = [];
 const DEFAULT_KANDEV: string[] = ["kandev"];
@@ -11,7 +11,12 @@ const DEFAULT_KANDEV: string[] = ["kandev"];
  * Resolves MCP support and configured MCP server names for the current session's agent.
  * Returns whether the agent supports MCP and the list of active MCP server names.
  */
-export function useSessionMcp(agentProfileId: string | null | undefined, sessionId?: string) {
+export function useSessionMcp(
+  agentProfileId: string | null | undefined,
+  sessionId?: string,
+  detailActive = true,
+) {
+  const store = useAppStoreApi();
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const attachmentHistory = useAppStore((state) =>
     sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
@@ -33,10 +38,11 @@ export function useSessionMcp(agentProfileId: string | null | undefined, session
   const supportsMcp = agent?.supports_mcp ?? false;
 
   useEffect(() => {
-    if (!agentProfileId || !supportsMcp) return;
+    if (!detailActive || !agentProfileId || !supportsMcp) return;
     let active = true;
+    const controller = new AbortController();
     const currentProfileId = agentProfileId;
-    getAgentProfileMcpConfigAction(currentProfileId)
+    readJourneyMcpConfig(store, currentProfileId, { signal: controller.signal })
       .then((config) => {
         if (!active) return;
         const userServers = config.enabled ? Object.keys(config.servers) : [];
@@ -48,8 +54,9 @@ export function useSessionMcp(agentProfileId: string | null | undefined, session
       });
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [agentProfileId, supportsMcp]);
+  }, [agentProfileId, detailActive, store, supportsMcp]);
 
   const mcpServers = useMemo(() => {
     const observedServers = attachmentHistory?.current.servers;

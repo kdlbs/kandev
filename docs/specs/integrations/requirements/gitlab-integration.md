@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-10-08
+updated: 2026-10-13
 owners:
   - tbd
 ---
@@ -53,6 +53,29 @@ existing lifecycle.
 This clarification excludes draft persistence after unmount, reload, or
 discussion removal, changes to MR/workspace switching, and changes to layout,
 copy, other review actions, or provider APIs.
+
+#### Pipeline job summary classification
+
+This clarification of the existing GitLab CI summary contract is locally
+implemented and verified in the
+[optional-manual classification package](../../../plans/gitlab-optional-manual-ci/plan.md).
+Hosted CI, review and merge remain pending; the existing requirement and
+unrelated criteria retain their lifecycle. Integrations owns the provider semantics across the
+status API, feedback, cached MR summaries, and desktop/phone disclosures.
+
+The existing `passed` bucket means accepted for pipeline progress. It includes
+skipped jobs and allowed failures, so it does not assert that every job ran or
+that every test succeeded. An optional manual job has raw status `manual` and
+`allow_failure=true`; a blocking manual job has `allow_failure=false`.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.16:** When an untriggered optional manual job is included in a pipeline's job list, Kandev shall count it in the existing accepted/pass bucket and retain it in the total. A successful test plus one optional manual deployment shall report 2/2 through status and feedback summaries, cached MR summaries after their next ordinary refresh, and the first-party live and fallback CI displays on desktop and phone.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.17:** Job and stage summaries shall agree for mixed states. A stage shall be accepted only when every included job is in the accepted/pass bucket. At least one non-allowed failed or canceled job shall keep the stage failed; otherwise at least one in-progress job shall keep it in progress, even alongside optional manual jobs. Whole-pipeline counts shall retain every job and the separate accepted, in-progress, and failed totals where exposed.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.18:** Blocking manual jobs shall remain in progress. Running, pending, created, scheduled, and unknown-status jobs shall remain in progress even with `allow_failure=true`. Success and skipped jobs shall retain their existing accepted classification; failed and canceled jobs shall remain failed unless allowed to fail, in which case they retain their existing accepted classification.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.19:** Summary classification shall preserve provider-reported job status, `allow_failure`, pipeline status, and job links. Accepted counts shall not substitute for pipeline status or change merge readiness, auto-merge gates, or the failing-job set used by auto-fix. An optional manual job shall not conceal a real failure, claim successful execution, or initiate an upstream action.
+
+This clarification excludes CI configuration edits, job execution, credentials,
+new fetching or cache policies, persistence changes, race repairs, other
+providers, new copy, and layout or touch-interaction changes.
 
 ## System design
 

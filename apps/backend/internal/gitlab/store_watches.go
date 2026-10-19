@@ -37,7 +37,7 @@ func (s *Store) CreateMRWatch(ctx context.Context, w *MRWatch) error {
 	return err
 }
 
-const mrWatchSelectCols = `id, session_id, task_id, repository_id, project_path,
+const mrWatchSelectCols = ` id, session_id, task_id, repository_id, project_path,
 	mr_iid, branch, last_checked_at, last_note_at, last_pipeline_state,
 	last_approval_state, created_at, updated_at`
 
@@ -207,13 +207,14 @@ func (s *Store) DeleteMRWatchesByTaskID(ctx context.Context, taskID string) (int
 
 // --- Review Watch CRUD ---
 
-const reviewWatchSelectCols = `id, workspace_id, workflow_id, workflow_step_id,
+const reviewWatchSelectCols = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	projects, agent_profile_id, executor_profile_id, prompt, repository_id, base_branch, review_scope,
 	custom_query, enabled, poll_interval_seconds, cleanup_policy,
 	max_inflight_tasks, generation, deleting, last_error, last_error_at, last_polled_at, created_at, updated_at`
 
 // CreateReviewWatch inserts a review watch and serializes Projects to JSON.
 func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
+	rw.CreatedByUserID = executorCreatorUserID(ctx)
 	if rw.ID == "" {
 		rw.ID = uuid.New().String()
 	}
@@ -238,12 +239,12 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	}
 	rw.CleanupPolicy = NormalizeCleanupPolicy(rw.CleanupPolicy)
 	_, err = s.db.NamedExecContext(ctx, `
-		INSERT INTO gitlab_review_watches (
+		INSERT INTO gitlab_review_watches (created_by_user_id,
 			id, workspace_id, workflow_id, workflow_step_id, projects,
 			agent_profile_id, executor_profile_id, prompt, repository_id, base_branch, review_scope, custom_query,
 			enabled, poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation, deleting, last_error, last_error_at, last_polled_at,
 			created_at, updated_at
-		) VALUES (
+		) VALUES (:created_by_user_id,
 			:id, :workspace_id, :workflow_id, :workflow_step_id, :projects,
 			:agent_profile_id, :executor_profile_id, :prompt, :repository_id, :base_branch, :review_scope, :custom_query,
 			:enabled, :poll_interval_seconds, :cleanup_policy, :max_inflight_tasks, :generation, :deleting, :last_error, :last_error_at, :last_polled_at,
@@ -583,13 +584,14 @@ func (s *Store) DeleteReviewMRTask(ctx context.Context, id string) error {
 
 // --- Issue Watch CRUD ---
 
-const issueWatchSelectCols = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchSelectCols = `created_by_user_id, id, workspace_id, workflow_id, workflow_step_id,
 	projects, agent_profile_id, executor_profile_id, prompt, repository_id, base_branch, labels, custom_query,
 	enabled, poll_interval_seconds, cleanup_policy, max_inflight_tasks, last_error, last_error_at,
 	generation, deleting, last_polled_at, created_at, updated_at`
 
 // CreateIssueWatch inserts an issue watch and serializes Projects + Labels.
 func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
+	iw.CreatedByUserID = executorCreatorUserID(ctx)
 	if iw.ID == "" {
 		iw.ID = uuid.New().String()
 	}
@@ -616,12 +618,12 @@ func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	}
 	iw.CleanupPolicy = NormalizeCleanupPolicy(iw.CleanupPolicy)
 	_, err = s.db.NamedExecContext(ctx, `
-		INSERT INTO gitlab_issue_watches (
+		INSERT INTO gitlab_issue_watches (created_by_user_id,
 			id, workspace_id, workflow_id, workflow_step_id, projects,
 			agent_profile_id, executor_profile_id, prompt, repository_id, base_branch, labels, custom_query,
 			enabled, poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation, deleting, last_error, last_error_at, last_polled_at,
 			created_at, updated_at
-		) VALUES (
+		) VALUES (:created_by_user_id,
 			:id, :workspace_id, :workflow_id, :workflow_step_id, :projects,
 			:agent_profile_id, :executor_profile_id, :prompt, :repository_id, :base_branch, :labels, :custom_query,
 			:enabled, :poll_interval_seconds, :cleanup_policy, :max_inflight_tasks, :generation, :deleting, :last_error, :last_error_at, :last_polled_at,

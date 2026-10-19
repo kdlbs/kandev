@@ -20,7 +20,7 @@ func (s *Service) stampToolPolicy(metadata map[string]interface{}, c *Coordinato
 		WorkspaceID:        c.WorkspaceID,
 		ConversationTaskID: conversationTaskID,
 		PolicyRevision:     c.PolicyRevision,
-		ToolNames:          ToolNames(s.policyFor(c), true),
+		ToolNames:          ToolNamesPhase31(s.policyFor(c), true, s.phase3, s.phase31),
 	})
 	if err != nil {
 		return err
@@ -39,7 +39,9 @@ func (s *Service) bindConversationTask(ctx context.Context, task *taskmodels.Tas
 	if err := s.stampToolPolicy(metadata, c, task.ID); err != nil {
 		return err
 	}
-	_, err := s.conversationTasks.UpdateTask(ctx, task.ID, &taskservice.UpdateTaskRequest{
+	bindCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bindTimeout)
+	defer cancel()
+	_, err := s.conversationTasks.UpdateTask(bindCtx, task.ID, &taskservice.UpdateTaskRequest{
 		Metadata:              metadata,
 		AllowReservedMetadata: true,
 	})

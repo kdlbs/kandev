@@ -579,6 +579,7 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 
 func TestPersistOrphanReapProgressBestEffortRetriesWriteFailure(t *testing.T) {
 	svc, _, repo := createTestService(t)
+	svc.StopTaskResourceCleanupWorker()
 	ctx := context.Background()
 	const taskID = "task-persist-progress-retry"
 	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-orphan-reap", Title: taskID}); err != nil {

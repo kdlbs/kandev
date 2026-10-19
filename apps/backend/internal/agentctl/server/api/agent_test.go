@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -49,11 +51,17 @@ func newTestServer(t *testing.T) *Server {
 
 func prepareVscodeTestServer(t *testing.T) *Server {
 	t.Helper()
-	t.Setenv(apiTestVscodeFixtureEnv, "1")
+	shutdownPath := filepath.Join(t.TempDir(), "vscode-fixture-shutdown")
+	t.Setenv(apiTestVscodeFixtureEnv, shutdownPath)
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir(), VscodeCommand: os.Args[0]}
 	procMgr := process.NewManager(cfg, log)
 	t.Cleanup(func() {
+		if runtime.GOOS == "windows" {
+			if err := os.WriteFile(shutdownPath, nil, 0o600); err != nil {
+				t.Errorf("request VS Code fixture shutdown: %v", err)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := procMgr.StopVscode(ctx); err != nil {
@@ -138,7 +146,7 @@ func TestHandleAgentConfigure_UsesLegacyOnlyWhenArgsAbsent(t *testing.T) {
 func dialTestWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/agent/stream"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"X-Kandev-Delivery-Version": []string{"2"}})
 	if err != nil {
 		t.Fatalf("failed to dial WebSocket: %v", err)
 	}

@@ -45,7 +45,7 @@ export function TranscriptNavGroup({
   return (
     <>
       {hasNavigationControls && (
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 max-md:contents">
           {onJumpToLatest && (
             <JumpToLatestButton isVisible={Boolean(showJumpToLatest)} onClick={onJumpToLatest} />
           )}

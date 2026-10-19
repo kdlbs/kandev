@@ -517,7 +517,7 @@ export function useChatInputState({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [sessionId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     valueRef.current = value;
     pendingCommentsRef.current = pendingCommentsByFile;
   }, [value, pendingCommentsByFile]);

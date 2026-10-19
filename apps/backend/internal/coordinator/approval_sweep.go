@@ -38,17 +38,21 @@ func (s *Service) StartApprovalSweep(ctx context.Context) {
 // extra bookkeeping to keep two passes from overlapping.
 func (s *Service) startApprovalSweep(ctx context.Context, tick <-chan time.Time, stopTicker func()) {
 	s.sweepMu.Lock()
-	if s.sweepStarted {
+	if s.sweepStarted || s.sweepClosed || ctx.Err() != nil {
 		s.sweepMu.Unlock()
+		stopTicker()
 		return
 	}
+	loopCtx, cancel := context.WithCancel(ctx)
+	s.sweepCancel = cancel
 	s.sweepStarted = true
+	s.sweepWG.Add(1)
 	s.sweepMu.Unlock()
 
-	s.sweepWG.Add(1)
 	go func() {
 		defer s.sweepWG.Done()
 		defer stopTicker()
+		defer cancel()
 		defer func() {
 			s.sweepMu.Lock()
 			s.sweepStarted = false
@@ -56,21 +60,25 @@ func (s *Service) startApprovalSweep(ctx context.Context, tick <-chan time.Time,
 		}()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-loopCtx.Done():
 				return
 			case now := <-tick:
-				s.runApprovalSweepPass(ctx, now.Add(-approvalSweepStaleAfter))
+				s.runApprovalSweepPass(loopCtx, now.Add(-approvalSweepStaleAfter))
 			}
 		}
 	}()
 }
 
-// WaitApprovalSweepStopped blocks until the goroutine started by
-// StartApprovalSweep has exited after its context was cancelled. Production
-// ties the sweep's lifetime purely to the app context and never calls this;
-// it exists so tests and graceful-shutdown callers can join the goroutine
-// after cancelling, instead of asserting no-leak immediately after cancel.
+// WaitApprovalSweepStopped closes admission, cancels the owned sweep and joins
+// its registered worker before the repository may close.
 func (s *Service) WaitApprovalSweepStopped() {
+	s.sweepMu.Lock()
+	s.sweepClosed = true
+	cancel := s.sweepCancel
+	s.sweepMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	s.sweepWG.Wait()
 }
 
@@ -83,7 +91,7 @@ func (s *Service) runApprovalSweepPass(ctx context.Context, cutoff time.Time) {
 			s.afterSweepPass()
 		}
 	}()
-	rows, err := s.store.ListApprovingClaimedBefore(ctx, cutoff, true)
+	rows, err := s.store.ListApprovingClaimedBeforeAnyKind(ctx, cutoff)
 	if err != nil {
 		s.logger.Warn("approval sweep: discovery query failed", zap.Error(err))
 		return

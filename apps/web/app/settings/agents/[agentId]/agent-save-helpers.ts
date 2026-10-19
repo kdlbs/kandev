@@ -234,7 +234,11 @@ export type SaveAgentCallbacks = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => Agent | void;
+  upsertAgent: (
+    agent: Agent,
+    creation?: AgentCreationPublication,
+    allowMissingAgent?: boolean,
+  ) => Agent | void;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;

@@ -31,6 +31,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initMessageShellOutputSchema,
 		r.initSessionContinuitySchema,
 		r.initAgentDeliverySchema,
 		r.initTurnChangesSchema,
@@ -62,6 +63,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
 		r.ensureTaskEnvironmentRecoveryArtifactsSchema,
 		r.ensureTaskEnvironmentRecoveryOperationsSchema,
+		r.ensureWorkspaceAdoptionsSchema,
 		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
@@ -1290,6 +1292,7 @@ func (r *Repository) initStepTransitionsSchema() error {
 		trigger TEXT NOT NULL,
 		actor_kind TEXT NOT NULL,
 		actor_id TEXT,
+		causing_run_id TEXT,
 		contract_version INTEGER NOT NULL,
 		occurred_at TIMESTAMP NOT NULL
 	);
@@ -1372,6 +1375,13 @@ func (r *Repository) initMessageTurnSchema() error {
 // task_environments were removed by the one-time cutover migration
 // (normalizeTaskWorktreeOwnership).
 const sessionWorktreeSchemaDDL = `
+ CREATE TABLE IF NOT EXISTS task_creation_authorizations (
+  kind TEXT NOT NULL,
+  creation_id TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  PRIMARY KEY(kind,creation_id)
+ );
+
 	CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,

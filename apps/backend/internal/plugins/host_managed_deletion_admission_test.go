@@ -284,6 +284,19 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 			spec := f.spec
 			spec.RequestID = "replacement-request"
 			spec.IdempotencyKey = "replacement"
+			blocked, _, err := f.manager.Ensure(ctx, spec)
+			require.NoError(t, err)
+			require.Equal(t, pluginsdk.CommandUnavailable, blocked.Status)
+			completed := false
+			for range 8 {
+				result, err := f.other.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{})
+				require.NoError(t, err)
+				if result.Completed == 1 {
+					completed = true
+					break
+				}
+			}
+			require.True(t, completed, "delivery retirement must finish before deterministic replacement")
 			created, replacement, err := f.manager.Ensure(ctx, spec)
 			require.NoError(t, err)
 			require.Equal(t, pluginsdk.CommandApplied, created.Status)

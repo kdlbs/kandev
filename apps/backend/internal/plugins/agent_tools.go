@@ -32,17 +32,18 @@ type AgentToolInvocationContext struct {
 	ManagedToolPolicy *mcpprofile.ManagedToolPolicy
 }
 
-// AgentToolCatalog returns the current active-plugin tool snapshot. The
-// revision changes only when the effective tool set changes; generation is
-// stable for the lifetime of the Service instance.
+// AgentToolCatalog returns the current tool snapshot of active plugins whose
+// required config is set. The revision changes only when the effective tool
+// set changes; generation is stable for the lifetime of the Service instance.
 func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
-	tools, err := buildAgentToolDefinitions(s.registry.List())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tools, err := buildAgentToolDefinitions(s.configReadyAgentToolRecords())
 	if err != nil {
 		return plugintools.Snapshot{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.agentToolGeneration == "" {
 		s.agentToolGeneration = fmt.Sprintf("service-%d", time.Now().UnixNano())
 	}
@@ -56,6 +57,77 @@ func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
 		s.agentToolSnapshotReady = true
 	}
 	return plugintools.Normalize(s.agentToolSnapshot), nil
+}
+
+// configReadyAgentToolRecords returns the active plugin records whose
+// required config is set. A plugin that cannot serve its tools until the
+// operator configures it contributes none; UpdateConfig recomputes the
+// catalog once the config is saved.
+func (s *Service) configReadyAgentToolRecords() []*store.Record {
+	records := s.registry.List()
+	ready := make([]*store.Record, 0, len(records))
+	for _, record := range records {
+		if record.Status == StatusActive && s.requiredConfigSet(record) {
+			ready = append(ready, record)
+		}
+	}
+	return ready
+}
+
+// requiredConfigSet reports whether every field in the record's
+// config_schema "required" list holds a set value (see
+// isRequiredConfigValueSet). A record without required fields needs no
+// config. A config that cannot be read leaves only this plugin unready, so
+// one broken config file cannot drop the other plugins' tools; the warning
+// carries the plugin ID only because the error can quote config content.
+func (s *Service) requiredConfigSet(record *store.Record) bool {
+	required := requiredConfigFields(record.ConfigSchema)
+	if len(required) == 0 {
+		return true
+	}
+	config, err := s.store.GetConfig(record.ID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) && s.log != nil {
+			s.log.Warn("plugins: agent tools hidden because the plugin config could not be read",
+				zap.String("plugin_id", record.ID))
+		}
+		return false
+	}
+	for _, field := range required {
+		if !isRequiredConfigValueSet(config[field]) {
+			return false
+		}
+	}
+	return true
+}
+
+// requiredConfigFields returns the string entries of a config_schema
+// "required" list, ignoring malformed entries like checkRequiredKeys does.
+func requiredConfigFields(schema map[string]any) []string {
+	required, _ := schema["required"].([]any)
+	fields := make([]string, 0, len(required))
+	for _, raw := range required {
+		if name, ok := raw.(string); ok {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}
+
+// isRequiredConfigValueSet mirrors the settings "Setup required" badge
+// (isConfigured in apps/web/hooks/domains/plugins/use-plugin-setup-status.ts):
+// an absent key, null, or blank string is unset; any other value, including
+// false and 0, is set. A saved secret holds its non-empty vault reference.
+// isZeroConfigValue is not used because it treats false and 0 as unset.
+func isRequiredConfigValueSet(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	default:
+		return true
+	}
 }
 
 func buildAgentToolDefinitions(records []*store.Record) ([]plugintools.Definition, error) {
@@ -157,6 +229,11 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 			zap.Duration("duration", time.Since(started)),
 			zap.String("outcome", outcome))
 	}()
+
+	// Keep record lookup and the RPC in one dispatch lease across lifecycle changes.
+	dispatchLock := s.dispatchLocks.lockFor(pluginID)
+	dispatchLock.RLock()
+	defer dispatchLock.RUnlock()
 
 	record, err := s.Get(pluginID)
 	if err != nil {

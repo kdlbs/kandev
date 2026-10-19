@@ -32,6 +32,7 @@ import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 
 type QuickChatContentProps = {
   sessionId: string;
+  loadSettings?: boolean;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
@@ -90,10 +91,14 @@ function useQuickChatComposerPriming({
   useQuickChatInitialDraft({ draft: initialDraft, initialPrompt, chatInputRef });
 }
 
-function useQuickChatState(sessionId: string, transformOutgoing?: (message: string) => string) {
+function useQuickChatState(
+  sessionId: string,
+  transformOutgoing?: (message: string) => string,
+  loadSettings = true,
+) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
-  useSettingsData(true);
+  useSettingsData(loadSettings);
   const panelState = useChatPanelState({
     sessionId,
     onOpenFile: undefined,
@@ -130,10 +135,11 @@ export const QuickChatContent = memo(function QuickChatContent({
   transformOutgoing,
   hideStartupRows,
   activityDisplay = false,
+  loadSettings,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
-  const state = useQuickChatState(sessionId, transformOutgoing);
+  const state = useQuickChatState(sessionId, transformOutgoing, loadSettings);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
@@ -189,7 +195,6 @@ export const QuickChatContent = memo(function QuickChatContent({
           isWorking={panelState.isWorking}
           sessionState={panelState.session?.state}
           worktreePath={getSessionWorkspacePath(panelState.session)}
-          onOpenFile={undefined}
         />
       </div>
       <ClarificationPanelSection

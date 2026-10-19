@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/coordinator/outcomes"
 )
 
 // proposalRejectReasonMaxRunes is RejectProposalRequest.Reason's length
@@ -52,15 +54,22 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	}
 
 	decidedBy := decidingUserID(ctx)
-	matched, err := s.rejectProposalStore(ctx, proposal, trimmed, decidedBy)
+	decidedAt := time.Now().UTC()
+	matched, err := s.rejectProposalStore(ctx, proposal, trimmed, decidedBy, decidedAt)
 	if err != nil {
 		return nil, err
 	}
 	if !matched {
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
+	rejectedSnapshot := *proposal
+	rejectedSnapshot.Status = ProposalStatusRejected
+	rejectedSnapshot.DecidedBy = optString(decidedBy)
+	rejectedSnapshot.UpdatedAt = decidedAt
+	s.notifyDecided(ctx, &rejectedSnapshot, outcomes.DecisionRejected, outcomes.Code("", trimmed), decidedAt)
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal rejected",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	rejected, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	return rejected, err
 }

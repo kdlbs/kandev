@@ -38,6 +38,45 @@ func (s *Service) markWorkspaceGroupMaterialized(ctx context.Context, taskID str
 	}
 }
 
+// admitInheritedEnvironment checks executor ownership before session creation
+// can publish a binding to another task's canonical environment.
+func (s *Service) admitInheritedEnvironment(ctx context.Context, task *v1.Task, executorID, executorProfileID string) error {
+	mode, _ := workspacePolicyMode(task.Metadata)
+	var envID string
+	switch mode {
+	case models.WorkspaceModeInheritParent:
+		if task.ParentID == "" {
+			return fmt.Errorf("%w: inherit_parent task has no parent", models.ErrWorkspaceReuseUnsafe)
+		}
+		var err error
+		envID, _, err = s.resolveInheritedEnvironmentChecked(ctx, task)
+		if err != nil {
+			return err
+		}
+	case models.WorkspaceModeSharedGroup:
+		if s.workspaceMaterializer != nil {
+			envID = s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID)
+		}
+	default:
+		return nil
+	}
+	if envID == "" {
+		return nil
+	}
+	available, err := s.validateInheritedEnvironmentReference(ctx, task, envID)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return fmt.Errorf("%w: inherited environment could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	env, err := s.repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		return fmt.Errorf("%w: inherited environment could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	return s.executor.AdmitInheritedEnvironment(ctx, task, env, executorID, executorProfileID)
+}
+
 // propagateInheritedEnvironment is the launch-time consumer of the
 // workspace policy persisted by office task-handoffs phase 4. When the
 // task's metadata.workspace.mode is "inherit_parent" or "shared_group"
@@ -104,6 +143,9 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	target, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || target == nil {
 		return fmt.Errorf("inherit_parent load target session: %w", err)
+	}
+	if err := s.admitSessionInheritedEnvironment(ctx, task, target, envID); err != nil {
+		return err
 	}
 	if target.TaskEnvironmentID == envID {
 		return nil
@@ -251,6 +293,9 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 	if err != nil || target == nil {
 		return fmt.Errorf("shared_group load target session: %w", err)
 	}
+	if err := s.admitSessionInheritedEnvironment(ctx, task, target, envID); err != nil {
+		return err
+	}
 	if target.TaskEnvironmentID == envID {
 		return nil
 	}
@@ -264,6 +309,16 @@ func (s *Service) inheritFromSharedGroup(ctx context.Context, task *v1.Task, ses
 		zap.String("session_id", sessionID),
 		zap.String("task_environment_id", envID))
 	return nil
+}
+
+// Propagation uses the prepared session's resolved executor before binding a
+// parent or group environment that may have become available after preflight.
+func (s *Service) admitSessionInheritedEnvironment(ctx context.Context, task *v1.Task, session *models.TaskSession, envID string) error {
+	env, err := s.repo.GetTaskEnvironment(ctx, envID)
+	if err != nil || env == nil {
+		return fmt.Errorf("%w: inherited environment could not be verified", models.ErrWorkspaceReuseUnsafe)
+	}
+	return s.executor.AdmitInheritedEnvironment(ctx, task, env, session.ExecutorID, session.ExecutorProfileID)
 }
 
 // workspacePolicyMode reads metadata.workspace.mode (set by

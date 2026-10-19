@@ -4,6 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 const archiveAndSwitchMock = vi.fn();
 const toastMock = vi.fn();
 const mockGetSubtaskCount = vi.fn();
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock("@/hooks/use-responsive-breakpoint", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/use-responsive-breakpoint")>()),
+  useResponsiveBreakpoint: () => ({ isMobile: viewport.isMobile, isFinePointer: true }),
+}));
 const taskPRsByTaskId = vi.hoisted(() => ({
   value: {
     "task-1": [{ pr_number: 42, state: "merged" }],
@@ -49,6 +54,8 @@ vi.mock("@/lib/local-storage", async (importOriginal) => ({
 
 import { PRClosedBanner, PRMergedBanner } from "./pr-archive-banners";
 
+const MERGED_BANNER = "pr-merged-banner";
+const CLOSED_BANNER = "pr-closed-banner";
 const MERGED_ARCHIVE_BUTTON = "pr-merged-archive-button";
 const MERGED_ARCHIVE_CONFIRM = "pr-merged-archive-confirm";
 
@@ -59,6 +66,7 @@ async function findEnabledConfirm(testId: string) {
 }
 
 beforeEach(() => {
+  viewport.isMobile = false;
   archiveAndSwitchMock.mockResolvedValue(undefined);
   mockGetSubtaskCount.mockResolvedValue({ count: 0 });
   taskPRsByTaskId.value = {
@@ -73,6 +81,24 @@ afterEach(() => {
 });
 
 describe("PRMergedBanner", () => {
+  it("uses a concise localized terminal message on phones", () => {
+    viewport.isMobile = true;
+    render(<PRMergedBanner taskId="task-1" />);
+    expect(screen.getByTestId(MERGED_BANNER).textContent).toContain("PR #42 merged");
+  });
+
+  it("uses the count-aware phone message once all PRs are merged", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = {
+      "task-1": [
+        { pr_number: 42, state: "merged" },
+        { pr_number: 43, state: "merged" },
+      ],
+    };
+    render(<PRMergedBanner taskId="task-1" />);
+    expect(screen.getByTestId(MERGED_BANNER).textContent).toContain("All 2 PRs merged");
+  });
+
   it("opens the confirmation dialog instead of archiving directly", async () => {
     render(<PRMergedBanner taskId="task-1" />);
 
@@ -106,7 +132,7 @@ describe("PRMergedBanner", () => {
 
     await waitFor(() => expect(screen.queryByTestId(MERGED_ARCHIVE_CONFIRM)).toBeNull());
     expect(archiveAndSwitchMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId("pr-merged-banner")).toBeTruthy();
+    expect(screen.getByTestId(MERGED_BANNER)).toBeTruthy();
   });
 
   it("keeps the failure toast when archive fails", async () => {
@@ -177,6 +203,29 @@ describe("PRMergedBanner", () => {
 });
 
 describe("PRClosedBanner", () => {
+  it("distinguishes the concise closed notice from a merged PR", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = { "task-1": [{ pr_number: 42, state: "closed" }] };
+    render(<PRClosedBanner taskId="task-1" />);
+    expect(screen.getByTestId(CLOSED_BANNER).textContent).toContain(
+      "PR #42 closed without merging",
+    );
+  });
+
+  it("counts all closed PRs without describing them as merged", () => {
+    viewport.isMobile = true;
+    taskPRsByTaskId.value = {
+      "task-1": [
+        { pr_number: 42, state: "closed" },
+        { pr_number: 43, state: "closed" },
+      ],
+    };
+    render(<PRClosedBanner taskId="task-1" />);
+    expect(screen.getByTestId(CLOSED_BANNER).textContent).toContain(
+      "All 2 PRs closed without merging",
+    );
+  });
+
   it("archives through the confirmation dialog", async () => {
     taskPRsByTaskId.value = {
       "task-1": [{ pr_number: 42, state: "closed" }],
@@ -190,5 +239,29 @@ describe("PRClosedBanner", () => {
     await waitFor(() =>
       expect(archiveAndSwitchMock).toHaveBeenCalledWith("task-1", { cascade: false }),
     );
+  });
+});
+
+describe("terminal notice eligibility", () => {
+  it.each([
+    { label: "absent", prs: [] },
+    { label: "open", prs: [{ pr_number: 42, state: "open" }] },
+    {
+      label: "mixed",
+      prs: [
+        { pr_number: 42, state: "merged" },
+        { pr_number: 43, state: "closed" },
+      ],
+    },
+  ])("does not offer terminal archive for $label PRs", ({ prs }) => {
+    taskPRsByTaskId.value = { "task-1": prs };
+    render(
+      <>
+        <PRMergedBanner taskId="task-1" />
+        <PRClosedBanner taskId="task-1" />
+      </>,
+    );
+    expect(screen.queryByTestId(MERGED_BANNER)).toBeNull();
+    expect(screen.queryByTestId(CLOSED_BANNER)).toBeNull();
   });
 });

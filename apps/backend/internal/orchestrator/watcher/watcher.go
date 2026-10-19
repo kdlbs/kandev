@@ -32,36 +32,46 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	RecoveryMode             string                                `json:"-"`
-	RecoveryAttemptsStarted  int                                   `json:"-"`
-	RecoveryDisposition      string                                `json:"-"`
-	RecoveryPhase            string                                `json:"-"`
-	ContinuationSafety       *streams.ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
-	CapacityContinuation     *streams.CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
-	TaskID                   string                                `json:"task_id"`
-	SessionID                string                                `json:"session_id"`
-	OwnerKind                string                                `json:"owner_kind,omitempty"`
-	TaskEnvironmentID        string                                `json:"task_environment_id,omitempty"`
-	AgentExecutionID         string                                `json:"agent_execution_id"`
-	AgentID                  string                                `json:"agent_id,omitempty"`
-	AgentProfileID           string                                `json:"agent_profile_id"`
-	ExecutionProfileID       string                                `json:"execution_profile_id,omitempty"`
-	TurnID                   string                                `json:"turn_id,omitempty"`
-	ExitCode                 *int                                  `json:"exit_code,omitempty"`
-	ErrorMessage             string                                `json:"error_message,omitempty"`
-	FailureCode              string                                `json:"failure_code,omitempty"`
-	FailureDetails           string                                `json:"failure_details,omitempty"`
-	StartupFailureReason     string                                `json:"startup_reason,omitempty"`
-	StartupFailureAttempts   int                                   `json:"startup_attempts,omitempty"`
-	StartupFailureNPMCode    string                                `json:"startup_npm_code,omitempty"`
-	Phase                    string                                `json:"phase,omitempty"`
-	AttemptID                string                                `json:"attempt_id,omitempty"`
-	ErrorStamp               string                                `json:"error_stamp,omitempty"`
-	Causes                   []models.AgentErrorCause              `json:"causes,omitempty"`
-	ProviderError            *streams.ProviderError                `json:"provider_error,omitempty"`
-	PromptFailureDisposition streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
-	SessionSettingsPolicy    streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
-	PromptGeneration         uint64                                `json:"prompt_generation,omitempty"`
+	RecoveryMode              string                                `json:"-"`
+	RecoveryAttemptsStarted   int                                   `json:"-"`
+	RecoveryDisposition       string                                `json:"-"`
+	RecoveryPhase             string                                `json:"-"`
+	ContinuationSafety        *streams.ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
+	CapacityContinuation      *streams.CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
+	TaskID                    string                                `json:"task_id"`
+	SessionID                 string                                `json:"session_id"`
+	OwnerKind                 string                                `json:"owner_kind,omitempty"`
+	TaskEnvironmentID         string                                `json:"task_environment_id,omitempty"`
+	AgentExecutionID          string                                `json:"agent_execution_id"`
+	AgentID                   string                                `json:"agent_id,omitempty"`
+	AgentProfileID            string                                `json:"agent_profile_id"`
+	ExecutionProfileID        string                                `json:"execution_profile_id,omitempty"`
+	TurnID                    string                                `json:"turn_id,omitempty"`
+	DeliveryStreamID          string                                `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string                                `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64                                `json:"delivery_harness_generation,omitempty"`
+	DeliverySequence          uint64                                `json:"delivery_sequence,omitempty"`
+	DeliverySubmissionID      string                                `json:"delivery_submission_id,omitempty"`
+	DeliveryOutcome           string                                `json:"delivery_outcome,omitempty"`
+	Status                    string                                `json:"status,omitempty"`
+	ExitCode                  *int                                  `json:"exit_code,omitempty"`
+	ErrorMessage              string                                `json:"error_message,omitempty"`
+	FailureCode               string                                `json:"failure_code,omitempty"`
+	FailureDetails            string                                `json:"failure_details,omitempty"`
+	StartupFailureReason      string                                `json:"startup_reason,omitempty"`
+	StartupFailureAttempts    int                                   `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode     string                                `json:"startup_npm_code,omitempty"`
+	Phase                     string                                `json:"phase,omitempty"`
+	AttemptID                 string                                `json:"attempt_id,omitempty"`
+	ErrorStamp                string                                `json:"error_stamp,omitempty"`
+	Causes                    []models.AgentErrorCause              `json:"causes,omitempty"`
+	ProviderError             *streams.ProviderError                `json:"provider_error,omitempty"`
+	PromptFailureDisposition  streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
+	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
+	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
+	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
+	RunID                     string                                `json:"run_id,omitempty"`
+	CausingRunID              string                                `json:"causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -91,6 +101,9 @@ type ACPSessionEventData struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
+	// succeeds the committed harness generation.
+	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events

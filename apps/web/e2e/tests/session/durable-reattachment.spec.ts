@@ -1,75 +1,18 @@
 import { expect, test } from "../../fixtures/test-base";
-import { triggerActualDeliveryDisconnect } from "../../helpers/durable-reattachment";
+import { verifyAutomaticRestartReconciliation } from "../../helpers/restart-reconciliation";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("durable delivery reattachment", () => {
   test.describe.configure({ retries: 0 });
 
-  test("persists an actual disconnect and keeps retry and Stop bound to the original session", async ({
+  test("restores an actual runtime disconnect without replay and accepts a new prompt", async ({
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
-    test.setTimeout(150_000);
-    const result = await triggerActualDeliveryDisconnect(
-      testPage,
-      apiClient,
-      seedData,
-      "Durable agentctl disconnect reattachment",
-    );
-    const { traffic, task, sessionId, recovery } = result;
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    await testPage.reload();
-    await session.waitForLoad();
-    const banner = testPage.getByTestId("failed-session-banner");
-    await expect(banner).toBeVisible({ timeout: 30_000 });
-    await expect(banner).toContainText(
-      "Delivery was interrupted. The prompt outcome is uncertain.",
-    );
-    expect(recovery.phase).toBe("uncertain");
-
-    const promptFramesBeforeRetry = traffic.frames.filter(
-      (frame) =>
-        frame.direction === "sent" &&
-        /prompt|message\.added|chat\.submit/i.test(frame.action ?? ""),
-    ).length;
-    await banner.getByTestId("recovery-retry-connection-button").click();
-    await expect(banner.getByTestId("session-recovery-error")).toBeVisible({ timeout: 30_000 });
-    await expect
-      .poll(() =>
-        traffic.frames.some(
-          (frame) =>
-            frame.direction === "sent" &&
-            frame.action === "session.recover" &&
-            frame.sessionId === sessionId,
-        ),
-      )
-      .toBe(true);
-    expect(
-      traffic.frames.filter(
-        (frame) =>
-          frame.direction === "sent" &&
-          /prompt|message\.added|chat\.submit/i.test(frame.action ?? ""),
-      ),
-    ).toHaveLength(promptFramesBeforeRetry);
-
-    await banner.getByTestId("recovery-stop-button").click();
-    await expect(banner.getByTestId("delivery-stop-outcome-unconfirmed")).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect
-      .poll(() =>
-        traffic.frames.some(
-          (frame) =>
-            frame.direction === "sent" &&
-            frame.action === "session.stop" &&
-            frame.sessionId === sessionId,
-        ),
-      )
-      .toBe(true);
-    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+    test.setTimeout(180_000);
+    await verifyAutomaticRestartReconciliation(testPage, apiClient, seedData, backend);
   });
 
   test("reconciles an actual updates-stream loss without replaying the active prompt", async ({

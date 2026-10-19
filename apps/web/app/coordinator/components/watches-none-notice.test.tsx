@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WatchesNoneNotice, watchesNoBoard } from "./watches-none-notice";
+import { WatchesNoneNotice, watchesNoBoard, watchesNoProject } from "./watches-none-notice";
 
 afterEach(cleanup);
 
@@ -49,5 +49,36 @@ describe("WatchesNoneNotice", () => {
     );
     fireEvent.click(screen.getByTestId("watches-none-choose"));
     expect(choose).toHaveBeenCalled();
+  });
+
+  it("is empty of projects only for a known empty selection without the no-repository toggle", () => {
+    const projects = (repositoryIds: string[] | null, includeNoRepository: boolean) => ({
+      scope: "all" as const,
+      workflowIds: [],
+      projects: { scope: "selected" as const, repositoryIds, includeNoRepository },
+    });
+    expect(watchesNoProject(projects([], false))).toBe(true);
+    expect(watchesNoProject(projects([], true))).toBe(false);
+    expect(watchesNoProject(projects(["r"], false))).toBe(false);
+    expect(watchesNoProject(projects(null, false))).toBe(false);
+    expect(watchesNoProject({ scope: "all", workflowIds: [] })).toBe(false);
+  });
+
+  it("says the coordinator watches no project and offers Choose projects", () => {
+    const choose = vi.fn();
+    render(
+      <WatchesNoneNotice
+        workspaceId="w"
+        coordinatorId="c"
+        watchSet={{
+          scope: "all",
+          workflowIds: [],
+          projects: { scope: "selected", repositoryIds: [], includeNoRepository: false },
+        }}
+        onChooseBoards={choose}
+      />,
+    );
+    expect(screen.getByText(/watches no project/)).toBeTruthy();
+    expect(screen.getByText("Choose projects")).toBeTruthy();
   });
 });

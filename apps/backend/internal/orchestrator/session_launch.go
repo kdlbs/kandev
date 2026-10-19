@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -294,6 +295,42 @@ type LaunchSessionResponse struct {
 	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
 }
 
+type SessionDeliveryRecoveryOutcome string
+
+const (
+	SessionDeliveryRecoveryContinued   SessionDeliveryRecoveryOutcome = "continued"
+	SessionDeliveryRecoveryAttached    SessionDeliveryRecoveryOutcome = "attached"
+	SessionDeliveryRecoverySettled     SessionDeliveryRecoveryOutcome = "settled"
+	SessionDeliveryRecoveryUncertain   SessionDeliveryRecoveryOutcome = "uncertain"
+	SessionDeliveryRecoveryBlocked     SessionDeliveryRecoveryOutcome = "blocked"
+	SessionDeliveryRecoveryUnavailable SessionDeliveryRecoveryOutcome = "unavailable"
+)
+
+type SessionDeliveryRecoveryIdentity struct {
+	SubmissionID      string `json:"submission_id"`
+	StreamID          string `json:"stream_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration int64  `json:"harness_generation"`
+	PromptGeneration  uint64 `json:"prompt_generation"`
+}
+
+// SessionDeliveryRecoveryResponse is the bounded result of a state-only
+// recovery request. It contains no provider output or runtime paths.
+type SessionDeliveryRecoveryResponse struct {
+	TaskID           string                           `json:"task_id"`
+	SessionID        string                           `json:"session_id"`
+	Outcome          SessionDeliveryRecoveryOutcome   `json:"outcome"`
+	Reason           string                           `json:"reason,omitempty"`
+	RecoveryRevision int64                            `json:"recovery_revision"`
+	RecoveryIdentity *SessionDeliveryRecoveryIdentity `json:"recovery_identity,omitempty"`
+}
+
+type sessionDeliveryRecoveryAttempt struct {
+	outcome           SessionDeliveryRecoveryOutcome
+	reason            string
+	processTerminated bool
+}
+
 // ResolveIntent infers the session intent from request fields when Intent is empty.
 func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 	if req.Intent != "" {
@@ -445,6 +482,9 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
+	}
 	return &sessionRecoveryRequiredError{Block: block}
 }
 
@@ -512,13 +552,21 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err != nil {
 		return fmt.Errorf("load session recovery block for resolution: %w", err)
 	}
-	resolved, err := store.ResolveSessionRecoveryBlock(ctx, block.ID, action, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
@@ -600,6 +648,9 @@ func (s *Service) recordSessionRecoveryBlock(
 	block.State = models.RecoveryBlockOpen
 	if block.ConsumerReference == "" {
 		block.ConsumerReference = consumer
+		if consumer == "interactive" && reason == durableDeliveryUnresolvedReason {
+			block.ConsumerReference = agentDeliveryConsumer
+		}
 	}
 	if block.CreatedAt.IsZero() {
 		block.CreatedAt = time.Now().UTC()
@@ -611,6 +662,7 @@ func (s *Service) recordSessionRecoveryBlock(
 	if err := store.UpsertSessionRecoveryBlock(ctx, block); err != nil {
 		return fmt.Errorf("persist session recovery block: %w", err)
 	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	agentruntime.RecordRecoveryRequired(consumer, reason)
 	return nil
 }
@@ -768,6 +820,11 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	manualTaskID := ""
+	if launchOriginForActivation(req) == launchOriginManual && retryLaunchInContext(ctx) == nil {
+		manualTaskID = req.TaskID
+	}
+	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
@@ -975,7 +1032,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
-		StartAgentSynchronously:          req.DeferRecoveryResolution && req.ForceContextContinuation,
+		StartAgentSynchronously: req.DeferRecoveryResolution &&
+			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1005,6 +1063,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		}
 		var blocked *sessionOpenRecoveryBlockedError
 		if errors.As(err, &blocked) {
+			if req.RecoveryAction != "" {
+				// An explicit recovery must not report success when no runtime
+				// was launched: its caller would acknowledge delivery or commit
+				// a continuation against an execution that does not exist.
+				return nil, err
+			}
 			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
 		}
 		if req.ActivationSource == LaunchActivationSourceSessionOpen && errors.Is(err, ErrCeilingLaunchConflict) {
@@ -1312,11 +1376,17 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		return nil, automation.ErrRetryLaunchUncertain
+	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}
@@ -1924,39 +1994,6 @@ func (s *Service) workspaceRecoveryExecutionID(ctx context.Context, sessionID st
 		return "", nil
 	}
 	return running.AgentExecutionID, nil
-}
-
-// RetrySessionDelivery reconnects the existing agent stream and replays from
-// its committed cursor. It is deliberately separate from RecoverSession:
-// reconnecting after an uncertain prompt must never send that prompt again or
-// create a replacement native session.
-func (s *Service) RetrySessionDelivery(ctx context.Context, taskID, sessionID string) (*LaunchSessionResponse, error) {
-	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
-		return nil, err
-	}
-	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
-		return nil, err
-	}
-	recoverer, ok := s.agentManager.(agentPromptStreamRecoverer)
-	if !ok {
-		return nil, errors.New("agent prompt stream recovery is unavailable")
-	}
-	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if err := recoverer.RecoverAgentPromptStream(retryCtx, sessionID); err != nil {
-		return nil, fmt.Errorf("failed to reconnect agent stream: %w", err)
-	}
-	if err := s.reconcileAgentDeliverySettlements(retryCtx, sessionID); err != nil {
-		return nil, fmt.Errorf("failed to settle recovered delivery outcome: %w", err)
-	}
-	return &LaunchSessionResponse{
-		Success:   true,
-		TaskID:    taskID,
-		SessionID: sessionID,
-	}, nil
 }
 
 func (s *Service) handleContinuationLaunchError(

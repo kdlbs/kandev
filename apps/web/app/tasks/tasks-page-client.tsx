@@ -11,7 +11,6 @@ import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
@@ -31,9 +30,11 @@ import { MobileTasksActions } from "./mobile-tasks-actions";
 import {
   parseTasksListGroup,
   parseTasksListSort,
+  isTaskListFacetOption,
+  resolveTasksListApiSort,
   sortTasksForList,
-  type TasksListGroup,
-  type TasksListSort,
+  type TasksListGroupPreference,
+  type TasksListSortPreference,
 } from "@/lib/tasks/tasks-list-options";
 
 interface TasksPageClientProps {
@@ -43,8 +44,8 @@ interface TasksPageClientProps {
   initialTasks: Task[];
   initialTotal: number;
   initialDataLoaded?: boolean;
-  initialSort: TasksListSort;
-  initialGroup: TasksListGroup;
+  initialSort: TasksListSortPreference;
+  initialGroup: TasksListGroupPreference;
 }
 
 type UseTaskOperationsParams = {
@@ -52,9 +53,9 @@ type UseTaskOperationsParams = {
   activeWorkflowId: string | null;
   selectedRepositoryId: string | null;
   pagination: PaginationState;
-  debouncedQuery: string;
+  searchQuery: string;
   showArchived: boolean;
-  tasksListSort: TasksListSort;
+  tasksListSort: TasksListSortPreference;
   setTasks: (tasks: Task[]) => void;
   setTotal: (total: number) => void;
 };
@@ -88,7 +89,7 @@ function useTaskOperations({
   activeWorkflowId,
   selectedRepositoryId,
   pagination,
-  debouncedQuery,
+  searchQuery,
   showArchived,
   tasksListSort,
   setTasks,
@@ -108,11 +109,11 @@ function useTaskOperations({
         const result = await listTasksByWorkspace(activeWorkspaceId, {
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
-          query: debouncedQuery,
+          query: searchQuery,
           includeArchived: showArchived,
           workflowId: activeWorkflowId,
           repositoryId: selectedRepositoryId,
-          sort: tasksListSort,
+          sort: resolveTasksListApiSort(tasksListSort),
         });
         if (!shouldCommit()) return;
         setTasks(result.tasks);
@@ -138,7 +139,7 @@ function useTaskOperations({
       selectedRepositoryId,
       pagination.pageIndex,
       pagination.pageSize,
-      debouncedQuery,
+      searchQuery,
       showArchived,
       tasksListSort,
       beginRequest,
@@ -236,16 +237,16 @@ function useTasksPageViewState({
   initialRepositories: Repository[];
   initialTasks: Task[];
   initialTotal: number;
-  initialSort: TasksListSort;
-  initialGroup: TasksListGroup;
+  initialSort: TasksListSortPreference;
+  initialGroup: TasksListGroupPreference;
   storeRepositories: Repository[];
 }) {
   const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
   const [tasks, setTasks] = useState(initialTasks);
   const [total, setTotal] = useState(initialTotal);
   const [searchQuery, setSearchQuery] = useState("");
-  const [tasksListSort, setTasksListSort] = useState<TasksListSort>(initialSort);
-  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(initialGroup);
+  const [tasksListSort, setTasksListSort] = useState<TasksListSortPreference>(initialSort);
+  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroupPreference>(initialGroup);
   const [showArchived, setShowArchived] = useState(false);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
 
@@ -269,7 +270,7 @@ function useTasksPageViewState({
 }
 
 function useTasksPageEffects({
-  debouncedQuery,
+  searchQuery,
   setPagination,
   activeWorkspaceId,
   fetchTasks,
@@ -279,7 +280,7 @@ function useTasksPageEffects({
   selectedRepositoryId,
   initialDataLoaded = false,
 }: {
-  debouncedQuery: string;
+  searchQuery: string;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
   activeWorkspaceId: string | null;
   fetchTasks: () => void;
@@ -293,7 +294,7 @@ function useTasksPageEffects({
 
   useEffect(() => {
     void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
-  }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
+  }, [searchQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
 
   useEffect(() => {
     if (
@@ -301,7 +302,7 @@ function useTasksPageEffects({
         hasInitialData: initialDataLoaded,
         alreadySkipped: skippedInitialFetchRef.current,
         pageIndex: pagination.pageIndex,
-        debouncedQuery,
+        debouncedQuery: searchQuery,
         showArchived,
       })
     ) {
@@ -313,7 +314,7 @@ function useTasksPageEffects({
     activeWorkspaceId,
     pagination.pageIndex,
     pagination.pageSize,
-    debouncedQuery,
+    searchQuery,
     showArchived,
     fetchTasks,
     initialDataLoaded,
@@ -359,20 +360,20 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     initialGroup: props.initialGroup,
     storeRepositories,
   });
-  const debouncedQuery = useDebounce(viewState.searchQuery, 300);
+  const { searchQuery } = viewState;
   const ops = useTaskOperations({
     activeWorkspaceId,
     activeWorkflowId,
     selectedRepositoryId,
     pagination: viewState.pagination,
-    debouncedQuery,
+    searchQuery,
     showArchived: viewState.showArchived,
     tasksListSort: viewState.tasksListSort,
     setTasks: viewState.setTasks,
     setTotal: viewState.setTotal,
   });
   useTasksPageEffects({
-    debouncedQuery,
+    searchQuery,
     setPagination: viewState.setPagination,
     activeWorkspaceId,
     fetchTasks: ops.fetchTasks,
@@ -387,7 +388,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     pagination: viewState.pagination,
     router,
   });
-  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, debouncedQuery };
+  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, searchQuery };
 }
 
 function useTasksListPreferenceSync({
@@ -398,10 +399,10 @@ function useTasksListPreferenceSync({
   setTasks,
   setPagination,
 }: {
-  tasksListSort: TasksListSort;
-  setTasksListSort: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  setTasksListGroup: (group: TasksListGroup) => void;
+  tasksListSort: TasksListSortPreference;
+  setTasksListSort: (sort: TasksListSortPreference) => void;
+  tasksListGroup: TasksListGroupPreference;
+  setTasksListGroup: (group: TasksListGroupPreference) => void;
   setTasks: (tasks: Task[] | ((prev: Task[]) => Task[])) => void;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
 }) {
@@ -410,7 +411,7 @@ function useTasksListPreferenceSync({
   const store = useAppStoreApi();
 
   const persistPreferences = useCallback(
-    (sort: TasksListSort, group: TasksListGroup) => {
+    (sort: TasksListSortPreference, group: TasksListGroupPreference) => {
       const current = store.getState().userSettings;
       const setUserSettings = store.getState().setUserSettings;
       if (current.tasksListSort === sort && current.tasksListGroup === group) {
@@ -444,7 +445,7 @@ function useTasksListPreferenceSync({
       : tasksListGroup;
     if (nextSort !== tasksListSort) {
       setTasksListSort(nextSort);
-      setTasks((prev) => sortTasksForList(prev, nextSort));
+      if (!isTaskListFacetOption(nextSort)) setTasks((prev) => sortTasksForList(prev, nextSort));
       setPagination((prev) => ({ ...prev, pageIndex: 0 }));
     }
     if (nextGroup !== tasksListGroup) {
@@ -463,7 +464,7 @@ function useTasksListPreferenceSync({
   ]);
 
   const writeUrl = useCallback(
-    (sort: TasksListSort, group: TasksListGroup) => {
+    (sort: TasksListSortPreference, group: TasksListGroupPreference) => {
       const params = new URLSearchParams(window.location.search);
       params.set("sort", sort);
       params.set("group", group);
@@ -474,9 +475,9 @@ function useTasksListPreferenceSync({
   );
 
   const handleSortChange = useCallback(
-    (sort: TasksListSort) => {
+    (sort: TasksListSortPreference) => {
       setTasksListSort(sort);
-      setTasks((prev) => sortTasksForList(prev, sort));
+      if (!isTaskListFacetOption(sort)) setTasks((prev) => sortTasksForList(prev, sort));
       setPagination((prev) => ({ ...prev, pageIndex: 0 }));
       writeUrl(sort, tasksListGroup);
       persistPreferences(sort, tasksListGroup);
@@ -485,7 +486,7 @@ function useTasksListPreferenceSync({
   );
 
   const handleGroupChange = useCallback(
-    (group: TasksListGroup) => {
+    (group: TasksListGroupPreference) => {
       setTasksListGroup(group);
       writeUrl(tasksListSort, group);
       persistPreferences(tasksListSort, group);
@@ -542,12 +543,12 @@ export function TasksPageClient(props: TasksPageClientProps) {
   });
   const { displayedTasks, sort, group, selectSort, selectGroup } = useTaskListFacetSelection({
     facetKeys: facetOptions.map((facet) => facet.value),
-    coreSort: s.tasksListSort,
-    coreGroup: s.tasksListGroup,
+    requestedSort: s.tasksListSort,
+    requestedGroup: s.tasksListGroup,
     tasks: s.tasks,
     facetValues,
-    onCoreSortChange: handleSortChange,
-    onCoreGroupChange: handleGroupChange,
+    onSortChange: handleSortChange,
+    onGroupChange: handleGroupChange,
   });
   const stepMetadata = useTasksListStepRefresh(s, displayedTasks, group);
 
@@ -560,7 +561,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         currentPage: "tasks",
         searchQuery: s.searchQuery,
         onSearchChange: s.setSearchQuery,
-        isSearchLoading: s.isLoading && !!s.debouncedQuery,
+        isSearchLoading: s.isLoading && !!s.searchQuery,
         tasksListOptions: {
           showArchived: s.showArchived,
           onShowArchivedChange: s.setShowArchived,

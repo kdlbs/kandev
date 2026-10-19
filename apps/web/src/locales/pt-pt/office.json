@@ -583,6 +583,7 @@
   "pauseAgent": "Pausar agente",
   "pauseReasonPlaceholder": "Porque está a pausar esta área de trabalho?",
   "pauseRequestFailed": "Falha ao atualizar o estado de pausa. Tente novamente.",
+  "pauseStateLoading": "A ler o estado de pausa...",
   "pauseStateStale": "Pode estar desatualizado",
   "pauseStateUnavailable": "Estado de pausa indisponível. A área de trabalho pode ou não estar pausada.",
   "pauseUnavailable": "Nenhuma área de trabalho selecionada.",

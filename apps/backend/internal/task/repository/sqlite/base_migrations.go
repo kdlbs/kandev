@@ -79,6 +79,12 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 //
 //nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
 func (r *Repository) runMigrations(ctx context.Context) error {
+	if err := r.ensureExecutorOwnershipSchema(); err != nil {
+		return err
+	}
+	// Existing transition rows have no run identity; new writes capture it
+	// from the trusted execution owner when it is available.
+	_ = r.migrate.Apply("task_step_transitions.causing_run_id", `ALTER TABLE task_step_transitions ADD COLUMN causing_run_id TEXT`)
 	for _, migration := range []struct{ name, query string }{
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
@@ -89,6 +95,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
 		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
 		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"session_restore_attempts.checkpoint_json", `ALTER TABLE session_restore_attempts ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.harness_generation", `ALTER TABLE agent_delivery_effects ADD COLUMN harness_generation BIGINT NOT NULL DEFAULT 0`},
@@ -650,6 +657,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_task_completion_gate_operations_task
 			ON task_completion_gate_operations(workspace_id, task_id, created_at)`)
 
+	_ = r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''")
+	_ = r.migrate.Apply("workflows.created_by_user_id", "ALTER TABLE workflows ADD COLUMN created_by_user_id TEXT NOT NULL DEFAULT ''")
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
@@ -1070,9 +1080,13 @@ func (r *Repository) recreateTableNamed(name, tableName, triggerPhrase string, s
 // migrateTasksRemoveWorkflowFK removes the foreign key constraint on workflow_id
 // to allow ephemeral tasks (quick chat) to have empty workflow_id.
 func (r *Repository) migrateTasksRemoveWorkflowFK() error {
+	if err := r.migrate.Apply("tasks.executor_actor_user_id", "ALTER TABLE tasks ADD COLUMN executor_actor_user_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	return r.recreateTableNamed("tasks.recreate_drop_workflow_fk", "tasks", "FOREIGN KEY (workflow_id)", []string{
 		`CREATE TABLE tasks_new (
 			id TEXT PRIMARY KEY,
+ executor_actor_user_id TEXT NOT NULL DEFAULT '',
 			workspace_id TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
@@ -1093,7 +1107,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		`INSERT INTO tasks_new SELECT
-			id, workspace_id, workflow_id, workflow_step_id, title, description,
+			id, executor_actor_user_id, workspace_id, workflow_id, workflow_step_id, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
@@ -1259,6 +1273,9 @@ func (r *Repository) migrateSessionCommitsDedupeAndActivation() error {
 // The trigger phrase "agent_execution_id" detects when the migration hasn't yet
 // run (column still present); recreateTable is a no-op once the column is gone.
 func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
+	if err := r.ensureExecutorActorSchema(); err != nil {
+		return err
+	}
 	return r.recreateTableNamed("task_sessions.recreate_drop_agent_execution_id", "task_sessions", "agent_execution_id", []string{
 		`CREATE TABLE task_sessions_new (
 			id TEXT PRIMARY KEY,
@@ -1293,6 +1310,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			tokens_in INTEGER NOT NULL DEFAULT 0,
 			tokens_cached_in BIGINT NOT NULL DEFAULT 0,
 			tokens_out INTEGER NOT NULL DEFAULT 0,
+			executor_actor_user_id TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
@@ -1303,7 +1321,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
 			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''),
-			0, 0, 0, 0
+			0, 0, 0, 0, executor_actor_user_id
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,
@@ -1507,6 +1525,9 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 // migrateSessionsRemoveWorkflowStepID removes the deprecated workflow_step_id column
 // from task_sessions. Workflow step is now tracked on the task, not the session.
 func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
+	if err := r.ensureExecutorActorSchema(); err != nil {
+		return err
+	}
 	return r.recreateTableNamed("task_sessions.recreate_drop_workflow_step_id", "task_sessions", "workflow_step_id", []string{
 		`CREATE TABLE task_sessions_new (
 			id TEXT PRIMARY KEY,
@@ -1539,6 +1560,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			review_status TEXT DEFAULT '',
 			base_commit_sha TEXT DEFAULT '',
 			task_environment_id TEXT DEFAULT '',
+			executor_actor_user_id TEXT NOT NULL DEFAULT '',
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
@@ -1548,7 +1570,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
 			is_primary, is_passthrough, review_status,
-			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, '')
+			COALESCE(base_commit_sha, ''), COALESCE(task_environment_id, ''), executor_actor_user_id
 		FROM task_sessions`,
 		`DROP TABLE task_sessions`,
 		`ALTER TABLE task_sessions_new RENAME TO task_sessions`,

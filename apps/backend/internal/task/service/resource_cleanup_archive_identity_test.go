@@ -266,17 +266,11 @@ func TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity(t *testing.T) {
 		gotRepo.WorktreeBranch != wt.Branch || gotRepo.BranchSlug != wt.BranchSlug {
 		t.Fatalf("repository identity after archive = %+v, want worktree %+v", gotRepo, wt)
 	}
-	// REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001 (AC-.1, AC-.3): a dirty checkout is
-	// preserved on disk with its active worktree record, not force-removed,
-	// even though its source manifest was captured as evidence above.
-	if gotRepo.DeletedAt != nil {
-		t.Fatal("repository row was deleted for a dirty checkout archive should have preserved")
+	if gotRepo.DeletedAt == nil {
+		t.Fatal("removed checkout lacks deleted worktree metadata")
 	}
-	if _, err := os.Stat(filepath.Join(wt.Path, "README.md")); err != nil {
-		t.Fatalf("tracked change on disk after archive: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(wt.Path, "untracked.txt")); err != nil {
-		t.Fatalf("untracked file on disk after archive: %v", err)
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("dirty checkout remains after archive: %v", err)
 	}
 }
 
@@ -564,7 +558,7 @@ func TestArchiveCleanupSnapshotPreservesBranchMetadataAcrossRestart(t *testing.T
 	// Process the durable job with a fresh manager. This models a restart and
 	// proves that the JSON boundary, not the old manager cache, supplies the
 	// cleanup policy fields.
-	restartedManager := newCleanupTestWorktreeManager(t, repo)
+	restartedManager := newCleanupTestWorktreeManagerAt(t, repo, filepath.Dir(filepath.Dir(wt.Path)))
 	restartedManager.SetRepositoryProvider(worktree.NewRepositoryAdapter(repo))
 	svc.SetWorktreeCleanup(restartedManager)
 	svc.SetEnvironmentDestroyer(&archiveManagerEnvironmentDestroyer{mgr: restartedManager})

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -228,4 +229,49 @@ func (s *Service) createSession(ctx context.Context, userID, userAgent, ip strin
 		return "", err
 	}
 	return token, nil
+}
+
+// ErrIdentityUnavailable reports that a user lookup could not decide: a store
+// failure, or authentication being disabled.
+var ErrIdentityUnavailable = errors.New("identity lookup unavailable")
+
+// ResolveUserIdentity is IdentityForUser with the failure kinds separated:
+// ok is false with a nil error when the account is missing, disabled or its
+// organization is unusable, and the error is ErrIdentityUnavailable when the
+// lookup itself could not decide.
+func (s *Service) ResolveUserIdentity(ctx context.Context, userID string) (authn.Identity, bool, error) {
+	if s == nil || userID == "" || s.Mode() == ModeDisabled {
+		return authn.Identity{}, false, ErrIdentityUnavailable
+	}
+	user, err := s.users.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return authn.Identity{}, false, nil
+	}
+	if err != nil {
+		return authn.Identity{}, false, errors.Join(ErrIdentityUnavailable, err)
+	}
+	if user.Status != usermodels.StatusActive || !s.orgUsable(ctx, user.OrgID) {
+		return authn.Identity{}, false, nil
+	}
+	return identityOf(user, "", ""), true, nil
+}
+
+// UserDisplayName returns the name shown for a user, falling back to the email
+// when no display name is set. ok is false with a nil error when the account
+// does not exist.
+func (s *Service) UserDisplayName(ctx context.Context, userID string) (string, bool, error) {
+	if s == nil || userID == "" {
+		return "", false, nil
+	}
+	user, err := s.users.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if user.DisplayName != "" {
+		return user.DisplayName, true, nil
+	}
+	return user.Email, true, nil
 }

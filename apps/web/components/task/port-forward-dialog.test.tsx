@@ -1,7 +1,18 @@
 import { type ButtonHTMLAttributes, type PropsWithChildren } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PortForwardButton } from "./port-forward-dialog";
+import {
+  PortForwardButton as PortForwardTrigger,
+  PortForwardingManager,
+} from "./port-forward-dialog";
+
+function PortForwardButton({ sessionId }: { sessionId: string }) {
+  return (
+    <PortForwardingManager sessionId={sessionId}>
+      <PortForwardTrigger sessionId={sessionId} />
+    </PortForwardingManager>
+  );
+}
 
 const SESSION_ONE = "session-1";
 const SESSION_TWO = "session-2";
@@ -120,6 +131,15 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("PortForwardButton", () => {
+  // @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.9
+  it("renders management with the header shortcut off when opened from Panels", async () => {
+    visibilityMock.enabled = false;
+    visibilityMock.dialogOpen = true;
+    render(<PortForwardButton sessionId={SESSION_ONE} />);
+    expect(screen.queryByTestId(BUTTON_ID)).toBeNull();
+    expect(screen.queryByTestId("port-forward-port-input")).not.toBeNull();
+  });
+
   it("ignores tunnel results from a previous session", async () => {
     const firstSession = deferred<Tunnel[]>();
     const secondSession = deferred<Tunnel[]>();

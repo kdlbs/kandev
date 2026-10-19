@@ -39,6 +39,7 @@ session-activity authority remain with Tasks and Platform.
 - [Agent Rich Output](requirements/agent-rich-output.md)
 - [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
+- [Agent Install Detection Bounds](requirements/agent-install-detection-bounds.md)
 - [Collapsible Agent Blocks on the Agents Settings Page](requirements/collapsible-agent-blocks.md)
 - [Cursor Subagent Metadata](requirements/cursor-subagent-metadata.md)
 - [Dynamic Agent Routing Rollout Blockers](requirements/dynamic-agent-routing-rollout-blockers.md)
@@ -71,11 +72,13 @@ session-activity authority remain with Tasks and Platform.
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
+- [Probe Failure Diagnostics](requirements/probe-failure-diagnostics.md)
 
 ### System design
 
 - [Agent Resume and Runtime Recovery](system-design/agent-resume-runtime-recovery.md)
 - [Google Antigravity ACP Agent](system-design/antigravity-acp-agent.md)
+- [Agent Install Detection Bounds](system-design/agent-install-detection-bounds.md)
 - [Harness session continuity](system-design/harness-session-continuity.md) (draft)
 - [Injected Skill Naming](system-design/injected-skill-naming.md)
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)
@@ -103,6 +106,7 @@ session-activity authority remain with Tasks and Platform.
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
+- [Probe Failure Diagnostics](system-design/probe-failure-diagnostics.md)
 
 ## Migration record
 

@@ -38,7 +38,7 @@ func scanExecutorReachability(scanner interface{ Scan(...any) error }) (*models.
 // primary key, never reused, so the order is total and needs no tiebreak.
 func (r *Repository) ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at
+		SELECT id, name, type, status, is_system, resumable, config, created_at, updated_at, deleted_at, COALESCE(owner_user_id, '')
 		FROM executors
 		WHERE type = 'ssh' AND deleted_at IS NULL AND status = 'active'
 		ORDER BY id ASC

@@ -45,6 +45,8 @@ test.describe("Coordinator copilot activity display on a phone viewport", () => 
       name: "Activity Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const panel = await openCopilot(testPage);
@@ -72,6 +74,10 @@ test.describe("Coordinator copilot activity display on a phone viewport", () => 
     await expect(panel.getByTestId("activity-chip")).toHaveCount(1);
     await expect(chip).toHaveText(/Checked 2 sources/);
     await expect(chip).toHaveAttribute("aria-expanded", "false");
+    const chipBox = await chip.boundingBox();
+    expect(chipBox).not.toBeNull();
+    expect(chipBox!.height).toBeGreaterThanOrEqual(44);
+    expect(chipBox!.width).toBeGreaterThanOrEqual(44);
     await expect(panel.getByText("Kandev: List Workflows")).toHaveCount(0);
 
     await chip.click();

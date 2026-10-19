@@ -25,11 +25,13 @@ type mockSubscription struct {
 func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
 	w := &Watcher{}
 	payload := lifecycle.AgentEventPayload{
-		TaskID:                "task-1",
-		SessionID:             "session-1",
-		AgentExecutionID:      "execution-1",
-		AttemptID:             "resume-3",
-		SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+		TaskID:                    "task-1",
+		SessionID:                 "session-1",
+		AgentExecutionID:          "execution-1",
+		AttemptID:                 "resume-3",
+		Status:                    string(v1.AgentStatusReady),
+		SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+		RecoveredAvailabilityOnly: true,
 	}
 	var got AgentEventData
 	if err := w.parseEventData(payload, &got); err != nil {
@@ -37,6 +39,12 @@ func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
 	}
 	if got.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
 		t.Fatalf("settings policy = %q, want provider_restored", got.SessionSettingsPolicy)
+	}
+	if !got.RecoveredAvailabilityOnly {
+		t.Fatal("recovered availability marker was lost while decoding lifecycle event")
+	}
+	if got.Status != string(v1.AgentStatusReady) {
+		t.Fatalf("agent status = %q, want ready", got.Status)
 	}
 	if got.AttemptID != payload.AttemptID || got.AgentExecutionID != payload.AgentExecutionID {
 		t.Fatalf("attempt/execution identity changed in watcher: %#v", got)
@@ -339,10 +347,18 @@ func TestAgentEventHandling(t *testing.T) {
 		// Simulate publishing an agent completed event
 		exitCode := 0
 		event := bus.NewEvent(events.AgentCompleted, "test", map[string]interface{}{
-			"task_id":            "task-123",
-			"agent_execution_id": "agent-456",
-			"agent_type":         "test-agent",
-			"exit_code":          exitCode,
+			"task_id":                     "task-123",
+			"agent_execution_id":          "agent-456",
+			"agent_type":                  "test-agent",
+			"exit_code":                   exitCode,
+			"turn_id":                     "turn-123",
+			"delivery_stream_id":          "stream-123",
+			"delivery_incarnation_id":     "incarnation-123",
+			"delivery_harness_generation": uint64(7),
+			"delivery_sequence":           uint64(11),
+			"delivery_submission_id":      "submission-123",
+			"owner_kind":                  string(lifecycle.ExecutionOwnerTask),
+			"causing_run_id":              "run-cause-123",
 		})
 
 		_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
@@ -360,6 +376,17 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
+		if receivedData.OwnerKind != string(lifecycle.ExecutionOwnerTask) {
+			t.Errorf("owner_kind = %q, want %q", receivedData.OwnerKind, lifecycle.ExecutionOwnerTask)
+		}
+		if receivedData.CausingRunID != "run-cause-123" {
+			t.Errorf("causing_run_id = %q, want run-cause-123", receivedData.CausingRunID)
+		}
+		if receivedData.TurnID != "turn-123" || receivedData.DeliveryStreamID != "stream-123" ||
+			receivedData.DeliveryIncarnationID != "incarnation-123" || receivedData.DeliveryHarnessGeneration != 7 ||
+			receivedData.DeliverySequence != 11 || receivedData.DeliverySubmissionID != "submission-123" {
+			t.Errorf("agent event lost durable terminal identity: %+v", receivedData)
 		}
 	})
 }

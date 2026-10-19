@@ -101,6 +101,11 @@ This rule preserves the promise that branch replacement alone retains the origin
 
 A generic ACP error code is not sufficient evidence of missing native state.
 Adapter evidence must identify the failure class.
+Codex evidence is an internal error whose details name the requested session as having no rollout or as archived.
+The archived shape applies only to `codex-acp` and requires the complete
+`session <expected ID> is archived` statement, optionally followed by a period
+and guidance. Another provider, a different session ID, or an archived-word
+lookalike is not evidence of this failure class.
 Unknown errors remain blocked.
 
 ## Restore coordinator

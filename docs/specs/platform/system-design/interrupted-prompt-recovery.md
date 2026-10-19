@@ -33,6 +33,14 @@ Reject a nonempty prompt on workspace-only requests. Workspace restoration does 
 a prompt recovery block, including when `RecoveryAction` is supplied. No ACP initialize, new,
 load, resume, prompt, or queue drain may occur. Quick Chat requires no Git repository.
 
+Workspace inspection must preserve durable restart recovery ownership. An existing owned
+workspace execution remains accessible. A generic prompt block alone may permit cold
+workspace creation only when fresh evidence contains no saved execution, delivery binding,
+or pending recovery source or candidate. Recheck this at creation and registration.
+Active or malformed delivery recovery evidence blocks competing allocation, even for an
+explicit workspace request. Wait for exact-owner reconnection or restoration instead of
+replacing its row. See [durable reattachment](durable-agent-reattachment.md).
+
 ## Manual resume
 
 `useManualResumeSession` calls `session.recover` with action `resume`, matching the existing
@@ -48,6 +56,11 @@ feedback continue to work. Use the existing 60-second manual resume timeout. Do 
 Automatic open/focus paths still use `session.launch` with their existing activation source.
 They cannot acquire explicit recovery authorization. Do not pass a recovery action directly
 on an ordinary launch request to bypass the recovery coordinator.
+
+Explicit native recovery must await the current agent-start or reattachment result before
+acknowledging uncertain delivery or resolving its database block. An initialized flag retained
+from recovered inventory is not proof that the current authenticated reattachment succeeded.
+A current-start failure must leave the block and historical unknown submission intact.
 
 `RecoverSessionWithOptions` retains existing runtime control, workspace recovery preflight,
 configuration restoration, native-token preservation, Office dispatcher handoff, and
@@ -72,9 +85,17 @@ generation, and payload hash. Missing or conflicting evidence prevents every ret
 It then re-reads both stores and requires retained retirement for each unresolved SQL row
 before clearing the database block. Already-retired matching records make this idempotent.
 The eligible journal records belong to the current incarnation at or before the current generation.
+Historical blocks may predate recovery-notice metadata. After the same authenticated retirement
+check, SQL resolution accepts that case only when persisted ACP native identity matches the
+current harness generation, the block uses that incarnation and generation, and its exact
+submission remains interrupted-unknown in that session and generation. A stream identity is
+required. Missing native metadata, a superseding generation, or mismatched submission keeps
+the block open. Resolution preserves metadata and historical uncertainty rather than creating
+a recovery snapshot whose original process identity is unavailable.
 The process owner serializes retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
 state and payload and makes duplicate admission or dispatch of that ID fail. Existing newer
-generation retirement still cancels other superseded work. A refreshed capability must be clear
+generation retirement records unfinished superseded work as interrupted-unknown and retains
+its payload; previously terminal outcomes remain unchanged. A refreshed capability must be clear
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
 authentication and storage errors fail closed.
 
@@ -87,7 +108,8 @@ new endpoint, migration, native conversation replacement, or generation rotation
 
 Native-state loss remains an existing typed history-continuation failure, not an automatic
 fallback. Resume failure leaves the block open. Late replies must not update another active
-session. Workspace restoration remains usable while the original delivery block is open.
+session. Workspace inspection through an owned execution remains usable while the original
+delivery block is open; cold allocation follows the ownership checks above.
 Task chat and Quick Chat share the manual hook. Desktop and phone use existing controls and
 layouts; the read-only notice reuses the localized Resume label and shared recovery actions.
 
@@ -107,3 +129,20 @@ Follow-up verification includes the no-composer-owner read-only browser state on
 and phone, real bbolt acknowledgement, no replay and distinct new delivery, busy/foreign-owner
 rejection, failed journal acknowledgement retaining SQL blocks, journal reopen, and authenticated
 adoption of acknowledged unknown history.
+
+Canonical interrupted-prompt blocks with a submission ID and no structured runtime
+recovery record retain the existing explicit Resume action. They do not select
+Retry-only controls. A runtime recovery record or legacy uncertain-delivery error
+still selects state-only Retry. Restart restoration follows the automatic
+restore-only contract in the durable reattachment design.
+The browser tests prove the existing Resume target remains clickable on desktop
+and at a 320-pixel phone width, with a touch target of at least 44 pixels.
+
+An open delivery block keeps ordinary input disabled even without a coarse session
+error. Canonical interrupted work retains existing Resume; structured runtime
+recovery retains Retry. Terminal SQL settlement advances
+the session snapshot timestamp in the block-resolution transaction. The backend
+publishes the cleared block array even when no runtime recovery metadata exists.
+Explicit Resume publishes the same projection after resolving the saved block,
+before releasing parked queue work. A later queue failure does not hide a
+committed block resolution from the browser.

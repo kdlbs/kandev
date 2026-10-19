@@ -37,7 +37,7 @@ export class SessionPage {
     this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
-    this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.passthroughTerminal = page.locator('[data-testid="passthrough-terminal"]:visible');
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
     this.newSessionDialogPage = new NewSessionDialogPage(page);
   }
@@ -51,6 +51,15 @@ export class SessionPage {
   }
   get mobileSessionMenu() {
     return this.page.getByTestId("mobile-task-picker-trigger");
+  }
+  get mobilePanels() {
+    return this.page.getByTestId("mobile-session-nav-panels");
+  }
+  get mobilePortForwardingOpen() {
+    return this.page.getByTestId("mobile-port-forwarding-open");
+  }
+  get portForwardHeaderShortcut() {
+    return this.page.getByTestId("port-forward-header-shortcut");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
@@ -248,7 +257,8 @@ export class SessionPage {
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
     const isReady = async () =>
-      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
+      (await idle.isVisible()) &&
+      (!opts.requireEditable || (await editor.getAttribute("contenteditable")) === "true");
     const start = Date.now();
     let lastReloadAt = start;
 

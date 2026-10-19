@@ -91,7 +91,7 @@ func readInventory(reader io.Reader) (inventory, error) {
 			return nil, fmt.Errorf("missing native inventory/completion for %s", name)
 		}
 	}
-	if _, err := partition(state.inv); err != nil {
+	if _, err := partition(state.inv, 2); err != nil {
 		return nil, err
 	}
 	return state.inv, nil
@@ -143,8 +143,11 @@ func listOutput(pkg *listedPackage, output string) error {
 	return nil
 }
 
-func partition(inv inventory) ([2]cohort, error) {
-	var groups [2]cohort
+func partition(inv inventory, count int) ([]cohort, error) {
+	if count != 2 && count != 4 {
+		return nil, fmt.Errorf("unsupported cohort count %d", count)
+	}
+	groups := make([]cohort, count)
 	names := map[string]bool{}
 	for _, pkg := range inv {
 		seen := map[string]bool{}
@@ -160,11 +163,11 @@ func partition(inv inventory) ([2]cohort, error) {
 		ordered = append(ordered, name)
 	}
 	sort.Strings(ordered)
-	if len(ordered) < 2 {
-		return groups, errors.New("native inventory cannot form two nonempty cohorts")
+	if len(ordered) < count {
+		return groups, errors.New("native inventory cannot form the requested nonempty cohorts")
 	}
 	for index, name := range ordered {
-		groups[index%2].Names = append(groups[index%2].Names, name)
+		groups[index%count].Names = append(groups[index%count].Names, name)
 	}
 	for index := range groups {
 		escaped := make([]string, len(groups[index].Names))
@@ -176,8 +179,8 @@ func partition(inv inventory) ([2]cohort, error) {
 	return groups, verifyPartition(inv, groups)
 }
 
-func verifyPartition(inv inventory, groups [2]cohort) error {
-	selectors := [2]*regexp.Regexp{}
+func verifyPartition(inv inventory, groups []cohort) error {
+	selectors := make([]*regexp.Regexp, len(groups))
 	for i, group := range groups {
 		selectors[i] = regexp.MustCompile(group.Selector)
 	}

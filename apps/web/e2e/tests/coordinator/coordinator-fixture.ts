@@ -14,6 +14,8 @@ export type CoordinatorRecord = {
   name: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_agent_profile_id: string;
+  task_executor_profile_id: string;
   context: string;
   conversation_task_id: string | null;
   created_at: string;
@@ -74,6 +76,8 @@ export async function seedCoordinator(
       name: opts.name,
       agent_profile_id: opts.agentProfileId,
       executor_profile_id: opts.executorProfileId,
+      task_agent_profile_id: opts.agentProfileId,
+      task_executor_profile_id: opts.executorProfileId,
       context: opts.context ?? "",
     },
   );

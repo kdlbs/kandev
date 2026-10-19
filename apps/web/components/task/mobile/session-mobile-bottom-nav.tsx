@@ -22,6 +22,7 @@ import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { PluginPanelPicker } from "./plugin-panel-picker";
 import { registrationIsVisible } from "../plugin-task-panel";
+import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
@@ -41,6 +42,7 @@ type SessionMobileBottomNavProps = {
 
 type NavItem = {
   label: string;
+  testId?: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
   active?: boolean;
@@ -74,6 +76,7 @@ function buildMobileNavItems({
   onOpenStatus,
   onOpenPluginPicker,
   hasTaskCanvases,
+  hasPortForwarding,
   mobilePluginPanelsAvailable,
   connectionIssueSeverity,
   t,
@@ -86,6 +89,7 @@ function buildMobileNavItems({
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
   hasTaskCanvases: boolean;
+  hasPortForwarding: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
   mobilePluginPanelsAvailable: boolean;
@@ -137,10 +141,11 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(hasTaskCanvases || mobilePluginPanelsAvailable
+    ...(hasTaskCanvases || mobilePluginPanelsAvailable || hasPortForwarding
       ? [
           {
             label: t("common:panels"),
+            testId: "mobile-session-nav-panels",
             icon: <IconLayoutGrid className="h-5 w-5" />,
             active: parsePluginPanelId(activePanel) !== undefined,
             onClick: onOpenPluginPicker,
@@ -176,6 +181,8 @@ export function SessionMobileBottomNav({
   sessionKind = null,
 }: SessionMobileBottomNavProps) {
   const { t } = useTranslation();
+  const portForwarding = useOptionalPortForwardingVisibility();
+  const hasPortForwarding = Boolean(taskId && portForwarding);
   usePluginRegistry();
   const registryVersion = pluginRegistry.getVersion();
   const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
@@ -191,6 +198,7 @@ export function SessionMobileBottomNav({
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
         hasTaskCanvases: taskCanvases.length > 0,
+        hasPortForwarding,
         mobilePluginPanelsAvailable,
         connectionIssueSeverity,
         t,
@@ -206,13 +214,14 @@ export function SessionMobileBottomNav({
       activePanel,
       taskCanvases.length,
       mobilePluginPanelsAvailable,
+      hasPortForwarding,
       t,
     ],
   );
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-border bg-background"
+      className="fixed bottom-0 left-0 right-0 z-40 flex items-center overflow-x-auto overscroll-x-contain border-t border-border bg-background"
       data-testid="session-mobile-bottom-nav"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
@@ -254,11 +263,14 @@ function MobileNavButton({
       type="button"
       onClick={item.onClick ?? (() => onPanelChange(item.panel))}
       className={cn(
-        "flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 px-3 py-2 transition-colors",
+        "flex min-h-11 min-w-11 flex-1 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-2 transition-colors",
         mobileNavColorClass(item, activePanel, issueDetails !== null),
       )}
       aria-label={issueDetails?.description}
-      data-testid={item.panel === "changes" ? "mobile-session-nav-changes" : undefined}
+      onFocus={(event) =>
+        event.currentTarget.scrollIntoView?.({ block: "nearest", inline: "nearest" })
+      }
+      data-testid={item.panel === "changes" ? "mobile-session-nav-changes" : item.testId}
       data-connection-severity={item.connectionIssueSeverity}
     >
       <span className="relative">

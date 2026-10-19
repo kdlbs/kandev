@@ -21,7 +21,7 @@ const coordinatorToolActivityDefaultLimit = 20
 func (h *Handlers) handleListCoordinatorActivity(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	fields, err := automationPayloadFields(msg.Payload)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid JSON payload", nil)
 	}
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
 	if !ok || principal.CoordinatorID == "" {
@@ -29,6 +29,9 @@ func (h *Handlers) handleListCoordinatorActivity(ctx context.Context, msg *ws.Me
 	}
 	if h.coordinatorSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "coordinator service is not available", nil)
+	}
+	if !h.coordinatorWorkspaceMatches(ctx, principal) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
 	}
 	limit, err := coordinatorToolLimit(fields)
 	if err != nil {
@@ -83,6 +86,9 @@ func coordinatorToolBefore(fields map[string]json.RawMessage) (string, error) {
 	var before string
 	if err := json.Unmarshal(raw, &before); err != nil {
 		return "", &coordinator.FieldError{Field: "before", Message: "before must be a string"}
+	}
+	if before == "" {
+		return "", &coordinator.FieldError{Field: "before", Message: "before must be a non-empty cursor"}
 	}
 	return before, nil
 }

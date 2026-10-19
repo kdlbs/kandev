@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -364,6 +367,78 @@ func TestDurableDetachReattachDuringCommit(t *testing.T) {
 	}
 }
 
+func TestInstanceTeardownDoesNotCrashSiblingStream(t *testing.T) {
+	serverA, processA, journalA := newDurableDeliveryTestServer(t)
+	serverB, processB, journalB := newDurableDeliveryTestServer(t)
+	httpA := httptest.NewServer(serverA.Router())
+	defer httpA.Close()
+	httpB := httptest.NewServer(serverB.Router())
+	defer httpB.Close()
+
+	appendStreamTestEvent(t, processA, journalA, "instance A ready")
+	appendStreamTestEvent(t, processB, journalB, "instance B ready")
+	connA := dialTestWS(t, httpA)
+	defer func() { _ = connA.Close() }()
+	connB := dialTestWS(t, httpB)
+	defer func() { _ = connB.Close() }()
+	if event := readStreamTestEvent(t, connA); event.Text != "instance A ready" {
+		t.Fatalf("instance A event = %q, want initial event", event.Text)
+	}
+	if event := readStreamTestEvent(t, connB); event.Text != "instance B ready" {
+		t.Fatalf("instance B event = %q, want initial event", event.Text)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := processA.StopForTeardown(ctx); err != nil {
+		t.Fatalf("stop instance A: %v", err)
+	}
+	_ = connA.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := connA.ReadMessage(); err == nil {
+		t.Fatal("instance A stream remained open after teardown")
+	} else {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			t.Fatalf("instance A stream did not close during teardown: %v", err)
+		}
+	}
+
+	processB.SendErrorEvent("instance B still running", 1)
+	if event := readStreamTestEvent(t, connB); event.Error != "instance B still running" {
+		t.Fatalf("instance B event after sibling teardown = %q", event.Error)
+	}
+}
+
+func appendStreamTestEvent(t *testing.T, processManager *process.Manager, deliveryJournal *journal.Journal, text string) {
+	t.Helper()
+	payload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, incarnationID, generation := processManager.DeliverySubmissionIdentity()
+	streamID := processManager.DeliveryStreamID()
+	if _, err := deliveryJournal.Append(context.Background(), journal.Event{
+		SessionID: sessionID, IncarnationID: incarnationID, HarnessGeneration: generation,
+		StreamID: streamID, Type: adapter.EventTypeMessageChunk, Payload: payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readStreamTestEvent(t *testing.T, conn *websocket.Conn) adapter.AgentEvent {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read agent stream event: %v", err)
+	}
+	var event adapter.AgentEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatalf("decode agent stream event: %v", err)
+	}
+	return event
+}
+
 func newDurableDeliveryTestServer(t *testing.T) (*Server, *process.Manager, *journal.Journal) {
 	return newDurableDeliveryTestServerWithLimit(t, 0)
 }
@@ -403,6 +478,7 @@ func TestDeliveryAPIRejectsForeignStreamIdentity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.target, bytes.NewBufferString(tc.body))
+			req.Header.Set(journal.DeliveryProtocolHeader, "2")
 			req.Header.Set("Content-Type", "application/json")
 			resp := httptest.NewRecorder()
 
@@ -452,6 +528,8 @@ func TestDeliveryAPIStatusReturnsBoundedRecoveryDescriptor(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/delivery", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 
@@ -487,6 +565,7 @@ func TestDeliveryAPIRejectsForeignSubmissionIdentity(t *testing.T) {
 
 	requestBody := `{"id":"submission-1","session_id":"other-session","incarnation_id":"other-incarnation","harness_generation":1,"hash":"hash-1","payload":"cHJvbXB0"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions", bytes.NewBufferString(requestBody))
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 
@@ -521,6 +600,8 @@ func TestDeliveryAPIRejectsForeignStoredSubmission(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/submissions/foreign-submission", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 
@@ -554,6 +635,8 @@ func TestDeliveryAPICancelsCurrentSubmission(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions/submission-cancel-api/cancel", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 

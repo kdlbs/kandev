@@ -4,7 +4,7 @@ system: office
 requirements:
   - REQ-OFFICE-COSTS-001
 created: 2026-04-25
-updated: 2026-08-18
+updated: 2026-10-13
 owners:
   - cfl
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-OFFICE-COSTS-001` dur
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-OFFICE-COSTS-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-COSTS-001` | [Migrated source detail](#migrated-source-detail); [Costs Explorer request windows](#costs-explorer-request-windows) for AC-001.2/.8 |
 
 ## Migrated source detail
 
@@ -176,6 +176,110 @@ SQL token aggregates skip NULL values. Thus, an aggregate output-token total
 is a lower bound if one or more source rows have unknown output counts. Cost
 totals still include those rows. Use the raw cost-list response when a consumer
 must determine if an output-token total is complete.
+
+### Costs Explorer request windows
+
+This section governs AC-OFFICE-COSTS-001.2/.8 across the composed HTTP read,
+SQL aggregation and shared desktop/phone controls. Office owns this vertical
+contract because it owns `office_cost_events` and the workspace breakdown.
+The [task cost ledger](../../task-cost-ledger/spec.md) owns separate immutable
+usage recording and session rollups; the
+[budget measurement contract](../requirements/budget-measurement-integrity.md)
+owns enforcement windows. Neither is changed by an Explorer selection.
+
+**Request contract.** `GET /api/v1/office/workspaces/:wsId/costs/breakdown`
+accepts one optional `range` query parameter:
+
+| Query | Lower bound | Upper bound |
+| --- | --- | --- |
+| omitted | none (existing lifetime behavior) | none |
+| `range=mtd` | first day of request instant's UTC month, 00:00 UTC | request instant |
+| `range=30d` | request instant minus `30 * 24h` | request instant |
+
+Selected windows are half-open: `start <= occurred_at < before`. Last 30 days
+is an elapsed duration, not 30 civil dates or a local-midnight truncation.
+At UTC month rollover MTD starts in the new month; at its first instant the
+window is empty. Future events are excluded from selected windows. Omitted
+range retains the historical unbounded query, including its existing treatment
+of future timestamps. The handler rejects a supplied empty value, repeated
+values (including duplicates), or anything outside `mtd`/`30d` with HTTP 400
+and the existing `{error: ...}` envelope before querying storage. Validation
+errors have a stable diagnostic; database errors remain HTTP 500. No request
+or response field beyond this query parameter is added.
+
+**Service boundary.** Preserve `CostService.GetCostsBreakdown(ctx, wsID)` for
+unfiltered callers. Add `GetCostsBreakdownForRange(ctx, wsID, range)` for the
+handler. It validates the range and captures `time.Now().UTC()` once before
+launching the existing five errgroup queries. A small deterministic window
+resolver accepts that instant explicitly, permitting fixed calendar/offset
+boundary tests. Pass the same start/before pair to every query; no query reads
+the clock. The lifetime path uses the current repository methods. Keep empty
+arrays normalized and errors joined before returning. Sharing temporal bounds
+does not promise a transaction-wide database snapshot: the existing concurrent
+read architecture is retained, so a write between queries has its existing
+visibility semantics.
+
+**Repository boundary.** Add narrow `SumCostsInWindow` and
+`GetCostsByAgentInWindow` / `GetCostsByProjectInWindow` /
+`GetCostsByModelInWindow` / `GetCostsByProviderInWindow` methods, each accepting
+`start, before time.Time`. Add these to the cost service's `Repository`
+interface. Share the existing query bodies through private per-query helpers
+so lifetime methods retain their signatures and no budget-facing `*Since`
+method changes. Window helpers add only bound parameters
+`AND e.occurred_at >= ? AND e.occurred_at < ?` to the existing WHERE clause,
+before GROUP BY; convert both arguments to UTC and use `r.ro.Rebind`.
+Ordinary timestamp comparison, SUM/COUNT/COALESCE and existing concatenation
+are portable across SQLite and PostgreSQL. Do not introduce dialect-specific
+date arithmetic, string-formatted timestamps, migrations or browser filtering.
+
+Keep workspace scoping through the existing task/run-session joins and
+`COALESCE(t.workspace_id, rs.workspace_id)`. Preserve event-time agent profile
+identity, deleted-profile empty labels, live task project assignment (including
+unassigned/run-only groups), model grouping by `(provider, model)`, provider
+fallback labels, all event counts, integer subcent arithmetic and zero-cost
+rows. Each dimension includes every selected in-workspace event exactly once;
+its sum equals the selected total and its counts equal the selected event
+cardinality. Group count cards continue to count groups in their selected
+breakdown. No new event-count field is needed in the composed response.
+
+**Frontend boundary.** In `lib/api/domains/office-api.ts`, keep
+`getCostsBreakdown(workspaceId, options?)` compatible by extending the optional
+request options with a typed `range?: "mtd" | "30d"`. Destructure range from
+transport options; append the encoded query only when present and preserve
+signals/other request options. `CostOverview` passes its selected range on
+initial load, selection and Office live refresh. Include range in the existing
+fetch callback dependencies so live refresh cannot retain an earlier range.
+Retain the request-generation guard and existing error handling. Track the
+loaded range with the loaded workspace: results are display-eligible only when
+both match the current selection. Pending or failed switches use the existing
+empty view rather than another window's spending; same-range live refresh
+retains its current behavior. Do not fetch
+or filter raw lifetime rows in the browser.
+
+**Mobile and validation.** `CostOverview` already shares controls, selection,
+API consumption and tables across widths. This change is data normalization
+only: no layout, copy, touch target, navigation, breakpoint, drawer or scroll
+owner changes. Under the bounded mobile-parity exemption, actual component
+button actions through the real API wrapper/intercepted fetch plus HTTP/real
+SQL tests prove the shared result; no new phone layout, capture or browser
+build gate is required. Existing
+`e2e/tests/office/costs.spec.ts` uses `waitForHttp` with
+`/\/costs\/breakdown$/`; the helper compares `URL.pathname`, so the new query
+needs no matcher change. Its focused existing query-string unit test is the
+compatibility check.
+
+Regression coverage includes fixed month/year/leap-year and offset/DST
+instants; exact lower/upper bounds; old event/new ingestion and the reverse;
+empty windows; all dimensions and group counts; cross-workspace task and
+run-session rows; live project reassignment and deleted agent profiles.
+Use real SQLite for repository and service/Gin HTTP tests. Add env-gated real
+PostgreSQL query parity using `testutil.OpenIsolatedPostgres` and
+`PostgresDSNFromEnv`, initializing task then Office repositories as in the
+existing PostgreSQL fixture; never send SQLite-only fixture DDL to PostgreSQL.
+A missing DSN is an explicit skip, not proof of PostgreSQL execution.
+
+Implementation is tracked in the
+[cost range repair plan](../../../plans/office-cost-date-range/plan.md).
 
 ### Cost explorer UI routes
 

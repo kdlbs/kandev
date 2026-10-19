@@ -24,7 +24,10 @@ import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-v
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
-import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type {
+  TasksListGroupPreference,
+  TasksListSortPreference,
+} from "@/lib/tasks/tasks-list-options";
 import type { KanbanSort } from "@/lib/kanban/kanban-sort";
 import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
@@ -424,8 +427,8 @@ export type UserSettingsState = {
   startupPage: StartupPage;
   workflowId: string | null;
   repositoryIds: string[];
-  tasksListSort: TasksListSort;
-  tasksListGroup: TasksListGroup;
+  tasksListSort: TasksListSortPreference;
+  tasksListGroup: TasksListGroupPreference;
   tasksListShowDetails: boolean;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;

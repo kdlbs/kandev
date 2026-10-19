@@ -499,3 +499,59 @@ func (r *Repository) ResetRunningTaskResourceCleanupJobs(ctx context.Context) er
 func (r *Repository) unmarkedManagedDeletionSQL() string {
 	return dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(resource_snapshot, ''), '{}')", "managed_delete") + " IS NULL"
 }
+
+// WakeWaitingArchiveReclaimJobs admits one bounded page of legacy waiting jobs.
+// The cutoff keeps a newly deferred in-use job out of subsequent startup pages.
+func (r *Repository) WakeWaitingArchiveReclaimJobs(
+	ctx context.Context, cutoff time.Time, afterID string, limit int,
+) (string, bool, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return afterID, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
+		SELECT id FROM task_resource_cleanup_jobs
+		WHERE trigger = ? AND state = ? AND updated_at < ? AND id > ?
+		ORDER BY id ASC LIMIT ?
+	`), models.TaskResourceCleanupTriggerArchiveReclaim,
+		models.TaskResourceCleanupStateWaitingForClean, cutoff.UTC(), afterID, limit)
+	if err != nil {
+		return afterID, false, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return afterID, false, err
+		}
+		ids = append(ids, id)
+	}
+	readErr := errors.Join(rows.Err(), rows.Close())
+	if readErr != nil {
+		return afterID, false, readErr
+	}
+	for _, id := range ids {
+		_, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_resource_cleanup_jobs
+			SET state = ?, next_attempt_at = NULL, updated_at = ?
+			WHERE id = ? AND trigger = ? AND state = ? AND updated_at < ?
+		`), models.TaskResourceCleanupStatePending, time.Now().UTC(), id,
+			models.TaskResourceCleanupTriggerArchiveReclaim,
+			models.TaskResourceCleanupStateWaitingForClean, cutoff.UTC())
+		if err != nil {
+			return afterID, false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return afterID, false, err
+	}
+	if len(ids) > 0 {
+		afterID = ids[len(ids)-1]
+	}
+	return afterID, len(ids) < limit, nil
+}
