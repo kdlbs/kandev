@@ -211,6 +211,7 @@ launch request
 Explicit launch overrides bypass refusal and write a manual-override audit entry.
 Ordinary messages use bounded turn admission even when their caller has manual
 execution authority. Automatic origins never become manual during replay.
+Agent-requested MCP starts remain automatic through replay.
 Task focus that resumes an
 idle-suspended session is passive inspection, like opening a conversation, so it
 uses the automatic origin. Its deferred record keeps the completed-session
