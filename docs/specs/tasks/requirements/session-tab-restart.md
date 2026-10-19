@@ -35,8 +35,9 @@ separate [replacement behavior](configuration-chat-restart.md).
 - **AC-TASKS-SESSION-TAB-RESTART-001.2:** Selecting Restart session shall stop
   the targeted session, then request its normal resume after Stop succeeds.
   The action shall retain the session identity, conversation history, and
-  workspace. It shall preserve unsent input and tab selection. A later explicit
-  user selection during the restart shall take precedence. It shall not
+  workspace. It shall preserve unsent input and tab selection throughout the
+  attempt. A later explicit user selection during the restart shall take
+  precedence. It shall not
   create a replacement session, submit a prompt, or explicitly select a primary
   session. The existing Stop lifecycle can promote another active session to primary.
 - **AC-TASKS-SESSION-TAB-RESTART-001.3:** A failed Stop shall prevent Resume.

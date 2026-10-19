@@ -2,36 +2,22 @@
 
 import { useCallback } from "react";
 import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
 import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import {
+  getSessionRestartStore,
+  isSessionRestartPending,
+} from "@/lib/session/session-restart-state";
 import { isSessionStoppable } from "./session-action-state";
-
-type PendingStore = ReturnType<typeof createPendingStore>;
-const pendingByOwner = new WeakMap<object, PendingStore>();
-
-function createPendingStore() {
-  return createStore<ReadonlySet<string>>(() => new Set());
-}
-
-function getPendingStore(owner: object) {
-  let store = pendingByOwner.get(owner);
-  if (!store) {
-    store = createPendingStore();
-    pendingByOwner.set(owner, store);
-  }
-  return store;
-}
-
-export function isSessionRestartPending(owner: object, sessionId: string | null | undefined) {
-  return !!sessionId && getPendingStore(owner).getState().has(sessionId);
-}
 
 export function useSessionRestarting(sessionId: string | null | undefined) {
   const owner = useAppStoreApi();
-  return useStore(getPendingStore(owner), (sessions) => !!sessionId && sessions.has(sessionId));
+  return useStore(
+    getSessionRestartStore(owner),
+    (sessions) => !!sessionId && sessions.has(sessionId),
+  );
 }
 
 function restoreRestartSelection(
@@ -52,7 +38,7 @@ function restoreRestartSelection(
 
 export function useSessionRestart(sessionId: string | null | undefined, taskId: string | null) {
   const owner = useAppStoreApi();
-  const pending = getPendingStore(owner);
+  const pending = getSessionRestartStore(owner);
   const isRestarting = useSessionRestarting(sessionId);
   const isRestartPending = useCallback(
     () => isSessionRestartPending(owner, sessionId),

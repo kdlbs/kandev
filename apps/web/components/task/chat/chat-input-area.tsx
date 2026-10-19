@@ -6,10 +6,8 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import {
-  isSessionRestartPending,
-  useSessionRestarting,
-} from "@/hooks/domains/session/use-session-restart";
+import { useSessionRestarting } from "@/hooks/domains/session/use-session-restart";
+import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import {
   ChatInputContainer,

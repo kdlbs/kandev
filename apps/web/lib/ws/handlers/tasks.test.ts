@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "@/lib/state/store";
 import { registerTasksHandlers } from "./tasks";
+import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import {
   makeStore,
   makeTask,
@@ -36,6 +37,32 @@ function makeFollowStore(opts: {
     setActiveSessionAuto: opts.setActiveSessionAuto,
   });
 }
+
+describe("task.updated during restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
+  it.each([true, false])(
+    "preserves only the restarting selection (target pending: %s)",
+    (restartingTarget) => {
+      const setActiveSessionAuto = vi.fn();
+      const store = makeFollowStore({
+        primarySessionId: "sess-old",
+        activeSessionId: "sess-old",
+        pinnedSessionId: null,
+        setActiveSessionAuto,
+      });
+      getSessionRestartStore(store).setState(
+        new Set([restartingTarget ? "sess-old" : SESS_OTHER]),
+        true,
+      );
+
+      registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+      expect(store.getState().kanban.tasks[0].primarySessionId).toBe("sess-new");
+      if (restartingTarget) expect(setActiveSessionAuto).not.toHaveBeenCalled();
+      else expect(setActiveSessionAuto).toHaveBeenCalledWith("t1", "sess-new");
+    },
+  );
+});
 
 describe("task.updated primary-session focus follow", () => {
   let store: ReturnType<typeof makeStore>;

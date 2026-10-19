@@ -20,23 +20,40 @@ test("blocks sending throughout restart while keeping the draft editable", async
   prCapture,
 }) => {
   test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 1600, height: 1000 });
   const gate = await routeNavigationResponses(testPage);
   const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  await apiClient.launchSession({
+    task_id: fixture.task.id,
+    agent_profile_id: seedData.agentProfileId,
+    prompt: "/e2e:simple-message",
+  });
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
+          (session) => session.state === "WAITING_FOR_INPUT",
+        ).length,
+    )
+    .toBe(2);
+  await fixture.session.sessionTabBySessionId(fixture.sessionId).click();
   const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
   const draftText = "Keep this draft while the session restarts";
   await fixture.session.fillMessage(draftText);
   gate.hold((request) => request.action === "session.stop");
-  const stopped = fixture.wire.waitForResponse("session.stop");
-  const launched = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stopped });
   try {
     await fixture.session.sessionTabBySessionId(fixture.sessionId).click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).click();
     await expect.poll(() => gate.heldCount()).toBe(1);
+    await expect
+      .poll(() => testPage.evaluate("window.__KANDEV_E2E_STORE__.getState().tasks.activeSessionId"))
+      .toBe(fixture.sessionId);
     await assertRestartSubmissionBlocked(testPage, fixture, draftText);
     await waitForFiniteAnimations(testPage.locator("body"));
     await prCapture.screenshot("desktop-restarting-composer", {
       caption: "Keep editing the draft while Restart session temporarily blocks Send.",
     });
+    const launched = fixture.wire.waitForResponse("session.launch", { timeout: 30_000 });
     gate.release();
     gate.hold((request) => request.action === "session.launch");
     await expect.poll(() => gate.heldCount()).toBe(1);

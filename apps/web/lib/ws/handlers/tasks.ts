@@ -34,6 +34,7 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
+import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
 import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
@@ -332,6 +333,7 @@ function maybeFollowUpdatedTaskPrimary(
     newPrimary !== previousPrimary &&
     afterState.tasks.activeTaskId === taskId &&
     afterState.tasks.activeSessionId === previousPrimary &&
+    !isSessionRestartPending(store, previousPrimary) &&
     !shouldPreservePinnedSessionForTask(afterState, taskId);
   if (!shouldFollow || !newPrimary) return;
   clearPinnedSessionIfOverridden(store, newPrimary);

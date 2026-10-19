@@ -77,6 +77,14 @@ This supports multiple hook instances, synchronous duplicate rejection,
 reactive reads, and final cleanup without modifying durable session state.
 Do not use the durable `pending_action` field, which represents agent input.
 
+The model lives in `lib/session/session-restart-state.ts`, without React
+dependencies. The action, composer, and WebSocket handlers share the same store
+owner. During Restart, `task.updated` primary-follow and `session.state_changed`
+adoption retain the currently selected pending target before clearing its pin.
+State and primary projections still update normally. Both event paths check the
+guard, so their delivery order cannot expose a sibling composer implicitly.
+A later manual session selection remains allowed and uses its own input state.
+
 Menus disable Stop, Resume, Delete, and Restart for the pending target.
 The action guard also rejects duplicate programmatic activation. Preserve the
 captured operation when a menu closes or its component unmounts.

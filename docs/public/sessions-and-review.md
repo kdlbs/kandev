@@ -67,7 +67,7 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 
 Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
 
-Restart keeps the selected conversation open. If you select another conversation
+Restart keeps the selected conversation open throughout the attempt. If you select another conversation
 while restart is pending, Kandev keeps your later selection.
 
 While a session restarts, you can edit its draft, but you cannot send it.

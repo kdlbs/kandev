@@ -27,6 +27,11 @@ Update the restart hook, `chat-input-area`, `composer-status-notices`, `use-comp
 tests and both existing session restart E2E files. Reuse the localized progress
 copy and existing composer geometry. Update public session guidance.
 
+Share the pending model with `lib/ws/handlers/tasks.ts` and `agent-session.ts`
+through `lib/session/session-restart-state.ts`. Keep the selected target and pin
+through automatic handoff events without changing backend primary promotion.
+Cover both event paths and a pending different session in their handler tests.
+
 No backend, persistence, recovery-policy, or cross-browser coordination changes.
 Work sequentially in the primary session.
 
@@ -64,7 +69,7 @@ message/queue traffic while submission is blocked.
 Run from the repository root:
 
 ```bash
-pnpm --dir apps/web exec vitest run hooks/domains/session/use-session-actions.test.ts components/task/chat/chat-input-area.test.tsx components/task/chat/chat-input-area-restart.test.tsx components/task/chat/use-chat-input-container.test.ts components/task/chat/use-composer-props.test.tsx components/task/chat/chat-input-container.test.tsx components/task/chat/chat-input-body.test.tsx components/task/chat/use-chat-input-state.test.ts
+pnpm --dir apps/web exec vitest run hooks/domains/session/use-session-actions.test.ts components/task/chat/chat-input-area.test.tsx components/task/chat/chat-input-area-restart.test.tsx components/task/chat/use-chat-input-container.test.ts components/task/chat/use-composer-props.test.tsx components/task/chat/chat-input-container.test.tsx components/task/chat/chat-input-body.test.tsx components/task/chat/use-chat-input-state.test.ts lib/ws/handlers --maxWorkers=2
 NODE_OPTIONS=--max-old-space-size=6144 pnpm --dir apps/web run typecheck
 pnpm --dir apps/web run i18n:check
 pnpm --dir apps/web run i18n:ratchet
@@ -83,23 +88,28 @@ phone screenshots, push the verified head, and collect fresh CI/review evidence.
 
 ## Results
 
-Local implementation and verification completed on 2026-10-19 in the primary
+Implementation and local verification completed on 2026-10-19 in the primary
 session. No subagents were used.
 
-- Both new hook regressions first failed on the previous implementation:
-  submission remained enabled and an earlier callback accepted the prompt.
-  The previous browser build also lacked the pending composer notice.
-- The eight-file Vitest command above passed: 144 tests. This includes existing
-  attachment preservation when submission returns false, the real restart
-  pending set, an earlier callback, both pending phases, and an unaffected sibling.
+- The initial hook regressions failed because submission remained enabled and
+  an earlier callback accepted the prompt. The previous browser build also
+  lacked the pending composer notice.
+- A stronger two-session browser regression exposed an automatic switch to the
+  live sibling during Stop. Targeted regressions failed in both WebSocket
+  selection paths. The shared pending model now retains the selected target
+  and its pin while preserving state projection and normal primary promotion.
+- The expanded Vitest command above passed: 782 tests across 75 files. Coverage
+  includes both event paths, a different pending session as a positive control,
+  the real pending set, an earlier submit callback, both pending phases, an
+  unaffected sibling, and existing attachment preservation on a false result.
 - Changed-file ESLint passed with zero warnings. Prettier and the 6144 MiB
   typecheck passed. Localization checks and the new-code ratchet passed.
 - A fresh managed desktop build passed all 5 restart tests with retries disabled.
   The phone run reused those assets and passed both tests with retries disabled.
-  Held Stop and Resume responses proved that the draft stayed editable and no
-  prompt or queue admission occurred. Each test then sent one message after
-  release as a positive control. Existing history, selection, and recovery
-  scenarios remained covered.
+  Both new guard tests use two live sessions and hold Stop and Resume responses
+  separately. The draft stays editable, no prompt or queue request is sent,
+  and each test sends one message after release as a positive control. Existing
+  history, explicit navigation, and recovery scenarios remain covered.
 - Public-doc validation passed for 48 pages. Specification catalog validation,
   full specification lint, and whitespace checks passed.
 

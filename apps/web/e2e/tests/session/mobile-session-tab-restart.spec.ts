@@ -20,18 +20,35 @@ test("mobile: blocks Send during restart and preserves an editable draft", async
   test.setTimeout(120_000);
   const gate = await routeNavigationResponses(testPage);
   const fixture = await createRestartScenario(testPage, apiClient, seedData);
+  await apiClient.launchSession({
+    task_id: fixture.task.id,
+    agent_profile_id: seedData.agentProfileId,
+    prompt: "/e2e:simple-message",
+  });
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listTaskSessions(fixture.task.id)).sessions.filter(
+          (session) => session.state === "WAITING_FOR_INPUT",
+        ).length,
+    )
+    .toBe(2);
+  await testPage.getByTestId("mobile-sessions-pill").tap();
+  await testPage.getByTestId(`mobile-session-row-${fixture.sessionId}`).tap();
+  await expect(testPage.getByRole("dialog", { name: "Sessions", exact: true })).not.toBeVisible();
   const before = await captureRestartBaseline(apiClient, fixture.task.id, fixture.sessionId);
   const draftText = "Keep this phone draft during restart";
   await fixture.session.fillMessage(draftText);
   gate.hold((request) => request.action === "session.stop");
-  const stopped = fixture.wire.waitForResponse("session.stop");
-  const launched = fixture.wire.waitForResponse("session.launch", { timeoutAfter: stopped });
   try {
     await testPage.getByTestId("mobile-sessions-pill").tap();
     const sheet = testPage.getByRole("dialog", { name: "Sessions", exact: true });
     const row = sheet.getByTestId(`mobile-session-row-${fixture.sessionId}`);
-    await row.getByRole("button", { name: "Session actions" }).tap();
-    await testPage.getByRole("menuitem", { name: "Restart session", exact: true }).tap();
+    await row.getByRole("button", { name: "Session actions" }).click();
+    const action = testPage.getByRole("menuitem", { name: "Restart session", exact: true });
+    await expect(action).toBeVisible();
+    await waitForFiniteAnimations(testPage.getByRole("menu"));
+    await action.tap();
     await expect.poll(() => gate.heldCount()).toBe(1);
     await testPage
       .locator('[data-slot="drawer-overlay"][data-state="open"]')
@@ -43,6 +60,7 @@ test("mobile: blocks Send during restart and preserves an editable draft", async
       caption: "The phone composer keeps its draft editable while Send is blocked during restart.",
     });
     await assertNoDocumentHorizontalOverflow(testPage, "phone restarting composer");
+    const launched = fixture.wire.waitForResponse("session.launch", { timeout: 30_000 });
     gate.release();
     gate.hold((request) => request.action === "session.launch");
     await expect.poll(() => gate.heldCount()).toBe(1);
