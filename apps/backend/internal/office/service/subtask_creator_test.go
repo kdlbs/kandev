@@ -25,6 +25,7 @@ type createSubtaskCall struct {
 	Title           string
 	Description     string
 	Metadata        map[string]interface{}
+	Relations       shared.AgentTaskRelations
 }
 
 // mockSubtaskCreator implements service.TaskCreator (so it can be passed as
@@ -39,9 +40,10 @@ type mockSubtaskCreator struct {
 
 func (m *mockSubtaskCreator) CreateOfficeSubtask(
 	_ context.Context, parentTaskID, assigneeAgentID, title, description string,
-	metadata map[string]interface{},
+	metadata map[string]interface{}, relations shared.AgentTaskRelations,
 ) (string, error) {
 	m.subtaskCalls = append(m.subtaskCalls, createSubtaskCall{
+		Relations:       relations,
 		ParentTaskID:    parentTaskID,
 		AssigneeAgentID: assigneeAgentID,
 		Title:           title,
@@ -105,7 +107,7 @@ func TestCreateOfficeSubtaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.
 	causingRun := runs[0]
 
 	taskID, err := svc.CreateOfficeSubtaskAsAgent(
-		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", causingRun.ID,
+		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", causingRun.ID, shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeSubtaskAsAgent: %v", err)
@@ -160,7 +162,7 @@ func TestCreateOfficeSubtaskAsAgent_EmptyCausingRunID_NoCarrier(t *testing.T) {
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeSubtaskAsAgent(
-		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", "",
+		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", "", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeSubtaskAsAgent: %v", err)
@@ -182,7 +184,7 @@ func TestCreateOfficeSubtaskAsAgent_UnreadableCausingRunID_NoCarrierButTaskCreat
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeSubtaskAsAgent(
-		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", "does-not-exist",
+		ctx, "", "parent-task-1", "agent-assignee", "Build widget", "A description", "does-not-exist", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeSubtaskAsAgent: %v", err)
@@ -202,7 +204,7 @@ func TestCreateOfficeSubtaskAsAgent_NilCreatorReturnsError(t *testing.T) {
 	svc := newTestService(t) // no TaskCreator
 	ctx := context.Background()
 
-	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, "", "parent-task-1", "", "Task", "", "")
+	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, "", "parent-task-1", "", "Task", "", "", shared.AgentTaskRelations{})
 	if err == nil {
 		t.Fatal("expected error when task creator is nil")
 	}
@@ -216,7 +218,7 @@ func TestCreateOfficeSubtaskAsAgent_CreatorWithoutSubtaskSupportReturnsError(t *
 	svc := newTestService(t, service.ServiceOptions{TaskCreator: mock})
 	ctx := context.Background()
 
-	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, "", "parent-task-1", "", "Task", "", "")
+	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, "", "parent-task-1", "", "Task", "", "", shared.AgentTaskRelations{})
 	if err == nil {
 		t.Fatal("expected error when task creator does not implement SubtaskCreator")
 	}
@@ -237,7 +239,7 @@ func TestCreateOfficeSubtaskAsAgent_ForbiddenWhenPermissionMissing(t *testing.T)
 		t.Fatalf("create caller: %v", err)
 	}
 
-	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, caller.ID, "parent-task-1", "", "Blocked task", "", "")
+	_, err := svc.CreateOfficeSubtaskAsAgent(ctx, caller.ID, "parent-task-1", "", "Blocked task", "", "", shared.AgentTaskRelations{})
 	if err == nil {
 		t.Fatal("expected ErrForbidden, got nil")
 	}

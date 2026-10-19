@@ -33,6 +33,7 @@ type TaskCreator interface {
 		title string,
 		description string,
 		causingRunID string,
+		relations shared.AgentTaskRelations,
 	) (string, error)
 	// CreateOfficeSubtaskAsAgent's causingRunID is the run this subtask
 	// creation happened inside (AC-OFFICE-RUN-CAUSATION-001.5), empty when
@@ -45,6 +46,7 @@ type TaskCreator interface {
 		title string,
 		description string,
 		causingRunID string,
+		relations shared.AgentTaskRelations,
 	) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -73,8 +75,6 @@ func (i CreateTaskInput) unsupportedField() string {
 		present bool
 	}{
 		{"priority", strings.TrimSpace(i.Priority) != ""},
-		{"blocked_by", len(i.BlockedBy) > 0},
-		{"workspace_mode", strings.TrimSpace(i.WorkspaceMode) != ""},
 		{"workspace_group_id", strings.TrimSpace(i.WorkspaceGroupID) != ""},
 		{"default_child_workspace", strings.TrimSpace(i.DefaultChildWorkspace) != ""},
 		{"default_child_ordering", strings.TrimSpace(i.DefaultChildOrdering) != ""},
@@ -110,6 +110,10 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 		return "", errTaskTitleRequired
 	}
 	input.AssigneeAgentID = strings.TrimSpace(input.AssigneeAgentID)
+	relations, err := normalizeTaskRelations(input)
+	if err != nil {
+		return "", err
+	}
 	if a.deps.Tasks == nil {
 		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
 	}
@@ -121,15 +125,18 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	if err := a.validateTaskRelations(ctx, runCtx.WorkspaceID, input); err != nil {
 		return "", err
 	}
+	if err := a.validateBlockerScope(ctx, runCtx, relations.BlockedBy); err != nil {
+		return "", err
+	}
 	if input.ParentTaskID != "" {
 		return a.deps.Tasks.CreateOfficeSubtaskAsAgent(
 			ctx, runCtx.AgentID, input.ParentTaskID, input.AssigneeAgentID, input.Title, input.Description,
-			runCtx.RunID,
+			runCtx.RunID, relations,
 		)
 	}
 	return a.deps.Tasks.CreateOfficeTaskAsAgent(
 		ctx, runCtx.AgentID, runCtx.WorkspaceID, input.ProjectID, input.AssigneeAgentID, input.Title, input.Description,
-		runCtx.RunID,
+		runCtx.RunID, relations,
 	)
 }
 
@@ -301,6 +308,7 @@ type ActionDependencies struct {
 	AgentModifier AgentModifier
 	Skills        SkillManager
 	Handoff       HandoffDependencies
+	TaskReads     TaskReadRelation
 }
 
 // CreateProjectInput contains fields an agent may provide when creating a project.
@@ -552,6 +560,7 @@ func (a *Actions) CreateSubtask(
 		input.Title,
 		input.Description,
 		runCtx.RunID,
+		shared.AgentTaskRelations{},
 	)
 }
 

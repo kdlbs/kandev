@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/office/shared"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
@@ -75,7 +76,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 	causingRun := runs[0]
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, agent.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID,
+		ctx, agent.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", causingRun.ID, shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -126,7 +127,7 @@ func TestCreateOfficeTaskAsAgent_EmptyCausingRunID_NoCarrier(t *testing.T) {
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "",
+		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)
@@ -148,7 +149,7 @@ func TestCreateOfficeTaskAsAgent_UnreadableCausingRunID_NoCarrierButTaskCreated(
 	ctx := context.Background()
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "does-not-exist",
+		ctx, "", "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "does-not-exist", shared.AgentTaskRelations{},
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent: %v", err)

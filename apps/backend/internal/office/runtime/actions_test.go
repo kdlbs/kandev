@@ -1350,11 +1350,12 @@ func (c *recordingTaskCreator) CreateOfficeTaskAsAgent(
 	title string,
 	description string,
 	causingRunID string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID: callerAgentID, WorkspaceID: workspaceID, ProjectID: projectID,
 		AssigneeAgentID: assigneeAgentID, Title: title, Description: description, Root: true,
-		CausingRunID: causingRunID,
+		CausingRunID: causingRunID, Relations: relations,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil
@@ -1372,6 +1373,7 @@ type createTaskCall struct {
 	Description     string
 	Root            bool
 	CausingRunID    string
+	Relations       shared.AgentTaskRelations
 }
 
 func (c *recordingTaskCreator) GetTaskWorkspaceID(_ context.Context, taskID string) (string, error) {
@@ -1402,6 +1404,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 	title string,
 	description string,
 	causingRunID string,
+	relations shared.AgentTaskRelations,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID:   callerAgentID,
@@ -1410,6 +1413,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 		Title:           title,
 		Description:     description,
 		CausingRunID:    causingRunID,
+		Relations:       relations,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil

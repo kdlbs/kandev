@@ -146,13 +146,9 @@ func taskCreate(args []string) int {
 	description := fs.String("description", "", "Task description")
 	parent := fs.String("parent", "", "Parent task ID")
 	assignee := fs.String("assignee", "", "Assignee agent ID")
-	priority := fs.String("priority", "", "Priority value")
 	project := fs.String("project", "", "Project ID")
-	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs that must complete before this task")
-	workspaceMode := fs.String("workspace-mode", "", "Workspace mode for this task: inherit_parent, new_workspace, or shared_group")
-	workspaceGroupID := fs.String("workspace-group-id", "", "Workspace group ID to join (required when --workspace-mode=shared_group)")
-	defaultChildWorkspace := fs.String("default-child-workspace", "", "Parent-only: default workspace mode for children (inherit_parent or new_workspace)")
-	defaultChildOrdering := fs.String("default-child-ordering", "", "Parent-only ordering policy for children. 'sequential' records dependency edges between siblings; 'parallel' records none. Note: recording an edge does NOT by itself defer when a child starts.")
+	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs this task waits for; each must be this run's task, in its task scope, or readable from it")
+	workspaceMode := fs.String("workspace-mode", "", "Workspace mode for this task: inherit_parent (subtasks only) or new_workspace; omit to keep the default")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
@@ -163,22 +159,10 @@ func taskCreate(args []string) int {
 		cliError("--title is required")
 		return 1
 	}
-	unsupported := []struct {
-		name  string
-		value string
-	}{
-		{"priority", *priority},
-		{"blocked-by", *blockedBy},
-		{"workspace-mode", *workspaceMode},
-		{"workspace-group-id", *workspaceGroupID},
-		{"default-child-workspace", *defaultChildWorkspace},
-		{"default-child-ordering", *defaultChildOrdering},
-	}
-	for _, field := range unsupported {
-		if strings.TrimSpace(field.value) != "" {
-			cliError("--%s is not supported by Office runtime task create", field.name)
-			return 1
-		}
+	blockers, err := parseBlockedBy(*blockedBy)
+	if err != nil {
+		cliError("%v", err)
+		return 1
 	}
 
 	client, err := newKandevClient()
@@ -200,6 +184,12 @@ func taskCreate(args []string) int {
 	}
 	if *project != "" {
 		payload["project_id"] = *project
+	}
+	if len(blockers) > 0 {
+		payload["blocked_by"] = blockers
+	}
+	if mode := strings.TrimSpace(*workspaceMode); mode != "" {
+		payload["workspace_mode"] = mode
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/tasks", payload)
@@ -276,6 +266,25 @@ func taskHandoff(args []string) int {
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/handoffs", payload)
 	return handleResponse(body, status, err)
+}
+
+// parseBlockedBy splits a comma-separated --blocked-by value into trimmed task
+// IDs. An empty value yields none; an empty entry is an error, so a stray comma
+// never silently drops a dependency.
+func parseBlockedBy(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			return nil, fmt.Errorf("--blocked-by contains an empty task ID")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
 }
 
 // resolveTaskID returns the explicit ID if provided, otherwise falls back to

@@ -140,7 +140,7 @@ pass before launcher settings are described as an isolation boundary:
 
 - **GIVEN** a direct Office runtime caller, **WHEN** it supplies a cross-workspace project, parent, or assignee, **THEN** task creation is denied before persistence or wakeup.
 
-- **GIVEN** an Office agent passes priority, blocker, or workspace-policy flags to `task create`, **WHEN** the runtime cannot preserve those fields, **THEN** the CLI rejects the request explicitly instead of silently dropping them.
+- **GIVEN** an Office agent passes `--priority`, `--workspace-group-id`, `--default-child-workspace`, or `--default-child-ordering` to `task create`, **WHEN** the CLI parses its flags, **THEN** it fails as an unknown flag before sending a request. `--blocked-by` and `--workspace-mode` are supported as described in [agent task relations](agent-task-relations.md).
 
 - **GIVEN** a user viewing an office task in advanced mode, **WHEN** the agent needs clarification, **THEN** it uses `ask_user_question` (available in ModeOffice) and the user sees the question in the UI.
 

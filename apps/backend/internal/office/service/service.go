@@ -333,9 +333,11 @@ type TaskCreator interface {
 	// CreateOfficeTaskAsAgent's metadata carries the task-boundary causation
 	// carrier set (AC-OFFICE-RUN-CAUSATION-001.18) when the caller resolved
 	// one; nil when there is none to persist (e.g. no causing run).
+	// relations carries the blocker and workspace-mode fields the runtime
+	// already validated; the zero value declares nothing.
 	CreateOfficeTaskAsAgent(
 		ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
-		metadata map[string]interface{},
+		metadata map[string]interface{}, relations shared.AgentTaskRelations,
 	) (taskID string, err error)
 }
 
@@ -348,7 +350,7 @@ type TaskCreator interface {
 type SubtaskCreator interface {
 	CreateOfficeSubtask(
 		ctx context.Context, parentTaskID, assigneeAgentID, title, description string,
-		metadata map[string]interface{},
+		metadata map[string]interface{}, relations shared.AgentTaskRelations,
 	) (taskID string, err error)
 }
 
@@ -704,7 +706,7 @@ const defaultWorkspaceName = "default"
 // absent carrier).
 func (s *Service) CreateOfficeTaskAsAgent(
 	ctx context.Context, callerAgentID, workspaceID, projectID, assigneeAgentID, title, description string,
-	causingRunID string,
+	causingRunID string, relations shared.AgentTaskRelations,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -718,7 +720,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
-	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata)
+	return s.taskCreator.CreateOfficeTaskAsAgent(ctx, workspaceID, projectID, assigneeAgentID, title, description, metadata, relations)
 }
 
 // CreateOfficeSubtaskAsAgent checks can_create_tasks for the caller before
@@ -731,7 +733,7 @@ func (s *Service) CreateOfficeTaskAsAgent(
 // a runtime action is an Office trigger the same as creating a root task.
 func (s *Service) CreateOfficeSubtaskAsAgent(
 	ctx context.Context, callerAgentID, parentTaskID, assigneeAgentID, title, description string,
-	causingRunID string,
+	causingRunID string, relations shared.AgentTaskRelations,
 ) (string, error) {
 	if err := s.requireTaskCreatePermission(ctx, callerAgentID); err != nil {
 		return "", err
@@ -749,7 +751,7 @@ func (s *Service) CreateOfficeSubtaskAsAgent(
 			metadata = carrierMetadataFromRunForAgent(run, callerAgentID)
 		}
 	}
-	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata)
+	return creator.CreateOfficeSubtask(ctx, parentTaskID, assigneeAgentID, title, description, metadata, relations)
 }
 
 // GetTaskWorkspaceID returns the workspace that owns a task for runtime scope validation.
