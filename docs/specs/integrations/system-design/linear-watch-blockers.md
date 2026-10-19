@@ -14,7 +14,7 @@ The integration system owns the blocker setting, the blocker projection on
 `LinearIssue`, and the decision to hold an issue. The orchestrator's watcher
 dispatch is unchanged: it never sees a held issue. The setting is stored as
 JSON in the existing `filter_json` column, so old rows decode with the setting
-off. Held issues are recorded in a new `linear_issue_watch_held_issues` table,
+off. Pending issues are recorded in a new `linear_issue_watch_pending_issues` table,
 created by the store's idempotent schema setup like the other Linear tables.
 
 ## Requirement mapping
@@ -22,9 +22,9 @@ created by the store's idempotent schema setup like the other Linear tables.
 | Acceptance criteria | Design sections |
 | --- | --- |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.1` | Blocker projection; Holding issues |
-| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2` | Holding issues; Held issues; Pagination |
+| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2` | Holding issues; Pending issues; Pagination |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.3` | Blocker projection; Holding issues |
-| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4` | Blocker projection; Held issues |
+| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4` | Blocker projection; Pending issues |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.5` | Setting; Pagination |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-002.1` | Watch dialog |
 
@@ -74,28 +74,32 @@ dedup table nor counts it against `maxInflightTasks`. The next poll reads its
 blockers again, and once they are completed it is published and sorted with
 the other issues. Held counts are logged at debug level.
 
-## Held issues
+## Pending issues
 
 Linear's search orders by `updatedAt`, and a watch reads at most
 `issueWatchMaxPages` pages of 50. A held issue does not change when its blocker
-completes, so in a busy team it can leave that window while it waits. To
-release it anyway, the watch records the Linear IDs of the issues it holds in
-`linear_issue_watch_held_issues (issue_watch_id, issue_id)`, keyed by watch
-and removed with it, on reset, and when the issue is released.
+completes, so in a busy team it can leave that window while it waits. A
+released issue can also miss its start: when the watch's in-flight cap is
+full, dispatch defers the event without reserving the issue. To start such
+issues anyway, a blocker-aware watch records the Linear IDs of the issues it
+has matched but not yet started (held issues and released issues not yet
+reserved) in `linear_issue_watch_pending_issues (issue_watch_id, issue_id)`,
+keyed by watch and cleared with it and on reset.
 
-On each poll, `holdBlockedIssues` takes the held IDs that the paged search did
-not return and re-checks them with the same search and filter plus
+On each poll, `holdBlockedIssues` takes the pending IDs that the paged search
+did not return and re-checks them with the same search and filter plus
 `SearchFilter.IssueIDs`, which `buildIssueFilter` maps to `id: { in: [...] }`.
 `IssueIDs` is `json:"-"`, so it is never stored or read from a request.
-Re-checks run in batches of 50 IDs, and the held set is capped at
-`maxHeldIssues` (250), so a poll adds at most five requests. An issue that no
-longer matches the filter is absent from the response and stops being held.
-Re-checked issues join the window's issues before blockers are evaluated, and
-the issues still blocked replace the stored set. When a re-check request
-fails, its unchecked IDs stay held and the rest of the poll continues; a
-canceled poll fails as a whole. When the held set cannot be read, the stored
-set is left unchanged. Beyond 250 held issues, the extra ones are released
-only while they are inside the search window.
+Re-checks run in batches of 50 IDs, and the pending set is capped at
+`maxPendingIssues` (250), so a poll adds at most five requests. Re-checked
+issues join the window's unseen issues before blockers are evaluated. The
+stored set is then replaced by the unseen issues of this poll, held first:
+an issue leaves it once dispatch has reserved it (it is then seen) or once it
+no longer matches the filter (it is absent from the response). When a
+re-check request fails, its unchecked IDs stay pending and the rest of the
+poll continues; a canceled poll fails as a whole. When the pending set cannot
+be read, the stored set is left unchanged. Beyond 250 pending issues, the
+extra ones start only while they are inside the search window.
 
 ## Pagination
 
@@ -129,9 +133,10 @@ issues that were held are then started by the next poll if they match.
 Real `GraphQLClient` requests against `httptest.Server` cover the query
 choice, the relation mapping, and truncation. Service tests cover holding,
 release after completion, canceled, cross-team, and truncated blockers,
-pagination past held issues, the unchanged default path, re-checks of held
-issues outside the window (release, filter mismatch, request failure,
-cancellation, and batch bounds), and the held table across reset and delete. Web unit tests
+pagination past held issues, the unchanged default path, re-checks of pending
+issues outside the window (release, a release deferred until reservation,
+filter mismatch, request failure, cancellation, and batch bounds), and the
+pending table across reset and delete. Web unit tests
 cover the form round trip and the switch. Playwright covers the setting across
 team pick, save, and reopen on desktop and phone, and a mock-Linear dispatch
 where a blocked issue gets a task only after its blocker completes. The mock

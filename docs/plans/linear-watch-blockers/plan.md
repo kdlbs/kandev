@@ -91,8 +91,8 @@ Author-reported results are recorded in each work order.
   the setting off are unchanged.
 - An issue with more than 25 incoming relations is held until relations are
   removed, because its blocker list is incomplete.
-- Held issues are re-checked by ID with up to five extra requests per poll.
-  A watch holding more than 250 issues releases the extra ones only while
-  they are in the search window.
+- Pending (held or released but not yet started) issues are re-checked by ID
+  with up to five extra requests per poll. Beyond 250 pending issues, the
+  extra ones start only while they are in the search window.
 - A canceled blocker holds its issue until the relation is removed or the
   setting is turned off.

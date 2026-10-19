@@ -7,31 +7,36 @@ import (
 	"go.uber.org/zap"
 )
 
-// maxHeldIssues bounds how many held issues a watch re-checks by ID on each
-// poll. It matches the paged search window, so a watch adds at most
-// issueWatchMaxPages extra requests for held issues.
-const maxHeldIssues = issueWatchMaxPages * issueWatchSearchPageSize
+// maxPendingIssues bounds how many pending issues a watch re-checks by ID on
+// each poll. It matches the paged search window, so a watch adds at most
+// issueWatchMaxPages extra requests for pending issues.
+const maxPendingIssues = issueWatchMaxPages * issueWatchSearchPageSize
 
-// holdBlockedIssues re-checks the issues a watch held on earlier polls that
-// the paged search did not return, removes issues that still have an open
-// blocker, and records them as held for the next poll. Held issues are not
-// reserved, so they take no in-flight slot until they are released.
+// holdBlockedIssues removes issues that still have an open blocker. Held
+// issues are not reserved, so they take no in-flight slot.
+//
+// A held issue does not change when its blocker completes, so it can leave
+// the paged search window while it waits. The watch therefore keeps its
+// matched but unstarted issues as pending: each poll re-checks the pending
+// IDs the window did not return, and an issue stays pending until dispatch
+// reserves it or it stops matching the filter. A released issue whose event is
+// deferred by the in-flight cap is thus found again on the next poll.
 func (s *Service) holdBlockedIssues(
 	ctx context.Context, client Client, w *IssueWatch,
 	issues []*LinearIssue, fetched, seen map[string]struct{},
 ) ([]*LinearIssue, error) {
-	held, listErr := s.store.ListHeldIssueIDs(ctx, w.ID)
+	pending, listErr := s.store.ListPendingIssueIDs(ctx, w.ID)
 	if listErr != nil {
-		s.log.Warn("linear: held issue list failed",
+		s.log.Warn("linear: pending issue list failed",
 			zap.String("watch_id", w.ID), zap.Error(listErr))
 	}
-	revisit := make([]string, 0, len(held))
-	for _, id := range held {
+	revisit := make([]string, 0, len(pending))
+	for _, id := range pending {
 		if _, ok := fetched[id]; !ok {
 			revisit = append(revisit, id)
 		}
 	}
-	revisited, unchecked, err := s.revisitHeldIssues(ctx, client, w, revisit)
+	revisited, unchecked, err := s.revisitPendingIssues(ctx, client, w, revisit)
 	if err != nil {
 		return nil, err
 	}
@@ -46,23 +51,23 @@ func (s *Service) holdBlockedIssues(
 			zap.String("watch_id", w.ID), zap.Int("held", len(blocked)))
 	}
 	// A failed read leaves the stored set alone rather than replacing it with
-	// the window's view, which would forget held issues outside the window.
+	// the window's view, which would forget pending issues outside the window.
 	if listErr == nil {
-		next := heldIssueIDs(unchecked, blocked)
-		if err := s.store.ReplaceHeldIssueIDs(ctx, w.ID, next); err != nil {
-			s.log.Warn("linear: held issue update failed",
+		next := pendingIssueIDs(unchecked, blocked, kept)
+		if err := s.store.ReplacePendingIssueIDs(ctx, w.ID, next); err != nil {
+			s.log.Warn("linear: pending issue update failed",
 				zap.String("watch_id", w.ID), zap.Error(err))
 		}
 	}
 	return kept, nil
 }
 
-// revisitHeldIssues fetches held issues by ID, still restricted by the watch
-// filter, in pages of issueWatchSearchPageSize. An issue that no longer
-// matches is absent from the result and so stops being held. When a request
-// fails, the IDs it did not check are returned as unchecked so they stay
-// held; a canceled poll returns the error.
-func (s *Service) revisitHeldIssues(
+// revisitPendingIssues fetches pending issues by ID, still restricted by the
+// watch filter, in pages of issueWatchSearchPageSize. An issue that no longer
+// matches is absent from the result and so stops being pending. When a
+// request fails, the IDs it did not check are returned as unchecked so they
+// stay pending; a canceled poll returns the error.
+func (s *Service) revisitPendingIssues(
 	ctx context.Context, client Client, w *IssueWatch, ids []string,
 ) ([]*LinearIssue, []string, error) {
 	var out []*LinearIssue
@@ -75,7 +80,7 @@ func (s *Service) revisitHeldIssues(
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil, nil, err
 			}
-			s.log.Debug("linear: held issue re-check stopped early",
+			s.log.Debug("linear: pending issue re-check stopped early",
 				zap.String("watch_id", w.ID), zap.Error(err))
 			return out, ids[start:], nil
 		}
@@ -116,13 +121,14 @@ func issueBlocked(issue *LinearIssue) bool {
 	return false
 }
 
-// heldIssueIDs lists the IDs to hold for the next poll, unchecked ones first,
-// without duplicates and at most maxHeldIssues.
-func heldIssueIDs(unchecked []string, blocked []*LinearIssue) []string {
-	out := make([]string, 0, min(len(unchecked)+len(blocked), maxHeldIssues))
-	added := make(map[string]struct{}, cap(out))
+// pendingIssueIDs lists the IDs to re-check on the next poll: unchecked ones,
+// then held issues, then released issues not yet reserved, without
+// duplicates and at most maxPendingIssues.
+func pendingIssueIDs(unchecked []string, groups ...[]*LinearIssue) []string {
+	out := make([]string, 0, maxPendingIssues)
+	added := make(map[string]struct{}, maxPendingIssues)
 	add := func(id string) {
-		if _, ok := added[id]; ok || id == "" || len(out) >= maxHeldIssues {
+		if _, ok := added[id]; ok || id == "" || len(out) >= maxPendingIssues {
 			return
 		}
 		added[id] = struct{}{}
@@ -131,8 +137,10 @@ func heldIssueIDs(unchecked []string, blocked []*LinearIssue) []string {
 	for _, id := range unchecked {
 		add(id)
 	}
-	for _, issue := range blocked {
-		add(issue.ID)
+	for _, group := range groups {
+		for _, issue := range group {
+			add(issue.ID)
+		}
 	}
 	return out
 }

@@ -33,8 +33,8 @@ before they are published.
 - `searchIssuesWithBlockersQuery` and `blockersFromRelations` in the GraphQL
   client; the mock client returns blockers only for blocker-aware searches.
 - `CheckIssueWatch` pagination for blocker-aware watches,
-  `holdBlockedIssues`, and the `linear_issue_watch_held_issues` table with
-  re-checks of held issues by ID (`SearchFilter.IssueIDs`).
+  `holdBlockedIssues`, and the `linear_issue_watch_pending_issues` table with
+  re-checks of pending issues by ID (`SearchFilter.IssueIDs`).
 
 ## Out of scope
 
@@ -47,7 +47,8 @@ before they are published.
 2. A poll publishes only issues whose blockers are all completed, holds
    canceled, cross-team, and truncated cases, releases an issue on the first
    poll after completion, and pages past held issues. A held issue outside
-   the search window is re-checked by ID and released, in bounded batches.
+   the search window is re-checked by ID and released, in bounded batches,
+   and a released issue stays pending until dispatch reserves it.
 3. A flag-only filter is rejected as empty; a watch with the flag off keeps
    its single plain search.
 
@@ -76,7 +77,7 @@ None.
 
 Author-reported: `go test -race -tags=fts5 ./internal/linear/` passes,
 including the GraphQL request, mapping, hold, release, pagination, and
-default-path tests in `blockers_test.go` and the held-issue re-check and store
-tests in `blockers_revisit_test.go`. The desktop Playwright dispatch case
+default-path tests in `blockers_test.go` and the pending-issue re-check and
+store tests in `blockers_revisit_test.go`. The desktop Playwright dispatch case
 creates a task for the unblocked mock issue only, then for the held issue after
 its blocker is marked completed.

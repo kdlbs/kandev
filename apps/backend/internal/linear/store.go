@@ -99,10 +99,10 @@ const createTablesSQL = `
 		FOREIGN KEY(issue_watch_id) REFERENCES linear_issue_watches(id) ON DELETE CASCADE
 	);
 
-	-- Issues a blocker-aware watch is holding until their blockers complete.
-	-- Polls re-check these by ID so a held issue is released even after it
-	-- leaves the watch's paged search window.
-	CREATE TABLE IF NOT EXISTS linear_issue_watch_held_issues (
+	-- Issues a blocker-aware watch has matched but not yet started: held
+	-- issues and released issues not yet reserved. Polls re-check these by ID
+	-- so they still start after leaving the watch's paged search window.
+	CREATE TABLE IF NOT EXISTS linear_issue_watch_pending_issues (
 		issue_watch_id TEXT NOT NULL,
 		issue_id TEXT NOT NULL,
 		PRIMARY KEY(issue_watch_id, issue_id),

@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// heldWatchFixture serves a paged search window from window and answers
+// pendingWatchFixture serves a paged search window from window and answers
 // re-checks by ID from byID, recording every request's filter.
-type heldWatchFixture struct {
+type pendingWatchFixture struct {
 	*svcFixture
 	watch    *IssueWatch
 	window   []LinearIssue
@@ -21,9 +21,9 @@ type heldWatchFixture struct {
 	failNext error
 }
 
-func newHeldWatchFixture(t *testing.T) *heldWatchFixture {
+func newPendingWatchFixture(t *testing.T) *pendingWatchFixture {
 	t.Helper()
-	h := &heldWatchFixture{svcFixture: newSvcFixture(t), byID: map[string]LinearIssue{}}
+	h := &pendingWatchFixture{svcFixture: newSvcFixture(t), byID: map[string]LinearIssue{}}
 	ctx := context.Background()
 	if _, err := h.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		AuthMethod: AuthMethodAPIKey, Secret: "lin_api",
@@ -61,7 +61,7 @@ func newHeldWatchFixture(t *testing.T) *heldWatchFixture {
 	return h
 }
 
-func (h *heldWatchFixture) poll(t *testing.T) []string {
+func (h *pendingWatchFixture) poll(t *testing.T) []string {
 	t.Helper()
 	got, err := h.svc.CheckIssueWatch(context.Background(), h.watch)
 	if err != nil {
@@ -70,11 +70,11 @@ func (h *heldWatchFixture) poll(t *testing.T) []string {
 	return blockerTestIDs(got)
 }
 
-func (h *heldWatchFixture) held(t *testing.T) []string {
+func (h *pendingWatchFixture) pending(t *testing.T) []string {
 	t.Helper()
-	ids, err := h.store.ListHeldIssueIDs(context.Background(), h.watch.ID)
+	ids, err := h.store.ListPendingIssueIDs(context.Background(), h.watch.ID)
 	if err != nil {
-		t.Fatalf("list held: %v", err)
+		t.Fatalf("list pending: %v", err)
 	}
 	return ids
 }
@@ -85,13 +85,13 @@ func blockedBy(stateType string) []LinearIssueBlocker {
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
 func TestService_CheckIssueWatch_ReleasesHeldIssueOutsideSearchWindow(t *testing.T) {
-	h := newHeldWatchFixture(t)
+	h := newPendingWatchFixture(t)
 	h.window = []LinearIssue{{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}}
 	if got := h.poll(t); len(got) != 0 {
 		t.Fatalf("first poll published %v", got)
 	}
-	if want := []string{"id-2"}; !reflect.DeepEqual(h.held(t), want) {
-		t.Fatalf("held = %v, want %v", h.held(t), want)
+	if want := []string{"id-2"}; !reflect.DeepEqual(h.pending(t), want) {
+		t.Fatalf("pending = %v, want %v", h.pending(t), want)
 	}
 
 	// The held issue has left the paged window; the poll re-checks it by ID.
@@ -108,22 +108,50 @@ func TestService_CheckIssueWatch_ReleasesHeldIssueOutsideSearchWindow(t *testing
 	if got, want := h.poll(t), []string{"ENG-2"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("third poll published %v, want %v", got, want)
 	}
-	if len(h.held(t)) != 0 {
-		t.Fatalf("released issue still held: %v", h.held(t))
+}
+
+// A released issue whose event the in-flight cap defers is not reserved; it
+// must stay pending so a later poll publishes it again once a slot frees up.
+//
+// @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
+func TestService_CheckIssueWatch_KeepsReleasedIssuePendingUntilReserved(t *testing.T) {
+	h := newPendingWatchFixture(t)
+	h.window = []LinearIssue{{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}}
+	h.poll(t)
+	h.window = nil
+	h.byID["id-2"] = LinearIssue{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("completed")}
+	for poll := 1; poll <= 2; poll++ {
+		if got, want := h.poll(t), []string{"ENG-2"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("poll %d published %v, want %v", poll, got, want)
+		}
+		if want := []string{"id-2"}; !reflect.DeepEqual(h.pending(t), want) {
+			t.Fatalf("poll %d: pending = %v, want %v", poll, h.pending(t), want)
+		}
+	}
+
+	ctx := context.Background()
+	if ok, err := h.store.ReserveIssueWatchTask(ctx, h.watch.ID, "ENG-2", ""); err != nil || !ok {
+		t.Fatalf("reserve: ok=%v err=%v", ok, err)
+	}
+	if got := h.poll(t); len(got) != 0 {
+		t.Fatalf("reserved issue published again: %v", got)
+	}
+	if len(h.pending(t)) != 0 {
+		t.Fatalf("reserved issue still pending: %v", h.pending(t))
 	}
 }
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
 func TestService_CheckIssueWatch_DropsHeldIssueThatNoLongerMatches(t *testing.T) {
-	h := newHeldWatchFixture(t)
+	h := newPendingWatchFixture(t)
 	h.window = []LinearIssue{{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}}
 	h.poll(t)
 	h.window = nil
 	if got := h.poll(t); len(got) != 0 {
 		t.Fatalf("published %v", got)
 	}
-	if len(h.held(t)) != 0 {
-		t.Fatalf("an issue the filter no longer returns must stop being held: %v", h.held(t))
+	if len(h.pending(t)) != 0 {
+		t.Fatalf("an issue the filter no longer returns must stop being pending: %v", h.pending(t))
 	}
 	h.poll(t)
 	if len(h.revisits) != 1 {
@@ -133,7 +161,7 @@ func TestService_CheckIssueWatch_DropsHeldIssueThatNoLongerMatches(t *testing.T)
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2
 func TestService_CheckIssueWatch_KeepsHeldIssuesWhenRecheckFails(t *testing.T) {
-	h := newHeldWatchFixture(t)
+	h := newPendingWatchFixture(t)
 	h.window = []LinearIssue{{ID: "id-2", Identifier: "ENG-2", Blockers: blockedBy("started")}}
 	h.poll(t)
 	h.window = []LinearIssue{{ID: "id-3", Identifier: "ENG-3"}}
@@ -141,8 +169,8 @@ func TestService_CheckIssueWatch_KeepsHeldIssuesWhenRecheckFails(t *testing.T) {
 	if got, want := h.poll(t), []string{"ENG-3"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("published %v, want %v", got, want)
 	}
-	if want := []string{"id-2"}; !reflect.DeepEqual(h.held(t), want) {
-		t.Fatalf("held = %v, want %v", h.held(t), want)
+	if want := []string{"id-2", "id-3"}; !reflect.DeepEqual(h.pending(t), want) {
+		t.Fatalf("pending = %v, want %v", h.pending(t), want)
 	}
 
 	h.failNext = context.Canceled
@@ -153,14 +181,14 @@ func TestService_CheckIssueWatch_KeepsHeldIssuesWhenRecheckFails(t *testing.T) {
 
 // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4
 func TestService_CheckIssueWatch_RechecksHeldIssuesInBoundedBatches(t *testing.T) {
-	h := newHeldWatchFixture(t)
-	for i := range maxHeldIssues + 10 {
+	h := newPendingWatchFixture(t)
+	for i := range maxPendingIssues + 10 {
 		id := fmt.Sprintf("id-%03d", i)
 		h.window = append(h.window, LinearIssue{ID: id, Identifier: fmt.Sprintf("ENG-%d", i), Blockers: blockedBy("started")})
 	}
 	h.poll(t)
-	if got := len(h.held(t)); got != maxHeldIssues {
-		t.Fatalf("held %d issues, want the %d cap", got, maxHeldIssues)
+	if got := len(h.pending(t)); got != maxPendingIssues {
+		t.Fatalf("%d pending issues, want the %d cap", got, maxPendingIssues)
 	}
 	h.window = nil
 	h.poll(t)
@@ -174,29 +202,29 @@ func TestService_CheckIssueWatch_RechecksHeldIssuesInBoundedBatches(t *testing.T
 	}
 }
 
-func TestStore_HeldIssueIDsFollowWatchLifecycle(t *testing.T) {
-	h := newHeldWatchFixture(t)
+func TestStore_PendingIssueIDsFollowWatchLifecycle(t *testing.T) {
+	h := newPendingWatchFixture(t)
 	ctx := context.Background()
-	if err := h.store.ReplaceHeldIssueIDs(ctx, h.watch.ID, []string{"b", "a"}); err != nil {
+	if err := h.store.ReplacePendingIssueIDs(ctx, h.watch.ID, []string{"b", "a"}); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
-	if want := []string{"a", "b"}; !reflect.DeepEqual(h.held(t), want) {
-		t.Fatalf("held = %v, want %v", h.held(t), want)
+	if want := []string{"a", "b"}; !reflect.DeepEqual(h.pending(t), want) {
+		t.Fatalf("pending = %v, want %v", h.pending(t), want)
 	}
 	if err := h.store.ResetIssueWatchState(ctx, h.watch.ID); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if len(h.held(t)) != 0 {
-		t.Fatalf("reset must clear held issues")
+	if len(h.pending(t)) != 0 {
+		t.Fatalf("reset must clear pending issues")
 	}
-	if err := h.store.ReplaceHeldIssueIDs(ctx, h.watch.ID, []string{"a"}); err != nil {
+	if err := h.store.ReplacePendingIssueIDs(ctx, h.watch.ID, []string{"a"}); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	if err := h.store.DeleteIssueWatch(ctx, h.watch.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if len(h.held(t)) != 0 {
-		t.Fatalf("delete must clear held issues")
+	if len(h.pending(t)) != 0 {
+		t.Fatalf("delete must clear pending issues")
 	}
 }
 
