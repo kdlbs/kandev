@@ -14,7 +14,7 @@ import (
 
 // @covers AC-SYSTEM-PAGE-SYSTEM-PAGE-001.9
 func TestRestoreRejectsInvalidSnapshotBeforeDisruption(t *testing.T) {
-	for _, damage := range []string{"truncated", "damaged-page", "non-sqlite"} {
+	for _, damage := range []string{"empty", "truncated", "damaged-page", "non-sqlite"} {
 		for _, legacy := range []bool{false, true} {
 			name := damage + "/modern"
 			if legacy {
@@ -28,7 +28,12 @@ func TestRestoreRejectsInvalidSnapshotBeforeDisruption(t *testing.T) {
 				snapshot := filepath.Join(svc.backupsDir(), receipt.Name)
 				damageRestoreSnapshot(t, snapshot, damage)
 				_, err = verifySnapshot(context.Background(), snapshot)
-				require.Error(t, err, "fixture must fail SQLite verification")
+				if damage == "empty" {
+					// SQLite treats an empty file as a valid empty database.
+					require.NoError(t, err)
+				} else {
+					require.Error(t, err, "fixture must fail SQLite verification")
+				}
 				require.NoError(t, updateRestoreTestValue(svc, "current-unbacked-work"))
 				paths := []string{svc.databasePath, svc.databasePath + "-wal", svc.databasePath + "-shm", snapshot}
 				before := readRestoreTestFiles(t, paths)
@@ -42,6 +47,9 @@ func TestRestoreRejectsInvalidSnapshotBeforeDisruption(t *testing.T) {
 				require.NoError(t, err)
 				job := waitRestoreTerminal(t, svc, id)
 				require.Equal(t, jobs.StateFailed, job.State, "damaged snapshot must fail before disrupting the working database")
+				if damage == "empty" {
+					require.Contains(t, job.Message, "restore snapshot is empty")
+				}
 				require.Zero(t, unavailable)
 				require.Zero(t, quiesce)
 				require.Zero(t, shutdown)
@@ -81,6 +89,8 @@ func damageRestoreSnapshot(t *testing.T, path, damage string) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	switch damage {
+	case "empty":
+		data = nil
 	case "truncated":
 		data = data[:128]
 	case "damaged-page":

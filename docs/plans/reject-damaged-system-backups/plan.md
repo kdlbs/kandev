@@ -159,3 +159,14 @@ No production or permanent tests changed before the reviewed design checkpoint.
   the rejected job before further pool reads; use an otherwise idle fixture.
 - Integrity checks do not establish application schema compatibility or protect
   against unrelated external file mutations. Those remain outside this fix.
+
+### Zero-byte admission correction
+
+Public-Restore regressions independently confirmed that a fully truncated file
+still passed SQLite integrity checking and was restored by the initial fix.
+The restore-specific staging copy now rejects zero copied bytes before any
+disruption, preserving the shared verifier contract. The corruption matrix now
+includes zero-byte and 128-byte truncation under modern and legacy hooks.
+Earlier local evidence above is historical; the corrective backup GREEN and
+scoped lint results are recorded in Task 01. No new schema or repository logic
+requires repeating earlier sqlguard/conformance checks.

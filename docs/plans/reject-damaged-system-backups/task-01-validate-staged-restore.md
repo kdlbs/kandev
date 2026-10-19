@@ -56,9 +56,11 @@ After the later explicit implementation release and heavy-lease grant:
    immediately, and avoid sleeps or private qualification fixtures.
 2. Add `TestRestoreRejectsInvalidSnapshotBeforeDisruption` as independent
    table-driven fixtures: create and verify a valid snapshot from saved data,
-   then (a) truncate to 128 bytes, (b) damage its SQLite page/header structure
+   then (a) truncate to zero or 128 bytes, (b) damage its SQLite page/header structure
    deterministically while preserving file length, or (c) replace contents with
-   non-SQLite bytes. Assert fixture verification fails so corruption is real.
+   non-SQLite bytes. Assert verification fails for nonempty corruption; for zero-byte truncation,
+   assert the shared verifier accepts the empty file under SQLite semantics
+   while the restore admission must reject it.
    Enable WAL on the real pool before fixture writes (the default public
    helper alone does not enable it), disable automatic checkpointing for the
    fixture, and ensure WAL/SHM exist. Write distinct newer current data after
@@ -181,9 +183,9 @@ post-job SQL probes. Do not weaken downstream controls into early-invalid tests.
 
 ## Results
 
-Implemented after explicit release. Production change is four lines in
-`runRestore`, invoking the existing verifier against the staged path before
-all disruptive callbacks and deleting staging on error. All ten A/M paths
+Implemented after explicit release. Production invokes the existing verifier against the staged path before
+all disruptive callbacks and deletes staging on error. Staged copying also
+rejects zero bytes because SQLite integrity checking accepts an empty file. All ten A/M paths
 above are present; no additional production owner changed.
 
 - RED: all six invalid cases failed with actual succeeded versus expected failed;
@@ -205,3 +207,16 @@ Operational handles, install/hook receipts, current head, leases, and hosted
 CI/review budgets remain in the external Kandev task plan and recovery record.
 No production/permanent tests/install/heavy command/commit/push occurred before
 the design checkpoint; subsequent delivery uses normal hooks.
+
+### Zero-byte correction
+
+A later independently authored public-Restore regression on the initial published
+fix failed both modern/legacy cases: expected failed, actual succeeded. SQLite's
+shared verifier correctly reflects its permissive empty-file semantics, so the
+restore copy now rejects zero copied bytes without changing shared retention or
+schema contracts. This extends the same invalid matrix and acceptance criterion.
+Targeted RED exit 1. Corrective full backup-package GREEN exit 0 (1.452s)
+with Go 1.26.0/race/trimpath/fts5/p1/GOMAX2/GOMEM512MiB, inner240/GNU280/kill10.
+Scoped changed-Go lint over `store.go` and `restore_integrity_test.go` exit 0,
+zero issues (GNU360/kill10). Earlier passing sqlguard/conformance are retained for this local
+pre-disruption guard; no SQL/schema/repository changes were introduced.

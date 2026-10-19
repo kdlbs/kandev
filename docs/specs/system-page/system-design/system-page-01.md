@@ -152,7 +152,9 @@ Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk
 
 For `AC-SYSTEM-PAGE-SYSTEM-PAGE-001.9`, `internal/system/backups.Service`
 holds the existing pool maintenance gate while copying the selected snapshot
-to `<configured-database-path>.new`. After the copy is synced and closed,
+to `<configured-database-path>.new`. A zero-byte copy is rejected as empty
+before shutdown: SQLite itself accepts an empty file as an empty database.
+After a nonempty copy is synced and closed,
 `runRestore` verifies that actual staged file using the existing read-only
 `verifySnapshot` helper in `retention_preparation.go`. Its escaped native path,
 `mode=ro`, and complete `PRAGMA integrity_check` result contract are reused;
