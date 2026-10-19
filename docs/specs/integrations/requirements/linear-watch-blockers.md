@@ -47,14 +47,18 @@ completed, without changing the watch's matching or ordering otherwise.
   matched issue, in the watch's dispatch order and under its in-flight cap. A
   held issue shall not take an in-flight slot and shall not
   be recorded as seen. A poll shall still scan the later result pages of the
-  watch, so issues that can start are not hidden behind held ones.
+  watch, so issues that can start are not hidden behind held ones. A held
+  issue shall be re-checked on later polls even after it has left the
+  watch's paged search window, for up to 250 held issues per watch, while it
+  still matches the watch filter.
 - **AC-INTEGRATIONS-LINEAR-BLOCKERS-001.3:** A canceled blocker shall keep the
   issue held. Blockers in another team or project shall count like any other
   blocker. When Linear reports more blocker relations than the watch fetched,
   the issue shall be held.
 - **AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4:** The watch shall request issue
   relations from Linear only when the blocker setting is on, with a bounded
-  number of relations per issue. The blocker setting shall not be sent to
+  number of relations per issue and a bounded number of re-check requests
+  per poll. The blocker setting shall not be sent to
   Linear as a search condition.
 - **AC-INTEGRATIONS-LINEAR-BLOCKERS-001.5:** When the blocker setting is off,
   including for every existing watch, polls shall send the same Linear
@@ -72,6 +76,7 @@ completed, without changing the watch's matching or ordering otherwise.
   Saving shall store its value in the watch filter. Reopening and saving an
   existing watch shall keep the stored value. Changing the team or workspace
   shall not change it. The watch table shall mark a watch with the setting on.
+  On coarse pointers the switch shall have a hit area of at least 44 px.
   Desktop and phone layouts shall behave the same.
 
 ## Out of scope

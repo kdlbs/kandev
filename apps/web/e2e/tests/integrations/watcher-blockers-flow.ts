@@ -38,6 +38,7 @@ export async function assertRequireBlockersDonePersists(
   };
   await pick("Workspace", "E2E Workspace");
   const toggle = dialog.getByTestId("linear-watch-require-blockers-done");
+  await expectTouchTargetOnCoarsePointer(testPage, toggle);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await pick("Team", /ENG/);
@@ -63,6 +64,22 @@ export async function assertRequireBlockersDonePersists(
     "aria-checked",
     "true",
   );
+}
+
+// On phones the switch keeps its compact look but its hit area must reach
+// 44px: points 22px above and below its center (44px in all) still hit the switch.
+async function expectTouchTargetOnCoarsePointer(page: Page, toggle: Locator) {
+  const coarse = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+  if (page.viewportSize()!.width < 768) expect(coarse).toBe(true);
+  if (!coarse) return;
+  await toggle.scrollIntoViewIfNeeded();
+  const hits = await toggle.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    return [y - 22, y + 22].map((py) => element.contains(document.elementFromPoint(x, py)));
+  });
+  expect(hits).toEqual([true, true]);
 }
 
 async function taskTitles(apiClient: ApiClient, seedData: SeedData): Promise<string[]> {

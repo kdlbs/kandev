@@ -349,7 +349,7 @@ function RequireBlockersDoneField({ form, setForm }: { form: FormState; setForm:
         data-testid="linear-watch-require-blockers-done"
         checked={form.requireBlockersDone}
         onCheckedChange={(v) => setForm((p) => ({ ...p, requireBlockersDone: v }))}
-        className="cursor-pointer"
+        className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:-inset-y-[15px]"
       />
     </div>
   );

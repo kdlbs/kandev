@@ -32,8 +32,9 @@ before they are published.
   `normalizeFilter`.
 - `searchIssuesWithBlockersQuery` and `blockersFromRelations` in the GraphQL
   client; the mock client returns blockers only for blocker-aware searches.
-- `CheckIssueWatch` pagination for blocker-aware watches and
-  `dropBlockedIssues`.
+- `CheckIssueWatch` pagination for blocker-aware watches,
+  `holdBlockedIssues`, and the `linear_issue_watch_held_issues` table with
+  re-checks of held issues by ID (`SearchFilter.IssueIDs`).
 
 ## Out of scope
 
@@ -45,7 +46,8 @@ before they are published.
    bounded `inverseRelations` block and never send the flag to Linear.
 2. A poll publishes only issues whose blockers are all completed, holds
    canceled, cross-team, and truncated cases, releases an issue on the first
-   poll after completion, and pages past held issues.
+   poll after completion, and pages past held issues. A held issue outside
+   the search window is re-checked by ID and released, in bounded batches.
 3. A flag-only filter is rejected as empty; a watch with the flag off keeps
    its single plain search.
 
@@ -58,8 +60,8 @@ pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/integrati
 
 ## Files likely touched
 
-- `apps/backend/internal/linear/{models,graphql_client,mock_client,service_issue_watch}.go`
-- `apps/backend/internal/linear/blockers_test.go`
+- `apps/backend/internal/linear/{models,graphql_client,mock_client,store,store_issue_watch,service_issue_watch,service_issue_watch_blockers}.go`
+- `apps/backend/internal/linear/blockers_test.go`, `blockers_revisit_test.go`
 - `apps/web/e2e/helpers/api-client.ts`, `apps/web/e2e/tests/integrations/*blockers*`
 
 ## Dependencies
@@ -74,6 +76,7 @@ None.
 
 Author-reported: `go test -race -tags=fts5 ./internal/linear/` passes,
 including the GraphQL request, mapping, hold, release, pagination, and
-default-path tests in `blockers_test.go`. The desktop Playwright dispatch case
+default-path tests in `blockers_test.go` and the held-issue re-check and store
+tests in `blockers_revisit_test.go`. The desktop Playwright dispatch case
 creates a task for the unblocked mock issue only, then for the held issue after
 its blocker is marked completed.

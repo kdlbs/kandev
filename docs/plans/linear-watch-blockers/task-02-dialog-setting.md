@@ -39,7 +39,8 @@ See `UI-01` in the [plan](plan.md#ascii-ui-preview): a switch row under Query.
 
 1. Saving stores the setting; reopening and saving keeps it; team and
    workspace changes keep it; a flag-only filter does not enable Save.
-2. Desktop and phone flows show the setting on after save and reopen.
+2. Desktop and phone flows show the setting on after save and reopen; on
+   phones the switch has a 44 px hit area.
 
 ## Verification
 

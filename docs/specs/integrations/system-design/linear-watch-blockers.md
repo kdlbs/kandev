@@ -13,17 +13,18 @@ requirements:
 The integration system owns the blocker setting, the blocker projection on
 `LinearIssue`, and the decision to hold an issue. The orchestrator's watcher
 dispatch is unchanged: it never sees a held issue. The setting is stored as
-JSON in the existing `filter_json` column, so it needs no migration and old
-rows decode with the setting off.
+JSON in the existing `filter_json` column, so old rows decode with the setting
+off. Held issues are recorded in a new `linear_issue_watch_held_issues` table,
+created by the store's idempotent schema setup like the other Linear tables.
 
 ## Requirement mapping
 
 | Acceptance criteria | Design sections |
 | --- | --- |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.1` | Blocker projection; Holding issues |
-| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2` | Holding issues; Pagination |
+| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.2` | Holding issues; Held issues; Pagination |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.3` | Blocker projection; Holding issues |
-| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4` | Blocker projection |
+| `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.4` | Blocker projection; Held issues |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-001.5` | Setting; Pagination |
 | `AC-INTEGRATIONS-LINEAR-BLOCKERS-002.1` | Watch dialog |
 
@@ -73,6 +74,29 @@ dedup table nor counts it against `maxInflightTasks`. The next poll reads its
 blockers again, and once they are completed it is published and sorted with
 the other issues. Held counts are logged at debug level.
 
+## Held issues
+
+Linear's search orders by `updatedAt`, and a watch reads at most
+`issueWatchMaxPages` pages of 50. A held issue does not change when its blocker
+completes, so in a busy team it can leave that window while it waits. To
+release it anyway, the watch records the Linear IDs of the issues it holds in
+`linear_issue_watch_held_issues (issue_watch_id, issue_id)`, keyed by watch
+and removed with it, on reset, and when the issue is released.
+
+On each poll, `holdBlockedIssues` takes the held IDs that the paged search did
+not return and re-checks them with the same search and filter plus
+`SearchFilter.IssueIDs`, which `buildIssueFilter` maps to `id: { in: [...] }`.
+`IssueIDs` is `json:"-"`, so it is never stored or read from a request.
+Re-checks run in batches of 50 IDs, and the held set is capped at
+`maxHeldIssues` (250), so a poll adds at most five requests. An issue that no
+longer matches the filter is absent from the response and stops being held.
+Re-checked issues join the window's issues before blockers are evaluated, and
+the issues still blocked replace the stored set. When a re-check request
+fails, its unchecked IDs stay held and the rest of the poll continues; a
+canceled poll fails as a whole. When the held set cannot be read, the stored
+set is left unchanged. Beyond 250 held issues, the extra ones are released
+only while they are inside the search window.
+
 ## Pagination
 
 A watch with default order normally reads a single page, because sorting a
@@ -88,7 +112,9 @@ its current page count and requests.
 whose blockers are done" follows the query field in `FilterFields`. The team
 selector and `switchWatchWorkspace` leave it unchanged because it is not an
 ID from the Linear organization. The watch table summary adds
-`blockers:done`. Desktop and phone share the same dialog composition. New
+`blockers:done`. On coarse pointers the switch's hit area grows to about
+44 px through its `::after` inset, without changing its look. Desktop and
+phone share the same dialog composition. New
 copy is localized in every shipped locale.
 
 ## Security and compatibility
@@ -103,7 +129,9 @@ issues that were held are then started by the next poll if they match.
 Real `GraphQLClient` requests against `httptest.Server` cover the query
 choice, the relation mapping, and truncation. Service tests cover holding,
 release after completion, canceled, cross-team, and truncated blockers,
-pagination past held issues, and the unchanged default path. Web unit tests
+pagination past held issues, the unchanged default path, re-checks of held
+issues outside the window (release, filter mismatch, request failure,
+cancellation, and batch bounds), and the held table across reset and delete. Web unit tests
 cover the form round trip and the switch. Playwright covers the setting across
 team pick, save, and reopen on desktop and phone, and a mock-Linear dispatch
 where a blocked issue gets a task only after its blocker completes. The mock
