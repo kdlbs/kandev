@@ -622,22 +622,26 @@ func (h *Handlers) queueMoveTaskPromptWithMoveID(
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	taskID, err := unmarshalStringField(msg.Payload, "task_id")
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	var request struct {
+		TaskID           string `json:"task_id"`
+		WorkspaceCleanup string `json:"workspace_cleanup"`
+		Discard          bool   `json:"discard_worktree_changes"`
+		Unverified       bool   `json:"allow_unverified_workspace_changes"`
 	}
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid task deletion payload", nil)
+	}
+	taskID, mode := request.TaskID, request.WorkspaceCleanup
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-	}
-
-	mode, err := unmarshalStringField(msg.Payload, "workspace_cleanup")
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid workspace cleanup mode", nil)
 	}
 	if mode != "" && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupDelete && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupRetain {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workspace cleanup mode", nil)
 	}
-	options := service.DeleteTaskOptions{WorkspaceCleanup: models.WorkspaceCleanupMode(mode)}
+	if (request.Unverified && !request.Discard) || (mode == string(models.WorkspaceCleanupRetain) && (request.Discard || request.Unverified)) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workspace cleanup consent", nil)
+	}
+	options := service.DeleteTaskOptions{WorkspaceCleanup: models.WorkspaceCleanupMode(mode), DiscardWorktreeChanges: request.Discard, AllowUnverifiedWorkspaceChanges: request.Unverified}
 	// Keep MCP task lifecycle mutations on the same HandoffService path as
 	// HTTP/WS when it is wired. This releases workspace-group membership and
 	// preserves shared-environment ownership before the task row is removed.
@@ -648,9 +652,8 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				h.logger.Error("failed to delete task", zap.Error(err))
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
 			}
-			if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
-				result := h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID})
-				result.RuntimeStopPending = true
+			if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+				result := h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options)
 				return ws.NewResponse(msg.ID, msg.Action, result)
 			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
@@ -661,8 +664,8 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				keyTaskID:  taskID,
 			})
 		}
-		if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
-			return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID}))
+		if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+			return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options))
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 	}
@@ -670,8 +673,8 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
 	}
-	if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain {
-		return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.RetainedTaskDeletionResult(ctx, []string{taskID}))
+	if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+		return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 }

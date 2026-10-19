@@ -8,6 +8,9 @@ import (
 )
 
 func (o DeleteTaskOptions) validate() error {
+	if o.AllowUnverifiedWorkspaceChanges && (o.retainsWorkspace() || !o.DiscardWorktreeChanges) {
+		return fmt.Errorf("%w: unverified workspace changes require delete mode and discard consent", ErrTaskDeletePreflightInvalid)
+	}
 	switch o.WorkspaceCleanup.Normalized() {
 	case models.WorkspaceCleanupDelete:
 		return nil
@@ -41,8 +44,26 @@ func (s *Service) DeleteTaskWithLifecycleOptions(ctx context.Context, id string,
 		}
 		return err
 	}
-	if options.retainsWorkspace() {
-		return fmt.Errorf("task lifecycle coordinator does not support workspace retention")
+	if options.retainsWorkspace() || options.AllowUnverifiedWorkspaceChanges {
+		return fmt.Errorf("task lifecycle coordinator does not support workspace cleanup options")
 	}
 	return s.DeleteTaskWithLifecycle(ctx, id)
+}
+
+func (s *HandoffService) validateDeleteCascadeAdmission(ctx context.Context, ids []string, options DeleteTaskOptions) error {
+	if options.retainsWorkspace() {
+		return nil
+	}
+	if checker, ok := s.resourceCleaner.(interface {
+		ValidateTaskDeleteWorktreesWithOptions(context.Context, []string, DeleteTaskOptions) error
+	}); ok {
+		return checker.ValidateTaskDeleteWorktreesWithOptions(ctx, ids, options)
+	}
+	if options.AllowUnverifiedWorkspaceChanges {
+		return errors.New("task cleaner does not support unverified workspace changes")
+	}
+	if checker, ok := s.resourceCleaner.(taskDeleteWorktreeAdmissionChecker); ok {
+		return checker.ValidateTaskDeleteWorktrees(ctx, ids, options.DiscardWorktreeChanges)
+	}
+	return nil
 }

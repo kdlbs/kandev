@@ -25,6 +25,7 @@ type BulkTaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   workspaceCleanup?: "delete" | "retain";
+  allowUnverifiedWorkspaceChanges?: boolean;
   confirmationId?: string;
 };
 
@@ -153,6 +154,7 @@ function BulkDeleteDialog({
       cascade: boolean;
       discardWorktreeChanges: boolean;
       workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
       confirmationId: string;
     },
     selection: BulkTaskActionSelection,

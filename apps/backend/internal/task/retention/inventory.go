@@ -22,61 +22,87 @@ type Inventory struct {
 }
 
 type snapshot struct {
-	Version           int                         `json:"retention_version"`
-	InventoryCaptured bool                        `json:"retention_inventory_captured"`
-	Executors         []*models.ExecutorRunning   `json:"retained_executors"`
-	WorkspaceCleanup  models.WorkspaceCleanupMode `json:"workspace_cleanup"`
-	TaskEnvironment   *models.TaskEnvironment     `json:"task_environment"`
-	Worktrees         []struct {
+	PriorCleanupInventory           []json.RawMessage           `json:"prior_cleanup_inventory"`
+	AllowUnverifiedWorkspaceChanges bool                        `json:"allow_unverified_workspace_changes"`
+	DiscardWorktreeChanges          bool                        `json:"discard_worktree_changes"`
+	CleanupInventoryCaptured        bool                        `json:"cleanup_inventory_captured"`
+	CleanupVersion                  int                         `json:"cleanup_version"`
+	Version                         int                         `json:"retention_version"`
+	InventoryCaptured               bool                        `json:"retention_inventory_captured"`
+	Executors                       []*models.ExecutorRunning   `json:"retained_executors"`
+	WorkspaceCleanup                models.WorkspaceCleanupMode `json:"workspace_cleanup"`
+	TaskEnvironment                 *models.TaskEnvironment     `json:"task_environment"`
+	Worktrees                       []struct {
 		ID   string `json:"id"`
 		Path string `json:"path"`
 	} `json:"worktrees"`
 }
 
 func Load(ctx context.Context, db *sqlx.DB) (Inventory, error) {
+	return LoadForTask(ctx, db, "")
+}
+
+// LoadForTask scopes unknown inventory to a trusted task identity. Empty scope
+// requires complete global inventory for path-only and orphan sweeps.
+func LoadForTask(ctx context.Context, db *sqlx.DB, scope string) (Inventory, error) {
 	inventory := Inventory{TaskIDs: map[string]struct{}{}, WorktreeIDs: map[string]struct{}{}, ResourceIDs: map[string]struct{}{}}
-	rows, err := db.QueryxContext(ctx, `SELECT task_id, resource_snapshot FROM task_resource_cleanup_jobs`)
+	owner, err := cleanupOwnerTask(ctx, db)
+	if err != nil {
+		return Inventory{}, err
+	}
+	rows, err := db.QueryxContext(ctx, `SELECT task_id,state,resource_snapshot FROM task_resource_cleanup_jobs
+ WHERE task_id IN (SELECT task_id FROM task_resource_cleanup_jobs
+ WHERE workspace_protection IN ('retain','unknown','unclassified')
+ OR (workspace_protection='cleanup' AND state NOT IN ('succeeded','cancelled')))`)
 	if err != nil {
 		return Inventory{}, err
 	}
 	defer func() { _ = rows.Close() }()
 	snapshots := make(map[string][]snapshot)
+	unknown := make(map[string]bool)
 	for rows.Next() {
-		var taskID, payload string
-		if err := rows.Scan(&taskID, &payload); err != nil {
+		var taskID, state, payload string
+		if err := rows.Scan(&taskID, &state, &payload); err != nil {
 			return Inventory{}, err
 		}
 		var saved snapshot
 		if err := json.Unmarshal([]byte(payload), &saved); err != nil {
-			return Inventory{}, fmt.Errorf("read workspace retention: %w", err)
+			unknown[taskID] = true
+			continue
 		}
 		snapshots[taskID] = append(snapshots[taskID], saved)
-		switch saved.WorkspaceCleanup.Normalized() {
-		case models.WorkspaceCleanupDelete:
-			continue
-		case models.WorkspaceCleanupRetain:
-		default:
-			return Inventory{}, fmt.Errorf("unsupported workspace cleanup mode")
+		switch saved.protection() {
+		case protectionUnknown:
+			unknown[taskID] = true
+		case "retain":
+			inventory.TaskIDs[taskID] = struct{}{}
+		case "cleanup":
+			if state != "succeeded" && state != "cancelled" && taskID != owner {
+				inventory.TaskIDs[taskID] = struct{}{}
+			}
 		}
-		if saved.Version > 1 {
-			return Inventory{}, fmt.Errorf("unsupported workspace retention version")
-		}
-		if !saved.InventoryCaptured {
-			return Inventory{}, fmt.Errorf("retained workspace inventory is incomplete")
-		}
-		inventory.TaskIDs[taskID] = struct{}{}
-
 	}
 	if err := rows.Err(); err != nil {
 		return Inventory{}, err
 	}
+	return inventory.finishProjection(snapshots, unknown, scope)
+}
+
+func (inventory Inventory) finishProjection(snapshots map[string][]snapshot, unknown map[string]bool, scope string) (Inventory, error) {
 	for taskID := range inventory.TaskIDs {
+		inventory.invalidPath = false
 		for _, saved := range snapshots[taskID] {
 			inventory.addSnapshot(saved)
 		}
+		if inventory.invalidPath {
+			unknown[taskID] = true
+		}
 	}
-	if inventory.invalidPath {
-		return Inventory{}, fmt.Errorf("retained workspace path is not absolute")
+	for taskID := range unknown {
+		inventory.TaskIDs[taskID] = struct{}{}
+		if scope == "" || taskID == "" || scope == taskID {
+			return Inventory{}, fmt.Errorf("workspace protection inventory is incomplete")
+		}
 	}
 	return inventory, nil
 }
@@ -110,6 +136,15 @@ func (i Inventory) Protects(taskID, worktreeID, path string) bool {
 }
 
 func (inventory *Inventory) addSnapshot(saved snapshot) {
+	for _, payload := range saved.PriorCleanupInventory {
+		var prior snapshot
+		if err := json.Unmarshal(payload, &prior); err != nil {
+			inventory.invalidPath = true
+			continue
+		}
+		inventory.addSnapshot(prior)
+	}
+
 	for _, runtime := range saved.Executors {
 		if runtime == nil {
 			continue

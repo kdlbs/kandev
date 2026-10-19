@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test, type SeedData } from "../fixtures/test-base";
+import type { PrAssetCapture } from "./pr-asset-capture";
 import type { ApiClient } from "./api-client";
 import { waitForHttp } from "./causal-waits";
 
@@ -47,7 +48,7 @@ export async function createDamagedDeleteTask(api: ApiClient, seed: SeedData, ti
 }
 
 export async function deleteDamagedTaskKeepingFiles(page: Page, dialog: Locator, taskID: string) {
-  await expect(dialog.getByTestId("delete-preflight-error")).toBeVisible();
+  await expect(dialog.getByTestId("delete-unverified-workspace-checkbox")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
   const preview = waitForHttp(page, "POST", /\/tasks\/delete-preflight$/, {
     predicate: (response) => response.request().postDataJSON()?.workspace_cleanup === "retain",
@@ -80,4 +81,55 @@ export async function waitForDeletePreviewTask(api: ApiClient, taskID: string) {
       { timeout: 60_000, message: "initial agent turn must finish before deletion preview" },
     )
     .toBe(true);
+}
+
+export async function deleteDamagedTaskWithPendingCleanup(
+  page: Page,
+  dialog: Locator,
+  taskID: string,
+  capture?: PrAssetCapture,
+) {
+  const acknowledgement = dialog.getByTestId("delete-unverified-workspace-checkbox");
+  const action = dialog.getByRole("button", { name: "Delete", exact: true });
+  await expect(acknowledgement).toBeVisible();
+  await expect(acknowledgement).not.toBeChecked();
+  await expect(dialog.getByTestId("delete-keep-files-checkbox")).not.toBeChecked();
+  await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
+  await expect(action).toBeDisabled();
+  const preview = waitForHttp(page, "POST", /\/tasks\/delete-preflight$/, {
+    predicate: (response) =>
+      response.request().postDataJSON()?.allow_unverified_workspace_changes === true,
+  });
+  const mobile = (page.viewportSize()?.width ?? 1024) < 768;
+  if (mobile) {
+    await acknowledgement.tap();
+  } else {
+    await acknowledgement.focus();
+    await acknowledgement.press("Space");
+  }
+  expect((await preview).ok()).toBe(true);
+  await expect(action).toBeEnabled();
+  if (mobile) {
+    expect((await acknowledgement.locator("..").boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  }
+  await page.screenshot({ path: test.info().outputPath("pending-cleanup-delete.png") });
+  await capture?.screenshot("pending-cleanup-delete", {
+    caption: "Delete a task when workspace changes cannot be checked",
+  });
+  const deletion = waitForHttp(page, "DELETE", new RegExp(`/tasks/${taskID}$`));
+  if (mobile) {
+    await action.tap();
+  } else {
+    await action.focus();
+    await action.press("Enter");
+  }
+  const response = await deletion;
+  expect(response.ok()).toBe(true);
+  expect(await response.json()).toMatchObject({
+    success: true,
+    workspace_cleanup: "delete",
+    workspace_cleanup_pending: true,
+  });
+  await expect(dialog).not.toBeVisible();
 }

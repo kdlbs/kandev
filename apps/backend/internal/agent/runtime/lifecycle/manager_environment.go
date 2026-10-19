@@ -26,6 +26,9 @@ type ContainerLiveStatus struct {
 // Used by Reset Environment to tear down the container layer without touching worktrees
 // or sprite sandboxes.
 func (m *Manager) DestroyContainer(ctx context.Context, containerID string) error {
+	if containerID == "" {
+		return nil
+	}
 	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
 	if retentionErr != nil {
 		return retentionErr
@@ -35,9 +38,6 @@ func (m *Manager) DestroyContainer(ctx context.Context, containerID string) erro
 		return err
 	}
 
-	if containerID == "" {
-		return nil
-	}
 	backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
 	if err != nil {
 		return fmt.Errorf("docker backend unavailable: %w", err)

@@ -257,7 +257,7 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
 	const schema = `
- CREATE TABLE task_resource_cleanup_jobs (task_id TEXT, state TEXT, resource_snapshot TEXT);
+ CREATE TABLE task_resource_cleanup_jobs (task_id TEXT, state TEXT, resource_snapshot TEXT, workspace_protection TEXT DEFAULT 'unclassified');
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
 			state TEXT NOT NULL,
@@ -351,7 +351,7 @@ func TestStorageInventoryProtectsRetainedDeletedTask(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "retained", "repo")
 	payload := `{"workspace_cleanup":"retain","retention_inventory_captured":true,"worktrees":[{"id":"wt","path":"` + filepath.ToSlash(path) + `"}]}`
 	for _, state := range []string{"prepared", "succeeded", "failed", "cancelled"} {
-		if _, err := database.Exec(`INSERT INTO task_resource_cleanup_jobs VALUES (?, ?, ?)`, "deleted-retained", state, payload); err != nil {
+		if _, err := database.Exec(`INSERT INTO task_resource_cleanup_jobs (task_id,state,resource_snapshot) VALUES (?, ?, ?)`, "deleted-retained", state, payload); err != nil {
 			t.Fatal(err)
 		}
 	}

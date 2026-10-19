@@ -65,6 +65,7 @@ type TaskDeleteConfirmDialogProps = {
     discardWorktreeChanges: boolean;
     confirmationId: string;
     workspaceCleanup?: "delete" | "retain";
+    allowUnverifiedWorkspaceChanges?: boolean;
   }) => void;
   confirmTestId?: string;
   /** Overrides default focus restoration when the original trigger may disappear. */
@@ -74,6 +75,7 @@ type TaskDeleteConfirmDialogProps = {
 };
 
 type DiscardWorktreeChangesOptionProps = {
+  unknown?: boolean;
   enabled: boolean;
   checked: boolean;
   disabled?: boolean;
@@ -81,6 +83,7 @@ type DiscardWorktreeChangesOptionProps = {
 };
 
 function DiscardWorktreeChangesOption({
+  unknown,
   enabled,
   checked,
   disabled,
@@ -94,12 +97,18 @@ function DiscardWorktreeChangesOption({
         checked={checked}
         onCheckedChange={(value) => onCheckedChange(value === true)}
         disabled={disabled}
-        data-testid="delete-discard-worktree-checkbox"
+        data-testid={
+          unknown ? "delete-unverified-workspace-checkbox" : "delete-discard-worktree-checkbox"
+        }
       />
       <span>
-        {t("task:discardWorktreeChanges")}
+        {t(unknown ? "task:deleteUnverifiedWorkspaceOption" : "task:discardWorktreeChanges")}
         <span className="block text-sm text-muted-foreground">
-          {t("task:discardWorktreeChangesDescription")}
+          {t(
+            unknown
+              ? "task:deleteUnverifiedWorkspaceDescription"
+              : "task:discardWorktreeChangesDescription",
+          )}
         </span>
       </span>
     </label>
@@ -141,11 +150,13 @@ type TaskDeleteActionProps = {
   discardWorktreeChanges: boolean;
   confirmationId: string;
   workspaceCleanup?: "delete" | "retain";
+  allowUnverifiedWorkspaceChanges?: boolean;
   onConfirm: (opts: {
     cascade: boolean;
     discardWorktreeChanges: boolean;
     confirmationId: string;
     workspaceCleanup?: "delete" | "retain";
+    allowUnverifiedWorkspaceChanges?: boolean;
   }) => void;
   onClose: () => void;
 };
@@ -158,6 +169,7 @@ function TaskDeleteAction({
   discardWorktreeChanges,
   confirmationId,
   workspaceCleanup,
+  allowUnverifiedWorkspaceChanges,
   onConfirm,
   onClose,
 }: TaskDeleteActionProps) {
@@ -175,6 +187,7 @@ function TaskDeleteAction({
           discardWorktreeChanges,
           confirmationId,
           ...(workspaceCleanup === "retain" ? { workspaceCleanup } : {}),
+          ...(allowUnverifiedWorkspaceChanges ? { allowUnverifiedWorkspaceChanges: true } : {}),
         });
         onClose();
       }}
@@ -188,11 +201,13 @@ function TaskDeleteAction({
 function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
   const [cascade, setCascade] = useState(false);
   const [keepFiles, setKeepFiles] = useState(false);
+  const [allowUnverifiedWorkspaceChanges, setAllowUnverifiedWorkspaceChanges] = useState(false);
   const [discardWorktreeChanges, setDiscardWorktreeChanges] = useState(false);
   const handleOpenChange = (next: boolean) => {
     if (!next) {
       setCascade(false);
       setKeepFiles(false);
+      setAllowUnverifiedWorkspaceChanges(false);
       setDiscardWorktreeChanges(false);
     }
     onOpenChange(next);
@@ -200,6 +215,8 @@ function useTaskDeleteDialogState(onOpenChange: (open: boolean) => void) {
   return {
     keepFiles,
     setKeepFiles,
+    allowUnverifiedWorkspaceChanges,
+    setAllowUnverifiedWorkspaceChanges,
     cascade,
     setCascade,
     discardWorktreeChanges,
@@ -255,6 +272,7 @@ function PreflightStatusBanner({
 }
 
 function TaskDeleteDialogOptions({
+  unknown,
   isInFlight,
   isBulkOperation,
   safeCount,
@@ -269,6 +287,7 @@ function TaskDeleteDialogOptions({
   cascade,
   setCascade,
 }: {
+  unknown?: boolean;
   isInFlight?: boolean;
   isBulkOperation?: boolean;
   safeCount: number;
@@ -290,6 +309,7 @@ function TaskDeleteDialogOptions({
       )}
       <PreflightStatusBanner status={preflightStatus} onRetry={onRetryPreflight} />
       <DiscardWorktreeChangesOption
+        unknown={unknown}
         enabled={requiresDiscardConsent}
         checked={discardWorktreeChanges}
         onCheckedChange={setDiscardWorktreeChanges}
@@ -344,6 +364,8 @@ export function TaskDeleteConfirmDialog({
   const {
     keepFiles,
     setKeepFiles,
+    allowUnverifiedWorkspaceChanges,
+    setAllowUnverifiedWorkspaceChanges,
     cascade,
     setCascade,
     discardWorktreeChanges,
@@ -356,21 +378,32 @@ export function TaskDeleteConfirmDialog({
   const preflight = useTaskDeletePreflight(open, taskId, taskIds, cascade, {
     discardWorktreeChanges,
     workspaceCleanup,
+    allowUnverifiedWorkspaceChanges,
   });
   const requiresDiscardConsent =
     preflight.status === "resolved" && preflight.requiresDiscardConsent;
   const preflightReady = preflight.status === "resolved";
+  const unknown = preflight.workspaceInspection === "unknown";
 
-  useResetDiscardWorktreeChanges(preflight.scopeKey, setDiscardWorktreeChanges);
+  useResetDiscardWorktreeChanges(
+    `${preflight.scopeKey}:${open}:${keepFiles}`,
+    setDiscardWorktreeChanges,
+  );
+  useResetDiscardWorktreeChanges(
+    `${preflight.scopeKey}:${open}:${keepFiles}`,
+    setAllowUnverifiedWorkspaceChanges,
+  );
   useEffect(() => {
     setKeepFiles(false);
   }, [preflight.scopeKey, open]);
 
-  const deleteDisabled =
-    isDeleting ||
-    !preflightReady ||
-    !preflight.confirmationId ||
-    (requiresDiscardConsent && !discardWorktreeChanges);
+  const deleteDisabled = !canConfirmDeletion(
+    isDeleting,
+    preflightReady,
+    preflight.confirmationId,
+    requiresDiscardConsent,
+    unknown ? allowUnverifiedWorkspaceChanges : discardWorktreeChanges,
+  );
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
@@ -402,11 +435,13 @@ export function TaskDeleteConfirmDialog({
               onCheckedChange={(checked) => {
                 setKeepFiles(checked === true);
                 setDiscardWorktreeChanges(false);
+                setAllowUnverifiedWorkspaceChanges(false);
               }}
             />
             <span>{t("task:deleteKeepFilesOption")}</span>
           </label>
           <TaskDeleteDialogOptions
+            unknown={unknown}
             isInFlight={isInFlight}
             isBulkOperation={isBulkOperation}
             safeCount={safeCount}
@@ -414,8 +449,13 @@ export function TaskDeleteConfirmDialog({
             preflightStatus={preflight.status}
             onRetryPreflight={preflight.retry}
             requiresDiscardConsent={requiresDiscardConsent}
-            discardWorktreeChanges={discardWorktreeChanges}
-            setDiscardWorktreeChanges={setDiscardWorktreeChanges}
+            discardWorktreeChanges={
+              unknown ? allowUnverifiedWorkspaceChanges : discardWorktreeChanges
+            }
+            setDiscardWorktreeChanges={(checked) => {
+              setDiscardWorktreeChanges(checked);
+              setAllowUnverifiedWorkspaceChanges(unknown && checked);
+            }}
             isDeleting={isDeleting}
             subtaskCount={subtaskCount}
             cascade={cascade}
@@ -434,6 +474,7 @@ export function TaskDeleteConfirmDialog({
             discardWorktreeChanges={discardWorktreeChanges}
             confirmationId={preflight.confirmationId}
             workspaceCleanup={workspaceCleanup}
+            allowUnverifiedWorkspaceChanges={allowUnverifiedWorkspaceChanges}
             onConfirm={onConfirm}
             onClose={() => handleOpenChange(false)}
           />
@@ -441,4 +482,14 @@ export function TaskDeleteConfirmDialog({
       </AlertDialogContent>
     </AlertDialog>
   );
+}
+
+function canConfirmDeletion(
+  isDeleting: boolean | undefined,
+  ready: boolean,
+  ticket: string,
+  requiresConsent: boolean,
+  consent: boolean,
+) {
+  return !isDeleting && ready && !!ticket && (!requiresConsent || consent);
 }

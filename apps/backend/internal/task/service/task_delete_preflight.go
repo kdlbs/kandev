@@ -9,6 +9,12 @@ import (
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	"go.uber.org/zap"
+)
+
+const (
+	taskDeleteInspectionComplete = "complete"
+	taskDeleteInspectionUnknown  = "unknown"
 )
 
 // ErrTaskDeletePreflightInvalid identifies a malformed delete selection.
@@ -21,6 +27,7 @@ var ErrTaskDeletePreflightUnavailable = errors.New("task delete preflight unavai
 // TaskDeletePreflightResult contains the current local-change requirement for
 // the exact task scope requested by the caller.
 type TaskDeletePreflightResult struct {
+	WorkspaceInspection    string                      `json:"workspace_inspection"`
 	WorkspaceCleanup       models.WorkspaceCleanupMode `json:"workspace_cleanup"`
 	RequiresDiscardConsent bool                        `json:"requires_discard_consent"`
 	ConfirmationID         string                      `json:"confirmation_id"`
@@ -56,7 +63,7 @@ func (s *Service) TaskDeletePreflightWithOptions(ctx context.Context, taskIDs []
 	}
 	if options.retainsWorkspace() {
 		ticket, ticketErr := s.issueTaskDeletePreview(ctx, roots, cascade, false, options.WorkspaceCleanup)
-		return TaskDeletePreflightResult{ConfirmationID: ticket, WorkspaceCleanup: options.WorkspaceCleanup}, ticketErr
+		return TaskDeletePreflightResult{ConfirmationID: ticket, WorkspaceCleanup: options.WorkspaceCleanup, WorkspaceInspection: "not_requested"}, ticketErr
 	}
 	provider, inspector, err := s.taskDeletePreflightInspector()
 	if err != nil {
@@ -73,17 +80,19 @@ func (s *Service) TaskDeletePreflightWithOptions(ctx context.Context, taskIDs []
 		worktrees = append(worktrees, inventory...)
 	}
 	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
+	inspection := taskDeleteInspectionComplete
 	if err != nil {
-		return TaskDeletePreflightResult{}, fmt.Errorf(
-			"%w: inspect worktrees before delete: %w", ErrTaskDeletePreflightUnavailable, err,
-		)
+		if !recoverableDeleteInspection(ctx, err) {
+			return TaskDeletePreflightResult{}, fmt.Errorf("%w: inspect worktrees before delete: %w", ErrTaskDeletePreflightUnavailable, err)
+		}
+		inspection = taskDeleteInspectionUnknown
+		s.logUnknownDeleteInspection(err, len(roots))
 	}
-	discardWorktreeChanges := options.DiscardWorktreeChanges
-	confirmationID, err := s.issueTaskDeletePreview(ctx, roots, cascade, discardWorktreeChanges)
+	confirmationID, err := s.issueTaskDeletePreviewWithOptions(ctx, roots, cascade, options)
 	if err != nil {
 		return TaskDeletePreflightResult{}, err
 	}
-	return TaskDeletePreflightResult{RequiresDiscardConsent: len(dirty) > 0, ConfirmationID: confirmationID, WorkspaceCleanup: models.WorkspaceCleanupDelete}, nil
+	return TaskDeletePreflightResult{WorkspaceInspection: inspection, RequiresDiscardConsent: len(dirty) > 0 || inspection == taskDeleteInspectionUnknown, ConfirmationID: confirmationID, WorkspaceCleanup: models.WorkspaceCleanupDelete}, nil
 }
 
 func normalizeTaskDeletePreflightIDs(taskIDs []string) []string {
@@ -157,4 +166,11 @@ func (s *Service) resolveTaskDeletePreflightTargets(
 		}
 	}
 	return targets, nil
+}
+
+func (s *Service) logUnknownDeleteInspection(err error, count int) {
+	var inspection *worktree.CleanupInspectionError
+	if errors.As(err, &inspection) {
+		s.logger.Warn("task delete preflight inspection failed", zap.String("stage", inspection.Stage), zap.String("reason", inspection.Reason), zap.Int("task_count", count))
+	}
 }

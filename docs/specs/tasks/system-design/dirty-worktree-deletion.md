@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-05
-updated: 2026-10-16
+updated: 2026-10-19
 owners:
   - cfl
 ---
@@ -22,7 +22,11 @@ or push behavior, or branch redundancy rules.
 
 This document describes normal deletion with workspace cleanup. The explicit
 keep-files alternative is defined in [task deletion recovery](task-delete-recovery.md).
-Its retention choice does not grant permission for destructive cleanup.
+Its retention choice does not grant permission for destructive cleanup. The
+same recovery design defines explicit admission with unknown inspection. That
+extension supersedes the unconditional inspection-error block below only when
+its separate acknowledgement and discard consent are both present. Physical
+removal audits remain mandatory.
 
 ## Requirement mapping
 
@@ -149,7 +153,8 @@ Executor type, descendant count alone, and cached session Git summaries do not
 establish whether consent is needed. The explicit `requireDiscardConsent` prop
 must no longer override a fresh clean result; remove its heuristic callers.
 
-Loading and error states hide discard consent and disable normal Delete.
+Loading and transport/admission errors hide discard consent and disable Delete.
+A typed unknown-inspection result uses the recovery acknowledgement flow.
 The independent keep-files choice remains available under the recovery design.
 Errors offer localized retry feedback. Clean results hide discard consent and send
 `discardWorktreeChanges:false`. Dirty results show the existing unchecked option
@@ -173,9 +178,10 @@ schema change is required. A missing field is `false`.
 
 ## Failure and recovery
 
-- A status inspection error fails admission closed and returns no consent prompt
-  that could authorize removal of an uncertain path. The user can select the
-  separate keep-files action, which does not inspect or remove the workspace.
+- A status inspection error fails ordinary admission closed. The recovery
+  design permits explicit consent to delete the task with unknown changes and
+  durable pending cleanup. This does not authorize removal of an uncertain path.
+  The separate keep-files action does not inspect or remove the workspace.
 - A dirty conflict preserves the task, worktree, branch, and local changes. The
   user can commit the changes or retry with explicit discard consent.
 - A non-cleanliness audit failure preserves the checkout even when consent is

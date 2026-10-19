@@ -1035,6 +1035,19 @@ executor profile are outside this cleanup.
 ### Delete a task when its workspace cannot be checked
 
 1. Open the task's **Delete** dialog.
+2. Select **Delete even if workspace changes cannot be checked**. Local changes may be lost.
+3. Select **Delete** after the confirmation finishes loading.
+
+Kandev deletes the task and records the resources that still need cleanup.
+It removes resources only after their ownership and identity checks pass.
+A damaged resource does not block cleanup of an independent healthy workspace.
+Files that cannot be safely removed remain protected from automatic maintenance.
+Kandev retries cleanup. Missing original ownership evidence can require manual repair.
+Access checks and database operations must still succeed.
+
+### Delete a task and keep its workspace files
+
+1. Open the task's **Delete** dialog.
 2. Select **Keep workspace files**. This option is also available after a failed workspace check.
 3. Select **Delete task and keep files**.
 

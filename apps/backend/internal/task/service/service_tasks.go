@@ -125,12 +125,14 @@ type taskStopTarget struct {
 }
 
 type taskEnvironmentCleanup struct {
-	retentionInventoryCaptured bool
-	workspaceCleanup           models.WorkspaceCleanupMode
-	env                        *models.TaskEnvironment
-	deleteRow                  bool
-	preserveBranches           bool
-	discardWorktreeChanges     bool
+	deferEnvironment                bool
+	retentionInventoryCaptured      bool
+	allowUnverifiedWorkspaceChanges bool
+	workspaceCleanup                models.WorkspaceCleanupMode
+	env                             *models.TaskEnvironment
+	deleteRow                       bool
+	preserveBranches                bool
+	discardWorktreeChanges          bool
 	// agentHistory is set only for Quick Chat deletion.
 	agentHistory []agentHistoryTarget
 }
@@ -2983,6 +2985,18 @@ func (s *Service) deleteTaskWithReasonAndOptions(
 func (s *Service) ValidateTaskDeleteWorktrees(
 	ctx context.Context, taskIDs []string, discardWorktreeChanges bool,
 ) error {
+	return s.ValidateTaskDeleteWorktreesWithOptions(ctx, taskIDs, DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges})
+}
+
+func (s *Service) ValidateTaskDeleteWorktreesWithOptions(ctx context.Context, taskIDs []string, options DeleteTaskOptions) error {
+	if err := options.validate(); err != nil {
+		return err
+	}
+	if options.AllowUnverifiedWorkspaceChanges {
+		if _, _, err := s.taskDeletePreflightInspector(); err != nil {
+			return err
+		}
+	}
 	if s.worktreeCleanup == nil {
 		return nil
 	}
@@ -3001,13 +3015,22 @@ func (s *Service) ValidateTaskDeleteWorktrees(
 		}
 		worktrees = append(worktrees, inventory...)
 	}
-	return s.validateTaskDeleteWorktreeInventory(ctx, worktrees, discardWorktreeChanges)
+	return s.validateTaskDeleteWorktreeInventoryWithOptions(ctx, worktrees, options)
 }
 
 func (s *Service) validateTaskDeleteWorktreeInventory(
 	ctx context.Context, worktrees []*worktree.Worktree, discardWorktreeChanges bool,
 ) error {
-	if len(worktrees) == 0 || s.worktreeCleanup == nil {
+	return s.validateTaskDeleteWorktreeInventoryWithOptions(ctx, worktrees, DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges})
+}
+
+func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Context, worktrees []*worktree.Worktree, options DeleteTaskOptions) error {
+	if options.AllowUnverifiedWorkspaceChanges {
+		if _, _, err := s.taskDeletePreflightInspector(); err != nil {
+			return err
+		}
+	}
+	if len(worktrees) == 0 {
 		return nil
 	}
 	inspector, ok := s.worktreeCleanup.(WorktreeDirtyInspector)
@@ -3016,9 +3039,12 @@ func (s *Service) validateTaskDeleteWorktreeInventory(
 	}
 	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
 	if err != nil {
+		if options.AllowUnverifiedWorkspaceChanges && recoverableDeleteInspection(ctx, err) {
+			return nil
+		}
 		return fmt.Errorf("inspect worktrees before delete: %w", err)
 	}
-	if discardWorktreeChanges {
+	if options.DiscardWorktreeChanges {
 		return nil
 	}
 	return newTaskDeleteDirtyWorktreeError(dirty)
@@ -3109,7 +3135,7 @@ func (s *Service) deleteTaskWithManagedClaim(
 	}
 
 	envCleanup := taskEnvironmentCleanup{
-		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges, workspaceCleanup: options.WorkspaceCleanup, retentionInventoryCaptured: options.retainsWorkspace(),
+		env: taskEnv, deleteRow: false, allowUnverifiedWorkspaceChanges: options.AllowUnverifiedWorkspaceChanges, discardWorktreeChanges: options.DiscardWorktreeChanges, workspaceCleanup: options.WorkspaceCleanup, retentionInventoryCaptured: options.retainsWorkspace(),
 	}
 	if claim == nil {
 		envCleanup.agentHistory = s.captureQuickChatAgentHistory(operationCtx, task, sessions)
@@ -3164,7 +3190,7 @@ func (s *Service) gatherTaskDeletionInventory(ctx context.Context, id string, tr
 	if err := options.validate(); err != nil {
 		return nil, err
 	}
-	if options.retainsWorkspace() && s.resourceCleanups == nil {
+	if (options.retainsWorkspace() || options.AllowUnverifiedWorkspaceChanges) && s.resourceCleanups == nil {
 		return nil, errors.New("durable workspace retention unavailable")
 	}
 	task, err := s.tasks.GetTask(ctx, id)
@@ -3180,7 +3206,7 @@ func (s *Service) gatherTaskDeletionInventory(ctx context.Context, id string, tr
 		return nil, fmt.Errorf("list worktrees for delete: %w", err)
 	}
 	if trigger == models.TaskResourceCleanupTriggerDelete && !options.retainsWorkspace() {
-		if err := s.validateTaskDeleteWorktreeInventory(ctx, worktrees, options.DiscardWorktreeChanges); err != nil {
+		if err := s.validateTaskDeleteWorktreeInventoryWithOptions(ctx, worktrees, options); err != nil {
 			return nil, err
 		}
 	}
@@ -4053,12 +4079,15 @@ func (s *Service) cleanupDestructiveTaskResources(
 			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
 	}
 	if !currentOwnership {
+		if envCleanup.allowUnverifiedWorkspaceChanges {
+			errs = append(errs, errors.New("workspace ownership changed; cleanup deferred"))
+		}
 		return errs
 	}
 	if cause := context.Cause(ctx); cause != nil {
 		return append(errs, cause)
 	}
-	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
+	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment && !envCleanup.deferEnvironment {
 		environmentCleanup := envCleanup
 		if s.canBatchCleanupTaskWorktrees(envCleanup) {
 			environmentCleanup.env = taskEnvironmentWithoutSnapshotWorktrees(envCleanup.env, worktrees)
@@ -4074,6 +4103,9 @@ func (s *Service) cleanupDestructiveTaskResources(
 	var referenceErrs []error
 	worktrees, referenceErrs = s.filterSharedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees)
 	errs = append(errs, referenceErrs...)
+	if envCleanup.allowUnverifiedWorkspaceChanges && len(worktrees) != originalWorktreeCount {
+		errs = append(errs, errors.New("workspace remains in use; cleanup deferred"))
+	}
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
 			s.logger.Debug("no task worktrees eligible for cleanup",

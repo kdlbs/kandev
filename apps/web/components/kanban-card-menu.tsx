@@ -51,6 +51,7 @@ export interface TaskCardMenuParams {
       cascade?: boolean;
       discardWorktreeChanges?: boolean;
       workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
       confirmationId?: string;
     },
   ) => void;

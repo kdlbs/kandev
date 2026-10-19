@@ -9,6 +9,11 @@ Kandev runs Git commands in the selected repository workspace for a task session
 
 Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, provider-appropriate pull-request or merge-request creation, **Rebase**, and **Merge** when a Git-capable session is selected.
 
+When a damaged workspace prevents a change check during task deletion, you can
+acknowledge the unknown changes and delete the task. Physical cleanup remains
+subject to ownership and Git identity checks. See
+[delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 ## Quick path
 
 1. Inspect the selected repository in **Changes**.

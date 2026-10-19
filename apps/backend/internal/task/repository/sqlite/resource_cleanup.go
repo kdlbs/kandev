@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/retention"
 )
 
 const taskResourceCleanupColumns = `
@@ -90,12 +91,12 @@ func (r *Repository) createTaskResourceCleanupJob(
 		}
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`, workspace_protection)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(operation_id) DO NOTHING
 	`), job.ID, job.OperationID, job.TaskID, job.Trigger, job.State,
 		job.ResourceSnapshot, job.Attempts, job.NextAttemptAt, job.LastError,
-		job.CreatedAt, job.UpdatedAt, job.CompletedAt)
+		job.CreatedAt, job.UpdatedAt, job.CompletedAt, retention.SnapshotProtection(job.ResourceSnapshot))
 	if err != nil {
 		return false, err
 	}
@@ -115,9 +116,9 @@ func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, oper
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
-		SET resource_snapshot = ?, updated_at = ?
+		SET resource_snapshot = ?, workspace_protection = ?, updated_at = ?
 		WHERE operation_id = ? AND state = ? AND `+r.unmarkedManagedDeletionSQL()+`
-	`), snapshot, time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
+	`), snapshot, retention.SnapshotProtection(snapshot), time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
 	if err != nil {
 		return err
 	}
@@ -134,9 +135,9 @@ func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, oper
 func (r *Repository) UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error) {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
-		SET resource_snapshot = ?, updated_at = ?
+		SET resource_snapshot = ?, workspace_protection = ?, updated_at = ?
 		WHERE id = ? AND state = ? AND attempts = ? AND COALESCE(`+dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(resource_snapshot, ''), '{}')", "managed_delete")+`, '') = COALESCE(`+dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(?, ''), '{}')", "managed_delete")+`, '')
-	`), snapshot, time.Now().UTC(), id, models.TaskResourceCleanupStateRunning, attempt, snapshot)
+	`), snapshot, retention.SnapshotProtection(snapshot), time.Now().UTC(), id, models.TaskResourceCleanupStateRunning, attempt, snapshot)
 	if err != nil {
 		return false, err
 	}

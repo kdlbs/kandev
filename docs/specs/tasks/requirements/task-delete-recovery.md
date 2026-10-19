@@ -2,28 +2,31 @@
 status: active
 system: tasks
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-19
 owners:
   - kandev
 ---
 
-# Task deletion with retained workspace files
+# Task deletion with unavailable workspaces
 
 ## Overview
 
 A user must be able to remove a task when its workspace is damaged or
-unavailable. The recovery action deletes the task and preserves its workspace
-resources. It does not need a successful workspace inspection.
+unavailable. Normal deletion can commit with explicitly authorized cleanup
+still pending. The independent keep-files choice preserves workspace resources
+without authorizing later automatic removal.
 
 This capability belongs to tasks. It extends
 [runtime cleanup](runtime-cleanup.md) with an explicit retention outcome.
-Its separate document keeps this recovery contract within the specification
-size limit. Normal deletion remains governed by the existing cleanup contract.
+Its separate document keeps these recovery contracts within the specification
+size limit. Physical removal remains subject to the existing ownership checks.
 
 ## Terms
 
 - **Retain mode:** Delete the selected task records while keeping workspace
   files, Git registrations, branches, and file-bearing executor resources.
+- **Cleanup pending:** Task deletion committed, but some requested resource
+  removal has not completed. Cleanup remains authorized and durably tracked.
 - **Stop pending:** Task deletion committed, but agent shutdown is not confirmed.
   Kandev retains the shutdown obligation for retry.
 
@@ -66,15 +69,69 @@ or permitting unsafe file deletion.
   reachable actions with touch targets of at least 44 CSS px. Keyboard users
   shall receive visible focus and announced loading, error, and outcome states.
 - **AC-TASKS-DELETE-RECOVERY-001.8:** HTTP and MCP task deletion shall support
-  explicit retain mode. Omitting the mode shall preserve existing deletion and
-  discard-consent behavior. Responses shall distinguish retained workspace
+  explicit retain mode. Omitting the mode shall select normal deletion. Without
+  explicit consent to proceed with unknown workspace changes, existing admission
+  behavior shall remain. Responses shall distinguish retained workspace
   resources from pending shutdown and failed task deletion, without exposing
   another user's resource details.
+
+### REQ-TASKS-DELETE-RECOVERY-002: Normal deletion with incomplete inspection
+
+**Intent:** Delete an unusable task without requiring permanent file retention,
+while continuing to enforce safe resource removal.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DELETE-RECOVERY-002.1:** When workspace inspection cannot complete,
+  preflight shall distinguish unknown workspace changes from a clean result.
+  Authorized users shall be able to confirm normal deletion with that uncertainty.
+  Authorization, database inventory, and request-validation failures shall not
+  become successful previews.
+- **AC-TASKS-DELETE-RECOVERY-002.2:** When the user explicitly accepts unknown
+  workspace changes and discard of local changes, a physical marker, Git,
+  filesystem-access, or provider-availability failure shall not prevent deletion
+  of the task records after their cleanup obligations are durably saved.
+  Without that consent, an unknown workspace shall remain blocked.
+- **AC-TASKS-DELETE-RECOVERY-002.3:** Deletion shall preserve all database-known
+  cleanup targets, prior unfinished obligations, consent, and failure reasons
+  before removing live owner records. Failed authorization or persistence shall
+  leave the uncommitted task intact. Partial cascades shall identify committed
+  members and preserve their cleanup obligations.
+- **AC-TASKS-DELETE-RECOVERY-002.4:** Consent to unknown changes shall not
+  override path, ownership, shared-resource, retained-resource, registration,
+  or branch-identity safeguards. A failed inspection shall never prove absence.
+  Resources lacking safe removal evidence shall remain protected from unrelated
+  cleanup after task deletion and restart.
+- **AC-TASKS-DELETE-RECOVERY-002.5:** For a mixed selection, each independently
+  eligible resource shall progress through cleanup. One damaged resource shall
+  not prevent cleanup of another resource whose shutdown and ownership checks
+  pass. Shared and borrowed resources shall remain protected.
+- **AC-TASKS-DELETE-RECOVERY-002.6:** Transient cleanup failures shall retain
+  scheduled retries across restart. Retry exhaustion shall retain the operation,
+  diagnostic, and resource protection. Neither outcome shall recreate the deleted
+  task or silently turn requested cleanup into permanent retain mode.
+- **AC-TASKS-DELETE-RECOVERY-002.7:** Single, bulk, and cascade dialogs on desktop
+  and phone shall offer an unchecked acknowledgement of unknown workspace
+  changes. Confirmation shall bind that acknowledgement, discard consent,
+  cleanup mode, actor, and task scope. Changing any bound choice shall invalidate
+  the previous confirmation. Phone actions shall retain reachable 44 CSS px
+  touch targets, contained scrolling, and accessible status announcements.
+- **AC-TASKS-DELETE-RECOVERY-002.8:** HTTP and MCP shall expose the same explicit
+  acknowledgement and committed outcome. A response shall distinguish deleted
+  tasks, pending workspace cleanup, and pending runtime shutdown. Post-commit
+  failures shall not report the task as undeleted. Partial bulk results shall
+  remain attributable to their selected roots.
+- **AC-TASKS-DELETE-RECOVERY-002.9:** Retain mode shall continue to preserve all
+  selected resources and avoid physical inspection. A caller shall not combine
+  retain mode with consent to remove unverified workspace changes. Clean and
+  dirty normal deletion without inspection failures shall keep their existing
+  confirmation behavior.
 
 ## Exclusions
 
 This change does not repair damaged Git data, explain a host reboot, or prove
 SSD failure. It does not bypass permissions or unavailable database storage.
-It does not change archive, session deletion, or discard consent for normal
-deletion. A new resource browser and an action to release retained resources
+It does not change archive or session deletion. Consent cannot authorize
+arbitrary paths or remove another task's resources. A new resource browser and
+an action to release retained resources
 are outside this change. Retained resources can use disk space indefinitely.

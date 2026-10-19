@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -10,11 +11,36 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-func (s *Service) captureCleanupHeadOIDsForMode(ctx context.Context, worktrees []*worktree.Worktree, mode models.WorkspaceCleanupMode) (map[string]string, error) {
-	if mode == models.WorkspaceCleanupRetain {
-		return nil, nil
+func (s *Service) captureCleanupHeadOIDsForMode(ctx context.Context, worktrees []*worktree.Worktree, options DeleteTaskOptions) (map[string]string, map[string]string, error) {
+	if options.retainsWorkspace() {
+		return nil, nil, nil
 	}
-	return s.captureWorktreeCleanupHeadOIDs(ctx, worktrees)
+	if !options.AllowUnverifiedWorkspaceChanges {
+		heads, err := s.captureWorktreeCleanupHeadOIDs(ctx, worktrees)
+		return heads, nil, err
+	}
+	if _, ok := s.worktreeCleanup.(WorktreeCleanupIdentityProvider); len(worktrees) > 0 && !ok {
+		return nil, nil, errors.New("worktree cleanup identity provider is unavailable")
+	}
+	heads := make(map[string]string)
+	failures := make(map[string]string)
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		captured, err := s.captureWorktreeCleanupHeadOIDs(ctx, []*worktree.Worktree{wt})
+		if err != nil {
+			if !recoverableDeleteInspection(ctx, err) {
+				return nil, nil, err
+			}
+			failures[wt.ID] = "physical_identity_unavailable"
+			continue
+		}
+		for id, head := range captured {
+			heads[id] = head
+		}
+	}
+	return heads, failures, nil
 }
 
 func (s *Service) executeRetainedTaskShutdown(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot) error {

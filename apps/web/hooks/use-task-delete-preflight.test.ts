@@ -95,11 +95,36 @@ it("replaces a failed workspace check with a separate retain confirmation", asyn
   await waitFor(() => expect(result.current.status).toBe("error"));
   rerender({ mode: "retain" });
   await waitFor(() => expect(result.current.confirmationId).toBe("retain-ticket"));
-  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith(
-    ["task-1"],
-    false,
-    false,
-    undefined,
-    "retain",
+  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith(["task-1"], false, false, undefined, {
+    workspaceCleanup: "retain",
+  });
+});
+
+it("binds unknown-workspace acknowledgement to a fresh preview", async () => {
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: true,
+    workspace_inspection: "unknown",
+    confirmation_id: "initial",
+  });
+  const { result, rerender } = renderHook(
+    ({ ack }) =>
+      useTaskDeletePreflight(true, "task-1", undefined, false, {
+        discardWorktreeChanges: ack,
+        allowUnverifiedWorkspaceChanges: ack,
+      }),
+    { initialProps: { ack: false } },
   );
+  await waitFor(() => expect(result.current.status).toBe("resolved"));
+  expect(result.current.workspaceInspection).toBe("unknown");
+  mockGetTaskDeletePreflight.mockResolvedValue({
+    requires_discard_consent: true,
+    workspace_inspection: "unknown",
+    confirmation_id: "acknowledged",
+  });
+  rerender({ ack: true });
+  await waitFor(() => expect(result.current.confirmationId).toBe("acknowledged"));
+  expect(mockGetTaskDeletePreflight).toHaveBeenLastCalledWith(["task-1"], false, true, undefined, {
+    workspaceCleanup: "delete",
+    allowUnverifiedWorkspaceChanges: true,
+  });
 });

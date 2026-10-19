@@ -16,6 +16,7 @@ type MovePayload = {
 
 export type TaskActionOptions = {
   workspaceCleanup?: "delete" | "retain";
+  allowUnverifiedWorkspaceChanges?: boolean;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   confirmationId?: string;
@@ -42,6 +43,11 @@ export function useTaskActions() {
                 ? "task:deleteKeptFilesPending"
                 : "task:deleteKeptFilesComplete",
             ),
+          });
+        } else if (result?.workspace_cleanup_pending) {
+          toast({
+            title: t("task:deleteCleanupPendingTitle"),
+            description: t("task:deleteCleanupPendingDescription"),
           });
         }
         return;

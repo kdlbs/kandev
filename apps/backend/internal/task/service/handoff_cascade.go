@@ -578,11 +578,10 @@ func (s *HandoffService) deleteTaskTreeWithReasonAndOptions(
 	if err != nil {
 		return nil, err
 	}
-	if checker, ok := s.resourceCleaner.(taskDeleteWorktreeAdmissionChecker); ok && !options.retainsWorkspace() {
-		if err := checker.ValidateTaskDeleteWorktrees(deleteCtx, all, options.DiscardWorktreeChanges); err != nil {
-			return nil, err
-		}
+	if err := s.validateDeleteCascadeAdmission(deleteCtx, all, options); err != nil {
+		return nil, err
 	}
+
 	transferCompensationCtx, cancelTransferCompensation :=
 		archivecascade.ContinuationContextUntil(ctx, deleteDeadline)
 	defer cancelTransferCompensation()
@@ -1228,7 +1227,7 @@ func (s *HandoffService) prepareCascadeResourceCleanupWithCompensation(
 		operations[taskID] = operationID
 		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
 		var err error
-		if retaining, ok := s.resourceCleaner.(taskResourceRetentionCoordinator); ok && options.retainsWorkspace() {
+		if retaining, ok := s.resourceCleaner.(taskResourceRetentionCoordinator); ok && (options.retainsWorkspace() || options.AllowUnverifiedWorkspaceChanges) {
 			err = retaining.PrepareTaskResourceCleanupWithDeleteOptions(ctx, taskID, trigger, operationID, deleteEnvironmentRow, options)
 		} else if withOptions, supportsOptions := s.resourceCleaner.(taskResourceCleanupCoordinatorWithOptions); supportsOptions {
 			err = withOptions.PrepareTaskResourceCleanupWithOptions(

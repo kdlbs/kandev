@@ -11,7 +11,7 @@ type workspaceRetentionStore interface {
 }
 
 func (s *SQLiteStore) IsWorkspaceRetained(ctx context.Context, taskID, worktreeID, path string) (bool, error) {
-	inventory, err := retention.Load(ctx, s.ro)
+	inventory, err := retention.LoadForTask(ctx, s.ro, taskID)
 	if err != nil {
 		return false, err
 	}

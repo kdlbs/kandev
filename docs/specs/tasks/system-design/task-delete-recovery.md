@@ -3,8 +3,9 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-DELETE-RECOVERY-001
+  - REQ-TASKS-DELETE-RECOVERY-002
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-19
 owners:
   - kandev
 ---
@@ -14,7 +15,8 @@ owners:
 ## Boundary and evidence
 
 The task system owns deletion admission and durable resource retention. This
-design extends [normal deletion](dirty-worktree-deletion.md) and
+design covers retain mode and normal deletion with incomplete inspection. It
+extends [normal deletion](dirty-worktree-deletion.md) and
 [cleanup preparation](runtime-cleanup-preparation.md). The decision is recorded
 in [retain resources during recovery deletion](../../../decisions/2026-10-16-retain-resources-on-task-delete.md).
 
@@ -39,6 +41,7 @@ assume the more extensive draft archive design is already implemented.
 | AC-TASKS-DELETE-RECOVERY-001.2, .3 | Durable retention and cleanup exclusion |
 | AC-TASKS-DELETE-RECOVERY-001.5 | Runtime shutdown and outcomes |
 | AC-TASKS-DELETE-RECOVERY-001.6, .7 | Shared confirmation surface |
+| AC-TASKS-DELETE-RECOVERY-002.1-.9 | Normal deletion with incomplete inspection |
 
 ## Admission and protocol
 
@@ -189,7 +192,8 @@ and a statement that the task and conversation will be deleted.
 
 The confirmation button reads "Delete task and keep files" in retain mode.
 While its own preview is pending, it remains disabled. A failed normal check
-shows Retry and guidance to select keep-files. Retain-mode authorization or
+uses the unknown-inspection consent flow below. Transport or database errors
+show Retry and keep-files without issuing a cleanup confirmation. Retain-mode authorization or
 database failures remain actionable errors. Retry keeps the chosen mode.
 Changing task IDs, cascade, or closing resets the ticket and consent. Switching
 back to normal mode performs fresh inspection. Late responses cannot restore
@@ -207,10 +211,162 @@ All copy uses translation keys in the seven supported languages. Continue to
 announce errors and loading states. Show result feedback through the existing
 deletion notification path. Do not claim files are removed in retain mode.
 
+## Normal deletion with incomplete inspection
+
+This extension implements REQ-TASKS-DELETE-RECOVERY-002. The
+[deletion and cleanup decision](../../../decisions/2026-10-19-separate-task-deletion-from-cleanup.md)
+separates committed task deletion from verified physical cleanup. The existing
+retain-mode implementation remains independent. This extension is planned in
+[work order 02](../../../plans/task-delete-recovery/task-02-unavailable-cleanup.md).
+
+### Inspection and explicit consent
+
+Extend `TaskDeletePreflightResult` with `workspace_inspection`, a closed status
+of `complete`, `unknown`, or `not_requested`. Retain mode uses `not_requested`.
+Normal mode reports `unknown` only for classified physical inspection failures
+against database-resolved targets. Unknown must never return a clean preview.
+Keep `requires_discard_consent=true` for unknown and dirty normal previews so
+older clients cannot treat unknown as permission to delete without consent.
+
+Add `allow_unverified_workspace_changes`, default false, to `DeleteTaskOptions`
+and the existing preflight, HTTP, and MCP contracts. It requires
+`workspace_cleanup=delete` and `discard_worktree_changes=true`. The flag consents
+to task deletion and possible loss of unknown local changes. It is not physical
+ownership evidence. It is distinct from ordinary dirty-file consent, so existing
+scripts that pass only discard consent do not gain broader deletion authority.
+
+Bind both consent flags to `taskDeletePreview`, and verify them in
+`WithTaskDeleteConfirmation`. The UI obtains a fresh ticket when the user checks
+or unchecks the acknowledgement. No API accepts a path supplied by the caller.
+Normal MCP authorization remains mandatory and its explicit arguments carry
+both consent values. All option adapters and cascade members use the same value.
+
+Introduce typed inspection failures at marker, path, Git, and provider boundaries.
+Separate context cancellation, database inventory failures, and missing service
+configuration from physical unavailability. Do not catch every service error or
+classify from user-visible strings. A cancelled request still returns cancellation.
+An internal bounded inspection timeout can produce unknown while the parent
+request remains valid. Missing physical dependencies do not prove a workspace
+is safe or complete. They remain configuration errors before mutation.
+
+`TaskDeletePreflightWithOptions` resolves and authorizes all targets before
+inspection. Continue collecting per-resource results when one resource is
+unknown. An unknown result dominates the selection's summary, while preserving
+known dirty results. Every required database read must succeed. Physical
+inspection is read-only and bounded. Preserve the existing confirmed-absence
+classification rather than treating all not-found errors as absence.
+
+### Preparation and committed outcomes
+
+`ValidateTaskDeleteWorktrees`, direct deletion, and `HandoffService` must accept
+the same options. Only the explicit pair of acknowledgement and discard consent
+permits an unknown physical result to pass task-deletion admission. Healthy
+normal deletion continues through the existing checks. Retain preparation is
+unchanged and does not call the physical inspectors.
+
+Extend the existing versioned `taskResourceCleanupSnapshot`, not a second queue.
+Before deleting task records, persist the complete database inventory, exact
+runtime handles, earlier unfinished cleanup handles, consent flags, and a
+per-resource preparation result. Capture available HEAD, marker, adoption, and
+provider identities under the current locks. Record a classified failure for
+each unavailable physical identity without dropping the resource. Do not
+manufacture identities or overwrite previously captured ones. Failed database
+reads, snapshot serialization, or snapshot writes abort preparation.
+
+Audit every physical preparation hook, including `captureCleanupHeadOIDsForMode`,
+adoption capture and source-manifest paths. Archive-only preparation must not
+become a hidden physical prerequisite for acknowledged task deletion. Skip or
+record only classified physical failures under the new consent, never unrelated
+persistence or admission errors. Preserve managed-delete claims, shared-owner
+transfer, preparation compensation, and partial cascade semantics.
+
+Task deletion remains committed when worker activation or later shutdown fails.
+Generalize the result projection in `task_delete_result.go` for delete mode with
+`workspace_cleanup`, `cleanup_operation_ids`, `workspace_cleanup_pending`, and
+`runtime_stop_pending`. Retain responses keep `retention_operation_ids` and
+never imply pending removal. Pending flags come from durable operation state,
+including prepared jobs that have not started. Preserve computed flags across
+HTTP and MCP post-commit errors. Return per-root committed results for bulk
+operations, and use the existing task-deleted event to remove tasks from views.
+
+### Cleanup execution and protection
+
+Preserve the shutdown-before-destruction order. The worker processes independent
+resources separately, persists completed steps, and continues eligible sibling
+resources after one fails. A shared runtime or environment dependency can block
+all resources that depend on it. No cleanup step may erase another step's
+pending inventory. Retry resumes only unfinished effects.
+
+The new consent does not bypass `auditWorktreeCleanup`. Preserve no-follow path
+handles, marker ownership, exact registration, branch identity, expected commit,
+shared-reference checks, and retention guards. Do not automatically rewrite a
+corrupt marker, move a task directory, or run broad Git pruning. A task record
+can disappear while its damaged directory still needs repair.
+
+A worker may retry missing evidence only when retained immutable ownership and
+physical identity prove the same target. It must persist verified evidence
+before destructive I/O. If no trustworthy pre-deletion identity was captured,
+a later directory or branch at the same name cannot supply that missing proof.
+Leave that target blocked with a durable reason. Never adopt a replacement as
+the original task's resource merely because the old owner row is absent.
+
+Use the existing bounded retry schedule. A terminal failed operation keeps
+inventory and diagnostics and is not a cleanup success. Transient unavailable
+resources can complete after their original identities become verifiable.
+No new automatic repair engine or operator screen is part of this change.
+
+Pending and failed delete snapshots must protect their unfinished resources
+from storage GC, quarantine, container sweeps, and stale cleanup jobs. Extend
+the existing cleanup inventory projection with a distinct outstanding-cleanup
+classification. Do not mark these resources retained forever: the exact owning
+cleanup job may remove its verified targets. Other destructive callers cannot.
+Enforce that distinction using an internal job identity and current claim,
+never a caller-supplied bypass flag. Explicit retain protection always wins.
+
+Publish outstanding inventory under the existing mutation lease before live
+owner removal. Recheck the current claim, shared ownership, and retention under
+that lease immediately before I/O. Keep runtime shutdown outside the lease.
+Release outstanding protection only when each effect is durably complete, with
+resource-specific progress retained after task/workspace deletion and restart.
+Unreadable protection inventory fails closed at the affected scope. Read only
+needed task/job rows and use indexed cleanup disposition when required by the
+retention review fixes. Do not add a whole-table JSON decode to each resource
+check. Older snapshots retain their existing behavior unless the new consent
+and complete preparation envelope are both present.
+
+### Confirmation surface and compatibility
+
+Reuse `TaskDeleteConfirmDialog`, its existing centered AlertDialog, and
+`useTaskDeletePreflight`. This is a short confirmation rather than navigation.
+An unknown result shows an unchecked checkbox: "Delete even if workspace
+changes cannot be checked". Supporting text states: "Local changes may be
+lost. Files that cannot be safely removed will remain pending cleanup."
+Keep the separate "Keep workspace files" checkbox. The unknown acknowledgement
+sets both consent values through a fresh preview. It replaces the ordinary
+discard checkbox in that state, so users do not need two acknowledgements.
+
+Loading keeps the action disabled. A transport, authorization, or database
+failure does not show the unknown acknowledgement as a bypass. Retry remains
+available. Mode, scope, cascade, close, and reopen invalidate consent and the
+confirmation ticket. Late responses cannot restore an old choice. Selecting
+retain clears both removal consent flags and preserves its existing action.
+Clean and known-dirty previews keep their current behavior.
+
+Desktop keeps the compact action row. Phone keeps the inset centered alert,
+fixed heading/footer, contained scrolling body, stacked 44px touch actions,
+safe-area clearance, visible focus, and status announcements. Use existing
+semantic colors and primitives without new motion. Localize all copy in the
+seven languages and generated pseudo/Traditional Chinese catalogs.
+
+After a committed delete with pending effects, report "Task deleted. Workspace
+cleanup is pending." Report shutdown pending separately when true. Do not say
+files were removed. Public task, Git, and MCP guidance must distinguish this
+retryable cleanup authorization from permanent keep-files retention.
+
 ## Verification boundary
 
-The [work order](../../../plans/task-delete-recovery/task-01-retained-deletion.md)
-owns the corruption, permissions, restart, stale-confirmation, cleanup-race,
+The [retain work order](../../../plans/task-delete-recovery/task-01-retained-deletion.md)
+and [normal-delete work order](../../../plans/task-delete-recovery/task-02-unavailable-cleanup.md) own the corruption, permissions, restart, stale-confirmation, cleanup-race,
 shared-resource, HTTP/MCP, desktop, and phone regression tests. Tests must use
 disposable repositories and databases. Production incident files are evidence,
 not test fixtures to modify.

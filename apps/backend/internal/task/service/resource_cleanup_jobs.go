@@ -110,13 +110,22 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
-	RetentionVersion           int                            `json:"retention_version,omitempty"`
-	RetentionActorID           string                         `json:"retention_actor_id,omitempty"`
-	RetentionInventoryCaptured bool                           `json:"retention_inventory_captured,omitempty"`
-	RetainedExecutors          []*models.ExecutorRunning      `json:"retained_executors,omitempty"`
-	WorkspaceCleanup           models.WorkspaceCleanupMode    `json:"workspace_cleanup,omitempty"`
-	TaskDirectory              *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
-	ManagedDelete              *managed.DeleteClaim           `json:"managed_delete,omitempty"`
+	PriorCleanupInventory           []json.RawMessage              `json:"prior_cleanup_inventory,omitempty"`
+	PriorTaskEnvironments           []*models.TaskEnvironment      `json:"prior_task_environments,omitempty"`
+	CleanupInventoryConflicts       []string                       `json:"cleanup_inventory_conflicts,omitempty"`
+	CompletedWorktrees              map[string]bool                `json:"completed_worktrees,omitempty"`
+	RuntimeStopCompleted            bool                           `json:"runtime_stop_completed,omitempty"`
+	CleanupVersion                  int                            `json:"cleanup_version,omitempty"`
+	CleanupInventoryCaptured        bool                           `json:"cleanup_inventory_captured,omitempty"`
+	CleanupPreparationErrors        map[string]string              `json:"cleanup_preparation_errors,omitempty"`
+	AllowUnverifiedWorkspaceChanges bool                           `json:"allow_unverified_workspace_changes,omitempty"`
+	RetentionVersion                int                            `json:"retention_version,omitempty"`
+	RetentionActorID                string                         `json:"retention_actor_id,omitempty"`
+	RetentionInventoryCaptured      bool                           `json:"retention_inventory_captured,omitempty"`
+	RetainedExecutors               []*models.ExecutorRunning      `json:"retained_executors,omitempty"`
+	WorkspaceCleanup                models.WorkspaceCleanupMode    `json:"workspace_cleanup,omitempty"`
+	TaskDirectory                   *worktree.TaskDirectoryCleanup `json:"task_directory,omitempty"`
+	ManagedDelete                   *managed.DeleteClaim           `json:"managed_delete,omitempty"`
 	// InventoryRepair retains the successor's provenance through progress saves.
 	InventoryRepair        json.RawMessage                             `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                       `json:"sessions,omitempty"`
@@ -220,7 +229,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		operationID = newTaskResourceCleanupOperationID(trigger, taskID)
 	}
 	jobID := uuid.NewString()
-	worktreeHeadOIDs, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, envCleanup.workspaceCleanup)
+	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, DeleteTaskOptions{WorkspaceCleanup: envCleanup.workspaceCleanup, AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges, DiscardWorktreeChanges: envCleanup.discardWorktreeChanges})
 	if err != nil {
 		return nil, err
 	}
@@ -235,22 +244,27 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		return nil, err
 	}
 	snapshot := taskResourceCleanupSnapshot{
-		WorkspaceCleanup:           envCleanup.workspaceCleanup,
-		RetentionInventoryCaptured: envCleanup.retentionInventoryCaptured,
-		Sessions:                   sessions,
-		Worktrees:                  worktrees,
-		WorktreeHeadOIDs:           worktreeHeadOIDs,
-		WorktreeTaskDirNames:       worktreeTaskDirNames,
-		WorktreeBranchMetadata:     worktreeBranchMetadata,
-		WorktreeAdoptions:          worktreeAdoptions,
-		DiscardWorktreeChanges:     envCleanup.discardWorktreeChanges,
-		StopTargets:                persistStopTargets(stopTargets),
-		Attachments:                persistedAttachments,
-		WorkspaceID:                workspaceID,
-		TaskEnvironment:            envCleanup.env,
-		DeleteEnvironmentRow:       envCleanup.deleteRow,
-		LegacyWorktreeCleanup:      s.hasLegacyWorktreeCleanup(),
-		AgentHistory:               envCleanup.agentHistory,
+		CleanupPreparationErrors:        preparationErrors,
+		AllowUnverifiedWorkspaceChanges: envCleanup.allowUnverifiedWorkspaceChanges,
+		WorkspaceCleanup:                envCleanup.workspaceCleanup,
+		RetentionInventoryCaptured:      envCleanup.retentionInventoryCaptured,
+		Sessions:                        sessions,
+		Worktrees:                       worktrees,
+		WorktreeHeadOIDs:                worktreeHeadOIDs,
+		WorktreeTaskDirNames:            worktreeTaskDirNames,
+		WorktreeBranchMetadata:          worktreeBranchMetadata,
+		WorktreeAdoptions:               worktreeAdoptions,
+		DiscardWorktreeChanges:          envCleanup.discardWorktreeChanges,
+		StopTargets:                     persistStopTargets(stopTargets),
+		Attachments:                     persistedAttachments,
+		WorkspaceID:                     workspaceID,
+		TaskEnvironment:                 envCleanup.env,
+		DeleteEnvironmentRow:            envCleanup.deleteRow,
+		LegacyWorktreeCleanup:           s.hasLegacyWorktreeCleanup(),
+		AgentHistory:                    envCleanup.agentHistory,
+	}
+	if err := s.captureUnavailableCleanupInventory(ctx, taskID, &snapshot); err != nil {
+		return nil, err
 	}
 	if err := s.captureRetainedRuntimeInventory(ctx, taskID, &snapshot); err != nil {
 		return nil, err
@@ -260,7 +274,7 @@ func (s *Service) persistTaskResourceCleanupWithManagedClaim(
 		if err != nil {
 			return nil, fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
 		}
-		snapshot.SSHTaskDirs = sshTaskDirs
+		snapshot.SSHTaskDirs = append(snapshot.SSHTaskDirs, sshTaskDirs...)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -896,7 +910,7 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 			wt.IntegrationRef = metadata.IntegrationRef
 			wt.RecoveryHeadSHA = metadata.RecoveryHeadSHA
 		}
-		if snapshot.WorktreeHeadOIDs != nil {
+		if snapshot.WorktreeHeadOIDs != nil || snapshot.AllowUnverifiedWorkspaceChanges {
 			cleanupHeadOID, found := snapshot.WorktreeHeadOIDs[wt.ID]
 			wt.CleanupHeadOID = cleanupHeadOID
 			wt.CleanupHeadOIDUnavailable = !found || strings.TrimSpace(cleanupHeadOID) == ""
@@ -1275,10 +1289,10 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if snapshot.WorkspaceCleanup == models.WorkspaceCleanupRetain {
 		return s.executeRetainedTaskShutdown(ctx, job, snapshot)
 	}
+	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: job.Attempts})
 	if err := s.checkTaskWorkspaceCleanupAllowed(ctx, job.TaskID); err != nil {
 		return err
 	}
-	ctx = recoveryclaim.WithTaskCleanupJob(ctx, recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: job.Attempts})
 	var (
 		targets []taskStopTarget
 		err     error
@@ -1322,7 +1336,15 @@ func (s *Service) executeTaskResourceCleanupJob(
 			return err
 		}
 	}
-	if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops)); err != nil {
+	cleanupWorktrees := snapshot.Worktrees
+	cleanupEnvironment := snapshot.TaskEnvironment
+	if snapshot.AllowUnverifiedWorkspaceChanges {
+		if err := s.cleanupUnverifiedWorktrees(ctx, job, snapshot, stopOutcome); err != nil {
+			return err
+		}
+		cleanupWorktrees = nil
+		cleanupEnvironment = taskEnvironmentWithoutSnapshotWorktrees(snapshot.TaskEnvironment, snapshot.Worktrees)
+	} else if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops)); err != nil {
 		return err
 	}
 	var errs []error
@@ -1355,9 +1377,9 @@ func (s *Service) executeTaskResourceCleanupJob(
 	reapRootCandidates := s.gatherOrphanReapRootCandidates(
 		snapshot, cleanupSessionIDs(snapshot.Sessions, targets),
 	)
-	errs = append(errs, s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
+	errs = append(errs, s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, cleanupWorktrees, targets,
 		taskEnvironmentCleanup{
-			env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
+			env: cleanupEnvironment, deleteRow: snapshot.DeleteEnvironmentRow,
 			preserveBranches:       job.IsArchive(),
 			discardWorktreeChanges: snapshot.DiscardWorktreeChanges,
 			agentHistory:           snapshot.AgentHistory,
@@ -1555,7 +1577,7 @@ func (s *Service) resolveTaskResourceCleanupAfterMutationError(ctx context.Conte
 func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob, cleanupErr error) error {
 	state := models.TaskResourceCleanupStateRetryWait
 	var nextAttempt *time.Time
-	if isDirtyWorktreeCleanupError(cleanupErr) || (!isCascadeCriticalCleanupTrigger(job.Trigger) && job.Attempts >= taskResourceCleanupMaxAttempts) {
+	if isDirtyWorktreeCleanupError(cleanupErr) || cleanupRetryLimitReached(job) {
 		state = models.TaskResourceCleanupStateFailed
 	} else {
 		next := time.Now().UTC().Add(taskResourceCleanupRetryDelayForAttempt(job.Attempts))
@@ -1734,7 +1756,7 @@ func (s *Service) PrepareTaskResourceCleanupWithDeleteOptions(ctx context.Contex
 	if err := options.validate(); err != nil {
 		return err
 	}
-	if options.retainsWorkspace() && s.resourceCleanups == nil {
+	if (options.retainsWorkspace() || options.AllowUnverifiedWorkspaceChanges) && s.resourceCleanups == nil {
 		return errors.New("durable workspace retention unavailable")
 	}
 	// Reserve the durable lifecycle barrier BEFORE capturing the inventory.

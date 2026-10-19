@@ -570,10 +570,41 @@ it("requests retain confirmation without granting discard consent", async () => 
     false,
     false,
     { baseUrl: API_BASE_URL },
-    "retain",
+    { workspaceCleanup: "retain" },
   ]);
   expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
     workspace_cleanup: "retain",
     discard_worktree_changes: false,
   });
+});
+
+it("sends separate unknown-workspace consent in preview and deletion", async () => {
+  fetchSpy.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        confirmation_id: "ack",
+        requires_discard_consent: true,
+        workspace_inspection: "unknown",
+      }),
+      { status: 200 },
+    ),
+  );
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await Reflect.apply(getTaskDeletePreflight, undefined, [
+    ["task-1"],
+    false,
+    true,
+    { baseUrl: API_BASE_URL },
+    { workspaceCleanup: "delete", allowUnverifiedWorkspaceChanges: true },
+  ]);
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+    allow_unverified_workspace_changes: true,
+    discard_worktree_changes: true,
+  });
+  await deleteTask(
+    "task-1",
+    { confirmationId: "ack", discardWorktreeChanges: true, allowUnverifiedWorkspaceChanges: true },
+    { baseUrl: API_BASE_URL },
+  );
+  expect(String(fetchSpy.mock.calls[1][0])).toContain("allow_unverified_workspace_changes=true");
 });

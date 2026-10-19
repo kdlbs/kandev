@@ -1,6 +1,7 @@
 import {
   createDamagedDeleteTask,
   deleteDamagedTaskKeepingFiles,
+  deleteDamagedTaskWithPendingCleanup,
 } from "../../helpers/task-delete-recovery";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -204,6 +205,32 @@ test("deletes a damaged task while keeping its workspace files", async ({
   await kanban.openTaskActionsMenu(task.id);
   await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
   await deleteDamagedTaskKeepingFiles(testPage, testPage.getByRole("alertdialog"), task.id);
+  expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+  assertRetained();
+});
+
+test("deletes a damaged task with workspace cleanup pending", async ({
+  testPage,
+  prCapture,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const { task, assertRetained } = await createDamagedDeleteTask(
+    apiClient,
+    seedData,
+    "Damaged task pending cleanup",
+  );
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto();
+  await kanban.openTaskActionsMenu(task.id);
+  await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
+  await deleteDamagedTaskWithPendingCleanup(
+    testPage,
+    testPage.getByRole("alertdialog"),
+    task.id,
+    prCapture,
+  );
   expect((await apiClient.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
   assertRetained();
 });

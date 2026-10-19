@@ -38,3 +38,10 @@ func TestRetainedWorkspaceBlocksDestructiveRuntimeStop(t *testing.T) {
 		})
 	}
 }
+
+func TestRetainedWorkspaceEmptyContainerIsNoOp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	mgr := &Manager{runningWriter: retainedWorkspaceWriter{retained: true}}
+	require.NoError(t, mgr.DestroyContainer(ctx, ""))
+}

@@ -791,6 +791,13 @@ Every create response from both the MCP tool result and the REST response body a
 
 Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation; update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
+For normal deletion when workspace inspection fails, `delete_task_kandev`
+requires both `discard_worktree_changes: true` and
+`allow_unverified_workspace_changes: true`. These flags acknowledge possible
+loss of local changes. They do not bypass ownership checks for file removal.
+The response reports `cleanup_operation_ids`, `workspace_cleanup_pending`, and
+`runtime_stop_pending`. A successful task deletion can have pending cleanup.
+
 For an authorized task deletion, `delete_task_kandev` accepts the optional
 `workspace_cleanup` value `delete` (default) or `retain`. Use `retain` to delete
 the task and conversation while keeping workspace files and branches, including

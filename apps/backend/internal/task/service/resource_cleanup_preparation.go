@@ -25,7 +25,7 @@ func (s *Service) capturePreparedTaskCleanup(ctx context.Context, job *models.Ta
 	if err != nil {
 		return fmt.Errorf("list worktrees for cleanup snapshot: %w", err)
 	}
-	worktreeHeadOIDs, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, options.WorkspaceCleanup)
+	worktreeHeadOIDs, preparationErrors, err := s.captureCleanupHeadOIDsForMode(ctx, worktrees, options)
 	if err != nil {
 		return err
 	}
@@ -40,26 +40,31 @@ func (s *Service) capturePreparedTaskCleanup(ctx context.Context, job *models.Ta
 		return fmt.Errorf("list remote task directories for cleanup snapshot: %w", err)
 	}
 	snapshot := taskResourceCleanupSnapshot{
-		Sessions:                   sessions,
-		Worktrees:                  worktrees,
-		WorktreeHeadOIDs:           worktreeHeadOIDs,
-		WorktreeTaskDirNames:       worktreeTaskDirNames,
-		WorktreeBranchMetadata:     worktreeBranchMetadata,
-		StopTargets:                persistStopTargets(stopTargets),
-		TaskEnvironment:            taskEnv,
-		DeleteEnvironmentRow:       deleteEnvironmentRow,
-		DiscardWorktreeChanges:     options.DiscardWorktreeChanges,
-		WorkspaceCleanup:           options.WorkspaceCleanup,
-		RetentionInventoryCaptured: options.retainsWorkspace(),
-		LegacyWorktreeCleanup:      s.hasLegacyWorktreeCleanup(),
-		SSHTaskDirs:                sshTaskDirs,
-		WorkspaceID:                task.WorkspaceID,
+		AllowUnverifiedWorkspaceChanges: options.AllowUnverifiedWorkspaceChanges,
+		CleanupPreparationErrors:        preparationErrors,
+		Sessions:                        sessions,
+		Worktrees:                       worktrees,
+		WorktreeHeadOIDs:                worktreeHeadOIDs,
+		WorktreeTaskDirNames:            worktreeTaskDirNames,
+		WorktreeBranchMetadata:          worktreeBranchMetadata,
+		StopTargets:                     persistStopTargets(stopTargets),
+		TaskEnvironment:                 taskEnv,
+		DeleteEnvironmentRow:            deleteEnvironmentRow,
+		DiscardWorktreeChanges:          options.DiscardWorktreeChanges,
+		WorkspaceCleanup:                options.WorkspaceCleanup,
+		RetentionInventoryCaptured:      options.retainsWorkspace(),
+		LegacyWorktreeCleanup:           s.hasLegacyWorktreeCleanup(),
+		SSHTaskDirs:                     sshTaskDirs,
+		WorkspaceID:                     task.WorkspaceID,
+	}
+	if err := s.captureUnavailableCleanupInventory(ctx, taskID, &snapshot); err != nil {
+		return err
 	}
 	if err := s.captureRetainedRuntimeInventory(ctx, taskID, &snapshot); err != nil {
 		return err
 	}
 	if taskResourceCleanupDeletesTask(job.Trigger) {
-		snapshot.AgentHistory = s.captureQuickChatAgentHistory(ctx, task, sessions)
+		snapshot.AgentHistory = append(snapshot.AgentHistory, s.captureQuickChatAgentHistory(ctx, task, sessions)...)
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {

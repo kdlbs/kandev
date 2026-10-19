@@ -25,7 +25,10 @@ decision in the existing durable cleanup owner before deleting live rows.
 Every destructive cleanup consumer must respect that retained decision.
 Agent shutdown remains a separate durable obligation.
 
-Normal deletion retains its current inspection and discard-consent behavior.
+The original normal-deletion admission rule is amended by
+[separate task deletion from cleanup](2026-10-19-separate-task-deletion-from-cleanup.md).
+That explicit recovery path does not change retain-mode guarantees. Without
+the new acknowledgement, normal deletion keeps its inspection and consent behavior.
 Authorization, database integrity, and managed-task admission remain mandatory
 in both modes. Unknown physical state is sufficient to keep files, but never
 sufficient to remove them.

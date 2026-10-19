@@ -138,7 +138,7 @@ func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[s
 type containerInventory struct{ reader *sqlx.DB }
 
 func (i *containerInventory) ContainerTaskRemovable(ctx context.Context, taskID string) (bool, error) {
-	retained, err := retention.Load(ctx, i.reader)
+	retained, err := retention.LoadForTask(ctx, i.reader, taskID)
 	if err != nil {
 		return false, err
 	}

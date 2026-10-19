@@ -1,0 +1,110 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
+)
+
+// Cleanup keeps the original inventory until every resource is removed. A
+// failed resource cannot prevent independent worktrees from making progress.
+func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, stop taskRuntimeStopOutcome) error {
+	if snapshot.CleanupVersion != 1 || !snapshot.CleanupInventoryCaptured || !snapshot.DiscardWorktreeChanges || !taskResourceCleanupDeletesTask(job.Trigger) {
+		return errors.New("unverified cleanup inventory is incomplete")
+	}
+	snapshot.RuntimeStopCompleted = len(stop.failed) == 0
+	if snapshot.CompletedWorktrees == nil {
+		snapshot.CompletedWorktrees = make(map[string]bool)
+	}
+	if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
+		return err
+	}
+	var errs []error
+	if len(stop.failed) > 0 {
+		errs = append(errs, fmt.Errorf("%d runtime stop operations failed", len(stop.failed)))
+	}
+	preserve := taskCleanupPreserveRows(stop)
+	for _, wt := range snapshot.Worktrees {
+		if wt == nil || snapshot.CompletedWorktrees[wt.ID] {
+			continue
+		}
+		if err := s.cleanupUnverifiedWorktree(ctx, job, snapshot, wt, preserve); err != nil {
+			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
+			continue
+		}
+		snapshot.CompletedWorktrees[wt.ID] = true
+		if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+	}
+	if len(snapshot.CleanupInventoryConflicts) > 0 {
+		errs = append(errs, errors.New("prior workspace inventory has conflicting identities"))
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return s.cleanupPriorTaskEnvironments(ctx, job, snapshot)
+}
+
+func (s *Service) cleanupPriorTaskEnvironments(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot) error {
+	var errs []error
+	for _, env := range snapshot.PriorTaskEnvironments {
+		if env == nil || (snapshot.TaskEnvironment != nil && env.ID == snapshot.TaskEnvironment.ID && env.OwnershipGeneration == snapshot.TaskEnvironment.OwnershipGeneration) {
+			continue
+		}
+		errs = append(errs, s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, nil, taskEnvironmentCleanup{env: taskEnvironmentWithoutSnapshotWorktrees(env, snapshot.Worktrees), allowUnverifiedWorkspaceChanges: true, discardWorktreeChanges: true}, nil)...)
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) cleanupUnverifiedWorktree(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, wt *worktree.Worktree, preserve map[string]struct{}) error {
+	if slices.Contains(snapshot.CleanupInventoryConflicts, wt.ID) {
+		return errors.New("prior workspace inventory has conflicting identities")
+	}
+	wt.CleanupHeadOID = snapshot.WorktreeHeadOIDs[wt.ID]
+	wt.CleanupHeadOIDUnavailable = wt.CleanupHeadOID == ""
+	if wt.CleanupHeadOIDUnavailable {
+		return errors.New("original workspace identity is unavailable")
+	}
+	if !hasWorktreeSourceManifest(snapshot.ArchiveSourceManifest, wt.ID) {
+		manifest, err := s.captureArchiveSourceManifest(ctx, job.ID, job.TaskID, []*worktree.Worktree{wt})
+		if err != nil {
+			return err
+		}
+		snapshot.ArchiveSourceManifest = append(snapshot.ArchiveSourceManifest, manifest...)
+		if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
+			return err
+		}
+	}
+	return errors.Join(s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, []*worktree.Worktree{wt}, taskEnvironmentCleanup{
+		env: snapshot.TaskEnvironment, deferEnvironment: true,
+		discardWorktreeChanges: true, allowUnverifiedWorkspaceChanges: true,
+	}, preserve)...)
+}
+
+func hasWorktreeSourceManifest(manifest []ArchiveSourceManifest, id string) bool {
+	for _, item := range manifest {
+		if item.WorktreeID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanupRetryLimitReached(job *models.TaskResourceCleanupJob) bool {
+	if job.Attempts < taskResourceCleanupMaxAttempts {
+		return false
+	}
+	if !isCascadeCriticalCleanupTrigger(job.Trigger) {
+		return true
+	}
+	var options struct {
+		AllowUnverified bool `json:"allow_unverified_workspace_changes"`
+	}
+	return json.Unmarshal([]byte(job.ResourceSnapshot), &options) == nil && options.AllowUnverified
+}

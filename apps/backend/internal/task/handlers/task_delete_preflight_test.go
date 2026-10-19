@@ -146,3 +146,12 @@ func TestHTTPTaskDeletePreflightRetainSkipsBrokenWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPDeleteUnavailablePreflight(t *testing.T) {
+	router := newTaskDeletePreflightRouter(t, taskDeletePreflightHTTPCleanup{inspectErr: &worktree.CleanupInspectionError{Stage: worktree.CleanupInspectionStageStatus, Reason: worktree.CleanupInspectionReasonCommandFailed, Err: errors.New("bad object")}})
+	rec := httptest.NewRecorder()
+	req := withTaskDeleteTestIdentity(httptest.NewRequest(http.MethodPost, "/api/v1/tasks/delete-preflight", strings.NewReader(`{"task_ids":["task-1"],"discard_worktree_changes":true,"allow_unverified_workspace_changes":true}`)))
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"workspace_inspection":"unknown"`)
+}

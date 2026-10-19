@@ -294,3 +294,24 @@ it.each([false, true])("reports retained files with runtime stop pending=%s", as
       : "Workspace files and branches are retained.",
   });
 });
+
+it("reports committed task removal with physical cleanup pending", async () => {
+  deleteTaskMock.mockResolvedValueOnce({
+    success: true,
+    workspace_cleanup: "delete",
+    workspace_cleanup_pending: true,
+    runtime_stop_pending: false,
+  });
+  const { result } = renderHook(() => useTaskActions());
+  const options = {
+    discardWorktreeChanges: true,
+    allowUnverifiedWorkspaceChanges: true,
+    confirmationId: "ack",
+  };
+  await act(() => result.current.deleteTaskById("damaged", options));
+  expect(deleteTaskMock).toHaveBeenCalledWith("damaged", options);
+  expect(toastMock).toHaveBeenCalledWith({
+    title: "Task deleted. Cleanup pending.",
+    description: "Files that cannot be safely removed remain protected. Kandev will retry cleanup.",
+  });
+});

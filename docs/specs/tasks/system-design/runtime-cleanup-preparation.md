@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-09
-updated: 2026-10-16
+updated: 2026-10-19
 owners:
   - cfl
 ---
@@ -21,7 +21,10 @@ cleanup snapshot must survive task deletion.
 These identity-capture rules authorize physical cleanup in normal delete mode.
 [Task deletion recovery](task-delete-recovery.md) defines separate retain-mode
 preparation. It captures database inventory without physical inspection and
-never authorizes workspace removal.
+never authorizes workspace removal. That design also defines acknowledged
+normal deletion with incomplete physical evidence. It permits a durable
+per-resource blocked preparation result before deleting the task. It does not
+relax the identity requirements for physical removal described here.
 
 ## Identity capture
 

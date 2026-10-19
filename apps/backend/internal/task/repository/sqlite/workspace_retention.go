@@ -7,7 +7,7 @@ import (
 
 // HasRetainedTaskWorkspace remains valid after live task rows are deleted.
 func (r *Repository) HasRetainedTaskWorkspace(ctx context.Context, taskID string) (bool, error) {
-	inventory, err := retention.Load(ctx, r.ro)
+	inventory, err := retention.LoadForTask(ctx, r.ro, taskID)
 	if err != nil {
 		return false, err
 	}
@@ -15,7 +15,7 @@ func (r *Repository) HasRetainedTaskWorkspace(ctx context.Context, taskID string
 }
 
 func (r *Repository) HasRetainedWorkspaceResource(ctx context.Context, taskID string, resourceIDs ...string) (bool, error) {
-	inventory, err := retention.Load(ctx, r.ro)
+	inventory, err := retention.LoadForTask(ctx, r.ro, taskID)
 	if err != nil {
 		return false, err
 	}

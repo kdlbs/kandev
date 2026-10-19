@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/task/retention"
+	"time"
 )
 
 type workspaceRetentionReader interface {
@@ -14,6 +15,12 @@ type workspaceRetentionReader interface {
 // Provider stops can destroy the only copy of a workspace. Standalone stops
 // terminate local processes without removing the checkout.
 func (m *Manager) stopWorkspaceRuntime(ctx context.Context, backend ExecutorBackend, instance *ExecutorInstance, force bool) error {
+	// An admitted stop must finish disposal even after the requesting client leaves.
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+	}
 	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
 	if retentionErr != nil {
 		return retentionErr

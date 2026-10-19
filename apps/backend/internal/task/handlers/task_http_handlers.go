@@ -2135,11 +2135,11 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	cascade := cascadeQueryParam(c)
 	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	mode := models.WorkspaceCleanupMode(c.Query("workspace_cleanup"))
+	options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges, WorkspaceCleanup: mode, AllowUnverifiedWorkspaceChanges: strings.EqualFold(c.Query("allow_unverified_workspace_changes"), "true")}
 	deletedIDs := []string{taskID}
-	err := h.service.WithTaskDeleteConfirmation(
-		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, discardWorktreeChanges,
+	err := h.service.WithTaskDeleteConfirmationOptions(
+		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, options,
 		func() error {
-			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges, WorkspaceCleanup: mode}
 			if h.handoffSvc != nil {
 				out, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
 				if out != nil {
@@ -2148,7 +2148,7 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 				return err
 			}
 			return h.service.DeleteTaskWithOptions(deleteCtx, taskID, options)
-		}, mode,
+		},
 	)
 	if err != nil {
 		switch {
@@ -2164,8 +2164,8 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
 			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
 		case isCascadePostCommitError(err):
-			if mode == models.WorkspaceCleanupRetain {
-				c.JSON(http.StatusOK, h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs))
+			if mode == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+				c.JSON(http.StatusOK, h.service.CommittedTaskDeletionResult(deleteCtx, deletedIDs, options))
 				return
 			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
@@ -2178,8 +2178,8 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 		}
 		return
 	}
-	if mode == models.WorkspaceCleanupRetain {
-		c.JSON(http.StatusOK, h.service.RetainedTaskDeletionResult(deleteCtx, deletedIDs))
+	if mode == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+		c.JSON(http.StatusOK, h.service.CommittedTaskDeletionResult(deleteCtx, deletedIDs, options))
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
