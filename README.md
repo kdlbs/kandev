@@ -67,7 +67,7 @@ See [docs/features.md](docs/features.md) for the full feature inventory, includi
 
 ### In progress: Office mode
 
-We're working on **Office mode**, a feature-flagged autonomy layer for persistent agent teams. The direction is agent instances with roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. We'll document Office as a supported feature after it is live.
+**Office mode** is an experimental autonomy layer for persistent agent teams, disabled by default in production. It includes agent roles and permissions, dashboards, inbox/approvals, routines, task delegation, skills, memory, cost tracking, budgets, and workspace config sync. The [Office guide](docs/public/office.md) covers explicit enablement, setup, and evaluation of the current implementation; Office is not yet a stable production contract.
 
 ## Integrations
 

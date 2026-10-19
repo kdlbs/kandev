@@ -316,6 +316,8 @@ Regular Kanban does not currently expose a dependency editor or blocker filter. 
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
+The [Office task guide](office-tasks.md) covers its projects, assignments, deeper task trees, dependencies, and review/approval flow. Start with [Office setup](office-getting-started.md) to enable that experimental surface.
+
 </details>
 
 ## Troubleshooting

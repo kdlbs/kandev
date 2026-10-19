@@ -205,6 +205,10 @@ full list. This labelled link sits inside the group on desktop and phones, like
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
 workspace with a **Kanban** or **Office** badge and ends with the workspace-creation actions.
 
+Office is experimental and disabled by default. To evaluate a persistent agent team,
+follow [Get started with Office](office-getting-started.md); the [Office guide](office.md)
+covers its separate project, task, review, routine, and operations flows.
+
 From anywhere, press `Cmd/Ctrl+E` to open it with the keyboard: focus lands inside the menu,
 so arrow keys move between workspaces and **Enter** switches to the highlighted one. If the sidebar
 is collapsed, the shortcut expands it first. Rebind it under

@@ -986,6 +986,8 @@ Revision history is not an immutable record of every autosave. Consecutive write
 
 Regular Kanban reads and enforces blocker relationships (see [Task dependencies](#task-dependencies)) but has no blocker filter and no in-place editor: dependencies are declared when the task is created or over MCP. Office additionally exposes named documents, labels, and its own blocker property editor. Do not treat those Office surfaces as a stable public contract yet.
 
+For the experimental Office setup and delivery path, use the [Office guide](office.md) and [Manage Office tasks](office-tasks.md).
+
 ## Archive, unarchive, and delete
 
 On a phone, archive uses a confirmation step in the open Tasks sheet or a
