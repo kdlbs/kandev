@@ -34,6 +34,7 @@ type AgentExecution struct {
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
+	successorGenerationOwner     atomic.Pointer[successorGenerationOwner]
 
 	ID string
 	// CausingRunID is the trusted Office run that initiated this task-owned

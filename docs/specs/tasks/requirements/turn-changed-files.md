@@ -35,7 +35,7 @@ The card does not claim exclusive agent authorship.
 
 #### Acceptance criteria
 
-- **AC-TASKS-TURN-CHANGES-001.1:** Missing saved values shall resolve to enabled for new and existing users, including upgrades and frontend hydration.
+- **AC-TASKS-TURN-CHANGES-001.1:** New accounts and unsaved settings reads shall default to disabled, including frontend hydration. Existing saved preferences shall remain unchanged; no preference reset is performed.
 - **AC-TASKS-TURN-CHANGES-001.2:** Explicit disabled values shall survive unrelated saves, reloads, backend restarts, and upgrades.
 - **AC-TASKS-TURN-CHANGES-001.3:** Settings > General shall show the switch beside chat preferences through the existing Save/Discard flow.
   Its label shall be "Show changed files after each turn".
@@ -135,7 +135,8 @@ The card does not claim exclusive agent authorship.
   Phone and coarse-pointer actions shall have touch targets of at least 44 pixels.
 - **AC-TASKS-TURN-CHANGES-005.6:** Active turns, ready zero-change turns, disabled visibility, uncaptured turns, and turns without eligible Git checkouts shall have no card.
 - **AC-TASKS-TURN-CHANGES-005.7:** Terminal pending capture shall show "Preparing changes" independently of the agent-running indicator.
-  Failure shall show "Turn changes unavailable".
+  Settled summaries with zero recorded file entries shall have no card, including failed/unavailable captures.
+  Retained failure status shall remain distinct from a successful zero-change capture and available through explicit history selection.
   Partial totals shall say "available changes" and identify affected repository states.
 - **AC-TASKS-TURN-CHANGES-005.8:** Expired content shall preserve counts and explain why Open diff is unavailable.
   Known shared-checkout overlap shall have a visible attribution note.
@@ -180,6 +181,8 @@ The card does not claim exclusive agent authorship.
   Slow storage shall be measured where available, with its absence reported explicitly.
 - **AC-TASKS-TURN-CHANGES-007.4:** Measurements shall record environment, capture/comparison duration, changed bytes, failures, and retention growth.
   Operational metric labels shall exclude task, turn, session, path, and user identities.
+
+- **AC-TASKS-TURN-CHANGES-007.5:** Full tracked-file inventories shall not be rejected by the changed-file enumeration count limit. Within existing byte/time bounds, a valid repository with more than 30,000 tracked files shall support zero-change and one-file-change capture and comparison.
 
 ## Exclusions
 

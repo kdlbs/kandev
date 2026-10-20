@@ -107,4 +107,13 @@ describe("shouldPreserveFollowOnScroll", () => {
       ),
     ).toBe(false);
   });
+
+  it("keeps follow when native restoration moves upward within delayed content growth", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 1793, scrollHeight: 2130 },
+        { scrollTop: 1705, scrollHeight: 2218 },
+      ),
+    ).toBe(true);
+  });
 });

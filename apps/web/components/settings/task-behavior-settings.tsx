@@ -91,7 +91,7 @@ export function TaskBehaviorSettings() {
     ),
   }));
   return (
-    <div className="space-y-6" data-testid="task-behavior-settings">
+    <div className="w-full max-w-5xl space-y-6" data-testid="task-behavior-settings">
       <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
         <SettingsPageHeader
           title={t("settings:taskBehavior")}

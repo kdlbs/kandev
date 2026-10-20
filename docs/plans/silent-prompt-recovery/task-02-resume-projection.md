@@ -95,7 +95,7 @@ Results and run them. A “no tests to run” package is not verification eviden
 - New lifecycle `native_resume_projection_wait_test.go`
 - `apps/backend/internal/orchestrator/session_delivery_recovery.go` only if
   necessary to preserve context/ownership at the proof boundary
-- Existing `native_resume_proof_test.go`, `native_resume_readiness_test.go`,
+- Existing `native_resume_proof_status_test.go`, `native_resume_delivery_test.go`,
   and `session_native_delivery_recovery_test.go`
 - New desktop and phone native-resume-projection E2E files and fixture support
 - `docs/public/agents-and-profiles.md`
@@ -156,7 +156,10 @@ Verification passed:
 - The final lifecycle `NativeResumeProjectionWait|NativeResumeProof` race run
   passed after the client-lease and lint corrections.
 - Changed-package Go lint: zero issues.
-- Desktop Resume: 2 passed. Phone Resume and cancellation reload: 3 passed.
+- After integrating current main, the focused lifecycle/orchestrator race
+  filter also included slow native restore, stream retry, and cleanup.
+- Final desktop and phone browser runs: 5 passed on each viewport, covering
+  both work orders. The upstream equivalent SQLite timeout fix was retained.
 - TypeScript, targeted ESLint, and 21 focused action/recovery UI tests passed.
 - Public docs, catalog validation, specification lint, all 36 specification-linter
   tests, documentation coverage, and whitespace checks passed.

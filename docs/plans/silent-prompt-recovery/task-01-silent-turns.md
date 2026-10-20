@@ -149,11 +149,12 @@ Implemented and verified.
   Both chat action suites pass (57 tests). Targeted eslint and i18n checks pass.
 - Typecheck passes with `NODE_OPTIONS=--max-old-space-size=8192`; the default
   4 GB Node heap was insufficient for the current repository.
-- Real-watchdog browser coverage passes: four desktop scenarios passed together,
-  then the corrected uncertainty scenario passed separately; all four phone
-  scenarios passed together. The shorter timer requires the E2E runtime profile.
-  Phone screenshots were inspected. Desktop, narrow fine-pointer, and touch
-  geometry retain the intended control sizes.
+- Final browser checks after integrating current main passed on desktop and
+  phone: five cases on each viewport cover both work orders. This includes
+  resumed output, confirmed cancellation, uncertain cancellation, and Resume.
+  The shorter timer requires the E2E runtime profile. Desktop and phone
+  screenshots were inspected; narrow fine-pointer and touch geometry retain
+  the intended control sizes.
 - The uncertainty fixture loses the runtime during cancellation and rejects
   native resume. Delayed provider acknowledgement alone can still produce a
   confirmed durable cancellation, and runtime replacement can restore native

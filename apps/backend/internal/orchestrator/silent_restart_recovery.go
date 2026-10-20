@@ -298,11 +298,12 @@ func (s *Service) startSilentRestoreCandidate(
 		)
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
+	ownedResumeCtx = context.WithValue(ownedResumeCtx, silentRestoreStartupContextKey{}, true)
 	execution, err := s.resumeTaskSessionWithContinuationAndReservation(
 		ownedResumeCtx, inputs.task.ID, inputs.session.ID, options, commitWhenReady, reservation,
 	)
 	if err != nil {
-		return err
+		return errors.Join(err, s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
@@ -658,12 +659,23 @@ func (s *Service) silentRestoreCandidateReady(
 	default:
 		return nil, false, nil
 	}
-	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
-		return nil, false, nil
-	}
 	nativeID := s.currentACPSessionID(inputs.session.ID)
 	if nativeID == "" || nativeID != checkpoint.SourceGeneration.NativeSessionID {
 		return nil, false, nil
+	}
+	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+		recoverer, supported := s.agentManager.(silentRestoreStreamRecoverer)
+		if !supported {
+			return nil, false, nil
+		}
+		if err := recoverer.RecoverSilentRestoreCandidateStream(
+			ownerCtx, inputs.session.ID, checkpoint.CandidateExecutionID, nativeID,
+		); err != nil {
+			return nil, false, err
+		}
+		if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+			return nil, false, nil
+		}
 	}
 	return ownerCtx, true, nil
 }
@@ -740,6 +752,13 @@ func (s *Service) markSilentRestoreCandidateDead(
 	if !ok || prober.RowLiveness(running) != models.ProcessLivenessDead {
 		return models.SilentRestoreCheckpoint{}, errors.New("candidate execution liveness is not proven dead")
 	}
+	return s.recordSilentRestoreCandidateDead(ctx, store, attemptID, expected, inputs)
+}
+
+func (s *Service) recordSilentRestoreCandidateDead(
+	ctx context.Context, store taskrepo.SilentRestoreRepository, attemptID string,
+	expected models.SilentRestoreCheckpoint, inputs *silentRestoreInputs,
+) (models.SilentRestoreCheckpoint, error) {
 	ownerCtx, err := s.revalidateSilentRestoreInputs(ctx, inputs, expected)
 	if err != nil {
 		return models.SilentRestoreCheckpoint{}, err

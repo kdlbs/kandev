@@ -3973,6 +3973,203 @@
           "expected_task_ids": ["summary-running", "recent-idle", "raw-state-running"]
         }
       ]
+    },
+    {
+      "name": "repository-none",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "none",
+          "title": "A no repository",
+          "repository_ids": []
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "first",
+          "title": "B first repository",
+          "repository_ids": [
+            "repo-a"
+          ]
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "second",
+          "title": "C second repository",
+          "repository_ids": [
+            "repo-b"
+          ]
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "other-workflow",
+          "title": "D other workflow",
+          "repository_ids": []
+        }
+      ],
+      "cases": [
+        {
+          "name": "none-in",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "in",
+                "value": [
+                  "undefined"
+                ]
+              },
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "none"
+          ]
+        },
+        {
+          "name": "none-and-repository-in",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "in",
+                "value": [
+                  "undefined",
+                  "org/alpha"
+                ]
+              },
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "none",
+            "first"
+          ]
+        },
+        {
+          "name": "none-is-not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "is_not",
+                "value": "undefined"
+              },
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "first",
+            "second"
+          ]
+        },
+        {
+          "name": "none-and-repository-not-in",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "not_in",
+                "value": [
+                  "undefined",
+                  "org/alpha"
+                ]
+              },
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "second"
+          ]
+        }
+      ]
     }
   ]
 }
