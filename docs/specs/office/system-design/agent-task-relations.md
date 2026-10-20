@@ -179,12 +179,14 @@ The skills document it as a pattern to avoid. Detecting it is out of scope.
 
 `apps/backend/cmd/agentctl/kandev_task.go` `taskCreate`:
 
-- Removes the `--priority`, `--workspace-group-id`,
-  `--default-child-workspace`, and `--default-child-ordering` definitions.
-  The `flag` package then rejects them
-  as unknown flags before any client is created (`AC-…-004.2`).
-- Keeps `--blocked-by` and `--workspace-mode` (help: `inherit_parent or
-  new_workspace`), and deletes the reject-before-send loop.
+- Supports `--blocked-by` and `--workspace-mode` (help: `inherit_parent` for
+  subtasks or `new_workspace`).
+- Keeps the `--priority`, `--workspace-group-id`, `--default-child-workspace`,
+  and `--default-child-ordering` definitions and their existing
+  reject-before-send loop, now limited to those four flags. Each fails with
+  `--<flag> is not supported by Office runtime task create` before any client
+  is created (`AC-…-004.2`). Their future is tracked in
+  [#4613](https://github.com/kdlbs/kandev/issues/4613).
 - Splits `--blocked-by` on commas and trims each entry. An empty entry fails
   with `--blocked-by contains an empty task ID` (`AC-…-004.4`). Non-empty lists
   are sent as `blocked_by` (a JSON array) and a non-empty mode as

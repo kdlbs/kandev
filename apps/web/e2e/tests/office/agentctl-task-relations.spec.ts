@@ -179,7 +179,8 @@ test.describe("agentctl kandev task create relations", () => {
     ]) {
       const result = runCLI(env, ["task", "create", "--title", "Unsupported", flag, "x"]);
       expect(result.exitCode, `${flag}: ${result.output}`).toBe(1);
-      expect(result.output).toContain("flag provided but not defined");
+      expect(result.output).toContain(`${flag} is not supported by Office runtime task create`);
+      expect(result.taskId).toBeUndefined();
     }
   });
 });

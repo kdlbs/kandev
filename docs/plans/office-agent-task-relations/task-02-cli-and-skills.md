@@ -22,17 +22,19 @@ system_design:
 ## Summary
 
 Make `agentctl kandev task create` send `--blocked-by` and `--workspace-mode`,
-and remove the four flags the runtime still refuses. Update the Office skills, context, specs, and public docs that
+and keep refusing the four flags the runtime still rejects, as it does today. Update the Office skills, context, specs, and public docs that
 describe the command.
 
 ## In scope
 
-- `taskCreate`: delete the `--priority`, `--workspace-group-id`,
-  `--default-child-workspace`, and `--default-child-ordering` definitions and the reject-before-send loop. Parse
+- `taskCreate`: keep the `--priority`, `--workspace-group-id`,
+  `--default-child-workspace`, and `--default-child-ordering` definitions and
+  limit the reject-before-send loop to them. Parse
   `--blocked-by` (split, trim, reject empty entries) into a JSON array. Send a
   non-empty `--workspace-mode`. Update help text to the accepted values.
-- CLI tests: payload shape for each flag, unknown-flag failure for each removed
-  flag with no request sent, an empty `--blocked-by` entry failing before send,
+- CLI tests: payload shape for each flag, the existing
+  `--<flag> is not supported by Office runtime task create` refusal for each
+  still-refused flag with no request sent, an empty `--blocked-by` entry failing before send,
   and server `400` / `403` bodies surfacing through `handleResponse`.
 - Skills: `kandev-protocol/SKILL.md` (example and command table) and
   `kandev-task-ops/references/tasks.md`. Document the flags, the blocker scope
@@ -52,8 +54,8 @@ describe the command.
 ## Acceptance
 
 - CLI tests prove the two flags reach `/api/v1/office/runtime/tasks` with
-  the documented JSON keys, and that the removed flags fail as unknown before
-  any HTTP request.
+  the documented JSON keys, and that the still-refused flags fail with their
+  existing message before any HTTP request.
 - Skill and prompt sync tests pass, and no bundled skill mentions `--priority`,
   `--workspace-group-id`, `--default-child-workspace`, or
   `--default-child-ordering` for `task create`.
@@ -129,3 +131,17 @@ Sequential after 01.
 - Verification: `go test ./cmd/agentctl/...` (also under `-race`) and
   `go test ./internal/office/skills/...` passed; the removed-flag grep printed
   nothing; `list-docs.py validate` and `lint-spec-files.py --all` passed.
+
+### Correction
+
+- Removing the four unsupported flags was out of scope for #4547 and was
+  reverted at the user's request. `taskCreate` again defines `--priority`,
+  `--workspace-group-id`, `--default-child-workspace`, and
+  `--default-child-ordering` with their original help text, and refuses each
+  with `--<flag> is not supported by Office runtime task create` before any
+  request. Whether to support or remove them is tracked in #4613.
+- New regression `TestTaskCreate_StillRefusesUnsupportedFlagsWithRuntimeMessage`
+  failed first (the flags were undefined) and passes after the restore.
+  `AC-OFFICE-AGENT-TASK-RELATIONS-004.2` and the design's CLI surface were
+  updated to match. The skills never documented these flags, so they were
+  unchanged.

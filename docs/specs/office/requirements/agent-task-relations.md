@@ -104,20 +104,22 @@ them when the children complete.
   value, including `shared_group`, the system shall create no task and return a
   bad-request status naming the field and the accepted values.
 
-### REQ-OFFICE-AGENT-TASK-RELATIONS-004: Honest create surface
+### REQ-OFFICE-AGENT-TASK-RELATIONS-004: CLI support for relation fields
 
-**Intent:** The CLI and runtime endpoint advertise only what they honor, so an
-agent is never told a field exists and then refused for using it.
+**Intent:** The CLI sends the two relation fields the runtime now honors. Fields
+the runtime still refuses keep their existing pre-send refusal; whether to
+support or remove them is tracked in
+[#4613](https://github.com/kdlbs/kandev/issues/4613).
 
 #### Acceptance criteria
 
 - **AC-OFFICE-AGENT-TASK-RELATIONS-004.1:** `kandev task create` shall offer
   `--blocked-by` (comma-separated task IDs) and `--workspace-mode`, and shall
   send them to runtime task create.
-- **AC-OFFICE-AGENT-TASK-RELATIONS-004.2:** `kandev task create` shall not
-  define `--priority`, `--workspace-group-id`, `--default-child-workspace`, or
-  `--default-child-ordering`; passing one shall fail as an unknown flag before
-  any request is sent.
+- **AC-OFFICE-AGENT-TASK-RELATIONS-004.2:** When `kandev task create` receives
+  `--priority`, `--workspace-group-id`, `--default-child-workspace`, or
+  `--default-child-ordering`, it shall fail with `--<flag> is not supported by
+  Office runtime task create` before any request is sent, as it does today.
 - **AC-OFFICE-AGENT-TASK-RELATIONS-004.3:** When runtime task create receives
   `priority`, `workspace_group_id`, `default_child_workspace`, or
   `default_child_ordering`, the system shall create no task and return a
@@ -127,7 +129,7 @@ agent is never told a field exists and then refused for using it.
   sending a request.
 - **AC-OFFICE-AGENT-TASK-RELATIONS-004.5:** The Office skills and context that
   document `task create` shall describe the supported fields and the blocker
-  scope rule, and shall not mention the removed flags.
+  scope rule, and shall not document the unsupported flags as usable.
 
 ## Out of scope
 
@@ -137,7 +139,9 @@ agent is never told a field exists and then refused for using it.
   `REQ-OFFICE-AGENT-TASK-RELATIONS-002` is intentionally unassigned and is not
   reused.
 - `priority`, `workspace_group_id` / `shared_group`, `default_child_workspace`,
-  and `default_child_ordering` on runtime task create.
+  and `default_child_ordering` on runtime task create, and whether the CLI keeps
+  defining their flags (tracked in
+  [#4613](https://github.com/kdlbs/kandev/issues/4613)).
 - Changing how an omitted `workspace_mode` resolves on any child-creation path.
   The HTTP task API applies a parent's `default_child_workspace`, while MCP
   `create_task_kandev` and `CreateChildTask` (the Office agent path and workflow

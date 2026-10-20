@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +74,54 @@ func TestTaskCreate_SurfacesServerRelationRejection(t *testing.T) {
 	}
 	if body := taskCreateBody(t, captured); body["workspace_mode"] != "shared_group" {
 		t.Fatalf("workspace_mode = %#v, want shared_group passed through", body["workspace_mode"])
+	}
+}
+
+// captureCLIStderr runs fn with os.Stderr redirected and returns what it wrote.
+func captureCLIStderr(t *testing.T, fn func() int) (int, string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	original := os.Stderr
+	os.Stderr = w
+	code := fn()
+	_ = w.Close()
+	os.Stderr = original
+	out, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+	return code, string(out)
+}
+
+// The runtime still rejects these fields; the CLI keeps defining them and
+// refuses them before sending, as it did before blocker and workspace-mode
+// support. Whether to support or remove them is tracked separately.
+//
+// @covers AC-OFFICE-AGENT-TASK-RELATIONS-004.2
+func TestTaskCreate_StillRefusesUnsupportedFlagsWithRuntimeMessage(t *testing.T) {
+	for _, flagName := range []string{"priority", "workspace-group-id", "default-child-workspace", "default-child-ordering"} {
+		t.Run(flagName, func(t *testing.T) {
+			captured := setupMockTransport(t, http.StatusCreated, `{"task_id":"new-1"}`)
+			t.Setenv("KANDEV_API_URL", "http://kandev.test")
+			t.Setenv("KANDEV_API_KEY", "signed-run-token")
+
+			code, stderr := captureCLIStderr(t, func() int {
+				return runKandevCLI([]string{"task", "create", "--title", "Unsupported", "--" + flagName, "value"})
+			})
+			if code == 0 {
+				t.Fatal("expected unsupported flag to fail")
+			}
+			want := "--" + flagName + " is not supported by Office runtime task create"
+			if !strings.Contains(stderr, want) {
+				t.Fatalf("stderr = %q, want %q", stderr, want)
+			}
+			if captured.Method != "" {
+				t.Fatalf("server contacted for unsupported flag: %s %s", captured.Method, captured.Path)
+			}
+		})
 	}
 }

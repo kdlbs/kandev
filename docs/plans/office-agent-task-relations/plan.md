@@ -18,8 +18,9 @@ Let Office agents declare `blocked_by` and `workspace_mode` when they create a
 task through the signed runtime endpoint (GitHub issue #4547, narrowed by the
 author's comment). Blockers are scoped by the shared read relation. An explicit
 `workspace_mode: new_workspace` gives an agent-created child its own worktree.
-Nothing changes when the fields are omitted. The CLI stops defining the four
-fields that remain unsupported, including `default_child_workspace`.
+Nothing changes when the fields are omitted. The four fields the runtime still
+refuses keep their existing CLI definitions and pre-send refusal; their future
+is tracked in #4613.
 
 ## Confirmed current behavior
 
@@ -60,7 +61,7 @@ Waves mark order only; they do not authorize subagents.
   error mapping, and audit events.
 - Task-service tests cover `CreateChildTask` policy resolution and edge
   creation with rollback.
-- `cmd/agentctl` tests cover flag parsing, payloads, and removed flags.
+- `cmd/agentctl` tests cover flag parsing, payloads, and the still-refused flags.
 - The Playwright `agentctl-cli.spec.ts` suite drives the real CLI binary
   against the backend to provide end-to-end evidence.
 
