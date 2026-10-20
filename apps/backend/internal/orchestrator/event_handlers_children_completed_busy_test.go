@@ -122,6 +122,47 @@ func TestAutoStartAgentCallback_QueuesBusyRejectionWhenTurnStarted(t *testing.T)
 	require.Contains(t, entries[0].Content, busyParentStepPrompt)
 }
 
+// TestAutoStartAgentCallback_QueuesAfterFinalBusyRejection covers a turn that
+// starts during the last allowed launch: the prompt is queued rather than the
+// rejection being returned.
+func TestAutoStartAgentCallback_QueuesAfterFinalBusyRejection(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _ := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	launches := 0
+	cb := &autoStartAgentCallback{svc: svc, launch: func(context.Context, engine.ActionInput) error {
+		launches++
+		if launches == maxBusyAutoStartAttempts {
+			require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateRunning, ""))
+		}
+		return fmt.Errorf("failed to prompt session: %w", ErrAgentPromptInProgress)
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.NoError(t, err)
+	require.Equal(t, maxBusyAutoStartAttempts, launches)
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, busyParentSessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+}
+
+// TestAutoStartAgentCallback_StopsAfterBoundedBusyRejections keeps an idle
+// session that keeps refusing prompts as busy from retrying without bound.
+func TestAutoStartAgentCallback_StopsAfterBoundedBusyRejections(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _ := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	launches := 0
+	cb := &autoStartAgentCallback{svc: svc, launch: func(context.Context, engine.ActionInput) error {
+		launches++
+		return fmt.Errorf("failed to prompt session: %w", ErrAgentPromptInProgress)
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.ErrorIs(t, err, ErrAgentPromptInProgress)
+	require.Equal(t, maxBusyAutoStartAttempts, launches)
+}
+
 // TestAutoStartAgentCallback_KeepsHandoffClaimedByRefusedLaunch covers a
 // launch that claims the step handoff and is then refused as busy: the queued
 // prompt that replaces it still carries that handoff.

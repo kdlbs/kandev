@@ -40,7 +40,8 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
    already running, prompt in progress, or session not promptable), the prompt
    is still owed, so the callback starts over: it queues the prompt if the
    session is now mid-turn, or launches again if that turn has already ended.
-   It makes at most `maxBusyAutoStartAttempts` (3) launch attempts. A failure
+   It makes at most `maxBusyAutoStartAttempts` (3) launch attempts, and checks
+   for a running turn once more after the last busy rejection. A failure
    after the agent accepted the prompt, such as a stream disconnect or an
    uncertain delivery, is returned unchanged, so a prompt that may already have
    been delivered is never queued or sent again.

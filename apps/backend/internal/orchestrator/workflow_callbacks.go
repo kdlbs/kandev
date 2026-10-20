@@ -299,14 +299,18 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 	// attempt shares one handoff claim so a refused attempt cannot consume it.
 	handoffOnce := newStepHandoffOnce()
 	ctx = withStepHandoffOnce(ctx, in.State.TaskID, in.Step.ID, handoffOnce)
+	// Each busy rejection, including the last, is followed by a mid-turn check.
 	var err error
-	for attempt := 0; attempt < maxBusyAutoStartAttempts; attempt++ {
+	for launches := 0; ; launches++ {
 		queued, queueErr := c.queueStepPromptIfBusy(ctx, in, handoffOnce)
 		if queueErr != nil {
 			return engine.ActionResult{}, queueErr
 		}
 		if queued {
 			return engine.ActionResult{}, nil
+		}
+		if launches == maxBusyAutoStartAttempts {
+			break
 		}
 		err = c.launchStep(ctx, in)
 		if err == nil {
