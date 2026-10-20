@@ -35,16 +35,13 @@ accepts the prompt, so the queue delivers it after the turn.
 ## Acceptance
 
 1. A parent running a turn when its last child completes is not prompted
-   mid-turn and gets exactly one queued step prompt, delivered after the turn,
-   even when the completion is delivered twice.
-2. The children-completed operation is marked applied once the prompt is
-   queued.
-3. A turn that ends after the session read and before the queue insert still
-   gets the prompt delivered once.
-4. A launch refused as busy is retried when the turn has ended and queued when
-   a turn is running; a failure after prompt acceptance is returned without
-   queueing.
-5. A step handoff claimed by a refused launch is carried by the retry or the
+   mid-turn, gets exactly one queued step prompt delivered after the turn (even
+   when the completion is delivered twice or the turn ends while the prompt is
+   being queued), and the children-completed operation is marked applied.
+2. A launch refused as busy before the agent accepts the prompt is queued when
+   a turn is running and launched again when it has ended; a failure after
+   acceptance is returned without queueing.
+3. A step handoff claimed by a refused launch is carried by the retry or the
    queued prompt.
 
 ## Verification
