@@ -127,11 +127,15 @@ bounded and cancellation-safe behavior. Do not add a general retry service.
 
 When the cursor catches up, discard the partial proof and rerun the full
 existing authenticated status, SQL/journal inventory, retirement, cursor and
-final-status checks. Revalidate captured identity before returning. Same-owner
-stream progress may require another proof attempt within the same budget;
-changed identity, storage/authentication failure, unresolved live work, and
-conflicting evidence fail immediately. Never retry native initialization or
-send a prompt as part of this loop. Empty streams keep their current behavior.
+final-status checks. Revalidate captured identity before returning. One full
+proof with equal cursors and matching opening/closing authenticated status is
+sufficient; no additional quiet polling interval is required. If same-owner
+stream progress invalidates that proof, retry no sooner than the next 200 ms
+poll, using the original deadline. A stream that prevents a stable full proof
+throughout the budget times out and stays blocked. Changed identity,
+storage/authentication failure, unresolved live work, and conflicting evidence
+fail immediately. Never retry native initialization or send a prompt as part of
+this loop. Empty streams keep their current behavior.
 
 The existing transactional SQL resolver remains the final authority. Resolving
 one block cannot clear unrelated restrictions. Timeout returns the typed blocked
@@ -144,7 +148,10 @@ The browser retains its existing 60-second manual Resume timeout and busy
 controls on desktop and phone. No extra action or new layout is needed.
 Tests use a projection barrier and real journal/SQL state to prove one-request
 success, timeout, cancellation, owner change, same-owner progress, unavailable
-storage, no historical resend, and preservation of unrelated blocks.
+storage, no historical resend, and preservation of unrelated blocks. Continuously
+advancing status must time out on the original deadline without a tight retry
+loop. Unresolved journal work, even with a lagging cursor, must return blocked
+before starting a wait or scheduling a retry.
 
 ## Failure and compatibility
 

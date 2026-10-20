@@ -114,12 +114,19 @@ acceptance/metadata/stale-generation cases in `stall_activity_test.go`.
 Handler tests in `event_handlers_stall_test.go` prove no stop, failure, or
 duplicate notice. Cancellation integration tests prove both terminal
 acknowledgment and unresolved delivery with no resend. Snapshot tests assert
-bounded fields and exclusion of synthetic prompt/token secrets.
+bounded fields, rune-aligned truncation, rejection of malformed UTF-8, and
+exclusion of synthetic prompt/token secrets.
 These cover Agents criteria .1-.6, .8-.9 and .12-.15.
 
 Task 02 adds `native_resume_projection_wait_test.go` in lifecycle and
 orchestrator. Tests cover catch-up, deadline, cancellation, identity change,
-storage error, and fresh full-proof validation. Real SQL/journal integration
+storage error, and fresh full-proof validation.
+`TestNativeResumeProjectionWaitRejectsUnresolvedJournal` supplies authenticated
+unresolved journal work and a lagging cursor, then asserts an immediate blocked
+result with no wait or scheduled retry.
+`TestNativeResumeProjectionWaitContinuousProgressExhaustsOriginalBudget` proves
+that repeated same-owner progress respects the 200 ms retry cadence and original
+deadline. Real SQL/journal integration
 retains the unknown submission and releases only the matching block.
 These cover Platform criteria .5, .9, .12, .25 and .26.
 
@@ -179,6 +186,10 @@ PR review corrections: clarify that forced teardown is superseded and include
 the named accepted-silence regression in Task 01's test filter. A direct regex
 check confirmed coverage. Catalog validation, all 36 linter tests, specification
 lint, and diff whitespace checks passed after these documentation changes.
+Follow-up review clarifications define valid UTF-8 truncation, stable full-proof
+completion and paced retries within one deadline, and explicit unresolved-journal
+and continuous-progress regression cases. Catalog validation, all 36 linter
+tests, specification lint, and diff whitespace checks passed for this revision.
 
 ## Risks
 

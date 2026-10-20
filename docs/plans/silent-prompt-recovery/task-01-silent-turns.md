@@ -44,7 +44,8 @@ cancel action, and retain uncertainty when cancellation cannot confirm outcome.
   settlement. Reuse its bounded waits; repair only behavior that violates
   the referenced contract. Do not use `CancelTurn`'s internal success mapping
   as evidence that a durable submission has settled.
-- Capture the bounded first-stall snapshot defined in the design.
+- Capture the bounded first-stall snapshot defined in the design. Test valid
+  multibyte truncation within the byte cap and omission of malformed UTF-8.
 - Update desktop/phone E2E, public recovery guidance in
   `docs/public/agents-and-profiles.md`, and localization only if new copy is
   necessary. Preserve unrelated completed plan results.

@@ -155,9 +155,11 @@ category only if already observed. Unknown fields stay absent or explicitly
 unknown. Do not infer bundled Codex version from the host CLI version.
 
 Use fixed enums, typed numbers, and strings capped at 128 UTF-8 bytes, with a
-4 KiB total encoded record limit. Optional values that fail validation are
-omitted. No prompts, environment, URLs, paths, tool arguments, free-form provider
-errors, raw ACP frames or private logs enter the record. Use the existing
+4 KiB total encoded record limit. Omit malformed UTF-8 input. Truncate valid
+strings at the last complete rune boundary within the byte cap. Optional values
+that fail validation are omitted. No prompts, environment, URLs, paths, tool
+arguments, free-form provider errors, raw ACP frames or private logs enter the
+record. Use the existing
 rotated backend log retention; no new table, file writer or high-cardinality
 metric. Snapshot failure is logged as a fixed category and cannot change the
 turn, notice or cancel availability.
@@ -181,7 +183,9 @@ Use real cancellation and journal boundaries for acknowledged cancellation and
 unknown outcomes. Desktop and phone E2E must produce a real notice through the
 controlled mock path, activate Cancel, and check reload and successor isolation.
 Diagnostic tests inject secret-looking values and assert the allowlist and size
-bounds. The work orders own commands and implementation results.
+bounds. Include multibyte characters crossing the byte cap and malformed UTF-8;
+retained strings must stay valid UTF-8 within the cap. The work orders own
+commands and implementation results.
 
 ## Related decisions
 

@@ -33,6 +33,13 @@ events to finish projection. Rebuild recovery evidence before resolving a block.
   cursor and transactional resolution checks. Do not compare error text.
 - Add lifecycle tests with deterministic timing and real SQL/journal
   orchestrator integration, then desktop and phone E2E for one-click Resume.
+- Add `TestNativeResumeProjectionWaitRejectsUnresolvedJournal`: authenticated
+  unresolved journal work plus cursor lag returns blocked before any wait or
+  scheduled retry.
+- Add `TestNativeResumeProjectionWaitContinuousProgressExhaustsOriginalBudget`:
+  repeated same-owner progress cannot reset the deadline or cause a tight loop.
+  One complete proof with matching opening/closing status succeeds without
+  waiting for an extra quiet polling interval.
 - Update the public recovery guidance introduced by Task 01.
 
 ## Out of scope
@@ -116,3 +123,9 @@ sequential
 ## Results
 
 Pending. No implementation or product verification performed.
+
+Design review clarification: unresolved journal work must fail before waiting;
+continuous same-owner progress uses the original deadline and paced retries.
+Both named regressions match this work order's `NativeResume` test filter.
+Catalog validation, specification lint, 36 linter tests, and whitespace checks
+passed. Executable regressions remain implementation work.
