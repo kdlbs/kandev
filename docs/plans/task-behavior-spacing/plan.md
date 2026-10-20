@@ -148,5 +148,5 @@ Public documentation needs no text change because labels, navigation, and settin
 ### PR review follow-up
 
 Both Claude suggestions were applied: the private radio group now passes classes directly, and its row caller declares `grid` explicitly.
-The existing rendered layout is unchanged. Focused verification passed: 4 component tests, scoped ESLint, a fresh Vite build, 3 desktop profile cases, and 4 phone/touch cases.
+The existing rendered layout is unchanged. Focused verification passed: 4 component tests, scoped ESLint, a fresh Vite build, 3 desktop profile cases, and 5 phone/touch cases.
 See the work order for commands. Remote CI and review completion are tracked on the PR.
