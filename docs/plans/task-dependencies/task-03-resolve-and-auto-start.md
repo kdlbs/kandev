@@ -102,3 +102,11 @@ Mark this task `in_progress` before the RED tests and `done` only after the
 listed commands pass. Record which events the subscriber listens to, where
 startup reconciliation runs relative to the WIP queue reconciler, its batch
 bound, and the race-test mechanism in this file and `plan.md`.
+
+## Prepared-session repair
+
+Issue #4579's focused follow-up is tracked in
+[dependency prepared session reuse](../dependency-prepared-session/plan.md).
+Its regression covers an opened blocked task, whose existing workspace-only
+primary must become the dependency launch recipient when eligible. Original
+completion evidence above remains historical.

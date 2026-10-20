@@ -1449,6 +1449,7 @@ func (s *Service) StartTaskWithLaunchContext(
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
+	reusePreparedPrimary bool
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
@@ -1881,6 +1882,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if !promoted {
 			selectedExplicitSession = nil
 		}
+	}
+	if sessionID == "" && opts.reusePreparedPrimary && !isOfficeTask && explicitStartRoute == nil {
+		var releasePrepared func()
+		sessionID, releasePrepared, err = s.claimPreparedDependencyPrimary(ctx, task.ID, agentProfileID, executorID, executorProfileID)
+		if err != nil {
+			return nil, err
+		}
+		defer releasePrepared()
 	}
 	if sessionID == "" {
 		if explicitStartRoute != nil {
