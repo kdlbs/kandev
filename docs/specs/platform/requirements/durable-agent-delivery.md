@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-09-10
-updated: 2026-10-11
+updated: 2026-10-20
 owners:
   - kandev
 ---
@@ -28,8 +28,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 **Intent:** Events that agentctl accepts must survive a supported process restart.
 
-**User story:** As an operator, I want durable transport records, so that a disconnect does not erase accepted output.
-
 #### Acceptance criteria
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.1:** When durable delivery is active, agentctl must commit normalized events before publication and recover committed records after a process crash.
@@ -41,8 +39,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 **Intent:** Durability guarantees must match the actual executor storage lifetime.
 
-**User story:** As an operator, I want explicit storage limits, so that I know which failures permit recovery.
-
 #### Acceptance criteria
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-002.1:** When an executor advertises durable delivery, its journal must survive agentctl replacement within the retained environment. Native harness state must remain separate.
@@ -53,8 +49,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 **Intent:** A transport retry must not run the same logical prompt twice.
 
-**User story:** As a user, I want safe prompt delivery, so that a lost response does not repeat tool actions.
-
 #### Acceptance criteria
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-003.1:** When the backend repeats an accepted submission identifier with the same payload hash, agentctl must return its durable state without another harness dispatch.
@@ -63,8 +57,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004: Cursor-based event delivery
 
 **Intent:** Reconnect must restore committed events in order with bounded memory.
-
-**User story:** As a user, I want missing output after reconnect, so that the conversation remains complete.
 
 #### Acceptance criteria
 
@@ -80,8 +72,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 **Intent:** Replay must not duplicate messages, turn completion, or workflow effects.
 
-**User story:** As a user, I want one result per event, so that reconnect does not repeat task actions.
-
 #### Acceptance criteria
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.1:** When the backend acknowledges an event, the event must already exist in its durable inbox. Duplicate delivery must produce one canonical message effect.
@@ -93,8 +83,6 @@ This draft defines proposed behavior. It does not claim that the current impleme
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006: Disconnect reconciliation
 
 **Intent:** A broken stream is not proof that a prompt failed.
-
-**User story:** As a user, I want accurate reconnect status, so that Kandev does not restart work that already ran.
 
 #### Acceptance criteria
 
@@ -120,11 +108,12 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23:** Recovery shall verify current ownership, process termination, native identity, and independent admission restrictions. Missing or conflicting evidence shall preserve a blocked session. Archived, completed, Office-owned, and automation-owned sessions shall not enter ordinary automatic chat recovery.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.24:** Repeated restart or interrupted recovery shall reuse durable progress without duplicate restore or prompt dispatch. Resolved recovery metadata shall not trigger another recovery attempt or stale-owner warning. One blocked candidate shall not prevent other eligible candidates from recovering.
 
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.25:** When explicit native Resume encounters only a verified event-projection delay, it shall wait up to 10 seconds within the request deadline. If projection catches up and current recovery evidence remains valid, that request shall complete without a second click or replay of the interrupted instruction.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.26:** While that wait runs, desktop and phone shall retain busy recovery controls. Timeout, cancellation, changed ownership, conflicting evidence, live work, or unavailable storage shall preserve the recovery block and existing failure feedback. A late result shall not resolve an unrelated block or alter a successor session.
+
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 
 **Intent:** Compatible installations must receive durable delivery without an operator toggle or misleading fallback.
-
-**User story:** As an operator, I want explicit capability negotiation, so that mixed versions do not silently lose durability.
 
 #### Acceptance criteria
 

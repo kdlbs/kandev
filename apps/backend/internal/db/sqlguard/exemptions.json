@@ -1,5 +1,6 @@
 {
   "exemptions": [
+    {"file": "internal/db/schema_tables.go", "symbol": "ExistingSQLiteTablesContext", "rule": "sqlite-catalog", "reason": "Central SQLite-only table inventory rejects other drivers before querying the catalog"},
     {"file": "internal/launcher/backup_sqlite.go", "symbol": "verifyProductionSnapshot", "rule": "sqlite-catalog", "reason": "Launcher production snapshots open only the sqlite3 driver read-only and require SQLite integrity verification before publication"},
     {"file": "internal/task/inventoryrepair/alias_dependencies.go", "symbol": "inspectAliasSchema", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair observes the complete schema before allowing dependent-row removal"},
     {"file": "internal/task/inventoryrepair/alias_foreign_keys.go", "symbol": "aliasForeignKeyQuery", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair records existing violations before fencing and rejects new violations before publication"},

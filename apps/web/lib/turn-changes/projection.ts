@@ -24,6 +24,13 @@ export type TurnChangeSummaryProjection =
   | { visible: false; state: "hidden" }
   | { visible: true; state: "preparing" | "unavailable" | "expired" | "ready" };
 
+export function isTurnChangeCardVisible(summary: TurnChangeSetSummary): boolean {
+  return (
+    projectTurnChangeSummary(summary).visible &&
+    (summary.availability === "pending" || summary.file_count > 0)
+  );
+}
+
 export function projectTurnChangeSummary(
   summary: TurnChangeSetSummary,
 ): TurnChangeSummaryProjection {

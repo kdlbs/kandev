@@ -30,6 +30,21 @@ An aborted creation leaves no partially configured provider. If the connection f
 reload the settings to confirm the saved state before retrying, especially when adding a provider.
 Saves for separate providers are independent.
 
+## Use CLI passthrough on a phone
+
+Open a task running in CLI passthrough mode. Its connected terminal shows the
+same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
+**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+
+Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
+to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
+to the visible agent terminal and do not create a chat message.
+
+The row reserves space below terminal output and stays above the software
+keyboard. Opening **Chat** or **Comments** hides the row and clears modifiers.
+It returns when those panels close and the terminal is connected. Switching
+away from the terminal also clears modifiers. Desktop input remains unchanged.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -194,6 +209,14 @@ Workflow-step launches, profile switches, context resets, and replacement
 launches keep one matching saved-prompt expansion in the stored message and
 agent prompt. A queued workflow prompt resolves references when it drains, and
 its recovery launch uses that same definition.
+
+Skill content can reference saved prompts too, so shared rules live in one
+saved prompt instead of being copied into every skill. When Kandev delivers a
+skill to an agent as `SKILL.md`, the file keeps your text, including each
+`@name`, and appends the current content of each referenced prompt in a block
+at the end. This applies to Office and Kanban launches on every executor.
+Editing the saved prompt changes what the next launch delivers. The stored
+skill, the skill editor, and config export keep only the `@name` text.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 

@@ -22,9 +22,7 @@ Tasks owns the immutable interval and transcript anchor.
 Runtime provides ordered executor access; agentctl owns Git capture; user settings owns policy resolution.
 Frontend consumers reuse the existing diff renderer and responsive workbench.
 
-The [source inventory](../../../plans/turn-changed-files/plan.md#source-inventory) records inspected symbols and existing contracts.
-It explains why start-event subscribers and mutable Git status cannot establish immutable interval ordering.
-New package/type/API names below are proposed contracts unless the inventory identifies them as existing symbols.
+The [source inventory](../../../plans/turn-changed-files/plan.md#source-inventory) distinguishes existing and proposed contracts; mutable Git status and event subscribers cannot establish interval ordering.
 
 ## Requirement mapping
 
@@ -42,14 +40,14 @@ New package/type/API names below are proposed contracts unless the inventory ide
 
 Use `show_turn_changed_files` in storage and API; use `showTurnChangedFiles` in frontend state.
 The backend update request uses `*bool`. Serialization always includes the effective boolean, including false.
-Defaults start at true. JSON hydration overlays a supplied pointer only when present.
-Frontend normalization uses `?? true`, never `|| true`.
+New defaults start at false. JSON hydration overlays a supplied pointer only when present.
+Frontend defaults are false; partial hydration preserves current explicit values.
 There is no release flag and no `profiles.yaml` change.
 
 Add the field to models, DTO conversion, service patch/serialization, and store JSON encoding/decoding.
-An idempotent data migration inserts true only into payloads where the key is absent.
+The existing upgrade backfill inserts true only where the key is absent; it is unchanged.
 It preserves explicit false and existing user-settings revisions through the normal migration convention.
-Reads remain correct before the migration because missing values resolve to true.
+Unstored settings reads default false; saved true/false values retain their meaning.
 Cover SQLite JSON and PostgreSQL JSONB behavior, fresh databases, upgrades, and replay.
 
 Expose a narrow user-service method that returns effective settings user ID, enabled value, revision, and resolution kind.
@@ -75,14 +73,10 @@ Reserved queue labels such as workflow or system are not user IDs.
 The implementation must retain validated initiating identity through queue/deferred boundaries where current request context does not survive.
 It must not infer identity from the human assignee, task owner, or a connected socket.
 
-Add a small General chat preference component, following `TodoListPanelSettings` and `useSettingsSaveContributor`.
-Keep drafts, save revisions, canonical response hydration, discard, and in-flight edit preservation.
-Only the saved value controls cards and subsequent capture; toggling an unsaved draft does not change policy.
-Settings discovery links to the owning General chat group.
+Follow `TodoListPanelSettings` and `useSettingsSaveContributor` for General chat settings/discovery. Preserve drafts, revisions, canonical hydration, discard, and in-flight edits. Only saved values control cards and subsequent capture.
 
 ## Typed model
 
-Task model names below are proposed contracts.
 Create `TurnChangeSet`, `TurnRepositoryChangeSet`, `TurnFileChange`, and `TurnChangeAvailability` in a separate model file.
 
 `TurnChangeSet` includes:
@@ -346,12 +340,12 @@ Partial pagination cannot nominate an earlier assistant message as final.
 Add a separate terminal changes render item to `use-processed-messages` or an equivalent shared projection.
 Its output sits immediately after the final assistant row and outside any `turn_group` tool disclosure.
 Keep its stable key and measurement in native/virtualized transcript handling.
-Pending/failure rows use the same anchor. No-final-reply cancellation gets a terminal row with its outcome.
+Eligible pending/failure rows use the same anchor. Chat uses `isTurnChangeCardVisible`; history retains `projectTurnChangeSummary`. No-final-reply cancellation gets a terminal row with its outcome.
 Existing unread, bottom-follow, and reader-position claims remain authoritative.
 Capture updates invalidate only the affected row and preserve the reader's viewport anchor.
 
 The shared tree groups exact paths under checkout roots and aggregates known counts plus binary/unknown markers.
-Folders start collapsed; root files remain visible. Status icons have accessible labels.
+Folders start collapsed; root files stay visible; status icons have accessible labels.
 Full paths appear on focus/hover, with touch disclosure on phones.
 Open diff, folder toggles, and expand-all remain independent actions.
 
@@ -370,7 +364,8 @@ Availability projection:
 | Complete ready with nonzero file count | Card with navigation |
 | Complete ready with zero entries | Hidden card, retained successful zero record |
 | Disabled viewer, uncaptured turn, no eligible Git checkout | Hidden |
-| Failed/unavailable interval | Turn changes unavailable row; no successful zero |
+| Settled zero-entry summary | Hidden chat card; retain status and history selection |
+| Failed/unavailable interval with recorded files | Existing incomplete-state card |
 | Partial summary/content | Available changes totals, repository reasons, usable retained-file navigation |
 | Expired nonzero summary | Counts, History expired explanation, disabled Open diff |
 | Known overlap | Shared checkout note with interval detail |
@@ -426,7 +421,8 @@ The following defaults are proposed operational bounds, subject to measured vali
 | Stop/Cancel terminal preservation | 2 seconds after provider stop acknowledgement | Mark unpreserved content unavailable; permit cleanup |
 | Git capture concurrency | 2 per executor; 1 per actual checkout | Deadline includes queue time; no unbounded waiting |
 | Transient Git retry | At most 2 retries, 75/150 ms backoff inside outer deadline | Retry failed command on same private index; do not move accepted endpoints |
-| Raw enumeration | 8 MiB and 20,000 entries per checkout | Incomplete summary with reason; no deceptive ready zero |
+| Full-index inventory | 8 MiB output and existing deadline; no changed-entry count cap | Explicit bounded failure |
+| Candidate/changed enumeration | 8 MiB and 20,000 entries per checkout | Incomplete summary with reason; no deceptive ready zero |
 | New endpoint object bytes | 256 MiB per endpoint | Preflight eligible blob sizes and track written bytes; reject excess with size reason |
 | Retained text rendering | 8 MiB per blob, 4 MiB per patch variant, 32 MiB total export per turn | Explicit per-entry missing/truncated content; canonical counts retained |
 | HTTP content response | One file; 16 MiB uncompressed total | Typed limit response or bounded preview; decompression limit enforced |

@@ -3743,7 +3743,7 @@ func removeSessionMetadataKeyIfStateQuery(driver string) string {
 }
 
 // SetSessionACPSessionID mirrors the agent's ACP session id into the session's
-// "acp" metadata map as a single atomic UPDATE. json_patch merges the sub-key,
+// "acp" metadata map as a single atomic UPDATE. Each dialect merges the sub-key,
 // so keys session_info already wrote (title, ...) survive without a
 // read-modify-write round trip. The write only happens while the session's
 // executors_running row still holds acpSessionID as its resume token — i.e.
@@ -3756,17 +3756,34 @@ func (r *Repository) SetSessionACPSessionID(ctx context.Context, sessionID, acpS
 		return false, fmt.Errorf("failed to serialize metadata patch: %w", err)
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE task_sessions
 		SET metadata = json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json(?)),
 		    updated_at = ?
 		WHERE id = ?
-		  AND json_extract(metadata, '$.acp.session_id') IS NOT ?
+		  AND json_extract(` + sqliteMetadataObject + `, '$.acp.session_id') IS NOT ?
 		  AND EXISTS (
 			SELECT 1 FROM executors_running er
 			WHERE er.session_id = task_sessions.id AND er.resume_token = ?
 		  )
-	`), string(patch), now, sessionID, acpSessionID, acpSessionID)
+	`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(` + postgresMetadataObject + `, '{acp}',
+				(CASE WHEN jsonb_typeof((` + postgresMetadataObject + `)->'acp') = 'object'
+					THEN (` + postgresMetadataObject + `)->'acp' ELSE '{}'::jsonb END)
+				|| (?::jsonb->'acp'), true)::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND (` + postgresMetadataObject + `)#>>'{acp,session_id}' IS DISTINCT FROM ?
+			  AND EXISTS (
+				SELECT 1 FROM executors_running er
+				WHERE er.session_id = task_sessions.id AND er.resume_token = ?
+			  )
+		`
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(patch), now, sessionID, acpSessionID, acpSessionID)
 	if err != nil {
 		return false, err
 	}

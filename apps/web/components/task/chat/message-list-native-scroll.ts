@@ -99,8 +99,11 @@ export function shouldPreserveFollowOnScroll(
 ): boolean {
   const scrollTopDelta = current.scrollTop - previous.scrollTop;
   if (Math.abs(scrollTopDelta) <= 2) return true;
-  const contentGrowth = current.scrollHeight - previous.scrollHeight;
-  return contentGrowth > 0 && scrollTopDelta > 0 && scrollTopDelta <= contentGrowth + 2;
+  const contentDelta = current.scrollHeight - previous.scrollHeight;
+  return (
+    (contentDelta > 0 || (contentDelta < 0 && scrollTopDelta < 0)) &&
+    Math.abs(scrollTopDelta) <= Math.abs(contentDelta) + 2
+  );
 }
 
 function resolvePaginationSettleReason(
@@ -675,7 +678,15 @@ function useFollowIntent({
   const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
   useLayoutEffect(() => {
     const element = scrollRef.current;
-    if (element) lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
+    if (!element) return;
+    const recordGeometry = () => {
+      lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
+    };
+    recordGeometry();
+    const observer = new ResizeObserver(recordGeometry);
+    const content = element.querySelector("[data-chat-content]");
+    if (content) observer.observe(content);
+    return () => observer.disconnect();
   }, [scrollRef]);
   const resyncIsNearBottom = useCallback(
     (preserveFollow = false) => {
@@ -684,7 +695,7 @@ function useFollowIntent({
       const currentGeometry = readTranscriptScrollGeometry(el);
       const previousGeometry = lastScrollGeometryRef.current;
       lastScrollGeometryRef.current = currentGeometry;
-      // Delayed content growth cannot revoke bottom-follow without reader input.
+      // Content reflow cannot revoke bottom-follow without reader input.
       // Explicit navigation releases still reconcile against the actual geometry.
       if (
         preserveFollow &&
@@ -2291,6 +2302,10 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       onPositionClaim: claimProgrammaticPosition,
       startAlignedTargetRef,
     });
+  const prepareOlderPage = useCallback(() => {
+    beginOlderLoad();
+    resyncIsNearBottom();
+  }, [beginOlderLoad, resyncIsNearBottom]);
   const scrollToLatest = useScrollToLatestAction({
     scrollRef,
     sessionId,
@@ -2314,7 +2329,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       isRestoringLayout,
       placementLatches,
     },
-    beginOlderLoad,
+    prepareOlderPage,
   );
 
   return {

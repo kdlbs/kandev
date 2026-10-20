@@ -100,11 +100,14 @@
       ],
       "sources": [
         "apps/backend/internal/orchestrator/workflow_store.go",
-        "apps/web/components/kanban-with-preview.tsx"
+        "apps/web/components/kanban-with-preview.tsx",
+        "apps/web/components/task/sidebar-filter/use-filter-value-options.ts"
       ],
       "tests": [
         "apps/backend/internal/orchestrator/workflow_store_test.go",
-        "apps/web/components/kanban-with-preview.test.ts"
+        "apps/web/components/kanban-with-preview.test.ts",
+        "apps/web/e2e/tests/task/sidebar-repository-filter-none.spec.ts",
+        "apps/web/e2e/tests/task/mobile-sidebar-repository-filter-none.spec.ts"
       ],
       "mcpTools": [
         "create_workflow_kandev",

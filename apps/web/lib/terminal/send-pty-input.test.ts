@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
-import { sendPtyInput } from "./pty-terminal-input";
+import { sendPtyInput } from "./send-pty-input";
 
 beforeEach(() => {
   vi.stubGlobal("WebSocket", { OPEN: 1 });

@@ -546,3 +546,7 @@ describe("AppNavSections theme toggle", () => {
     expect(mocks.setTheme).toHaveBeenCalledWith("light");
   });
 });
+
+vi.mock("@/components/navigation/mobile-task-search-action", () => ({
+  MobileTaskSearchAction: () => null,
+}));

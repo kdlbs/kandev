@@ -129,7 +129,7 @@ function SettingsGroupContent({
     );
   }
   return (
-    <SettingsCard isDirty={isDirty} className="min-w-0 w-full" data-settings-group-card="true">
+    <SettingsCard isDirty={isDirty} className="min-w-0 w-full py-0" data-settings-group-card="true">
       <div className={cn("divide-y divide-border/70 px-4 py-2", contentClassName)}>{children}</div>
     </SettingsCard>
   );

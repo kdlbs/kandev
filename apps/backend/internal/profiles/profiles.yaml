@@ -191,6 +191,12 @@ mocks:
     dev:  ""
     e2e:  "true"
 
+  # Opt-in watchdog acceleration for controlled silent-prompt browser tests.
+  KANDEV_E2E_PROMPT_STALL_TIMEOUT:
+    prod: ""
+    dev:  ""
+    e2e:  ""
+
   # Replace third-party clients with in-memory fakes
   # so e2e specs don't hit live APIs (and dev doesn't need tokens).
   KANDEV_MOCK_GITHUB:

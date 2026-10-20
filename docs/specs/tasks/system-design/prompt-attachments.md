@@ -5,7 +5,7 @@ requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
   - REQ-TASKS-PROMPT-ATTACHMENTS-002
 created: 2026-09-01
-updated: 2026-10-06
+updated: 2026-10-20
 owners:
   - Kandev team
 ---
@@ -67,6 +67,15 @@ reader checks the task and the optional session before it opens a file.
 
 The lifecycle manager streams each file to the active agentctl instance. It
 then uses the returned safe name for native-prompt or workspace-path delivery.
+
+Agentctl stages and validates the bytes before installation. It prefers a hard
+link; if linking fails for a reason other than an existing destination, it
+copies into a file created exclusively with private permissions. Both paths
+retry collision names without overwriting existing files or following existing
+destination symlinks. Copy success requires the expected byte count and a
+successful destination close. Failed copies remove their partial destination;
+upload cleanup removes the staged file. Installation errors are logged with
+the underlying filesystem cause while the HTTP response remains generic.
 
 The lifecycle manager starts prompt generation before materialization. A
 materialization error therefore uses the same terminal prompt-error path as an

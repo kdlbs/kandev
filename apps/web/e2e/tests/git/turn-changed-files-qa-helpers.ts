@@ -64,3 +64,25 @@ export async function assertCardTouchTargets(page: Page) {
 export function resetTurnQaFile(repositoryPath: string) {
   rmSync(join(repositoryPath, "untracked_test.txt"), { force: true });
 }
+
+export async function routeEmptyUnavailableTurn(page: Page, sessionId: string) {
+  await page.route(`**/api/v1/task-sessions/${sessionId}/turn-changes?*`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...body,
+        change_sets: body.change_sets.map((summary: Record<string, unknown>) => ({
+          ...summary,
+          revision: Number(summary.revision) + 1,
+          availability: "unavailable",
+          reason: "checkout_unavailable",
+          file_count: 0,
+          complete: false,
+          summary_complete: false,
+        })),
+      },
+    });
+  });
+}

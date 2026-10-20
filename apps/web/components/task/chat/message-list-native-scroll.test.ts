@@ -99,6 +99,24 @@ describe("shouldPreserveFollowOnScroll", () => {
     ).toBe(true);
   });
 
+  it("keeps follow when native anchoring moves with shrinking content", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 1877, scrollHeight: 2389 },
+        { scrollTop: 1790, scrollHeight: 2302 },
+      ),
+    ).toBe(true);
+  });
+
+  it("does not preserve follow when movement exceeds the content shrink", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 1877, scrollHeight: 2389 },
+        { scrollTop: 1600, scrollHeight: 2302 },
+      ),
+    ).toBe(false);
+  });
+
   it("does not preserve follow when scroll movement is unrelated to content growth", () => {
     expect(
       shouldPreserveFollowOnScroll(
@@ -106,5 +124,14 @@ describe("shouldPreserveFollowOnScroll", () => {
         { scrollTop: 500, scrollHeight: 1200 },
       ),
     ).toBe(false);
+  });
+
+  it("keeps follow when native restoration moves upward within delayed content growth", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 1793, scrollHeight: 2130 },
+        { scrollTop: 1705, scrollHeight: 2218 },
+      ),
+    ).toBe(true);
   });
 });

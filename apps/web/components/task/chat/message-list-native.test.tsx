@@ -3596,17 +3596,18 @@ it.each([
   { enabled: true, reading: false, pending: true, expected: 900 },
   { enabled: true, reading: true, pending: true, expected: 570 },
   { enabled: false, reading: false, pending: true, expected: 600 },
+  { enabled: true, reading: false, pending: true, shrink: true, expected: 800 },
 ])(
-  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending",
-  ({ enabled, reading, pending, expected }) => {
-    let contentResize: (() => void) | undefined;
+  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending shrink=$shrink",
+  ({ enabled, reading, pending, shrink = false, expected }) => {
+    const contentResizes = new Set<() => void>();
     vi.stubGlobal(
       "ResizeObserver",
       class {
         constructor(private callback: ResizeObserverCallback) {}
         observe(element: Element) {
           if (element.hasAttribute("data-chat-content")) {
-            contentResize = () => this.callback([], this as unknown as ResizeObserver);
+            contentResizes.add(() => this.callback([], this as unknown as ResizeObserver));
           }
         }
         unobserve() {}
@@ -3641,8 +3642,13 @@ it.each([
           metrics.scrollTop = 570;
         }
         metrics.scrollHeight = 1300;
+        if (shrink) {
+          contentResizes.forEach((resize) => resize());
+          metrics.scrollHeight = 1200;
+          metrics.scrollTop -= 100;
+        }
         container.dispatchEvent(new Event("scroll"));
-        contentResize?.();
+        contentResizes.forEach((resize) => resize());
       });
       view.rerender(
         <AutoScrollHarness

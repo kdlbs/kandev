@@ -1,3 +1,4 @@
+import { verifyAutomaticRestartReconciliation } from "../../helpers/restart-reconciliation";
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -109,4 +110,15 @@ test.describe("mobile: agent survival across backend restart", () => {
       await releaseFeature();
     }
   });
+});
+
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4
+test("slow native restore preserves the conversation and accepts a new instruction", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(180_000);
+  await verifyAutomaticRestartReconciliation(testPage, apiClient, seedData, backend, "40s");
 });
