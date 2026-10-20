@@ -109,7 +109,9 @@ type WorktreeBatchCleanerWithOptions interface {
 
 // DeleteTaskOptions controls destructive task deletion behavior.
 type DeleteTaskOptions struct {
-	DiscardWorktreeChanges bool
+	AllowUnverifiedWorkspaceChanges bool
+	WorkspaceCleanup                models.WorkspaceCleanupMode
+	DiscardWorktreeChanges          bool
 }
 
 // WorktreeArchiveBatchCleaner removes archived task worktrees without deleting

@@ -2222,7 +2222,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
 		}
 		if projectionErr != nil {
-			rollbackErr := stopRuntimeInstanceAndRelease(context.WithoutCancel(ctx), rt, execInstance, true)
+			rollbackErr := m.stopWorkspaceRuntimeAndRelease(context.WithoutCancel(ctx), rt, execInstance, true)
 			err = errors.Join(
 				fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr),
 				rollbackErr,
@@ -2251,7 +2251,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// instance directly to avoid leaking it, then fail closed.
 		if rt != nil && execInstance != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if stopErr := stopRuntimeInstanceAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
+			if stopErr := m.stopWorkspaceRuntimeAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
 				m.logger.Warn("failed to stop runtime instance after command resolution error",
 					zap.Error(stopErr))
 			}
@@ -2751,7 +2751,7 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 		if !execution.isResumedSession && execInstance.StopReason == "" {
 			execInstance.StopReason = StopReasonLaunchRollback
 		}
-		err := rt.StopInstance(cleanupCtx, execInstance, !retainedKubernetesResume)
+		err := m.stopWorkspaceRuntime(cleanupCtx, rt, execInstance, !retainedKubernetesResume)
 		if err == nil && execution.RuntimeName == agentruntime.RuntimeKubernetes && !retainedKubernetesResume {
 			err = m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		}
@@ -2814,7 +2814,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if stopErr := stopRuntimeInstanceAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
+		if stopErr := m.stopWorkspaceRuntimeAndRelease(cleanupCtx, rt, execInstance, true); stopErr != nil {
 			m.logger.Warn("failed to stop runtime instance during launch rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

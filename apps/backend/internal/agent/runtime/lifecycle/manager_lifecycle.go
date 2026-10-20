@@ -813,7 +813,7 @@ func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri
 		m.recoveryGuard.Release(ri.SessionID)
 		return
 	}
-	if err := backend.StopInstance(ctx, ri, true); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, ri, true); err != nil {
 		m.logger.Warn("failed to stop unreconstructable recovered instance",
 			zap.String("instance_id", ri.InstanceID),
 			zap.String("session_id", ri.SessionID),

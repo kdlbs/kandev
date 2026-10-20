@@ -210,6 +210,11 @@ PR integration retained the current plugin facet preference contract and updated
 inherited control/search tests for the visible List filters. A regression proves
 that facet tokens use a built-in API sort. Search tests prove one debounce window,
 immediate clear, retained scope, cancellation, and stale-response rejection.
-Final local validation passed 153 unit tests in 20 suites, typecheck, ESLint for
+After the first base integration, validation passed 153 unit tests in 20 suites, typecheck, ESLint for
 40 changed TypeScript files, and all 32 desktop and 11 phone browser cases.
 See [PR integration validation](plan.md#pr-integration-validation) for the evidence.
+
+The final base update extends task deletion. The List layers preserve the shared
+`DeleteTaskParams` and cleanup feedback. The final focused unit run passed 158
+tests in 21 suites; typecheck and affected-file lint passed. The fresh-build
+desktop and phone deletion smoke checks passed.

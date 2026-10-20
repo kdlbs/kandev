@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
   "allPRsClosedNotice_other": "全 {{count}} 件の PR がマージされずにクローズされました。このタスクをアーカイブできます。",
   "turnOffTranscriptAutoScroll": "会話の自動スクロールを無効にする",
-  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする"
+  "turnOnTranscriptAutoScroll": "会話の自動スクロールを有効にする",
+  "deleteKeepFilesOption": "ワークスペースのファイルを保持",
+  "deleteKeepFilesAction": "タスクを削除してファイルを保持",
+  "deleteKeepFilesDescription": "選択したタスクとその会話は削除されます。ワークスペースのファイルとブランチは保持されます。Kandev はこれらを自動的に削除しません。保持されたリソースはディスク容量を使用し続けたり、プロバイダーの料金が発生したりする場合があります。",
+  "deleteKeptFilesTitle": "タスクを削除し、ファイルを保持しました。",
+  "deleteKeptFilesPending": "ワークスペースのファイルは保持されています。実行環境の停止はまだ完了していません。",
+  "deleteKeptFilesComplete": "ワークスペースのファイルとブランチは保持されています。",
+  "deleteUnverifiedWorkspaceOption": "ワークスペースの変更を確認できなくても削除する",
+  "deleteUnverifiedWorkspaceDescription": "ローカルの変更が失われる可能性があります。安全に削除できないファイルは、クリーンアップ待ちとして保持されます。",
+  "deleteCleanupPendingTitle": "タスクを削除しました。クリーンアップは保留中です。",
+  "deleteCleanupPendingDescription": "安全に削除できないファイルは保護されます。Kandev がクリーンアップを再試行します。"
 }

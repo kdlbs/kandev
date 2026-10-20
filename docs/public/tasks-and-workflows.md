@@ -1099,6 +1099,38 @@ leaves other conversations and the agent's shared indexes and history databases 
 It uses the host's home and config-directory settings; overrides set only in an agent or
 executor profile are outside this cleanup.
 
+### Delete a task when its workspace cannot be checked
+
+1. Open the task's **Delete** dialog.
+2. Select **Delete even if workspace changes cannot be checked**. Local changes may be lost.
+3. Select **Delete** after the confirmation finishes loading.
+
+Kandev deletes the task and records the resources that still need cleanup.
+It removes resources only after their ownership and identity checks pass.
+A damaged resource does not block cleanup of an independent healthy workspace.
+Files that cannot be safely removed remain protected from automatic maintenance.
+Kandev retries cleanup. Missing original ownership evidence can require manual repair.
+Access checks and database operations must still succeed.
+
+### Delete a task and keep its workspace files
+
+1. Open the task's **Delete** dialog.
+2. Select **Keep workspace files**. This option is also available after a failed workspace check.
+3. Select **Delete task and keep files**.
+
+Kandev deletes the task and conversation, but keeps workspace files, Git branches,
+and file-bearing provider resources. It does not need to read the workspace to
+confirm this choice. Access checks and database operations must still succeed.
+The same choice is available for bulk deletion and selected subtasks.
+
+Retained resources are excluded from automatic cleanup. They can continue to use
+disk space or incur provider charges. If Kandev cannot stop a runtime without
+risking those files, the task is still deleted and runtime shutdown stays pending.
+The deletion result reports this state.
+
+Do not downgrade to a Kandev version without workspace retention support while
+retained resources exist. Older cleanup code cannot enforce that protection.
+
 ## Troubleshooting
 
 - **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.

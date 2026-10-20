@@ -107,6 +107,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)
 		}
 	}
+	if err := r.migrateWorkspaceProtection(ctx); err != nil {
+		return err
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}

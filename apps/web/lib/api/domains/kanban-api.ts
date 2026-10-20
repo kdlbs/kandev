@@ -243,13 +243,18 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
+export type TaskWorkspaceCleanup = "delete" | "retain";
+
 export type DeleteTaskParams = {
+  allowUnverifiedWorkspaceChanges?: boolean;
+  workspaceCleanup?: TaskWorkspaceCleanup;
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
   confirmationId?: string;
 };
 
 export type TaskDeletePreflightResponse = {
+  workspace_inspection?: "complete" | "unknown" | "not_requested";
   requires_discard_consent: boolean;
   confirmation_id: string;
 };
@@ -259,7 +264,9 @@ export async function getTaskDeletePreflight(
   cascade: boolean,
   discardWorktreeChanges = false,
   options?: ApiRequestOptions,
+  cleanup: Pick<DeleteTaskParams, "workspaceCleanup" | "allowUnverifiedWorkspaceChanges"> = {},
 ) {
+  const { workspaceCleanup, allowUnverifiedWorkspaceChanges = false } = cleanup;
   return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
     ...options,
     cache: "no-store",
@@ -267,6 +274,8 @@ export async function getTaskDeletePreflight(
       method: "POST",
       body: JSON.stringify({
         task_ids: taskIds,
+        ...(allowUnverifiedWorkspaceChanges ? { allow_unverified_workspace_changes: true } : {}),
+        ...(workspaceCleanup ? { workspace_cleanup: workspaceCleanup } : {}),
         cascade,
         discard_worktree_changes: discardWorktreeChanges,
       }),
@@ -275,12 +284,24 @@ export async function getTaskDeletePreflight(
   });
 }
 
+export type TaskDeletionResult = {
+  success: boolean;
+  workspace_cleanup?: TaskWorkspaceCleanup;
+  retention_operation_ids?: string[];
+  cleanup_operation_ids?: string[];
+  workspace_cleanup_pending?: boolean;
+  runtime_stop_pending?: boolean;
+};
+
 export async function deleteTask(
   taskId: string,
   params?: DeleteTaskParams,
   options?: ApiRequestOptions,
 ) {
   const queryParams = new URLSearchParams();
+  if (params?.allowUnverifiedWorkspaceChanges)
+    queryParams.set("allow_unverified_workspace_changes", "true");
+  if (params?.workspaceCleanup) queryParams.set("workspace_cleanup", params.workspaceCleanup);
   if (params?.cascade) queryParams.set("cascade", "true");
   if (params?.discardWorktreeChanges) {
     queryParams.set("discard_worktree_changes", "true");
@@ -290,7 +311,7 @@ export async function deleteTask(
   if (params?.confirmationId) {
     headers.set("X-Kandev-Task-Delete-Confirmation", params.confirmationId);
   }
-  return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
+  return fetchJson<TaskDeletionResult | undefined>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...options?.init, headers },
   });
@@ -311,6 +332,10 @@ export async function deleteTaskAfterUserAction(
     params?.cascade ?? false,
     params?.discardWorktreeChanges ?? false,
     options,
+    {
+      workspaceCleanup: params?.workspaceCleanup,
+      allowUnverifiedWorkspaceChanges: params?.allowUnverifiedWorkspaceChanges,
+    },
   );
   return deleteTask(taskId, { ...params, confirmationId: preview.confirmation_id }, options);
 }

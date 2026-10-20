@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "allPRsClosedNotice_other": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "turnOffTranscriptAutoScroll": "關閉對話記錄自動滾動",
-  "turnOnTranscriptAutoScroll": "開啟對話記錄自動滾動"
+  "turnOnTranscriptAutoScroll": "開啟對話記錄自動滾動",
+  "deleteKeepFilesOption": "保留工作區檔案",
+  "deleteKeepFilesAction": "刪除任務並保留檔案",
+  "deleteKeepFilesDescription": "此操作會刪除所選任務及其對話。工作區檔案和分支將會保留。Kandev 不會自動刪除它們。保留的資源可能繼續佔用磁碟空間或產生服務商費用。",
+  "deleteKeptFilesTitle": "任務已刪除，檔案已保留。",
+  "deleteKeptFilesPending": "工作區檔案已保留。執行環境仍待關閉。",
+  "deleteKeptFilesComplete": "工作區檔案和分支已保留。",
+  "deleteUnverifiedWorkspaceOption": "即使無法檢查工作區更改也刪除",
+  "deleteUnverifiedWorkspaceDescription": "本地更改可能會丟失。無法安全刪除的檔案將保留，等待清理。",
+  "deleteCleanupPendingTitle": "任務已刪除。清理待處理。",
+  "deleteCleanupPendingDescription": "無法安全刪除的檔案仍受保護。Kandev 將重試清理。"
 }

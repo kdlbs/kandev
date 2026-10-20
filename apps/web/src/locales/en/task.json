@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "All {{count}} PR was closed without merging. You can archive this task.",
   "allPRsClosedNotice_other": "All {{count}} PRs were closed without merging. You can archive this task.",
   "turnOffTranscriptAutoScroll": "Turn off transcript auto-scroll",
-  "turnOnTranscriptAutoScroll": "Turn on transcript auto-scroll"
+  "turnOnTranscriptAutoScroll": "Turn on transcript auto-scroll",
+  "deleteKeepFilesOption": "Keep workspace files",
+  "deleteKeepFilesAction": "Delete task and keep files",
+  "deleteKeepFilesDescription": "This deletes the selected tasks and their conversations. Workspace files and branches will remain. Kandev will not remove them automatically. Retained resources can continue to use disk space or incur provider charges.",
+  "deleteKeptFilesTitle": "Task deleted. Files kept.",
+  "deleteKeptFilesPending": "Workspace files are retained. Runtime shutdown is still pending.",
+  "deleteKeptFilesComplete": "Workspace files and branches are retained.",
+  "deleteUnverifiedWorkspaceOption": "Delete even if workspace changes cannot be checked",
+  "deleteUnverifiedWorkspaceDescription": "Local changes may be lost. Files that cannot be safely removed will remain pending cleanup.",
+  "deleteCleanupPendingTitle": "Task deleted. Cleanup pending.",
+  "deleteCleanupPendingDescription": "Files that cannot be safely removed remain protected. Kandev will retry cleanup."
 }

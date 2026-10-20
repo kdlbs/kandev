@@ -273,3 +273,45 @@ describe("useTaskActions", () => {
     });
   });
 });
+
+it.each([false, true])("reports retained files with runtime stop pending=%s", async (pending) => {
+  deleteTaskMock.mockResolvedValueOnce({
+    success: true,
+    workspace_cleanup: "retain",
+    runtime_stop_pending: pending,
+  });
+  const { result } = renderHook(() => useTaskActions());
+  await act(() =>
+    result.current.deleteTaskById("damaged", {
+      workspaceCleanup: "retain",
+      confirmationId: "ticket",
+    }),
+  );
+  expect(toastMock).toHaveBeenCalledWith({
+    title: "Task deleted. Files kept.",
+    description: pending
+      ? "Workspace files are retained. Runtime shutdown is still pending."
+      : "Workspace files and branches are retained.",
+  });
+});
+
+it("reports committed task removal with physical cleanup pending", async () => {
+  deleteTaskMock.mockResolvedValueOnce({
+    success: true,
+    workspace_cleanup: "delete",
+    workspace_cleanup_pending: true,
+    runtime_stop_pending: false,
+  });
+  const { result } = renderHook(() => useTaskActions());
+  const options = {
+    discardWorktreeChanges: true,
+    allowUnverifiedWorkspaceChanges: true,
+    confirmationId: "ack",
+  };
+  await act(() => result.current.deleteTaskById("damaged", options));
+  expect(deleteTaskMock).toHaveBeenCalledWith("damaged", options);
+  expect(toastMock).toHaveBeenCalledWith({
+    title: "Task deleted. Cleanup pending.",
+    description: "Files that cannot be safely removed remain protected. Kandev will retry cleanup.",
+  });
+});

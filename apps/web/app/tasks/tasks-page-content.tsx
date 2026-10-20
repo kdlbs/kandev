@@ -7,6 +7,7 @@ import type { TaskListStepPreviews, TaskListWorkflow } from "@/lib/tasks/task-li
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { TasksListView, type TasksListReadFeedbackProps } from "./tasks-list-view";
 import type { TasksListFilterProps } from "./tasks-list-filters";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
 type Props = TasksListReadFeedbackProps & {
   filters: TasksListFilterProps;
@@ -35,10 +36,7 @@ type Props = TasksListReadFeedbackProps & {
   deletingTaskId: string | null;
   onArchive: (id: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (id: string) => Promise<void>;
-  onDelete: (
-    id: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
-  ) => Promise<void>;
+  onDelete: (id: string, opts?: DeleteTaskParams) => Promise<void>;
   onRefresh: () => Promise<void>;
   mobileActions: ReactNode;
 };

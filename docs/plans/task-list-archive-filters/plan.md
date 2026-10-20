@@ -348,7 +348,7 @@ Plugin facet choices remain in URL/preferences and use a built-in API sort.
 List keeps one 300ms request debounce; clearing admits the empty query immediately.
 Inherited search and facet tests now use the visible List controls.
 
-After integration, 153 focused unit tests passed across 20 suites. Typecheck
+After the first integration, 153 focused unit tests passed across 20 suites. Typecheck
 and ESLint for all 40 changed TypeScript files passed. Fresh production assets
 passed all 32 desktop and 11 phone browser cases, including plugin preferences,
 queued-search cancellation, stale replies, archive navigation, filters, and history.
@@ -358,6 +358,13 @@ that test now uses the established selection helper.
 Evidence is under `/tmp/kandev-archive-pr-delivery-1n02tpi8/`: `merged-unit-final.log`,
 `merged-typecheck-final-2.log`, `merged-eslint-final.log`,
 `kandev-run.e2e.us9VZMmr.log`, and `kandev-run.e2e.BbcpuZI9.log`.
+A later main update extended task deletion. Integration preserves the shared
+`DeleteTaskParams` through the List layers and retains cleanup feedback.
+The refreshed unit run passed 158 tests in 21 suites; typecheck and affected-file
+ESLint passed. Fresh-build desktop and phone deletion smoke checks also passed.
+Evidence: `final-unit.log`, `final-typecheck.log`, and `kandev-run.e2e.Rzl7M8cY.log`
+and `kandev-run.e2e.pNNtIdjU.log` in the same delivery directory.
+
 The manual instance remains stopped. PR publication and remote CI are separate
 from these completed local checks.
 

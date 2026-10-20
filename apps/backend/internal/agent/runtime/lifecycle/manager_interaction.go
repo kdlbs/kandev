@@ -3172,7 +3172,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		}
 		runtimeInstance.Metadata = metadata
 	}
-	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, rt, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
 		// absent. Only surface this at WARN outside shutdown.
 		if m.IsShuttingDown() {
