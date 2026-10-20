@@ -195,6 +195,17 @@ Portable conflict handling uses `ON CONFLICT`. Shared SQL does not use `INSERT O
 
 Shared execution helpers rebind source `?` placeholders at the final database or transaction boundary. `sqlx.In` expansion occurs before rebinding.
 
+The task repository's `SetSessionACPSessionID` mirrors the current executor
+resume token with one guarded UPDATE. SQLite merges the ACP sub-object with
+`json_patch`; PostgreSQL uses `jsonb_set` and merges the existing ACP object
+with the new session ID. Both preserve other metadata and ACP fields, normalize
+absent/null metadata, and replace a non-object ACP value with the ID object.
+The UPDATE requires a matching `executors_running.resume_token` and skips an
+already-current ID without changing `updated_at`. PostgreSQL uses
+`IS DISTINCT FROM` for the nullable ID comparison. Shared behavioral tests
+execute both statements against their actual engines.
+
+
 Schema inspection uses `internal/db.TableExists`, `TableColumns`, and related helpers. Store packages do not query SQLite catalogs directly.
 
 ## Dialect safety check
