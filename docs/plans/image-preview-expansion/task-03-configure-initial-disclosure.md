@@ -125,3 +125,31 @@ and attachment layout. The desktop rich-output suite passed all six scenarios.
 Logs: `/tmp/kandev-run.e2e.SfbYQism.log` and
 `/tmp/kandev-run.e2e.gQGywspz.log`. The phone RED run is
 `/tmp/kandev-run.e2e.24jARUXK.log`. No product contract changed in this follow-up.
+
+CI follow-up: frontend shard 2 failed in the attachment integration test because
+it still required the retired `w-fit` dialog width. The current dialog uses a
+bounded viewport width so it enlarges images on phones. Update that assertion
+without changing product code. The existing phone and desktop geometry tests
+remain the owner of rendered size and containment. The focused ChatMessage
+suite reproduced the failure, then passed all 39 tests after the correction.
+No requirements, system design, public documentation, or screenshots need an
+update because this follow-up changes only a test expectation.
+
+Post-fix verification on the PR branch passed:
+
+```sh
+pnpm --dir apps/web exec vitest run components/task/chat/messages/chat-message.test.tsx
+NODE_ENV=production pnpm --dir apps/web run test --shard=2/2 --reporter=default --reporter=json --outputFile=/tmp/pr4619-shard2-results.json
+```
+
+The full shard passed 1,480 files and 13,694 tests, with four skipped tests.
+Logs: `/tmp/pr4619-chatmessage-red.log`, `/tmp/pr4619-chatmessage-green.log`,
+and `/tmp/pr4619-shard2.log`. CI's merge-ref report includes additional base
+branch tests. The walkthrough failure was a Git checkout timeout before code
+execution; its failed job was retried once.
+The repaired assertion also failed when the dialog width was temporarily
+changed back to `w-fit`. The production file was restored byte for byte, then
+all 39 ChatMessage tests passed again. Evidence:
+`/tmp/pr4619-width-mutation-receipt.json` and
+`/tmp/pr4619-chatmessage-restored-green.log`. CI checked out synthetic merge
+`f78a0dc46c002fd0e83bc6ac88f75007b05a6587` for the failed job.
