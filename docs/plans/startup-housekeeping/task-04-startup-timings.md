@@ -147,3 +147,14 @@ The isolated restart asserts completed housekeeping, frozen ready time, preserve
 remote ownership, unchanged conversation/turn identity, prompt and queue counts,
 and phone containment. Controlled prompt-history timing evidence is in task 01;
 these checks do not claim a universal startup latency target.
+
+PR review refinement: boot-id completion continues progress polling until the final
+ready snapshot, then freezes it; missing final detail clears an earlier active
+projection. The new hook regression failed before the fix and passed after.
+Desktop and phone completion checks now hold the final response behind boot-id
+completion to exercise the race. The real restart helper waits for the persisted
+agent message before asserting UI content, avoiding a custom DOM wait budget.
+
+The launcher payload check now uses the largest registered fields, full active
+progress, maximum numeric widths, and 32 history entries. Latest focused frontend
+verification passed 118 tests across 11 files; typecheck and targeted ESLint passed.

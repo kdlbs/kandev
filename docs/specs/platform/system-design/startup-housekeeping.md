@@ -93,6 +93,8 @@ The minimal listener and passive event subscriptions are allowed before the gate
 Move health checks or required initialization out of a worker's activation
 method if they are actual readiness prerequisites. Preserve one start/stop pair,
 reverse cleanup, restore quiescing, and subscriber-before-publisher ordering.
+Worker starts registered while activation is in progress join its pending batch;
+they cannot bypass an earlier failure or execute recursively ahead of that batch.
 
 Office and automation schedules retain their policy after activation. They are
 independent producers, not an excuse for restoration to dispatch instructions.
@@ -220,6 +222,27 @@ work; a stale completion cannot affect a successor. Unsupported provider shapes
 continue to produce their existing explicit blocked outcome. Pending remote
 ownership goes to its existing retry mechanism rather than consuming a global
 readiness gate. Do not weaken process-tree liveness proofs.
+
+## Bounded inventory and completion snapshots
+
+Background native restore inventory retains one bounded page at a time and drains
+that page before reading the next. Focused requests still join the shared two-slot
+dispatcher independently of inventory pagination.
+
+Restart boot-id completion keeps startup-detail polling active until the ready
+snapshot arrives, then freezes that final detail. A successful final response
+without compatible snapshot data clears an earlier in-progress projection.
+
+Persisted ownership inventory is required local evidence even when its rows name
+remote runtimes. A read failure prevents readiness; remote endpoint availability
+remains session-scoped after readiness. This preserves fail-closed owner fencing.
+Malformed terminal plugin metadata is logged and skipped during deferred operation
+repair so other unfinished operations can progress.
+
+Runtime classification joins executor evidence with one batched active-session
+inventory. Stopped rows with created, starting or running sessions still reach
+normal guarded settlement; stopped, execution-less waiting, idle or terminal conversations
+incur no process or endpoint probe. Resume identity remains retained.
 
 ## Validation and operational evidence
 

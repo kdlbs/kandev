@@ -41,7 +41,7 @@ export function RestartProgressDialog({
 }: RestartProgressDialogProps) {
   const { t } = useTranslation();
   const startupProgress = useStartupProgress(
-    phase === "restarting",
+    phase === "restarting" || phase === "done",
     phase === "done" || phase === "error",
   );
   if (phase === "idle") return null;

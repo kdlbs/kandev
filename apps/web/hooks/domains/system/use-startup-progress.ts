@@ -36,7 +36,9 @@ function readyBodyOf(err: unknown): ReadyBody | null {
  * without touching the last-rendered detail; a failing status falls back to
  * "last known" instead. The 503 "still starting" response carries a
  * parseable snapshot either way and is therefore always treated as fresh
- * data, not a failure.
+ * data, not a failure. When retaining completed detail, polling continues
+ * through the final ready snapshot. A ready response without compatible detail
+ * clears an earlier in-progress projection.
  */
 export function useStartupProgress(enabled: boolean, retainSnapshot = false): StartupProgressState {
   const [snapshot, setSnapshot] = useState<StartupSnapshot | null>(null);
@@ -56,6 +58,7 @@ export function useStartupProgress(enabled: boolean, retainSnapshot = false): St
       return;
     }
     let cancelled = false;
+    let finished = false;
 
     const applySnapshot = (ok: boolean, body: ReadyBody | null) => {
       const parsed = parseStartupSnapshot(body?.startup);
@@ -65,14 +68,19 @@ export function useStartupProgress(enabled: boolean, retainSnapshot = false): St
         // a successful status means ready, only a failing one falls back to
         // last-known.
         setLastKnown(!ok);
+        if (ok && retainSnapshot) {
+          finished = true;
+          setSnapshot(null);
+        }
         return;
       }
       setLastKnown(false);
       setSnapshot(parsed);
+      if (retainSnapshot && parsed.phase === "ready") finished = true;
     };
 
     const tick = async () => {
-      if (inFlightRef.current) return;
+      if (inFlightRef.current || finished) return;
       inFlightRef.current = true;
       const controller = new AbortController();
       activeControllerRef.current = controller;

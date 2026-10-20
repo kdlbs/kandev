@@ -3797,23 +3797,13 @@ func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Con
 
 func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
 	s.retireInterruptedNoticesOnStartup(ctx)
-	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
+	runningExecutors, err := s.startupRuntimeInventory(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))
 		return
 	}
 	if len(runningExecutors) == 0 {
 		s.logger.Info("no executors to reconcile on startup")
-		return
-	}
-	selected := runningExecutors[:0]
-	for _, row := range runningExecutors {
-		if startupRuntimeNeedsReconciliation(row) {
-			selected = append(selected, row)
-		}
-	}
-	runningExecutors = selected
-	if len(runningExecutors) == 0 {
 		return
 	}
 

@@ -95,3 +95,42 @@ func TestHousekeepingActivationCanBeJoinedBeforeRestoreCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// @covers AC-PLATFORM-STARTUP-HOUSEKEEPING-001.3
+func TestHousekeepingLateRegistrationWaitsForActivationOutcome(t *testing.T) {
+	r := New(nil)
+	ctx := WithReporter(t.Context(), r)
+	entered, release := make(chan struct{}), make(chan struct{})
+	want := errors.New("earlier start failed")
+	if err := AfterReadyError(ctx, func() error { close(entered); <-release; return want }); err != nil {
+		t.Fatal(err)
+	}
+	r.Set(Ready)
+	done := make(chan error, 1)
+	go func() { done <- Activate(ctx) }()
+	<-entered
+	late := false
+	err := AfterReadyError(ctx, func() error { late = true; return nil })
+	close(release)
+	activationErr := <-done
+	if err != nil || !errors.Is(activationErr, want) || late {
+		t.Fatalf("late registration bypassed earlier failure: registration=%v activation=%v started=%t", err, activationErr, late)
+	}
+}
+
+func TestHousekeepingActivationDrainsNestedRegistration(t *testing.T) {
+	r := New(nil)
+	ctx := WithReporter(t.Context(), r)
+	var order []string
+	AfterReady(ctx, func() {
+		AfterReady(ctx, func() { order = append(order, "nested") })
+		order = append(order, "first")
+	})
+	r.Set(Ready)
+	if err := Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(order, []string{"first", "nested"}) {
+		t.Fatalf("nested registration bypassed ordered activation: %v", order)
+	}
+}

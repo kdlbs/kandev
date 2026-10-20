@@ -43,29 +43,45 @@ func (s *Service) housekeepingStep(ctx context.Context, id startup.StepID, run f
 	return err
 }
 
-func startupRuntimeNeedsReconciliation(row *models.ExecutorRunning) bool {
-	return row != nil && (row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0)
+func startupRuntimeNeedsReconciliation(row *models.ExecutorRunning, state models.TaskSessionState) bool {
+	return row != nil && (row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 || state == models.TaskSessionStateCreated || state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning)
+}
+
+func (s *Service) startupRuntimeInventory(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := s.repo.ListExecutorsRunning(ctx)
+	if err != nil || len(rows) == 0 {
+		return rows, err
+	}
+	sessions, err := s.repo.ListActiveTaskSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	states := make(map[string]models.TaskSessionState, len(sessions))
+	for _, session := range sessions {
+		if session != nil {
+			states[session.ID] = session.State
+		}
+	}
+	selected := rows[:0]
+	for _, row := range rows {
+		if row != nil && startupRuntimeNeedsReconciliation(row, states[row.SessionID]) {
+			selected = append(selected, row)
+		}
+	}
+	return selected, nil
 }
 
 func (s *Service) classifyStartupRuntimeInventory(ctx context.Context) error {
-	rows, err := s.repo.ListExecutorsRunning(ctx)
+	rows, err := s.startupRuntimeInventory(ctx)
 	if err != nil {
 		return err
 	}
-	var count int64
-	for _, row := range rows {
-		if startupRuntimeNeedsReconciliation(row) {
-			count++
-		}
-	}
-	startup.SetTotal(ctx, startup.StepRuntimeInventory, count)
-	for _, row := range rows {
+	startup.SetTotal(ctx, startup.StepRuntimeInventory, int64(len(rows)))
+	for range rows {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if startupRuntimeNeedsReconciliation(row) {
-			startup.Advance(ctx, startup.StepRuntimeInventory, 1)
-		}
+		startup.Advance(ctx, startup.StepRuntimeInventory, 1)
 	}
 	return nil
 }

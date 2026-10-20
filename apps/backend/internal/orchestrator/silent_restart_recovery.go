@@ -109,7 +109,6 @@ func (s *Service) resetSilentRestoreRecovery() {
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
 	queue := s.restartRestoreScheduler(ctx)
-	var jobs []*restartRestoreJob
 	after := ""
 	for ctx.Err() == nil {
 		candidates, err := store.ListSilentRestoreCandidates(ctx, after, silentRestoreCandidateLimit)
@@ -117,6 +116,7 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			s.logger.Warn("could not list silent restart recovery candidates", zap.Error(err))
 			break
 		}
+		jobs := make([]*restartRestoreJob, 0, len(candidates))
 		for _, candidate := range candidates {
 			jobs = append(jobs, queue.submit(candidate, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
 				err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
@@ -127,15 +127,16 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			}))
 			after = candidate.SessionID
 		}
+		// Drain this bounded metadata page before retaining another backlog page.
+		for _, job := range jobs {
+			select {
+			case <-job.done:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if len(candidates) < silentRestoreCandidateLimit {
 			break
-		}
-	}
-	for _, job := range jobs {
-		select {
-		case <-job.done:
-		case <-ctx.Done():
-			return
 		}
 	}
 }

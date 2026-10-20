@@ -193,3 +193,45 @@ local evidence; PR CI and review handling remain part of delivery before merge.
 - History expands the readiness payload. Test its maximum against bounded readers.
 - Focus priority must not bypass session capacity or alter Stop/archival semantics.
 - No wall-clock readiness target is promised without controlled measurements.
+
+## PR remediation
+
+PR #4609 review identified full-backlog metadata retention and stale completed
+restart detail. The restore pass now drains each bounded inventory page before
+reading another. Completed dialogs fetch the final ready snapshot before freezing
+history. Activation also queues registrations made during an in-flight activation
+so earlier failures cannot be bypassed. The new E2E helper waits on the persisted
+agent message before asserting rendered content.
+
+New regressions reproduced the queue, final-snapshot, and activation-order defects
+before their fixes. Targeted Go race checks, frontend checks, and desktop/phone
+completion checks are rerun before pushing; fresh captures replace the original
+PR screenshots after the remediation commit. Exact-head CI and review evidence
+remain external delivery work until the PR merges.
+
+CodeRabbit's aggregate review also identified malformed terminal plugin inventory
+blocking unrelated cleanup and stopped rows retaining active session state. The
+fix skips invalid plugin metadata with a warning and classifies stopped rows
+against one batched active-session read. Both regressions failed before their
+fixes. Local ownership SQL reads intentionally remain required: an unavailable
+remote endpoint is different from unreadable persisted ownership evidence.
+Launcher readiness coverage now includes the largest registered fields, a full
+active step, maximum numeric widths, and all 32 history entries.
+
+Latest focused frontend run: 118 tests passed across 11 files. Typecheck with an
+8 GiB heap and targeted ESLint passed. Affected-package race checks passed across lifecycle, orchestrator, startup,
+backend composition and launcher. Four desktop and two phone rendered/restart
+checks passed. Final Go lint reports zero issues; targeted ESLint and i18n ratchet pass.
+Fresh post-commit captures precede the remediation push. The launcher upper-bound fixture is 7,349 bytes against a 32 KiB reader.
+
+Review dispositions: the requested nonfatal remote-inventory read is not applied,
+because this is local SQL ownership evidence required before launch admission,
+not remote availability. The existing failure gate is now covered explicitly.
+The alleged duplicate unpublished-turn reconciliation was a nil-service guard
+followed by the sole call in both base and current code; once-only coverage passes.
+The context-key policy suggestion remains optional: callers use the dedicated
+`StartDeferredRemoteRecovery` method, with no mutable manager-wide policy. The
+panic-only timeout-cancellation suggestion adds no live-process recovery benefit
+because these workers have no panic recovery boundary; normal returns already
+cancel both contexts. The combined phone capture test is retained to preserve its
+two-asset manifest and existing scrolling assertions.

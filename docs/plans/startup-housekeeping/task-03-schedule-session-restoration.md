@@ -87,3 +87,9 @@ regressions failed before the implementation. All 120 focused frontend tests
 passed across 11 files, including focused-session resumption; web typecheck passed
 with an 8 GiB Node heap. Changed-file Go lint and targeted ESLint passed. Desktop
 and phone two-conversation restart checks passed in task 04's isolated E2E runs.
+
+PR review refinement: the pass drains one bounded metadata page before fetching
+another. The regression failed with both restore workers blocked and passed after
+the change, including the positive control that the next page is read after drain.
+The existing independent-candidate, focus, deduplication and shutdown tests passed
+under the race detector.

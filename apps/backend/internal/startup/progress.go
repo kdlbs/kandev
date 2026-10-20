@@ -60,6 +60,7 @@ type Reporter struct {
 	log                   *logger.Logger
 	activations           []func() error
 	activated             bool
+	activationComplete    bool
 	activationDone        chan struct{}
 	activationErr         error
 	readyAt               time.Time

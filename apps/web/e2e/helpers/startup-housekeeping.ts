@@ -9,6 +9,7 @@ import {
   expectRestartConversationIdentity,
 } from "./silent-restart-recovery";
 import { attachGatewayTrafficCapture } from "./ws-traffic";
+import { waitForAgentMessage } from "./session";
 import { SessionPage } from "../pages/session-page";
 
 export async function verifyStartupHousekeeping(
@@ -36,13 +37,12 @@ export async function verifyStartupHousekeeping(
         },
       );
       taskIds.push(task.id);
+      const session = (await api.listTaskSessions(task.id)).sessions.find((row) => row.is_primary)!;
+      await waitForAgentMessage(api, session.id, "Running slow response");
       await page.goto(`/t/${task.id}`);
       const chat = new SessionPage(page);
       await chat.waitForLoad();
-      await expect(chat.chat.getByText("Running slow response", { exact: false })).toBeVisible({
-        timeout: 30000,
-      });
-      const session = (await api.listTaskSessions(task.id)).sessions.find((row) => row.is_primary)!;
+      await expect(chat.chat.getByText("Running slow response", { exact: false })).toBeVisible();
       snapshots.push(await captureSilentRestartSnapshot(api, task.id, session.id));
     }
     withDatabase(backend.tmpDir, (db) => {

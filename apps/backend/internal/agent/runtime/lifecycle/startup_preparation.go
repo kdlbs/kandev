@@ -109,7 +109,8 @@ func (m *Manager) ReconcileStartupPluginInventory(ctx context.Context) error {
 		}
 		inventory, err := decodePluginExecutorInventory(record.Metadata)
 		if err != nil {
-			return err
+			m.logger.Warn("skipping invalid plugin executor inventory during startup repair", zap.String("session_id", record.SessionID), zap.Error(err))
+			continue
 		}
 		if inventory.Phase != pluginExecutorPhaseAllocating && inventory.Phase != pluginExecutorPhaseCleanupPending {
 			continue

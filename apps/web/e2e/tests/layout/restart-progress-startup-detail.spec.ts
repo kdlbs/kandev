@@ -1,5 +1,5 @@
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
-import { STARTUP_TIMINGS } from "../../helpers/startup-timing-fixture";
+import { finishStartupTimingRestart, STARTUP_TIMINGS } from "../../helpers/startup-timing-fixture";
 import { expect, test } from "../../fixtures/test-base";
 import {
   setAgentRuntimeAvailability,
@@ -126,10 +126,6 @@ test.describe("Restart progress dialog startup detail", () => {
 
     await expect(dialog.getByTestId("startup-timings")).toContainText("82 milliseconds");
     await expect(dialog.getByTestId("startup-timings")).toContainText("Timing incomplete");
-    await waitForFiniteAnimations(dialog);
-    await prCapture.screenshot("restart-timings-desktop", {
-      caption: "Restart dialog with startup operation timings",
-    });
 
     // A failing status with no parseable snapshot falls back to last-known
     // (AC-PLATFORM-STARTUP-PROGRESS-002.6/003.13): the prior step detail
@@ -147,6 +143,11 @@ test.describe("Restart progress dialog startup detail", () => {
     readyMode = "ready";
 
     await expect(dialog.getByText("Last known")).toHaveCount(0);
+    await finishStartupTimingRestart(testPage, dialog);
+    await waitForFiniteAnimations(dialog);
+    await prCapture.screenshot("restart-timings-desktop", {
+      caption: "Completed restart dialog with final startup timings",
+    });
   });
 
   /**

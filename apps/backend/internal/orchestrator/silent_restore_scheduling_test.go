@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/stretchr/testify/require"
 	"sync"
 	"testing"
@@ -167,4 +169,61 @@ func TestSilentRestoreFocusUsesTheSharedBoundedQueue(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("focused pending conversation did not take next restoration slot")
 	}
+}
+
+type pagedRestoreInventory struct {
+	taskrepo.SilentRestoreRepository
+	nextPage chan struct{}
+}
+
+func (r *pagedRestoreInventory) ListSilentRestoreCandidates(_ context.Context, after string, limit int) ([]models.SilentRestoreCandidate, error) {
+	if after != "" {
+		close(r.nextPage)
+		return nil, nil
+	}
+	rows := make([]models.SilentRestoreCandidate, limit)
+	for i := range rows {
+		rows[i].SessionID = fmt.Sprintf("pending-%03d", i)
+	}
+	return rows, nil
+}
+
+// @covers AC-PLATFORM-STARTUP-HOUSEKEEPING-004.1
+func TestSilentRestorePassBoundsInventoryToOnePage(t *testing.T) {
+	service, _, _, _, store := newSilentRestoreEligibilityFixture(t, "provider-session", "paged")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	q := service.restartRestoreScheduler(ctx)
+	defer q.stop()
+	release := make(chan struct{})
+	entered := make(chan struct{}, restartRestoreConcurrency)
+	for i := range restartRestoreConcurrency {
+		q.submit(models.SilentRestoreCandidate{SessionID: fmt.Sprintf("active-%d", i)}, func(ctx context.Context, _ models.SilentRestoreCandidate) error {
+			entered <- struct{}{}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return nil
+		})
+	}
+	for range restartRestoreConcurrency {
+		<-entered
+	}
+	inventory := &pagedRestoreInventory{SilentRestoreRepository: store, nextPage: make(chan struct{})}
+	done := make(chan struct{})
+	go func() { service.runSilentRestoreRecoveryPass(ctx, inventory); close(done) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-inventory.nextPage:
+		t.Fatal("read another full metadata page while both workers were blocked")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-inventory.nextPage:
+	case <-time.After(3 * time.Second):
+		t.Fatal("next page did not become readable after current-page restoration finished")
+	}
+	<-done
 }

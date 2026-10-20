@@ -97,3 +97,13 @@ ownership, idempotent preparation, and stopped-handle behavior. New plugin
 retention and cleanup-order regressions failed before the fix and passed after.
 Scoped Go lint passed with zero issues, including the final plugin refinement. The final isolated restart proof and final lint
 receipt are recorded in the combined plan.
+
+PR review refinement: starts registered during activation join the pending batch
+and observe earlier failure. Barrier and nested-registration regressions reproduced
+the race before the fix; targeted startup race tests passed.
+
+Aggregate review refinement: stopped rows whose sessions are still created,
+starting or running remain selected using a batched session read. Malformed plugin
+metadata is logged and skipped without blocking other unfinished operations.
+Regressions reproduced both defects. A separate guard test preserves required
+persisted ownership reads; endpoint availability stays outside global readiness.

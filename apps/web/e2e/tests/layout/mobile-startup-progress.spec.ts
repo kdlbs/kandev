@@ -1,5 +1,8 @@
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
-import { LONG_STARTUP_TIMINGS } from "../../helpers/startup-timing-fixture";
+import {
+  finishStartupTimingRestart,
+  LONG_STARTUP_TIMINGS,
+} from "../../helpers/startup-timing-fixture";
 import { expect, test } from "../../fixtures/test-base";
 import {
   setAgentRuntimeAvailability,
@@ -72,14 +75,19 @@ test("renders contained timings in the phone restart dialog and startup page", a
   expect(bounds!.y).toBeGreaterThanOrEqual(0);
   expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height);
   await assertNoDocumentHorizontalOverflow(testPage, "mobile startup progress dialog");
-  await waitForFiniteAnimations(dialog);
-  await prCapture.screenshot("restart-timings-mobile", {
-    caption: "Phone restart dialog with one scrolling timing list",
-  });
   await timings.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
   });
   await expect(timings.getByText("113 milliseconds", { exact: true })).toBeVisible();
+  await finishStartupTimingRestart(testPage, dialog);
+  const reload = dialog.getByRole("button", { name: "Reload page" });
+  expect((await reload.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await reload.click({ trial: true });
+  await assertNoDocumentHorizontalOverflow(testPage, "completed phone restart dialog");
+  await waitForFiniteAnimations(dialog);
+  await prCapture.screenshot("restart-timings-mobile", {
+    caption: "Completed phone restart dialog with final startup timings",
+  });
   {
     const snapshot = PROGRESS_BODY.startup;
     const html = await request

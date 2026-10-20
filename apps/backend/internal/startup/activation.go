@@ -24,7 +24,7 @@ func AfterReadyError(ctx context.Context, start func() error) error {
 		return start()
 	}
 	r.mu.Lock()
-	if !r.activated {
+	if !r.activated || !r.activationComplete {
 		r.activations = append(r.activations, func() error {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -62,16 +62,41 @@ func Activate(ctx context.Context) (result error) {
 	starts := r.activations
 	r.activations = nil
 	r.mu.Unlock()
-	defer func() { r.mu.Lock(); r.activationErr = result; close(r.activationDone); r.mu.Unlock() }()
-	for _, start := range starts {
-		if err := ctx.Err(); err != nil {
-			return err
+	defer func() {
+		r.mu.Lock()
+		r.completeActivationLocked(result)
+		r.mu.Unlock()
+	}()
+	for {
+		for _, start := range starts {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := start(); err != nil {
+				return err
+			}
 		}
-		if err := start(); err != nil {
-			return err
+		r.mu.Lock()
+		starts = r.activations
+		r.activations = nil
+		if len(starts) == 0 {
+			result = ctx.Err()
+			r.completeActivationLocked(result)
+			r.mu.Unlock()
+			return result
 		}
+		r.mu.Unlock()
 	}
-	return ctx.Err()
+}
+
+func (r *Reporter) completeActivationLocked(err error) {
+	if r.activationComplete {
+		return
+	}
+	r.activationErr = err
+	r.activationComplete = true
+	r.activations = nil
+	close(r.activationDone)
 }
 
 // WaitForActivation joins worker admission before a restore drains the owners.

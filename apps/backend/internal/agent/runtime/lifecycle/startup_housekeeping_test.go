@@ -87,7 +87,7 @@ func TestHousekeepingStoppedPluginHandleIsNotPendingAgentRecovery(t *testing.T) 
 func TestHousekeepingPluginInventoryRepairsOnlyUnfinishedOperations(t *testing.T) {
 	b := &housekeepingRemoteBackend{MockExecutor: MockExecutor{name: executor.NamePluginRemote}}
 	m, _ := task08ManagerWithBackend(t, b)
-	rows := []*models.ExecutorRunning{}
+	rows := []*models.ExecutorRunning{{SessionID: "malformed", Runtime: agentruntime.RuntimePluginRemote, Status: models.ExecutorRunningStatusStopped}}
 	for _, phase := range []string{pluginExecutorPhaseReady, pluginExecutorPhaseAllocating, pluginExecutorPhaseCleanupPending} {
 		row := pluginExecutorRecoveryRecord(t, phase, &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource"})
 		row.SessionID = phase
@@ -112,5 +112,24 @@ func TestHousekeepingPluginInventoryRepairsOnlyUnfinishedOperations(t *testing.T
 		if row.SessionID == pluginExecutorPhaseReady || row.SessionID == "live" {
 			t.Fatalf("repaired stable or live inventory: %s", row.SessionID)
 		}
+	}
+}
+
+type unreadableHousekeepingRemoteInventory struct {
+	task08ExecutorInventoryWriter
+	err error
+}
+
+func (w *unreadableHousekeepingRemoteInventory) ListExecutorsRunning(context.Context) ([]*models.ExecutorRunning, error) {
+	return nil, w.err
+}
+
+// @covers AC-PLATFORM-STARTUP-HOUSEKEEPING-001.3
+func TestHousekeepingRequiresReadablePersistedOwnershipInventory(t *testing.T) {
+	m := newTestManager(t)
+	want := errors.New("ownership inventory is unreadable")
+	m.SetExecutorRunningWriter(&unreadableHousekeepingRemoteInventory{err: want})
+	if err := m.PrepareStartupRecovery(t.Context()); !errors.Is(err, want) {
+		t.Fatalf("missing local ownership evidence admitted startup: %v", err)
 	}
 }
