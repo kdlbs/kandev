@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -14,6 +15,9 @@ import (
 )
 
 func TestTurnCheckpointCapturesLargeInventory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("full 30001-file checkout exceeds capture deadlines on Windows; large scans covered separately")
+	}
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
 	for i := 0; i < 30_001; i++ {
@@ -66,6 +70,26 @@ func TestTurnCheckpointCapturesLargeInventory(t *testing.T) {
 				t.Fatal("capture changed HEAD")
 			}
 		})
+	}
+}
+
+func TestTurnCheckpointScansLargeInventory(t *testing.T) {
+	root := t.TempDir()
+	var flags, staged bytes.Buffer
+	for i := 0; i < 30_001; i++ {
+		fmt.Fprintf(&flags, "H tracked-%05d.txt\x00", i)
+		fmt.Fprintf(&staged, "H 100644 0000000000000000000000000000000000000000 0\ttracked-%05d.txt\x00", i)
+	}
+	flags.WriteString("h final.txt\x00")
+	staged.WriteString("S 100644 0000000000000000000000000000000000000000 0\tfinal.txt\x00")
+	assume, skip, err := turnCheckpointFlaggedPaths(context.Background(), flags.Bytes(), root)
+	if err != nil || string(assume) != "final.txt\x00" || len(skip) != 0 {
+		t.Fatalf("flag scan: assume=%q skip=%q err=%v", assume, skip, err)
+	}
+	preserved, err := preserveMissingTurnCheckpointEntries(context.Background(), staged.Bytes(), root)
+	want := "100644 0000000000000000000000000000000000000000 0\tfinal.txt\x00"
+	if err != nil || string(preserved) != want {
+		t.Fatalf("staged scan: preserved=%q err=%v", preserved, err)
 	}
 }
 

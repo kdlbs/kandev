@@ -110,3 +110,13 @@ Capture-dependent desktop/mobile scroll fixtures now explicitly opt in and resto
 the saved preference. Their additional managed E2E runs passed (one case per
 viewport), bringing browser coverage to eleven passing cases. No product code
 or rendered composition changed in this follow-up.
+
+Windows CI remediation: hashing the full 30,001-file checkout exceeded the
+unchanged capture deadline on the hosted Windows runner. Both full-index scans
+now have portable 30,002-record regressions that verify processing of the final
+record; Windows uses those plus the existing small-repository capture tests.
+The full-checkout capture/compare/export integration remains on Linux and is
+skipped on Windows. A sparse fixture was investigated and discarded because it
+also timed out. The focused checkpoint/change suite passed locally again (7.3s).
+No production timeout, capture budget, or UI behavior changed in this follow-up.
+Remote CI and merge remain pending.
