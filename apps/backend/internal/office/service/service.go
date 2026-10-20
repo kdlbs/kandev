@@ -422,6 +422,7 @@ type Service struct {
 	taskStarter             TaskStarter
 	runSessionLauncher      RunSessionLauncher
 	runStopper              RunExecutionStopper
+	runPermissions          RunPermissionResolver
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService

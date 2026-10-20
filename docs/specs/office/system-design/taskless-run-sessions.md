@@ -36,6 +36,7 @@ current code rather than the contract, it says so.
 | .5, .6 | Outstanding lifecycle and recovery work |
 | .7 | Runtime admission and security |
 | .8 | Persistence; launch flow; outstanding lifecycle scope (replay clause) |
+| .9 | Permission requests |
 
 All criteria belong to REQ-OFFICE-TASKLESS-001.
 
@@ -315,6 +316,45 @@ from here. Inspect `office/service/event_subscribers.go` and `office/costs` for
 the write boundary. Keep bounded output/continuation semantics rather than
 introducing a new interactive chat UI. Run-detail session links must target a
 run-owned surface, never a task-session URL for a nonexistent task.
+
+## Permission requests
+
+agentctl holds an ACP permission request open until the backend answers it,
+including an auto-approval, which agentctl delivers only after the backend
+claims the decision. A taskless turn has no task session, no permission message
+and no UI, so nothing else can answer it; an unanswered request blocks the turn
+indefinitely and keeps the run claimed against the agent's concurrency ceiling.
+
+The runtime publishes a run-owned permission request on
+`permission_request.received.<run_session_id>`, mirroring the agent-stream
+subject rule, and the payload carries the owner fields named in Events and
+observation plus the execution ID. A subject with an empty final token matches
+no `*` subscriber, so the run session ID is required. Task permission handling
+in the orchestrator ignores run-owned requests by explicit owner-kind check; it
+must not store task messages or call task-session resolution for them.
+
+Office subscribes to the same subject family and admits a request through the
+event-admission rule above (claimed run, exact attempt, execution ID). It then
+decides:
+
+| Request | Decision |
+| --- | --- |
+| auto-approval pending (the Office agent's `auto_approve` is on; agentctl marks the request) | resolve with the offered auto-approval option |
+| otherwise, a reject option is offered | resolve with the first reject option |
+| otherwise | cancel the request |
+
+Office appends a `permission.decision` run event naming the decision, the
+option kind and the request title before it delivers the answer, so a delivery failure still leaves
+evidence on the run. Delivery goes through execution-keyed runtime calls
+(`ResolveRunPermission`, `CancelRunPermission`), because a run-owned execution
+has no task session ID to look up. A stale request (attempt superseded, run no
+longer claimed, execution already stopped) is dropped without delivery. After
+the answer, the turn reaches its own outcome through the normal AgentReady or
+failure path; this rule adds no new terminal path.
+
+A turn that hangs for a reason other than a permission request remains a known
+gap, tracked with the outstanding lifecycle work below; the generic stale-claim
+sweep requeues such a run without stopping its execution.
 
 ## Outstanding: stop controls and restart recovery
 
