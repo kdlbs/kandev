@@ -13,7 +13,6 @@ import { SettingsRow, type SettingsPresentation } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { Trans, useTranslation } from "react-i18next";
-import { cn } from "@/lib/utils";
 
 /**
  * `value` is the persisted enum the API compares — never translated. The label
@@ -99,7 +98,7 @@ function MCPTaskProfileRadioGroup({
       value={value}
       onValueChange={(nextValue) => onValueChange(nextValue as MCPTaskAgentProfileDefault)}
       data-settings-dirty={isDirty}
-      className={cn("gap-3", className)}
+      className={className}
     >
       {OPTIONS.map((option) => {
         const labelId = `mcp-task-profile-${option.value}-label`;
@@ -195,7 +194,7 @@ export function MCPTaskAgentProfileDefaultSettings({
         isDirty={isDirty}
         control={
           <MCPTaskProfileRadioGroup
-            className="w-full gap-2 md:grid-cols-2"
+            className="grid w-full gap-2 md:grid-cols-2"
             value={draft}
             isDirty={isDirty}
             onValueChange={setDraft}

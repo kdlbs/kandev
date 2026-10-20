@@ -125,3 +125,12 @@ The local PR-documentation coverage preflight passed with status `covered`.
 The completed layout matches UI-01 and UI-02, including the phone stack and preserved touch targets.
 The final screenshot capture passed both cases. Desktop and phone images were inspected and retained in `apps/web/.pr-assets/task-spacing/`.
 The temporary capture spec was removed. The managed runner stopped its isolated backend.
+
+### PR review follow-up
+
+Removed the redundant radio-group gap default and passed the optional class name directly to the shared primitive.
+The row caller now declares `grid` explicitly with its responsive columns.
+These changes preserve the rendered layout and settings behavior, so the requirements, design, and screenshots remain current.
+Verification: the profile component suite passed all 4 tests, scoped ESLint passed, and the Vite production build passed.
+The rebuilt frontend passed the 3 profile geometry/keyboard cases with `pnpm e2e:run --host --no-build --project chromium tests/settings/task-behavior-concise-help.spec.ts -- --grep 'places profile choices'`.
+It also passed all 4 cases with `pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-task-behavior-concise-help.spec.ts`.
