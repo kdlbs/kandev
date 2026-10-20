@@ -100,3 +100,20 @@ behavior, so the existing screenshots and public guidance remain accurate.
 pnpm --dir apps/web exec vitest run components/task/chat/messages/action-message-cleanup-history.test.ts components/task/chat/messages/action-message.test.tsx components/task/chat/session-recovery-card.test.tsx
 NODE_OPTIONS=--max-old-space-size=8192 pnpm --dir apps/web run typecheck
 ```
+
+### CI follow-up
+
+E2E shard 17 still selected the previous diagnostic ZIP description. The failure
+reproduced locally with retries disabled. Updated that expectation, two shared
+recovery helpers, and the launch-queue translation mock to match the new copy.
+The Logs page keeps its privacy-note and action-alignment assertions.
+
+All five affected desktop scenarios, both phone recovery scenarios, and seven
+launch-queue unit tests passed. Changed-file ESLint and Prettier checks passed.
+These test-only corrections do not change the rendered UI.
+
+```bash
+pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/system/logs-page.spec.ts e2e/tests/session/delivery-retention.spec.ts e2e/tests/session/session-resume-settings-recovery.spec.ts -- --grep 'System Logs page|preserves saved history|explains one-attempt' --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/session/mobile-delivery-retention.spec.ts e2e/tests/session/mobile-session-resume-settings-recovery.spec.ts -- --retries=0
+pnpm --dir apps/web exec vitest run components/task/launch-queue-status.test.tsx
+```
