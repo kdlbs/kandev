@@ -103,6 +103,7 @@ function renderPage(tasksListShowDetails: boolean) {
       <TasksPageClient
         workspaces={[]}
         initialWorkspaceId="ws1"
+        initialMetadataLoaded
         initialRepositories={[]}
         initialTasks={[]}
         initialTotal={0}

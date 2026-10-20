@@ -74,5 +74,7 @@
   "filteredCount_one": "{{count}} tarefa",
   "filteredCount_other": "{{count}} tarefas",
   "filtersButton_one": "Filtros ({{count}})",
-  "filtersButton_other": "Filtros ({{count}})"
+  "filtersButton_other": "Filtros ({{count}})",
+  "appliedWorkflow": "Fluxo de trabalho: {{name}}",
+  "appliedRepository": "Repositório: {{name}}"
 }

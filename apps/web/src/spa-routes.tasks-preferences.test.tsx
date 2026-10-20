@@ -56,7 +56,7 @@ function renderTaskBoot(sort: string, query = "") {
   ] as Task[];
   window.history.replaceState({}, "", `/tasks${query}`);
   render(
-    <StateProvider>
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
       <SpaRoutes
         routeData={
           {
@@ -121,7 +121,7 @@ it.each(["state", "workflow_step", "invalid"])("resolves a live SPA %s grouping 
     },
   } as BootRouteData;
   render(
-    <StateProvider>
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
       <SpaRoutes routeData={routeData} />
     </StateProvider>,
   );
@@ -139,7 +139,7 @@ it("does not present saved active boot rows beneath an explicit archive query", 
     "/tasks?workspace=ws&archive=archived&workflow=all&repository=all",
   );
   render(
-    <StateProvider>
+    <StateProvider initialState={{ workspaces: { items: [], activeId: "ws" } }}>
       <SpaRoutes
         routeData={
           {

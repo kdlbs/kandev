@@ -195,9 +195,11 @@ function TaskListAppliedScope(props: TasksListFilterProps) {
           className={controlSizingClassName("standard", "max-w-full cursor-pointer gap-2 text-xs")}
         >
           <span className="truncate">
-            {t("kanban:workflow")}:{" "}
-            {props.workflows.find((w) => w.id === props.workflowId)?.name ??
-              t("tasks:workflowUnavailable")}
+            {t("tasks:appliedWorkflow", {
+              name:
+                props.workflows.find((w) => w.id === props.workflowId)?.name ??
+                t("tasks:workflowUnavailable"),
+            })}
           </span>
           <IconX className="size-3 shrink-0" aria-hidden="true" />
         </Button>
@@ -210,9 +212,11 @@ function TaskListAppliedScope(props: TasksListFilterProps) {
           className={controlSizingClassName("standard", "max-w-full cursor-pointer gap-2 text-xs")}
         >
           <span className="truncate">
-            {t("kanban:repository")}:{" "}
-            {props.repositories.find((r) => r.id === props.repositoryId)?.name ??
-              t("tasks:repositoryUnavailable")}
+            {t("tasks:appliedRepository", {
+              name:
+                props.repositories.find((r) => r.id === props.repositoryId)?.name ??
+                t("tasks:repositoryUnavailable"),
+            })}
           </span>
           <IconX className="size-3 shrink-0" aria-hidden="true" />
         </Button>

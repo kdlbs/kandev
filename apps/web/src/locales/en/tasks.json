@@ -74,5 +74,7 @@
   "filteredCount_one": "{{count}} task",
   "filteredCount_other": "{{count}} tasks",
   "filtersButton_one": "Filters ({{count}})",
-  "filtersButton_other": "Filters ({{count}})"
+  "filtersButton_other": "Filters ({{count}})",
+  "appliedWorkflow": "Workflow: {{name}}",
+  "appliedRepository": "Repository: {{name}}"
 }

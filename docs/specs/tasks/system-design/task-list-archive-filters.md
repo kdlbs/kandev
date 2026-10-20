@@ -162,6 +162,21 @@ On workspace navigation, do not reuse task-page boot identity from a previous
 workspace. The current workspace resolves before reads begin. Do not modify the
 unused async `app/tasks/page.tsx` as a substitute for SPA wiring.
 
+The SPA route validates an explicit `workspace` against the authorized workspace
+list, then uses the canonical workspace action before mounting the List client.
+Changing that URL field cancels the previous bootstrap. Key the List client by
+resolved workspace so browser history preserves explicit filters. A failed
+workspace lookup shows a translated route error with Retry and Home. An unknown
+workspace shows Workspace not found with Home. Neither state mounts List or
+falls back to another workspace.
+
+Only the initial Tasks boot metadata or successful SPA workflow and repository
+reads set `initialMetadataLoaded`. A matching workspace ID alone does not prove
+readiness. Invalidate the Tasks boot seed after leaving Tasks or changing its
+workspace. Keep this invalidation in the SPA owner so returning from Settings
+cannot reuse metadata from a previous visit. Pending metadata remains loading;
+failed reads retain the existing metadata recovery path.
+
 ## Query transitions
 
 Use one transition to change a filter and reset pagination. Do not issue a
@@ -177,13 +192,15 @@ Clear filters writes an empty query and explicit `workflow=all` and
 workflow or repository indicator changes that field only. Search has its own
 clear control. Changing archive mode retains the other filters.
 
-A workspace change that keeps List open retains archive mode, clears search,
+A manual workspace change that keeps List open retains archive mode, clears search,
 sets both scope fields to explicit `all`, and resets page one. Clear previous rows before rendering
 the new workspace context. Do not apply old IDs while new metadata loads.
 Keep this normalization inside the Tasks route. Shared board and Threads
 history behavior must remain unchanged. `AppSidebarWorkspacePicker` selects a
 workspace's Home destination. Preserve that established route choice. The List
 effect must not replace a committed navigation outside the Tasks route.
+An explicit URL workspace change follows link restoration instead of this
+manual-selection normalization.
 
 List selectors receive effective values and actions from the feature query
 model. Suppress only duplicate built-in workflow/repository fields in the

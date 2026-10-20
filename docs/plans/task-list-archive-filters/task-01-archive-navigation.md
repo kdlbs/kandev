@@ -174,3 +174,8 @@ Complete on 2026-10-20.
 The query/data boundary is implemented in `use-tasks-list-query-state.ts` and
 `use-tasks-list-data.ts`. Shared Home navigation stays authoritative; List
 normalization cannot replace a committed route outside Tasks.
+
+PR review remediation adds URL workspace resolution, bootstrap cancellation,
+translated route recovery, and explicit metadata readiness. Unit regressions
+failed before the fix. Desktop and phone browser cases now cover cross-workspace
+history and recovery. See [PR review remediation](plan.md#pr-review-remediation).

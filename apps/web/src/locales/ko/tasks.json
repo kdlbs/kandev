@@ -74,5 +74,7 @@
   "filteredCount_one": "작업 {{count}}개",
   "filteredCount_other": "작업 {{count}}개",
   "filtersButton_one": "필터 ({{count}})",
-  "filtersButton_other": "필터 ({{count}})"
+  "filtersButton_other": "필터 ({{count}})",
+  "appliedWorkflow": "워크플로: {{name}}",
+  "appliedRepository": "리포지토리: {{name}}"
 }

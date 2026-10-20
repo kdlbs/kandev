@@ -754,6 +754,9 @@ Remove a selected filter with its clear button, or choose **Clear filters** to
 clear search, workflow, and repository together. Clearing keeps the archive
 mode, sort, grouping, and row details. Opening an explicit list link keeps its
 scope through reload and browser history without changing your saved filters.
+Links to another workspace select that workspace before loading tasks. If the
+workspace lookup fails, select **Retry**. If the workspace no longer exists or
+is unavailable, select **Home** to return to your task overview.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
@@ -767,9 +770,10 @@ Kanban and List share a compact phone header showing the workspace and current
 mode. Tap the **Kanban**, **Threads**, or **List** title dropdown to open view options and change display settings, or tap the
 Kanban/List context to open the same controls. The hamburger opens app
 navigation, including the workspace picker and **Home**. In Threads, tap the
-view name to choose a saved Threads view. Phone **Search tasks** lives under
-**View options**: selecting it reveals and focuses the search field below the
-header. Selecting it again hides the field and clears the query.
+view name to choose a saved Threads view. In Kanban, phone **Search tasks** lives
+under **View options**. Selecting it reveals and focuses the search field below
+the header. Selecting it again hides the field and clears the query. In List,
+the search field stays visible.
 
 Under **Settings → Preferences → Appearance → Startup Page**, choose a destination, then select **Save changes**:
 

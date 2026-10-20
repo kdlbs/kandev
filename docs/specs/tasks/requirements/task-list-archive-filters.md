@@ -114,21 +114,26 @@ including portable workflow defaults, sorting, grouping, and row details.
 - **AC-TASKS-LIST-ARCHIVE-FILTERS-004.1:** An explicit list link shall retain
   archive mode, search, workflow, and repository through reload and browser
   Back or Forward. A query-only navigation shall update an already open List.
+  A link to another authorized workspace shall select that workspace before
+  mounting List and retain the explicit filters.
 - **AC-TASKS-LIST-ARCHIVE-FILTERS-004.2:** Boot data or delayed responses from
   another workspace, archive mode, filter set, sort, or page shall not replace
   current results. Pending reads shall not present previous-scope rows or
   totals as current, or announce a successful empty result.
-- **AC-TASKS-LIST-ARCHIVE-FILTERS-004.3:** When a workspace change keeps List
+- **AC-TASKS-LIST-ARCHIVE-FILTERS-004.3:** When a manual workspace change keeps List
   open, List shall retain archive mode, clear search, select all workflows and
   repositories, and start at page one. Previous-workspace rows and scope
   identifiers shall not enter that read. Home and Office navigation shall retain
-  their existing destination behavior.
+  their existing destination behavior. Explicit links and browser history shall
+  retain their scope as specified in `004.1`.
 - **AC-TASKS-LIST-ARCHIVE-FILTERS-004.4:** Archive, unarchive, delete, pull-to-refresh,
   and Retry shall use the current query. Removing the final row of the final
   page shall select the last available page, or page one when the result is empty.
 - **AC-TASKS-LIST-ARCHIVE-FILTERS-004.5:** An unsupported archive-mode value
   shall resolve to Active. A workflow or repository unavailable in the resolved
   workspace shall show an unavailable-filter state until cleared or replaced.
+  Filter validation shall wait for metadata reads to finish. A failed workspace
+  lookup shall offer Retry. An unknown workspace shall offer Home.
   It shall not silently broaden the scope. Existing authorization failures
   shall not display rows from another workspace.
 

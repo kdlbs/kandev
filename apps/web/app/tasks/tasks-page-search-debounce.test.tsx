@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import type { TasksListViewProps } from "./tasks-list-view";
 import { TasksListFilters } from "./tasks-list-filters";
@@ -67,6 +67,7 @@ vi.mock("./tasks-list-view", () => ({
     filters,
     archiveMode,
     setArchiveMode,
+    unavailableFilter,
   }: TasksListViewProps) => (
     <div>
       <TasksListFilters
@@ -81,6 +82,7 @@ vi.mock("./tasks-list-view", () => ({
       <output aria-label="Total">{total}</output>
       <output aria-label="Loading">{String(isLoading)}</output>
       <output aria-label="Page">{pagination.pageIndex + 1}</output>
+      <output aria-label="Unavailable filter">{unavailableFilter ?? ""}</output>
       <button onClick={() => setPagination((prev) => ({ ...prev, pageIndex: 1 }))}>Page two</button>
       <button onClick={() => setPagination((prev) => ({ ...prev, pageSize: 10 }))}>Ten rows</button>
       <button onClick={() => setArchiveMode("all")}>Include archived</button>
@@ -90,13 +92,19 @@ vi.mock("./tasks-list-view", () => ({
 
 import { TasksPageClient } from "./tasks-page-client";
 
-function page() {
+let testStore: ReturnType<typeof useAppStoreApi>;
+function CaptureStore() {
+  testStore = useAppStoreApi();
+  return null;
+}
+
+function page(fromBoot = true, metadataLoaded = fromBoot) {
   return (
     <StateProvider
       initialState={{
         workspaces: { items: [], activeId: "ws1" },
         workflows: {
-          items: [{ id: "wf1", workspaceId: "ws1", name: "Workflow" } as never],
+          items: fromBoot ? [{ id: "wf1", workspaceId: "ws1", name: "Workflow" } as never] : [],
           activeId: "wf1",
         },
         userSettings: {
@@ -108,13 +116,15 @@ function page() {
         },
       }}
     >
+      <CaptureStore />
       <TasksPageClient
         workspaces={[]}
         initialWorkspaceId="ws1"
         initialRepositories={[{ id: "repo1", name: "Repository" } as Repository]}
         initialTasks={[]}
         initialTotal={0}
-        initialDataLoaded
+        initialDataLoaded={fromBoot}
+        initialMetadataLoaded={metadataLoaded}
         initialSort="title_asc"
         initialGroup="none"
       />
@@ -248,6 +258,38 @@ describe("List search admission", () => {
     await advance(900);
     expect(controls.list).not.toHaveBeenCalled();
   });
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+it("waits for metadata before treating a saved workflow as unavailable", async () => {
+  const view = render(page(false));
+  await act(async () => {});
+  expect(screen.getByLabelText("Unavailable filter").textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("true");
+  expect(controls.list).not.toHaveBeenCalled();
+
+  await act(async () => {
+    const state = testStore.getState();
+    const generation = state.workspaceContextGeneration;
+    state.setWorkspaceContextRead("workflows", "ws1", generation, "pending");
+    state.hydrate({
+      workflows: {
+        items: [{ id: "wf1", workspaceId: "ws1", name: "Workflow" } as never],
+        activeId: "wf1",
+      },
+    });
+    state.setWorkspaceContextRead("workflows", "ws1", generation, "success");
+    state.setRepositories("ws1", [{ id: "repo1", name: "Repository" } as Repository]);
+  });
+  view.rerender(page(false, true));
+  await act(async () => {});
+  expect(screen.getByLabelText("Unavailable filter").textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("false");
+  expect(controls.list).toHaveBeenCalledWith(
+    "ws1",
+    expect.objectContaining({ workflowId: "wf1", repositoryId: "repo1" }),
+    expect.anything(),
+  );
 });
 
 describe("List search scope and reply ownership", () => {

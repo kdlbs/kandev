@@ -24,7 +24,8 @@ The source contracts are the
 [requirements](../../specs/tasks/requirements/task-list-archive-filters.md) and
 [system design](../../specs/tasks/system-design/task-list-archive-filters.md).
 The user requested implementation after the design-package handoff on 2026-10-20.
-Production changes and focused tests are authorized. No commit or push is requested.
+Production changes and focused tests are authorized. After manual validation,
+the user requested a ready PR, then CI and review remediation.
 
 ## Planning assumptions
 
@@ -380,3 +381,30 @@ from these completed local checks.
   plugin contributions. Limit exclusions to Tasks and run affected regressions.
 - The shared workspace picker opens Home. List normalization must run only
   while the current route remains Tasks, so it cannot replace that navigation.
+
+## PR review remediation
+
+The route now validates the URL workspace before mounting List. Unknown
+workspaces offer Home. Failed workspace lookups offer Retry and Home without
+exposing internal errors. Browser history retains each link's explicit filters.
+Tasks boot metadata expires when leaving Tasks or changing workspace. SPA
+metadata readiness follows successful collection reads, including empty lists.
+
+Applied filter labels use complete translated messages with a name placeholder.
+The public phone guide limits the search toggle to Kanban and states that List
+search stays visible.
+
+Validation before the remediation commit:
+
+- The workspace and metadata regressions failed against the original behavior.
+- All 172 unit tests passed in 22 focused suites. The final route and loading
+  rerun passed all 26 tests. Typecheck and changed-file lint passed.
+- All 16 focused desktop browser scenarios passed. The five initial phone
+  scenarios passed, including cross-workspace history, Retry, unknown-workspace
+  Home recovery, 44px phone actions, and filter-drawer interactions.
+- Localization checks, the new-copy ratchet, the specification catalog,
+  specification lint, and the public documentation validator passed.
+
+Logs are in `/tmp/kandev-archive-pr-delivery-1n02tpi8`. The desktop browser log is
+`kandev-run.e2e.7U9t9I8J.log`; the initial phone log is
+`kandev-run.e2e.T4VD6W6L.log`.

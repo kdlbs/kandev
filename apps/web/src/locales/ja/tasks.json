@@ -74,5 +74,7 @@
   "filteredCount_one": "{{count}} 件のタスク",
   "filteredCount_other": "{{count}} 件のタスク",
   "filtersButton_one": "フィルター（{{count}}）",
-  "filtersButton_other": "フィルター（{{count}}）"
+  "filtersButton_other": "フィルター（{{count}}）",
+  "appliedWorkflow": "ワークフロー：{{name}}",
+  "appliedRepository": "リポジトリ：{{name}}"
 }

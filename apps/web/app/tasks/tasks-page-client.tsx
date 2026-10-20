@@ -49,6 +49,7 @@ interface TasksPageClientProps {
   initialTasks: Task[];
   initialTotal: number;
   initialDataLoaded?: boolean;
+  initialMetadataLoaded?: boolean;
   initialSort: TasksListSortPreference;
   initialGroup: TasksListGroupPreference;
 }
@@ -147,22 +148,21 @@ function useTasksListMetadata(
   initialWorkspaceId: string | undefined,
   repositories: Repository[],
   query: TasksListScope,
+  metadataLoaded: boolean,
 ) {
   const workflows = useAppStore((state) => state.workflows.items);
   const context = useAppStore((state) => state.workspaceContextRead);
   const repositoriesLoaded = useAppStore((state) =>
     workspaceId ? state.repositories.loadedByWorkspaceId[workspaceId] : false,
   );
-  const bootMetadata = Boolean(workspaceId && initialWorkspaceId === workspaceId);
+  const ready = Boolean(metadataLoaded && workspaceId && initialWorkspaceId === workspaceId);
   const currentContext = context.workspaceId === workspaceId;
   return tasksListFilterStatus({
     query,
     workflowIds: workflows.filter((w) => w.workspaceId === workspaceId).map((w) => w.id),
     repositoryIds: repositories.map((r) => r.id),
-    workflowReady:
-      bootMetadata ||
-      Boolean(currentContext && context.requestIds.workflows && !context.pending.workflows),
-    repositoryReady: bootMetadata || Boolean(repositoriesLoaded),
+    workflowReady: ready,
+    repositoryReady: ready || Boolean(repositoriesLoaded),
     workflowFailed: currentContext && Boolean(context.errors.workflows),
     repositoryFailed: currentContext && Boolean(context.errors.repositories),
   });
@@ -209,6 +209,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     props.initialWorkspaceId,
     repositories,
     query,
+    props.initialMetadataLoaded ?? false,
   );
   const debouncedQuery = useDebounce(query.searchQuery, 300);
   const requestedWorkspace = searchParams.get("workspace") ?? activeWorkspaceId;

@@ -74,5 +74,7 @@
   "filteredCount_one": "{{count}} 个任务",
   "filteredCount_other": "{{count}} 个任务",
   "filtersButton_one": "筛选（{{count}}）",
-  "filtersButton_other": "筛选（{{count}}）"
+  "filtersButton_other": "筛选（{{count}}）",
+  "appliedWorkflow": "工作流：{{name}}",
+  "appliedRepository": "仓库：{{name}}"
 }

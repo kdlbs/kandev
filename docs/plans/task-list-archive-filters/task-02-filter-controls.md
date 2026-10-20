@@ -218,3 +218,7 @@ The final base update extends task deletion. The List layers preserve the shared
 `DeleteTaskParams` and cleanup feedback. The final focused unit run passed 158
 tests in 21 suites; typecheck and affected-file lint passed. The fresh-build
 desktop and phone deletion smoke checks passed.
+
+PR review remediation uses translated interpolated messages for both applied
+filter labels and corrects the phone search guide. All locale checks passed.
+See [PR review remediation](plan.md#pr-review-remediation).

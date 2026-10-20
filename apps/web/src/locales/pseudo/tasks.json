@@ -74,5 +74,7 @@
   "filteredCount_one": "{{count}} ţàśķ",
   "filteredCount_other": "{{count}} ţàśķś",
   "filtersButton_one": "Ƒĩĺţēŕś ({{count}})",
-  "filtersButton_other": "Ƒĩĺţēŕś ({{count}})"
+  "filtersButton_other": "Ƒĩĺţēŕś ({{count}})",
+  "appliedWorkflow": "Ŵōŕķƒĺōŵ: {{name}}",
+  "appliedRepository": "Ŕēƥōśĩţōŕŷ: {{name}}"
 }
