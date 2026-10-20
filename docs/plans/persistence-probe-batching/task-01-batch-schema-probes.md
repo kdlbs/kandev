@@ -73,6 +73,7 @@ The existing control tests are retained.
 
 ```bash
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/persistence/requiredstores -run '^TestHealthSQLiteCatalogUsesOneSchemaQuery$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/db/dialect -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/db ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(ExistingSQLiteTablesContext|HealthSQLiteCatalog|PersistenceContentionFixture|RuntimeHealth|StartupHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence/storeconformance -count=1)
@@ -146,6 +147,10 @@ implementation and passed with one afterward. All task-defined code checks passe
 Three final paired HTTP runs produced 3,073 write 503s with the original probe
 and zero with the implementation. PostgreSQL integration cases were skipped
 because no test DSN was configured.
+
+CI also exposed a test-package import cycle through `internal/db/dialect`.
+The helper now compares the SQLite driver name directly, as other shared schema
+helpers do. The complete dialect package is included in required verification.
 
 See [implementation-evidence.md](implementation-evidence.md) and
 [implementation-measurements.json](implementation-measurements.json) for exact

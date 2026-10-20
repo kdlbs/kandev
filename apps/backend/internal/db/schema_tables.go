@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // ExistingSQLiteTablesContext returns the requested tables present in SQLite.
@@ -14,7 +13,7 @@ func ExistingSQLiteTablesContext(ctx context.Context, conn *sqlx.DB, tables []st
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if conn.DriverName() != dialect.SQLite3 {
+	if conn.DriverName() != "sqlite3" {
 		return nil, fmt.Errorf("SQLite table inventory requires the sqlite3 driver")
 	}
 	existing := make(map[string]bool)

@@ -98,7 +98,7 @@ writes or unlimited write capacity. Other host workloads can affect timing.
 The workload does not identify the writer operation behind the historical incident.
 
 The baseline uses the preserved original algorithm with its temporary total-time
-logging. The candidate uses the final production source without success logging.
+logging. The candidate uses the measured implementation without success logging.
 Do not compare successful probe durations between these two builds. Both retain
 the normal failure diagnostic and the same timeout and interval.
 
@@ -120,3 +120,39 @@ shutdown and recreated its disposable home. Its environment identified this
 replay root; it was stopped separately, and its files were removed. No process
 with the replay root in its command or environment remained. The live instance
 was not changed. The implementation is ready for code review; it has not been deployed.
+
+
+## CI import-cycle correction
+
+The first PR head passed the scoped checks but failed backend static lint in
+job `118559826223` because `internal/db/dialect` tests import `internal/db`.
+The new helper's reverse import created a test-package cycle. The exact local
+reproduction was:
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/db/dialect -count=1)
+```
+
+It failed with `import cycle not allowed in test`. The helper now compares the
+same `sqlite3` driver-name value directly, matching the shared schema layer's
+existing approach. SQL, bindings, pool selection, and runtime behavior are
+unchanged. The three stress pairs above remain measurements of the pre-correction
+source hashes; this import-only correction does not add a new performance claim.
+The work order now requires the entire dialect test package as well.
+
+Post-correction validation:
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/db/dialect -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/db ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(ExistingSQLiteTablesContext|HealthSQLiteCatalog|PersistenceContentionFixture|RuntimeHealth|StartupHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1)
+(cd apps/backend && go run ./cmd/sqlguard ./internal)
+PATH="/tmp/kandev-merge-tools:$PATH" bash scripts/lint-go-changed apps/backend/internal/db/schema_tables.go apps/backend/internal/db/dialect/aggregate.go apps/backend/internal/persistence/requiredstores/health.go
+```
+
+The complete dialect package, all new and changed health/schema regressions,
+existing fault/recovery controls, and SQL guard passed after the correction.
+Changed-package lint also passed, including `internal/db/dialect`, with zero
+issues. Fresh CI evidence remains pending until the correction is pushed and
+the new-head checks finish.
+
+Corrected schema-helper SHA-256: `10eae37d25e553371ab3b9a7a5fddb94b76c31c4d8b5fbe4ccbba03829d4c75d`.
