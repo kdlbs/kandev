@@ -36,7 +36,8 @@ separate [replacement behavior](configuration-chat-restart.md).
   the targeted session, then request its normal resume after Stop succeeds.
   The action shall retain the session identity, conversation history, and
   workspace. It shall preserve unsent input and tab selection throughout the
-  attempt. A later explicit user selection during the restart shall take
+  attempt. It shall preserve whether selection was automatic or explicitly pinned.
+  A later explicit user selection during the restart shall take
   precedence. It shall not
   create a replacement session, submit a prompt, or explicitly select a primary
   session. The existing Stop lifecycle can promote another active session to primary.

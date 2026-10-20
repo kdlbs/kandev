@@ -60,11 +60,14 @@ archive restrictions, admission, and recovery policy remain authoritative.
 sibling when Stop cancels the current primary. Keep this existing Stop behavior.
 Restart does not send `session.set_primary` to reverse that promotion.
 
-Capture whether the target is selected and the current user navigation revision
+Capture whether the target is selected, its pin state, and the user navigation revision
 before Stop. After the attempt settles, restore that target only if the user
 still views the same task and the navigation revision is unchanged. Automatic
 sibling adoption does not advance this revision. A later explicit selection does.
 Restore selection after a failed Resume too, so the target's recovery stays visible.
+Restore automatic selection with `setActiveSessionAuto` so it does not create a
+user pin or advance the navigation revision. Restore an existing pin with
+`setActiveSession`. Keep the task, target, and navigation revision guards in both cases.
 WebSocket projections retain responsibility for runtime state and readiness.
 The action does not write an optimistic RUNNING state or claim readiness from
 the launch acknowledgment alone.

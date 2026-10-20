@@ -6,6 +6,7 @@ import { ComposerAgentStartHint } from "./composer-agent-start-hint";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 import type { ChatPanelState } from "./use-chat-panel-state";
 
+/** Announces restart progress without showing the competing agent-start hint. */
 export function ComposerStatusNotices({
   panelState,
   showAgentStartHint,

@@ -363,6 +363,7 @@ function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSession
   }
 }
 
+/** Retains the active restart target or a protected user pin during automatic adoption. */
 function shouldPreserveSessionSelection(
   store: StoreApi<AppState>,
   taskId: string,

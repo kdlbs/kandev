@@ -132,6 +132,7 @@ export function shouldShowChatFocusHint(args: {
   );
 }
 
+/** Gives restart feedback priority over the ordinary environment preparation hint. */
 function getSubmitDisabledReason(
   isRestarting: boolean,
   inputBlocked: boolean,
@@ -142,6 +143,7 @@ function getSubmitDisabledReason(
   return undefined;
 }
 
+/** Derives submission eligibility separately from draft editing and presentation. */
 function computeDerivedState(params: {
   isStarting: boolean;
   isRestarting: boolean;
@@ -248,6 +250,7 @@ function useComposerInputPresentation({
   );
 }
 
+/** Coordinates retained drafts, editor sizing, and session-specific submission guards. */
 export function useChatInputContainer(params: UseChatInputContainerParams) {
   const { t } = useTranslation("chat");
   const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;

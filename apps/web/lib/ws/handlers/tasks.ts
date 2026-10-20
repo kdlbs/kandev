@@ -306,6 +306,7 @@ function removeArchivedTaskSideEffects(store: StoreApi<AppState>, taskId: string
   state.setOfficeRefetchTrigger("tasks");
 }
 
+/** Follows a changed primary only when neither a pending restart nor a user pin owns selection. */
 function maybeFollowUpdatedTaskPrimary(
   store: StoreApi<AppState>,
   beforeState: AppState,

@@ -154,8 +154,8 @@ record the guard, failure behavior, and checks. Screenshot publication and fresh
 remote CI/review for the new commit remain delivery steps.
 
 An additional two-session check reproduced automatic sibling adoption during
-Stop. Task 02 remains in progress until the shared pending model also protects
-automatic WebSocket selection, so the selected composer's send guard stays visible.
+Stop. Task 02 then added shared pending-state guards to both automatic WebSocket
+selection paths, so the selected composer's send guard stays visible.
 
 ## Verification results
 
@@ -180,6 +180,10 @@ The action now restores the original selection after the attempt settles,
 unless a later user navigation changes the task or navigation revision.
 Backend primary promotion remains unchanged. Desktop and phone regressions
 cover a selected target with a live sibling.
+
+The restoration fallback also preserves selection ownership. An automatically
+selected target stays unpinned and does not advance the user navigation revision.
+An existing user pin is restored after either successful or failed Resume.
 
 The [work order results](task-01-session-restart.md#pr-remediation-results)
 record the final local checks. Remote CI and review remain pending until the

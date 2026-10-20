@@ -20,7 +20,13 @@ const mockSetActiveSession = vi.fn((taskId: string, sessionId: string) => {
     activeSessionId: sessionId,
   };
 });
-const mockSetActiveSessionAuto = vi.fn();
+const mockSetActiveSessionAuto = vi.fn((taskId: string, sessionId: string) => {
+  mockState.tasks = {
+    ...(mockState.tasks as object),
+    activeTaskId: taskId,
+    activeSessionId: sessionId,
+  };
+});
 const mockClearActiveSession = vi.fn();
 const networkErrorMessage = "network down";
 

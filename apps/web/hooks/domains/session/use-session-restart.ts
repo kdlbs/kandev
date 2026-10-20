@@ -21,12 +21,13 @@ export function useSessionRestarting(sessionId: string | null | undefined) {
   );
 }
 
-/** Restores the target only when no later user navigation supersedes it. */
+/** Restores selection ownership only when no later user navigation supersedes it. */
 function restoreRestartSelection(
   owner: ReturnType<typeof useAppStoreApi>,
   taskId: string,
   sessionId: string,
   navigationRevision: number,
+  wasPinned: boolean,
 ) {
   const current = owner.getState();
   if (
@@ -34,7 +35,8 @@ function restoreRestartSelection(
     current.tasks.activeSessionId !== sessionId &&
     current.taskRemoval.navigationRevision === navigationRevision
   ) {
-    current.setActiveSession(taskId, sessionId);
+    if (wasPinned) current.setActiveSession(taskId, sessionId);
+    else current.setActiveSessionAuto(taskId, sessionId);
   }
 }
 
@@ -72,6 +74,7 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
     const wasSelected =
       initial.tasks.activeTaskId === taskId && initial.tasks.activeSessionId === sessionId;
     const navigationRevision = initial.taskRemoval.navigationRevision;
+    const wasPinned = initial.tasks.pinnedSessionId === sessionId;
     pending.setState(new Set([...pending.getState(), sessionId]), true);
     const toastId = toast({ title: t("task:sessionActionRestart"), variant: "loading" });
     try {
@@ -93,7 +96,8 @@ export function useSessionRestart(sessionId: string | null | undefined, taskId: 
       });
       return false;
     } finally {
-      if (wasSelected) restoreRestartSelection(owner, taskId, sessionId, navigationRevision);
+      if (wasSelected)
+        restoreRestartSelection(owner, taskId, sessionId, navigationRevision, wasPinned);
       const next = new Set(pending.getState());
       next.delete(sessionId);
       pending.setState(next, true);

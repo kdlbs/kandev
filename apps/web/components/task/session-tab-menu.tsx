@@ -125,6 +125,7 @@ export function DeleteSessionPopover({
   );
 }
 
+/** Keeps restart visible while pending and disables competing actions for the same target. */
 function SessionLifecycleMenuItems({
   sessionState,
   actions,
@@ -181,6 +182,7 @@ function SessionLifecycleMenuItems({
   );
 }
 
+/** Composes session actions while deferring rename focus until the context menu closes. */
 export function SessionContextMenuItems({
   sessionState,
   isPrimary,

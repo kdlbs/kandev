@@ -335,6 +335,7 @@ function useChatInputRecoveryActions(
 }
 
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
+  /** Keeps the draft editor mounted during restart before normal recovery presentation resumes. */
   // eslint-disable-next-line complexity, max-lines-per-function -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =

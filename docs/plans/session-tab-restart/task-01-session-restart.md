@@ -192,3 +192,44 @@ Menu geometry and motion follow the existing shared primitives.
 The checks found no actionable UI polish issue.
 Final commit verification, screenshot publication, remote CI, and review remain
 delivery steps. Exact-head remote evidence belongs in the PR and handoff.
+
+### Selection ownership follow-up
+
+The restoration fallback preserves whether the original selection was automatic
+or pinned. The real-store regression first reproduced an unwanted user pin after
+both successful and failed Resume. Automatic restoration now uses
+`setActiveSessionAuto`, which leaves the navigation revision unchanged.
+Existing pins still use `setActiveSession`, and later user navigation wins.
+
+The follow-up changes shared selection state without changing rendered markup,
+touch controls, or responsive composition. The existing desktop and phone
+restart scenarios remain the browser coverage for the shared action.
+Function contracts now document the affected composer, menu, and WebSocket guards.
+
+Local verification on 2026-10-20:
+
+- `pnpm exec vitest run hooks/domains/session/use-session-restart.test.ts hooks/domains/session/use-session-actions.test.ts`
+  passed: 35 tests in 2 files. The new real-store cases cover automatic and
+  pinned selections after successful and failed Resume.
+- The broader affected suites passed: 852 tests in 79 files. From `apps/web`:
+
+  ```bash
+  pnpm exec vitest run \
+    hooks/domains/session/use-session-restart.test.ts \
+    hooks/domains/session/use-session-actions.test.ts \
+    components/task/session-tab-menu.test.tsx \
+    components/task/preview-session-tabs.test.tsx \
+    components/task/mobile/mobile-sessions-section.test.tsx \
+    components/task/chat/chat-input-area.test.tsx \
+    components/task/chat/chat-input-area-restart.test.tsx \
+    components/task/chat/use-chat-input-container.test.ts \
+    components/task/chat/use-composer-props.test.tsx \
+    components/task/chat/chat-input-container.test.tsx \
+    components/task/chat/chat-input-body.test.tsx \
+    components/task/chat/use-chat-input-state.test.ts \
+    lib/ws/handlers --maxWorkers=2
+  ```
+
+- Changed-file ESLint, TypeScript checks, specification catalog validation,
+  and full specification lint passed. Normal commit hooks and current-head
+  remote CI remain delivery checks.

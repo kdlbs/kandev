@@ -143,6 +143,7 @@ function StateBadge({
   );
 }
 
+/** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
 function SessionActionsMenu({
   triggerRef,
   taskId,
@@ -261,6 +262,7 @@ function SessionIdentity({ row }: { row: SessionRow }) {
   );
 }
 
+/** Connects one session's menu and delete confirmation to its shared lifecycle actions. */
 function SessionRowTrailingActions({
   row,
   taskId,

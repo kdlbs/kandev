@@ -100,6 +100,7 @@ function useSessionTabState(sessionId: string | undefined) {
   };
 }
 
+/** Binds captured session actions to the tab's panel lifecycle and visible sibling count. */
 function useSessionTabActions(
   sessionId: string | undefined,
   taskId: string | null,
