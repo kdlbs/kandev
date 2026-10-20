@@ -81,11 +81,23 @@ export function useOptimisticTaskMutation() {
       }
 
       try {
-        await apiCall();
-        recordWriteSettled(taskId, TASK_SCOPE, sequence, taskScopePatch);
+        const settledPatch = settledStatusPatch(patch, await apiCall());
+        recordWriteSettled(
+          taskId,
+          TASK_SCOPE,
+          sequence,
+          settledPatch ? toTaskScopeValues(settledPatch) : taskScopePatch,
+        );
         const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
         if (reconciliation) {
           applyTaskScopeReconciliation(taskId, reconciliation, ctx.applyPatch, storeApi);
+        } else if (settledPatch) {
+          applyTaskScopeReconciliation(
+            taskId,
+            toTaskScopeValues(settledPatch),
+            ctx.applyPatch,
+            storeApi,
+          );
         }
       } catch (err) {
         handleTaskMutationFailure({
@@ -103,6 +115,19 @@ export function useOptimisticTaskMutation() {
     },
     [ctx, storeApi],
   );
+}
+
+/**
+ * A status mutation whose API call reports a different resulting status (a
+ * Done request that moved the task to a final step that does not complete
+ * it) settles on the reported status. Returns null when there is nothing to
+ * correct.
+ */
+function settledStatusPatch(patch: Partial<Task>, outcome: unknown): Partial<Task> | null {
+  if (patch.status === undefined || !outcome || typeof outcome !== "object") return null;
+  const status = (outcome as { status?: unknown }).status;
+  if (typeof status !== "string" || status === patch.status) return null;
+  return { status: status as TaskStatus };
 }
 
 /**

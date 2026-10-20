@@ -183,12 +183,20 @@ export type UpdateTaskPayload = {
   resume?: boolean;
 };
 
+// `status` and `workflow_step` are present only when a Done request moved the
+// task to its workflow's final step.
+export type UpdateTaskResponse = {
+  ok: boolean;
+  status?: string;
+  workflow_step?: { id?: string; name?: string };
+};
+
 export function updateTask(
   taskId: string,
   payload: UpdateTaskPayload,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ ok: boolean }>(`${BASE}/tasks/${taskId}`, {
+  return fetchJson<UpdateTaskResponse>(`${BASE}/tasks/${taskId}`, {
     ...options,
     init: { method: "PATCH", body: JSON.stringify(payload), ...options?.init },
   });

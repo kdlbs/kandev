@@ -606,6 +606,19 @@ func (s *DashboardService) allApproversApproved(ctx context.Context, taskID stri
 	return true
 }
 
+// PendingApproversForCompletion returns the approvers, with display names,
+// whose missing approval blocks the task from completing. Consulted by the
+// task service before a human move completes an Office task.
+func (s *DashboardService) PendingApproversForCompletion(
+	ctx context.Context, taskID string,
+) ([]PendingApproverDTO, error) {
+	pending, err := s.pendingApprovers(ctx, taskID)
+	if err != nil || len(pending) == 0 {
+		return nil, err
+	}
+	return s.resolvePendingApprovers(ctx, pending), nil
+}
+
 // pendingApprovers returns the agent IDs of approvers without a
 // current approved decision. An empty result means the gate is clear.
 func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) ([]string, error) {

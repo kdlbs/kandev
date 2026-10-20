@@ -443,6 +443,7 @@ type DashboardService struct {
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	finalStepMover        TaskFinalStepMover              // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

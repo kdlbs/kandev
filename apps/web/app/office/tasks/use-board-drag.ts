@@ -6,7 +6,9 @@ import { MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useAppStoreApi } from "@/components/state-provider";
 import {
   ApprovalGateError,
+  finalStepMoveNotice,
   updateTaskStatusOrTranslateGate,
+  type StatusUpdateOutcome,
 } from "@/lib/api/domains/office-status-gate";
 import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
@@ -29,8 +31,10 @@ import {
 export type StatusDropDeps = {
   getTask: (taskId: string) => OfficeTask | undefined;
   patchTask: (taskId: string, patch: Partial<OfficeTask>) => void;
-  updateStatus: (taskId: string, status: OfficeTaskStatus) => Promise<void>;
+  updateStatus: (taskId: string, status: OfficeTaskStatus) => Promise<StatusUpdateOutcome | void>;
   onError: (message: string) => void;
+  /** Optional: told when the backend settled the task on another status. */
+  onInfo?: (message: string) => void;
 };
 
 /**
@@ -71,12 +75,8 @@ export async function applyStatusDrop(
 
   deps.patchTask(taskId, { status: targetStatus });
   try {
-    await deps.updateStatus(taskId, targetStatus);
-    recordWriteSettled(taskId, TASK_SCOPE, sequence, taskScopePatch);
-    const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
-    if (reconciliation) {
-      deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
-    }
+    const outcome = await deps.updateStatus(taskId, targetStatus);
+    settleStatusDrop(taskId, targetStatus, sequence, outcome, deps);
   } catch (err) {
     if (err instanceof ApprovalGateError) {
       // The backend has already persisted the redirected status at this
@@ -116,6 +116,29 @@ export async function applyStatusDrop(
     // naming who still has to sign off.
     deps.onError(err instanceof Error ? err.message : t("task:failedToMoveTask"));
   }
+}
+
+// A Done request before the final workflow step moves the task to that step,
+// which may leave it on another status; settle on what the server holds
+// rather than the optimistic target.
+function settleStatusDrop(
+  taskId: string,
+  targetStatus: OfficeTaskStatus,
+  sequence: number,
+  outcome: StatusUpdateOutcome | void,
+  deps: StatusDropDeps,
+): void {
+  const settledStatus = (outcome?.status ?? targetStatus) as OfficeTaskStatus;
+  const settled: TaskScopeValues = { status: settledStatus, rawStatus: settledStatus };
+  recordWriteSettled(taskId, TASK_SCOPE, sequence, settled);
+  const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+  if (reconciliation) {
+    deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
+  } else if (settledStatus !== targetStatus) {
+    deps.patchTask(taskId, toOfficeTaskReconciliationPatch(settled));
+  }
+  const notice = outcome ? finalStepMoveNotice(targetStatus, outcome) : null;
+  if (notice) deps.onInfo?.(notice);
 }
 
 function toOfficeTaskReconciliationPatch(values: TaskScopeValues): Partial<OfficeTask> {
@@ -182,6 +205,7 @@ export function useBoardDrag(
         patchTask,
         updateStatus: (id, status) => updateTaskStatusOrTranslateGate(id, status),
         onError: (message) => toast.error(message),
+        onInfo: (message) => toast.info(message),
       });
     },
     [getTask, patchTask],

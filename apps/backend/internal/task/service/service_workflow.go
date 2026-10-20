@@ -684,6 +684,9 @@ func (s *Service) MoveTaskWithOptions(
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 		}
 	}
+	if err := s.guardOfficeHumanCompletion(ctx, task, stateAfterAdmission.State, opts); err != nil {
+		return nil, err
+	}
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
