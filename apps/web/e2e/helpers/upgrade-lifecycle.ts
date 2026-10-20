@@ -155,7 +155,11 @@ export async function browserUpgradeFollowup(
   const before = (await backend.api.listSessionMessages(task.session_id!)).messages.filter((m) =>
     m.content.includes("simple mock response"),
   ).length;
-  await session.sendMessage("/e2e:simple-message");
+  if (backend.info.project.name === "upgrade-mobile") {
+    await session.sendMessageViaButton("/e2e:simple-message");
+  } else {
+    await session.sendMessage("/e2e:simple-message");
+  }
   await waitForUpgradeTurn(backend.api, task.id, task.session_id!, before + 1);
   await session.expectChatResponseVisible("simple mock response", before);
   expect((await backend.api.listTaskSessions(task.id)).sessions.find((s) => s.is_primary)?.id).toBe(
