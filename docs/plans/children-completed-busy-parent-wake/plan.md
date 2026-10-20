@@ -31,7 +31,8 @@ never started again.
 
 - The busy parent failure mode and scenario under
   `AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1`.
-- `autoStartAgentCallback` and the shared `isBusyLaunchError` predicate.
+- `autoStartAgentCallback`, its pre-acceptance busy check, and the drain after
+  a turn that ends while the prompt is queued.
 
 ### Out of scope
 

@@ -19,7 +19,7 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
 
 | Acceptance criteria | Design sections |
 | --- | --- |
-| `AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1` (busy parent failure mode and scenario) | Queue when busy, Operation settlement |
+| `AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1` (busy parent failure mode and scenario) | Queue when busy, Turn ending while queueing, Operation settlement |
 
 ## Queue when busy
 
@@ -35,15 +35,25 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
    queued hand-off message and carrying a claimed step handoff as metadata. The
    ordinary queue drain delivers it after the current turn ends.
 2. Otherwise the callback launches through `LaunchSession(IntentWorkflowStep)`
-   as before. If that launch fails with a busy error (`isBusyLaunchError`: agent
-   already running, prompt in progress, session not promptable, or a transient
-   prompt error) and the session is now mid-turn, the callback queues the prompt
-   as in step 1.
+   as before. If that launch is refused before the prompt reaches the agent
+   because the session is running a turn (`isPromptRejectedAsBusy`: agent
+   already running, prompt in progress, or session not promptable) and the
+   session is now mid-turn, the callback queues the prompt as in step 1. A
+   failure after the agent accepted the prompt, such as a stream disconnect or
+   an uncertain delivery, is returned unchanged, so a prompt that may already
+   have been delivered is never queued again.
 
-`isBusyLaunchError` is the same predicate the created-session auto-start uses
-(`handleCreatedAutoStartLaunchFailure`). An uncertain prompt delivery is not a
-busy error, so the callback never queues a prompt that may already have been
-delivered.
+## Turn ending while queueing
+
+The ready handler that ends a turn settles it and drains the queue under the
+session guard. The callback reads the session state, then queues, without that
+guard, so the turn can end in between: its drain then finds an empty queue.
+After queueing, the callback re-reads the session. When the session is no
+longer mid-turn, it runs the guarded queue drain
+(`drainQueuedMessageForPromptableSession`), which delivers the prompt once; a
+concurrent drain claims the same message at most once. The callback skips this
+drain when its caller already holds the session guard, since that caller owns
+the turn settlement and its drain.
 
 ## Operation settlement
 
@@ -58,4 +68,6 @@ and does not queue a second prompt.
 `TestProcessOnChildrenCompleted_QueuesAutoStartWhileParentIsRunning` covers a
 running parent receiving two deliveries of the same completion: no direct
 prompt, one queued workflow message, the operation applied, and one prompt after
-the queue drains.
+the queue drains. `TestProcessOnChildrenCompleted_DeliversWakeWhenTurnEndsWhileQueueing`
+ends the parent's turn between the session read and the queue insert and checks
+that the prompt is delivered once and leaves the queue.

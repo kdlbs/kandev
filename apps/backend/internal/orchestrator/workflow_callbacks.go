@@ -298,7 +298,7 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 		SessionID:      in.State.SessionID,
 		WorkflowStepID: in.Step.ID,
 	})
-	if err != nil && queueIfBusy && isBusyLaunchError(err) {
+	if err != nil && queueIfBusy && isPromptRejectedAsBusy(err) {
 		queued, queueErr := c.queueStepPromptIfBusy(ctx, in)
 		if queueErr == nil && queued {
 			return engine.ActionResult{}, nil
@@ -319,8 +319,11 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(ctx context.Context, in e
 	if err != nil {
 		return false, fmt.Errorf("load session for queued auto-start: %w", err)
 	}
-	if session.State != taskmodels.TaskSessionStateRunning && session.State != taskmodels.TaskSessionStateStarting {
+	if !sessionMidTurn(session) {
 		return false, nil
+	}
+	if hook := c.svc.afterBusyAutoStartSessionRead; hook != nil {
+		hook()
 	}
 	step, err := c.svc.workflowStepGetter.GetStep(ctx, in.Step.ID)
 	if err != nil {
@@ -346,13 +349,37 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(ctx context.Context, in e
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
 		zap.String("workflow_step_id", step.ID))
+	c.drainIfTurnEnded(ctx, session.ID)
 	return true, nil
 }
 
-// isBusyLaunchError reports whether a launch failed only because the session
-// was already running a turn, so the prompt can wait in the queue.
-func isBusyLaunchError(err error) bool {
-	return isAgentAlreadyRunningError(err) || isSessionBusyError(err) || isTransientPromptError(err)
+// drainIfTurnEnded delivers the queued prompt when the turn ended while it was
+// being queued: that turn's ready handler may already have drained an empty
+// queue, and no later turn end would deliver it. The drain takes the session
+// guard, so it is skipped when the caller already holds it; that caller drains
+// the queue itself once it settles the turn.
+func (c *autoStartAgentCallback) drainIfTurnEnded(ctx context.Context, sessionID string) {
+	if workflowProfileSwitchGuardIsHeld(ctx, sessionID) || cancelInFlightGuardHeld(ctx) {
+		return
+	}
+	latest, err := c.svc.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || latest == nil || sessionMidTurn(latest) {
+		return
+	}
+	c.svc.drainQueuedMessageForPromptableSession(ctx, sessionID)
+}
+
+func sessionMidTurn(session *taskmodels.TaskSession) bool {
+	return session.State == taskmodels.TaskSessionStateRunning ||
+		session.State == taskmodels.TaskSessionStateStarting
+}
+
+// isPromptRejectedAsBusy reports whether a launch was refused before the
+// prompt was handed to the agent because the session was running a turn. A
+// failure after acceptance, such as a stream disconnect, is not one: queueing
+// that prompt again could start a duplicate turn.
+func isPromptRejectedAsBusy(err error) bool {
+	return isAgentAlreadyRunningError(err) || isSessionBusyError(err)
 }
 
 // runCodeReviewCallback starts a native code-review pass over the task's changed

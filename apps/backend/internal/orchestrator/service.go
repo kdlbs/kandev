@@ -1330,6 +1330,10 @@ type Service struct {
 	// narrow interval after handleAgentReady releases its per-session guard
 	// and before it starts a deferred durable-lifecycle dispatch.
 	afterReadyLifecycleReservation func()
+	// afterBusyAutoStartSessionRead is a deterministic test seam for the
+	// interval after a workflow auto-start reads a mid-turn session and before
+	// it queues the step prompt.
+	afterBusyAutoStartSessionRead func()
 	// agentReadyReservationWaitTimeout is a deterministic test seam. Zero uses
 	// the production timeout derived from the prompt dispatch budgets.
 	agentReadyReservationWaitTimeout time.Duration

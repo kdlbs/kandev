@@ -18,13 +18,13 @@ system_design:
 ## Summary
 
 Honor `QueueIfBusy` in `autoStartAgentCallback`: queue the step prompt when the
-session is mid-turn, and on a busy launch error, so the queue delivers it after
-the turn.
+session is mid-turn, and when a launch is refused as busy before the agent
+accepts the prompt, so the queue delivers it after the turn.
 
 ## In scope
 
-- `autoStartAgentCallback.queueStepPromptIfBusy` and `isBusyLaunchError`.
-- `handleCreatedAutoStartLaunchFailure` reuses `isBusyLaunchError`.
+- `autoStartAgentCallback.queueStepPromptIfBusy`, `isPromptRejectedAsBusy`,
+  and `drainIfTurnEnded`.
 
 ## Out of scope
 
@@ -37,6 +37,8 @@ the turn.
    even when the completion is delivered twice.
 2. The children-completed operation is marked applied once the prompt is
    queued.
+3. A turn that ends after the session read and before the queue insert still
+   gets the prompt delivered once.
 
 ## Verification
 
@@ -46,7 +48,7 @@ the turn.
 
 ## Files likely touched
 
-- `apps/backend/internal/orchestrator/{workflow_callbacks,event_handlers_workflow}.go`
+- `apps/backend/internal/orchestrator/{workflow_callbacks,service}.go`
 - `apps/backend/internal/orchestrator/event_handlers_children_completed_busy_test.go`
 
 ## Dependencies
@@ -59,5 +61,6 @@ None.
 
 ## Results
 
-Author-reported: the new test fails on `main` at `77247fa20` (operation not
-applied) and passes with the change.
+Author-reported: the busy-parent test fails on `main` at `77247fa20`
+(operation not applied) and passes with the change; the turn-ending test fails
+without the post-queue drain (wake never dispatched) and passes with it.
