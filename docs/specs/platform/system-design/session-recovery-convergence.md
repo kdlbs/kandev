@@ -148,7 +148,9 @@ and explicit Resume; neither path dispatches an old prompt.
 
 Native recovery proof waits up to five seconds for the captured journal
 high-water mark to reach canonical projection. It rereads proof when projection
-or acknowledgments advance under the same authenticated owner. Cancellation,
+or acknowledgments advance under the same authenticated owner. A byte-count
+change alone is not stream progress. Pruning can decrease bytes while retained
+sequence counters advance. Cancellation,
 owner changes, inventory changes, and unresolved work retain the admission
 fence. This wait does not repeat native Resume or dispatch a prompt.
 

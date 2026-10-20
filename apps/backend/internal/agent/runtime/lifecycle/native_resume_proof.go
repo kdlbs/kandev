@@ -139,11 +139,14 @@ func nativeResumeStreamProgressed(before, after *agentctl.DeliveryStatus) bool {
 	if current.HighWater < previous.HighWater || current.Acknowledged < previous.Acknowledged || current.FirstRetained < previous.FirstRetained {
 		return false
 	}
+	sequenceProgressed := current.HighWater > previous.HighWater ||
+		current.Acknowledged > previous.Acknowledged || current.FirstRetained > previous.FirstRetained
 	current.HighWater = previous.HighWater
 	current.Acknowledged = previous.Acknowledged
 	current.FirstRetained = previous.FirstRetained
+	// Byte usage can decrease during pruning, but it cannot prove sequence progress.
 	current.Bytes = previous.Bytes
-	return current == previous && *before.Stream != *after.Stream
+	return current == previous && sequenceProgressed
 }
 
 func sameNativeResumeProofStatus(before, after *agentctl.DeliveryStatus) bool {

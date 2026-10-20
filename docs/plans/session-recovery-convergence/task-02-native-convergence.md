@@ -129,3 +129,10 @@ cd apps/backend
 GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 2 ./internal/agent/runtime/lifecycle -run 'Test(NativeResume|AcknowledgedUnknown|LoadedNative)' -count=1
 GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResumeProof' -count=1
 ```
+
+Claude requested explicit byte-accounting coverage in the proof-status table.
+Both byte-only increase and decrease cases failed before the correction. Retry
+now requires a monotonic sequence-counter advance. Byte usage can decrease during
+valid pruning, so byte monotonicity is not required. The existing pruning case
+now covers that decrease. Focused proof race tests, changed-package Go lint
+(zero issues), catalog validation, and specification lint passed.
