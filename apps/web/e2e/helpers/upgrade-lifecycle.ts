@@ -145,7 +145,11 @@ export async function browserUpgradeFollowup(
   const task = seed.tasks.waiting;
   await page.goto(`${backend.baseUrl}/t/${task.id}`);
   const session = new SessionPage(page);
-  await session.showSessionContext();
+  if (backend.info.project.name === "upgrade-mobile") {
+    await session.waitForLoad();
+  } else {
+    await session.showSessionContext();
+  }
   await session.waitForChatIdle({ timeout: 90_000, requireEditable: true });
   await session.expectChatResponseVisible("simple mock response", 0);
   const before = (await backend.api.listSessionMessages(task.session_id!)).messages.filter((m) =>

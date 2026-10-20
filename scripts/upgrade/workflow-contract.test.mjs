@@ -25,7 +25,12 @@ test('upgrade CI is main-only and pins one candidate and baseline across the mat
     ['sqlite','upgrade-desktop'],['postgres','upgrade-desktop'],['sqlite','upgrade-mobile'],
   ]);
   assert.ok(testJob.steps.some(s => s.uses?.startsWith('actions/download-artifact@')));
-  assert.ok(testJob.steps.some(s => s.if === 'always()' && s.uses?.startsWith('actions/upload-artifact@')));
+  const evidence = testJob.steps.find(s => s.if === 'always()' && s.uses?.startsWith('actions/upload-artifact@'));
+  assert.equal(evidence.with['include-hidden-files'], true);
+  assert.ok(evidence.with.path.split('\n').includes('apps/web/e2e/test-results'));
+  for (const job of Object.values(workflow.jobs)) {
+    assert.equal(job.steps.find(s => s.uses?.startsWith('actions/setup-go@')).with['cache-dependency-path'], 'apps/backend/go.sum');
+  }
 });
 
 
