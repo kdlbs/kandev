@@ -95,4 +95,3 @@ changes, including actual settings bootstrap. Four compatibility controls passed
 - No Playwright run: no rendered or viewport-dependent behavior changed.
 - No public docs update: existing validated selection fallback is preserved;
   the internal requirement/design records explain decoding recovery.
-
