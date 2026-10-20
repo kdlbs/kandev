@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"strings"
 	"time"
 
@@ -292,6 +293,8 @@ const (
 	// change. Empty for every non-Office launch, which is legitimate, not
 	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
+	// MetadataKeyCausingRunID keeps the Office cause across a lifecycle restart.
+	MetadataKeyCausingRunID = "causing_run_id"
 	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
 	// across runtime and backend restarts so restore policy can distinguish a
 	// relocation from an unchanged workspace.
@@ -306,6 +309,7 @@ const (
 	MetadataKeySSHRemoteTaskDir        = "ssh_remote_task_dir"
 	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
 	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteControlPort    = "ssh_remote_control_port"
 	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
 	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
 	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
@@ -344,6 +348,9 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
+	metadataKeySSHPassthroughState:       true,
+	deliveryPromptTurnBindingMetadataKey: true,
 	// Sprites runtime
 	MetadataKeySpriteName:      true,
 	MetadataKeySpriteState:     true,
@@ -358,6 +365,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteTaskDir:        true,
 	MetadataKeySSHRemoteSessionDir:     true,
 	MetadataKeySSHRemoteAgentctlPort:   true,
+	MetadataKeySSHRemoteControlPort:    true,
 	MetadataKeySSHRemoteAgentctlPID:    true,
 	MetadataKeySSHAgentctlInstanceID:   true,
 	MetadataKeySSHLocalForwardPort:     true,
@@ -432,7 +440,9 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
+	MetadataKeyCausingRunID:             true,
 	MetadataKeyOriginalWorkspacePath:    true,
+	metadataKeyPassthroughMCPClaims:     true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -450,9 +460,18 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
+	metadataKeySSHPassthroughState:       true,
+	deliveryPromptTurnBindingMetadataKey: true,
+	// Project MCP ownership belongs to the execution that materialized the
+	// workspace file. It survives same-session recovery but must not be copied
+	// into a sibling session's launch request.
+	metadataKeyPassthroughMCPClaims: true,
+
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
+	MetadataKeyCausingRunID:          true,
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
@@ -627,7 +646,9 @@ type RemoteInstanceRefresher interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID string
+	InstanceID    string
+	CausingRunID  string
+	IsPassthrough bool
 	// ExecutorType is retained in execution metadata so recovered sessions can
 	// safely re-check host-local filesystem eligibility.
 	ExecutorType      string
@@ -641,11 +662,14 @@ type ExecutorCreateRequest struct {
 	// ForceContextContinuation records that the explicit recovery path started
 	// a new native conversation from a bounded Kandev context snapshot.
 	ForceContextContinuation bool
-	AgentProfileID           string
-	OfficeAgentProfileID     string
-	PromptTurnID             string
-	WorkspacePath            string
-	OriginalWorkspacePath    string
+	// ReplacesNativeConversation records an explicit fresh start on the
+	// successor harness generation.
+	ReplacesNativeConversation bool
+	AgentProfileID             string
+	OfficeAgentProfileID       string
+	PromptTurnID               string
+	WorkspacePath              string
+	OriginalWorkspacePath      string
 	// DurableJournalHostRoot is the retained storage root owned by the
 	// executor. Providers map it to their own stable environment path.
 	DurableJournalHostRoot string
@@ -738,7 +762,14 @@ type ExecutorInstance struct {
 	RuntimeName agentruntime.Runtime
 
 	// Agentctl client for communicating with this instance
-	Client *agentctl.Client
+	Client                    *agentctl.Client
+	remotePassthroughSnapshot *agentctltypes.PassthroughSnapshot
+
+	// DiscardRecovery closes only host-side resources allocated for this
+	// recovery attempt. It must never stop the remote process or resource. The
+	// manager calls it when a candidate cannot be authenticated or tracked;
+	// successful tracking transfers ownership to the runtime backend.
+	DiscardRecovery func() `json:"-"`
 
 	// Runtime-specific identifiers (only one set is populated)
 	ContainerID          string // Docker
@@ -784,6 +815,10 @@ type ExecutorInstance struct {
 	// lifecycle manager. The instance remains attached so the manager can use
 	// its existing bounded stop and recovery-guard path.
 	DeliveryRecoveryError error
+	// agentSessionAssociation is the authenticated, read-only owner projection
+	// captured for this exact recovery attempt. It is process-local only.
+	agentSessionAssociation  *agentctl.AgentSessionAssociation
+	expectedDeliveryStreamID string
 
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
@@ -847,42 +882,49 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
+	causingRunID := req.CausingRunID
+	if causingRunID == "" && req.Metadata != nil {
+		causingRunID, _ = req.Metadata[MetadataKeyCausingRunID].(string)
+	}
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		startupDisposition:        startupDispositionFromMetadata(metadata),
-		ID:                        ri.InstanceID,
-		ExecutorType:              executorType,
-		RunID:                     req.Env["KANDEV_RUN_ID"],
-		TaskID:                    req.TaskID,
-		SessionID:                 req.SessionID,
-		TaskEnvironmentID:         req.TaskEnvironmentID,
-		AgentProfileID:            req.AgentProfileID,
-		OfficeAgentProfileID:      req.OfficeAgentProfileID,
-		promptTurnID:              req.PromptTurnID,
-		AgentID:                   agentID,
-		ContainerID:               ri.ContainerID,
-		ContainerIP:               ri.ContainerIP,
-		WorkspacePath:             workspacePath,
-		OriginalWorkspacePath:     originalWorkspacePath,
-		WorkspaceSourceRoots:      append([]string(nil), req.WorkspaceSourceRoots...),
-		DeliveryStreamID:          req.DeliveryStreamID,
-		DeliveryIncarnationID:     req.DeliveryIncarnationID,
-		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
-		ForceContextContinuation:  req.ForceContextContinuation,
-		RuntimeName:               ri.RuntimeName,
-		Status:                    v1.AgentStatusRunning,
-		StartedAt:                 time.Now(),
-		metadata:                  metadata,
-		agentctl:                  ri.Client,
-		standaloneInstanceID:      ri.StandaloneInstanceID,
-		standalonePort:            ri.StandalonePort,
-		runtimeEpoch:              runtimeEpochFromClient(ri.Client),
-		standaloneHostPID:         runtimeProcessIDFromClient(ri.Client),
-		historyEnabled:            historyEnabled,
-		promptDoneCh:              make(chan PromptCompletionSignal, 1),
+		startupDisposition:         startupDispositionFromMetadata(metadata),
+		ID:                         ri.InstanceID,
+		CausingRunID:               causingRunID,
+		ExecutorType:               executorType,
+		RunID:                      req.Env["KANDEV_RUN_ID"],
+		TaskID:                     req.TaskID,
+		SessionID:                  req.SessionID,
+		TaskEnvironmentID:          req.TaskEnvironmentID,
+		AgentProfileID:             req.AgentProfileID,
+		OfficeAgentProfileID:       req.OfficeAgentProfileID,
+		promptTurnID:               req.PromptTurnID,
+		AgentID:                    agentID,
+		ContainerID:                ri.ContainerID,
+		ContainerIP:                ri.ContainerIP,
+		WorkspacePath:              workspacePath,
+		OriginalWorkspacePath:      originalWorkspacePath,
+		WorkspaceSourceRoots:       append([]string(nil), req.WorkspaceSourceRoots...),
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		ForceContextContinuation:   req.ForceContextContinuation,
+		ReplacesNativeConversation: req.ReplacesNativeConversation,
+		RuntimeName:                ri.RuntimeName,
+		Status:                     v1.AgentStatusRunning,
+		StartedAt:                  time.Now(),
+		metadata:                   metadata,
+		agentctl:                   ri.Client,
+		standaloneInstanceID:       ri.StandaloneInstanceID,
+		standalonePort:             ri.StandalonePort,
+		runtimeEpoch:               runtimeEpochFromClient(ri.Client),
+		standaloneHostPID:          runtimeProcessIDFromClient(ri.Client),
+		historyEnabled:             historyEnabled,
+		promptDoneCh:               make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
+	execution.sshApprovedEnvKeys = append([]string(nil), req.ApprovedSecretEnvKeys...)
 	return execution
 }
 

@@ -151,6 +151,23 @@ retainably without enlarging every transcript row.
   and obsolete plan revisions only as reportable candidates; selection respects
   configured retention and is non-destructive until maintenance executes, and
   human and agent conversational messages shall remain preserved by default.
+- **AC-PLATFORM-BOUNDED-SESSION-HISTORY-002.4:** Consecutive live updates that
+  contain complete, superseding snapshots of the same shell command output
+  shall not store one accumulated transcript per provider chunk. Continuous
+  output-only runs shall publish at most one pending snapshot per 250 ms,
+  plus their initial and final snapshots. Pending visible output shall be
+  published within 250 ms when the consumer is available, including when
+  the producer becomes quiet. Final bounded stdout, stderr, truncation and
+  exit status shall remain equal to unbatched normalization.
+- **AC-PLATFORM-BOUNDED-SESSION-HISTORY-002.5:** Shell snapshot reduction shall
+  preserve event ordering, command identity, state changes and terminal results.
+  Conversation text, reasoning, permissions, configuration, other tool kinds,
+  background activity and unknown update shapes shall remain lossless. Already
+  committed delivery records shall never be rewritten, dropped or resequenced.
+
+The [stream storage design](../system-design/delivery-stream-storage.md) and
+[combined repair plan](../../../plans/delivery-stream-storage/plan.md) define
+snapshot reduction and its compatibility checks.
 
 ### REQ-PLATFORM-DATABASE-MAINTENANCE-001: Backup-gated database maintenance command
 
@@ -212,3 +229,10 @@ next cycle.
 - Agent identity and runtime profiles, owned by the agent system.
 - Executor runtime environments, owned by the executor system.
 - Frontend settings presentation, owned by the UI system.
+
+## Incremental shell delivery extension
+
+[Incremental shell delivery](incremental-shell-delivery.md) defines the
+lifetime write-volume and compatibility contract. It supplements the active
+250 ms snapshot criteria rather than claiming those criteria already bound
+bytes for hours-long sparse streams.

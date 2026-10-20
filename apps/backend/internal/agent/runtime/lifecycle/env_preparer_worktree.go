@@ -105,7 +105,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 			WorktreeBranch:         wt.Branch,
 			WorktreeBranchOwner:    wt.BranchOwner,
 			WorktreeIntegrationRef: wt.IntegrationRef,
-			MainRepoGitDir:         filepath.Join(req.RepositoryPath, ".git"),
+			MainRepoGitDir:         worktreeMainRepoGitDir(wt, req.RepositoryPath),
 		}, nil
 	}
 
@@ -124,7 +124,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	// The executor-level setup belongs to the agent's effective workspace root,
 	// which can be the task directory for a parent-root layout.
 	setupPath := workspacePath
-	mainRepoGitDir := filepath.Join(req.RepositoryPath, ".git")
+	mainRepoGitDir := worktreeMainRepoGitDir(wt, req.RepositoryPath)
 
 	// Step 3 (optional): Fetch PR branch is handled inside worktree.Manager.Create
 	// via CreateRequest.CheckoutBranch. If it was set and failed, Create() would have
@@ -521,7 +521,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 			WorktreeBranchOwner:       wt.BranchOwner,
 			WorktreeIntegrationRef:    wt.IntegrationRef,
 			WorktreePath:              wt.Path,
-			MainRepoGitDir:            filepath.Join(spec.RepositoryPath, ".git"),
+			MainRepoGitDir:            worktreeMainRepoGitDir(wt, spec.RepositoryPath),
 			RequestedBaseBranch:       spec.BaseBranch,
 			BaseBranch:                wt.BaseBranch,
 			BaseBranchFallbackWarning: wt.BaseBranchFallbackWarning,
@@ -562,6 +562,13 @@ func (p *WorktreePreparer) prepareMultiRepo(
 		res.BaseBranchFallbackWarning = worktrees[0].BaseBranchFallbackWarning
 	}
 	return res, nil
+}
+
+func worktreeMainRepoGitDir(wt *worktree.Worktree, registeredPath string) string {
+	if wt.SourceCommonDir != "" {
+		return wt.SourceCommonDir
+	}
+	return filepath.Join(registeredPath, ".git")
 }
 
 // prepareOneRepo runs the validate → create-worktree → fetch-PR sequence for

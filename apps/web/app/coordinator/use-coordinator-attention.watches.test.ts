@@ -100,4 +100,30 @@ describe("useCoordinatorAttention with phase 2", () => {
     expect(result.current.classification.needsYou).toHaveLength(1);
     expect(result.current.inputs[3]).toEqual({ kind: "watches", error: true, loadedAt: 5 });
   });
+
+  it("adds a projects input and retries the watch set while the project list is unknown", () => {
+    watchMock.mockReturnValue(
+      watch({
+        scope: "all",
+        workflowIds: [],
+        projects: { scope: "selected", repositoryIds: null, includeNoRepository: false },
+      }),
+    );
+    const { result } = renderHook(() => useCoordinatorAttention("w", "c"));
+    expect(result.current.inputs.at(-1)).toEqual({ kind: "projects", error: true, loadedAt: 5 });
+    result.current.retryFailed();
+    expect(retryWatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds no projects input once the project list is known", () => {
+    watchMock.mockReturnValue(
+      watch({
+        scope: "all",
+        workflowIds: [],
+        projects: { scope: "selected", repositoryIds: ["r"], includeNoRepository: false },
+      }),
+    );
+    const { result } = renderHook(() => useCoordinatorAttention("w", "c"));
+    expect(result.current.inputs.map((input) => input.kind)).not.toContain("projects");
+  });
 });

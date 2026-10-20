@@ -20,6 +20,7 @@ type automationRunLaunch struct {
 	RunID        string                  `json:"run_id"`
 	ThreadAction automation.ThreadAction `json:"thread_action"`
 	ThreadReason string                  `json:"thread_reason"`
+	Launch       *automation.RetryLaunch `json:"launch,omitempty"`
 }
 
 // automationRunFromCeilingPayload returns the run a queued start serves, or
@@ -59,7 +60,8 @@ var errCeilingAutomationRunClosed = errors.New("orchestrator: queued start's aut
 
 // startQueuedAutomationRun replays a queued start through the run dispatcher,
 // so the replayed launch binds its run or fails it. A launch whose run is not
-// bound is stopped, because no completion would settle that run. A run that
+// bound is stopped for ordinary dispatch failures. Retry acceptance uncertainty
+// retains its execution until its owner has definitive evidence. A run that
 // closed before dispatch is reported as errCeilingAutomationRunClosed without
 // launching. A start that serves no run, or a service without the dispatcher,
 // launches unbound.
@@ -76,11 +78,16 @@ func (s *Service) startQueuedAutomationRun(
 		execution, startErr = start()
 		return automationRunDispatchFor(taskID, execution, startErr)
 	})
+	if err == nil {
+		s.reconcileAutomationStartOwnershipForRun(ctx, taskID, run.RunID)
+	}
 	switch {
 	case errors.Is(err, automation.ErrRunDeferred):
 		return nil, ErrCeilingLaunchDeferred
 	case errors.Is(err, automation.ErrAutomationRunNotDispatchable):
 		return nil, errCeilingAutomationRunClosed
+	case errors.Is(err, automation.ErrRetryLaunchUncertain):
+		return execution, err
 	case err != nil && execution != nil && execution.SessionID != "":
 		s.cancelAutomationDispatch(ctx, taskID, execution.SessionID)
 	}
@@ -100,6 +107,17 @@ func (s *Service) automationRunAwaitsLaunch(ctx context.Context, runID string) b
 	if err != nil {
 		return true
 	}
+	if run != nil && run.RetryGroupID != "" {
+		owner, ok := s.automationService.(automationRetryLaunchOwner)
+		if !ok {
+			return true
+		}
+		launch, err := owner.GetRetryLaunch(ctx, runID)
+		if err != nil {
+			return true
+		}
+		return !launch.CancelRequested && (launch.State == automation.RetryLaunchPrepared || launch.State == automation.RetryLaunchQueued)
+	}
 	return run != nil && run.Status == automation.RunStatusTriggered
 }
 
@@ -114,6 +132,17 @@ func (s *Service) failQueuedAutomationRun(ctx context.Context, payload map[strin
 	dispatcher, ok := s.automationService.(automationRunDispatcher)
 	if run == nil || !ok {
 		return true
+	}
+	if owner, ok := s.automationService.(interface {
+		CancelQueuedRetryLaunch(context.Context, string) (bool, error)
+	}); ok {
+		handled, err := owner.CancelQueuedRetryLaunch(ctx, run.RunID)
+		if handled {
+			return err == nil
+		}
+		if err != nil {
+			return false
+		}
 	}
 	dropped := errors.New(reason)
 	err := dispatcher.DispatchRun(ctx, run.RunID, run.ThreadAction, run.ThreadReason, func() (automation.RunDispatch, error) {
@@ -131,5 +160,28 @@ func (s *Service) failQueuedAutomationRun(ctx context.Context, payload map[strin
 		s.logger.Warn("could not fail the automation run of a dropped queued start",
 			zap.String("run_id", run.RunID), zap.Error(err))
 		return false
+	}
+}
+
+// Replay identity excludes a claim's mutable state. Admission always reloads
+// the current tuple and token from the durable launch ledger.
+func automationRunForCeilingPayload(run *automationRunLaunch) *automationRunLaunch {
+	if run == nil {
+		return nil
+	}
+	copyOfRun := *run
+	if run.Launch != nil {
+		launch := run.Launch
+		copyOfRun.Launch = &automation.RetryLaunch{
+			RunID: launch.RunID, AutomationID: launch.AutomationID, Generation: launch.Generation,
+			TaskID: launch.TaskID, SessionID: launch.SessionID, TurnID: launch.TurnID, SubmissionID: launch.SubmissionID,
+		}
+	}
+	return &copyOfRun
+}
+
+func normalizeCeilingAutomationRun(payload map[string]interface{}) {
+	if run := automationRunFromCeilingPayload(payload); run != nil {
+		payload[ceilingPayloadAutomationRunKey] = automationRunForCeilingPayload(run)
 	}
 }

@@ -101,7 +101,7 @@ func loadDynamicRouteActionSession(
 		return nil, err
 	}
 	if agent.Name != agents.DynamicAgentID {
-		return nil, errors.New("route actions require a dynamic profile")
+		return nil, orchestrator.ErrRouteActionRequiresDynamicProfile
 	}
 	return session, nil
 }

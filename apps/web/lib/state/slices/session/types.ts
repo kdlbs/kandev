@@ -12,6 +12,13 @@ import type {
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { ObservedPrompts } from "@/lib/session-last-prompt";
+import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
+
+export type ActiveTurnWindowObservation = {
+  activeTurnId: string | null;
+  reconcileEpoch: number;
+  updatedAt?: string;
+};
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -44,6 +51,8 @@ export type PromptsState = MessagesState & {
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
+  /** Message IDs whose matching turn rows were read with the same message window. */
+  windowCoverageBySession?: Record<string, { messageIds: string[]; activeTurnObserved: boolean }>;
   /**
    * Sessions whose FULL persisted turn history has entered the store (SSR
    * hydration or a complete REST fetch). Distinct from `bySession` presence:
@@ -68,6 +77,12 @@ export type TurnsState = {
    * Turns started after the boundary (genuine resumes) are unaffected.
    */
   settledBoundaryBySession: Record<string, string>;
+};
+
+export type TurnChangesState = {
+  bySession: Record<string, TurnChangeSetSummary[]>;
+  nextOffsetBySession: Record<string, number | null>;
+  loadedBySession: Record<string, boolean>;
 };
 
 export type TaskSessionsState = {
@@ -283,6 +298,7 @@ export type SessionSliceState = {
   messages: MessagesState;
   messagePrompts: PromptsState;
   turns: TurnsState;
+  turnChanges: TurnChangesState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
   pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
@@ -372,6 +388,14 @@ export type SessionSliceActions = {
     hydrationEpoch: number,
     options?: { replace?: boolean },
   ) => void;
+  /** Merges a bounded message-window turn snapshot without claiming full history. */
+  mergeTurnsWindow: (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
@@ -391,6 +415,13 @@ export type SessionSliceActions = {
   reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
+  mergeTurnChangePage: (
+    sessionId: string,
+    summaries: TurnChangeSetSummary[],
+    page: { offset: number; nextOffset?: number },
+  ) => void;
+  mergeTurnChangeSummary: (sessionId: string, summary: TurnChangeSetSummary) => void;
+  markTurnChangesLoaded: (sessionId: string, nextOffset: number | undefined) => void;
   /**
    * Source adoption is an authoritative idle boundary for the listed
    * sessions. `boundaryTimestamp` MUST be server-issued (the WS envelope

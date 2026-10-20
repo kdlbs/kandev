@@ -1,7 +1,10 @@
+import { useCallback, useMemo, useState } from "react";
 import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import { mergeHeldNeedsYouItems, type HeldItem } from "@/lib/coordinator/held-items";
 import { useNeedsYouFocusAfterDecision } from "../use-needs-you-focus";
 import { useNeedsYouFormNavigation } from "../use-needs-you-navigation";
 import { EmptyNeedsYouState } from "./empty-needs-you-state";
+import { AutonomyItemCard } from "./autonomy-item-card";
 import { NeedsYouItemCard } from "./needs-you-item-card";
 
 export type NeedsYouItemsPanelProps = {
@@ -20,6 +23,34 @@ export type NeedsYouItemsPanelProps = {
   };
   computeNeedsYouCount: () => number;
 };
+
+/**
+ * Items the manager has expanded stay in the list, at their position, after
+ * the task stops needing the manager, until they collapse
+ * (docs/specs/coordinator/system-design/relay.md "Question card").
+ */
+function useHeldItems(items: NeedsYouItem[]) {
+  const [held, setHeld] = useState<Record<string, HeldItem>>({});
+  const onExpandedChange = useCallback(
+    (item: NeedsYouItem, expanded: boolean) => {
+      setHeld((current) => {
+        if (!expanded) {
+          if (!(item.id in current)) return current;
+          const { [item.id]: _released, ...rest } = current;
+          return rest;
+        }
+        const live = items.findIndex((candidate) => candidate.id === item.id);
+        const index = live >= 0 ? live : (current[item.id]?.index ?? items.length);
+        const existing = current[item.id];
+        if (existing && existing.item === item && existing.index === index) return current;
+        return { ...current, [item.id]: { item, index } };
+      });
+    },
+    [items],
+  );
+  const displayItems = useMemo(() => mergeHeldNeedsYouItems(items, held), [items, held]);
+  return { displayItems, onExpandedChange };
+}
 
 /**
  * The Needs you list (or its empty state), plus the two cross-item
@@ -43,9 +74,10 @@ export function NeedsYouItemsPanel({
     items,
     inputsLoaded,
   );
-  useNeedsYouFocusAfterDecision(items);
+  const { displayItems, onExpandedChange } = useHeldItems(items);
+  useNeedsYouFocusAfterDecision(displayItems);
 
-  if (items.length === 0) {
+  if (displayItems.length === 0) {
     return (
       <EmptyNeedsYouState
         workingCount={workingCount}
@@ -57,23 +89,34 @@ export function NeedsYouItemsPanel({
 
   return (
     <div className="space-y-3" data-testid="needs-you-item-list">
-      {items.map((item) => (
-        <NeedsYouItemCard
-          key={item.id}
-          item={item}
-          workspaceId={workspaceId}
-          stepNameByTaskId={attentionMaps.stepNameByTaskId}
-          workflowNameById={attentionMaps.workflowNameById}
-          stepNameByWorkflowStep={attentionMaps.stepNameByWorkflowStep}
-          openTasksById={attentionMaps.openTasksById}
-          coordinatorName={coordinatorName}
-          coordinatorId={coordinatorId}
-          canManage={canManage}
-          computeNeedsYouCount={computeNeedsYouCount}
-          autoOpenForm={item.id === autoOpenProposalId ? autoOpenForm : null}
-          onAutoFormOpened={item.id === autoOpenProposalId ? onAutoFormOpened : undefined}
-        />
-      ))}
+      {displayItems.map((item) =>
+        item.kind === "autonomy" ? (
+          <AutonomyItemCard
+            key={item.id}
+            item={item}
+            workspaceId={workspaceId}
+            coordinatorId={coordinatorId}
+            canManage={canManage}
+          />
+        ) : (
+          <NeedsYouItemCard
+            key={item.id}
+            item={item}
+            workspaceId={workspaceId}
+            stepNameByTaskId={attentionMaps.stepNameByTaskId}
+            workflowNameById={attentionMaps.workflowNameById}
+            stepNameByWorkflowStep={attentionMaps.stepNameByWorkflowStep}
+            openTasksById={attentionMaps.openTasksById}
+            coordinatorName={coordinatorName}
+            coordinatorId={coordinatorId}
+            canManage={canManage}
+            computeNeedsYouCount={computeNeedsYouCount}
+            onExpandedChange={onExpandedChange}
+            autoOpenForm={item.id === autoOpenProposalId ? autoOpenForm : null}
+            onAutoFormOpened={item.id === autoOpenProposalId ? onAutoFormOpened : undefined}
+          />
+        ),
+      )}
     </div>
   );
 }

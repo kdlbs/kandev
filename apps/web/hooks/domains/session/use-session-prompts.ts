@@ -50,10 +50,14 @@ function requestPromptMessages(
   );
   return promise;
 }
-function usePromptSubscriptionReadiness(sessionId: string | null, connectionStatus: string) {
+function usePromptSubscriptionReadiness(
+  sessionId: string | null,
+  connectionStatus: string,
+  detailActive: boolean,
+) {
   const readinessRef = useRef<Promise<unknown> | null>(null);
   useEffect(() => {
-    if (!sessionId || connectionStatus !== "connected") return;
+    if (!detailActive || !sessionId || connectionStatus !== "connected") return;
     const client = getWebSocketClient();
     if (!client) return;
     const subscription = client.subscribeSessionWithReady(sessionId);
@@ -62,7 +66,7 @@ function usePromptSubscriptionReadiness(sessionId: string | null, connectionStat
       readinessRef.current = null;
       subscription.unsubscribe();
     };
-  }, [connectionStatus, sessionId]);
+  }, [connectionStatus, detailActive, sessionId]);
   return readinessRef;
 }
 
@@ -76,30 +80,38 @@ export type UseSessionPromptsResult = {
   retryPrompts: () => void;
 };
 
-/** Loads the prompt-only window without initializing the transcript cache. */
-export function useSessionPrompts(
-  sessionId: string | null,
-  { firstLoadOnly = false }: { firstLoadOnly?: boolean } = {},
-): UseSessionPromptsResult {
+function usePromptInputs(sessionId: string | null) {
   const prompts = useAppStore((state) =>
     sessionId ? (state.messagePrompts.bySession[sessionId] ?? EMPTY_PROMPTS) : EMPTY_PROMPTS,
   );
   const meta = useAppStore(
     (state) => (sessionId && state.messagePrompts.metaBySession[sessionId]) || EMPTY_PROMPT_META,
   );
-  const store = useAppStoreApi();
   const generation = useAppStore((state) =>
     sessionId ? (state.messagePrompts.generationBySession?.[sessionId] ?? 0) : 0,
   );
+  return { prompts, meta, generation };
+}
+
+/** Loads the prompt-only window without initializing the transcript cache. */
+export function useSessionPrompts(
+  sessionId: string | null,
+  {
+    firstLoadOnly = false,
+    detailActive = true,
+  }: { firstLoadOnly?: boolean; detailActive?: boolean } = {},
+): UseSessionPromptsResult {
+  const { prompts, meta, generation } = usePromptInputs(sessionId);
+  const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const readinessRef = usePromptSubscriptionReadiness(sessionId, connectionStatus);
+  const readinessRef = usePromptSubscriptionReadiness(sessionId, connectionStatus, detailActive);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [firstLoadLoading, setFirstLoadLoading] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   const retryPrompts = useCallback(() => setRetryVersion((version) => version + 1), []);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!detailActive || !sessionId) return;
     if (firstLoadOnly && store.getState().messagePrompts.authoritativeBySession?.[sessionId])
       return;
     let current = true;
@@ -154,7 +166,7 @@ export function useSessionPrompts(
     return () => {
       current = false;
     };
-  }, [connectionStatus, firstLoadOnly, generation, retryVersion, sessionId, store]);
+  }, [connectionStatus, detailActive, firstLoadOnly, generation, retryVersion, sessionId, store]);
 
   return useMemo(
     () => ({

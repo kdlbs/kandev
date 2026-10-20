@@ -15,8 +15,11 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/metrics"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/sqlite"
 )
+
+const maintenanceDefaultDeliveryCandidateLimit = 200
 
 // RunOptions configures one `kandev maintenance database` invocation.
 type RunOptions struct {
@@ -31,7 +34,8 @@ type RunOptions struct {
 	// KeepPlanRevisions is forwarded to AnalyzeOptions.KeepPlanRevisions.
 	KeepPlanRevisions int
 	// CandidateLimit is forwarded to AnalyzeOptions.CandidateLimit.
-	CandidateLimit int
+	CandidateLimit    int
+	DeliveryRetention models.AgentDeliveryRetentionBatchOptions
 }
 
 // Outcome is the full result of one Run call, covering both dry-run and
@@ -93,7 +97,11 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 	}
 	defer func() { _ = closeConnections() }()
 
-	report, set, err := analyze(ctx, repo, AnalyzeOptions{KeepPlanRevisions: opts.KeepPlanRevisions, CandidateLimit: opts.CandidateLimit})
+	report, set, err := analyze(ctx, repo, AnalyzeOptions{
+		KeepPlanRevisions: opts.KeepPlanRevisions,
+		CandidateLimit:    opts.CandidateLimit,
+		DeliveryRetention: applyDeliveryCandidateLimit(opts.DeliveryRetention, opts.CandidateLimit),
+	})
 	if err != nil {
 		return Outcome{}, fmt.Errorf("analyze retention candidates: %w", err)
 	}
@@ -105,7 +113,11 @@ func Run(ctx context.Context, homeDir, databaseDriver, databasePath string, opts
 		return Outcome{Executed: false, Report: report}, nil
 	}
 
-	return runExecuteAndCompact(ctx, writer, closeConnections, databasePath, backupPath, report, set, opts.Compact)
+	compactRun := func() (CompactionResult, error) {
+		return compact(ctx, writer, closeConnections, databasePath, metrics.DiskUsage, persistence.SnapshotSQLite)
+	}
+	return runExecuteAndCompact(ctx, writer, closeConnections, databasePath, backupPath,
+		repo, report, set, opts.DeliveryRetention, opts.CandidateLimit, opts.Compact, compactRun)
 }
 
 // openMaintenanceReadOnlyConnection opens an existing SQLite database in
@@ -189,18 +201,44 @@ func openMaintenanceRepository(writer, reader *sqlx.DB, log *logger.Logger) (*sq
 // VACUUM INTO compaction and atomic replacement. A compaction failure is
 // reported as a partial-success Outcome (deletes already committed and are
 // backed by backupPath) rather than a total abort.
-func runExecuteAndCompact(ctx context.Context, writer *sqlx.DB, closeConnections func() error, databasePath, backupPath string, report Report, set candidateSet, compactRequested bool) (Outcome, error) {
+func runExecuteAndCompact(
+	ctx context.Context,
+	writer *sqlx.DB,
+	closeConnections func() error,
+	databasePath, backupPath string,
+	repo *sqlite.Repository,
+	report Report,
+	set candidateSet,
+	retentionOptions models.AgentDeliveryRetentionBatchOptions,
+	candidateLimit int,
+	compactRequested bool,
+	compactRun func() (CompactionResult, error),
+) (Outcome, error) {
 	execResult, err := execute(ctx, writer.DB, set)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("execute retention deletes: %w", err)
 	}
 
 	outcome := Outcome{Executed: true, Report: report, BackupPath: backupPath, Execution: execResult}
+	retentionOptions = applyDeliveryCandidateLimit(retentionOptions, candidateLimit)
+	retentionResult, err := executeDeliveryRetention(ctx, repo, retentionOptions)
+	outcome.Execution.DeletedDeliveryEventPayloads += retentionResult.DeletedDeliveryEventPayloads
+	outcome.Execution.DeletedSettledDeliveryPrompts += retentionResult.DeletedSettledDeliveryPrompts
+	outcome.Execution.RetiredDeliveryEventReceipts += retentionResult.RetiredDeliveryEventReceipts
+	outcome.Execution.PurgedRetiredDeliveryRows += retentionResult.PurgedRetiredDeliveryRows
+	outcome.Execution.DeliveryOrphanJobsScheduled += retentionResult.DeliveryOrphanJobsScheduled
+	outcome.Execution.DeliveryRetirementJobsCompleted += retentionResult.DeliveryRetirementJobsCompleted
+	outcome.Execution.DeliveryBatches += retentionResult.DeliveryBatches
+	outcome.Execution.Partial = retentionResult.Partial || deliveryReportWasLimited(report)
+	if err != nil {
+		outcome.Execution.Partial = true
+		return outcome, fmt.Errorf("execute bounded delivery retention: %w", err)
+	}
 	if !compactRequested {
 		return outcome, nil
 	}
 
-	compactionResult, err := compact(ctx, writer, closeConnections, databasePath, metrics.DiskUsage, persistence.SnapshotSQLite)
+	compactionResult, err := compactRun()
 	if err != nil {
 		// Retention deletes already committed and are backed by backupPath;
 		// only the optional compaction step failed, so the run is reported
@@ -209,4 +247,68 @@ func runExecuteAndCompact(ctx context.Context, writer *sqlx.DB, closeConnections
 	}
 	outcome.Compaction = &compactionResult
 	return outcome, nil
+}
+
+func applyDeliveryCandidateLimit(options models.AgentDeliveryRetentionBatchOptions, candidateLimit int) models.AgentDeliveryRetentionBatchOptions {
+	if candidateLimit > 0 && (options.MaxCandidates <= 0 || candidateLimit < options.MaxCandidates) {
+		options.MaxCandidates = candidateLimit
+	}
+	return options
+}
+
+func executeDeliveryRetention(
+	ctx context.Context,
+	repo *sqlite.Repository,
+	options models.AgentDeliveryRetentionBatchOptions,
+) (ExecutionResult, error) {
+	var execution ExecutionResult
+	result, err := repo.RunAgentDeliveryRetentionBatch(ctx, options)
+	if err != nil {
+		return execution, err
+	}
+	execution.DeliveryBatches++
+	execution.DeletedDeliveryEventPayloads = result.EventPayloadsPruned
+	execution.DeletedSettledDeliveryPrompts = result.PromptPayloadsPruned
+	execution.RetiredDeliveryEventReceipts = result.EventRowsRetired
+	execution.Partial = result.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
+	orphans, err := repo.RunAgentDeliveryOrphanBatch(ctx, models.AgentDeliveryOrphanBatchOptions{MaxCandidates: options.MaxCandidates})
+	if err != nil {
+		execution.Partial = execution.DeliveryBatches > 0
+		return execution, err
+	}
+	execution.DeliveryBatches++
+	execution.DeliveryOrphanJobsScheduled = orphans.JobsScheduled
+	execution.Partial = execution.Partial || orphans.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
+	retirement, err := repo.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{MaxCandidates: options.MaxCandidates})
+	if err != nil {
+		execution.Partial = execution.DeliveryBatches > 0
+		return execution, err
+	}
+	execution.DeliveryBatches++
+	execution.PurgedRetiredDeliveryRows = retirement.RowsPurged
+	execution.DeliveryRetirementJobsCompleted = retirement.Completed
+	execution.Partial = execution.Partial || retirement.Pending || retirement.Suspended > 0 ||
+		retirement.RowsPurged >= deliveryCandidateLimit(options.MaxCandidates)
+	return execution, nil
+}
+
+func deliveryCandidateLimit(limit int) int {
+	if limit <= 0 || limit > maintenanceDefaultDeliveryCandidateLimit {
+		return maintenanceDefaultDeliveryCandidateLimit
+	}
+	return limit
+}
+
+func deliveryReportWasLimited(report Report) bool {
+	for _, group := range []CandidateGroup{
+		report.DuplicateGitSnapshots, report.ObsoletePlanRevisions, report.OrphanedMessagePayloads,
+		report.ProjectedDeliveryPayloads, report.SettledDeliveryPrompts,
+		report.RetiredDeliveryEventReceipts, report.RetiredDeliverySessionEvidence,
+		report.OrphanedDeliveryIdentities,
+	} {
+		if group.SampleLimitReached {
+			return true
+		}
+	}
+	return false
 }

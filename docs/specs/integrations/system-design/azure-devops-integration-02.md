@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
 created: 2026-07-17
-updated: 2026-07-31
+updated: 2026-10-18
 owners:
   - tbd
 ---
@@ -19,6 +19,7 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-AZURE-DE
 | Requirement | Design section |
 | --- | --- |
 | `REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001` (`AC-001.12` through `AC-001.14`) | [Task/detail association identity](#taskdetail-association-identity) |
 
 ## Migrated source detail
 
@@ -113,9 +114,60 @@ attributes, and unsafe URL schemes are never mounted.
 Quick-action task creation uses the existing task dialog. After successful
 creation, the client persists the task/work-item association before reporting
 the launch complete and invalidates the workspace task-link cache. The detail
-surface lists linked Kandev tasks by provider identity
-`(workspace_id, project_id, work_item_id)`. A failed association is visible and
+surface lists linked Kandev tasks through the identity matching described below.
+A failed association is visible and
 retryable; it is never represented as a successful link.
+
+### Task/detail association identity
+
+This section maps `AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.12` through
+`AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.14` to the existing detail path.
+The association's `projectId` is a provider project reference, not a guarantee
+that the value is a GUID. `convertWorkItem` in
+`apps/backend/internal/azuredevops/rest_client.go` projects
+`System.TeamProject` into `WorkItem.Project`, which is normally a project name.
+`AzureDevOpsTaskLauncher.linkCreatedTask` supplies that name to
+`AssociateTaskWorkItem`, and the service stores the validated caller value.
+The board selector instead uses `AzureDevOpsProject.id` and supplies that ID
+to the shared detail hook.
+
+`useAzureDevOpsWorkItemDetail` in
+`apps/web/hooks/domains/azure-devops/use-azure-devops-work-item-detail.ts`
+owns display matching. Its selected `projectId` and the current provider item
+argument's `initialItem.project` form the only candidate project identities.
+Ignore missing, empty, or whitespace-only candidate values; use a whitespace
+check only to reject unusable candidates, without trimming the value used for
+comparison. Compare remaining identities exactly, with no case folding,
+URL-derived aliases, workspace default, or global project-name lookup.
+
+Read associations with `listWorkspaceAzureDevOpsTaskWorkItems(workspaceId)`.
+For each row, require the current workspace ID and work-item ID, plus a match
+against at least one candidate project identity. Apply one filter to the
+flattened workspace response: coinciding aliases do not append a row twice,
+and every distinct matching association remains in response order. If the
+item has no usable project name, selected-ID matching continues independently.
+If neither candidate is usable, no row matches. Keep the existing request
+and generation lifecycle; this predicate does not create an identity cache.
+
+The desktop dialog and phone drawer consume this same hook and existing
+linked-task markup in `azure-devops-work-item-detail.tsx`. This is a data-only
+correction: no layout, navigation, touch, scrolling, or translated-copy change.
+Targeted actual-hook tests satisfy mobile parity's data-only exception; they
+do not claim rendered mobile or browser coverage.
+
+Regression coverage belongs in
+`apps/web/hooks/domains/azure-devops/use-azure-devops-work-item-detail.test.ts`.
+Mount the actual hook with independently authored, typed first-party data:
+selected project GUID, provider item project name, and a normal name-valued
+association. Assert the returned linked rows, with ID-valued associations,
+missing/blank names, coinciding aliases, multiple links, and mixed foreign
+workspace/project/item rows as controls. Do not substitute tests of a copied
+matching helper for this consumer coverage.
+
+No association write, backend validation, schema, migration, API, authentication,
+provider mutation, or cache lifecycle change is required. Existing GUID-valued
+rows remain readable; this does not expand which inputs the association service
+accepts. Historical names after provider renames remain outside this contract.
 
 Watcher task metadata uses exact provider-specific keys. Work-item tasks write
 `azure_devops_work_item_watch_id`, `azure_devops_project_id`,

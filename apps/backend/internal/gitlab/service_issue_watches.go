@@ -52,6 +52,10 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
 	}
@@ -174,6 +178,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := validateWatchMaxInflight(iw.MaxInflightTasks); err != nil {
 		return err
 	}
+
+	if _, err := s.executorActorContext(ctx, iw.CreatedByUserID, iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return err
+	}
 	return store.UpdateIssueWatch(ctx, iw)
 }
 
@@ -267,6 +275,12 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if watch == nil {
 		return nil, fmt.Errorf("watch is nil")
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	if !watch.Enabled {
 		return nil, nil
 	}

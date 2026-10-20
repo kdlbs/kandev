@@ -93,10 +93,28 @@ func (k *resumeKind) Execute(ctx context.Context, claim Claim) (Outcome, error) 
 func (k *resumeKind) launch(ctx context.Context, claim Claim, sessionID string) (resumeResult, error) {
 	done := make(chan resumeResult, 1)
 	var abandoned atomic.Bool
-	launchCtx := context.WithoutCancel(ctx)
+	k.svc.launchMu.Lock()
+	if k.svc.launchClosed {
+		k.svc.launchMu.Unlock()
+		return resumeResult{}, failWith("session resume is stopping")
+	}
+	launchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	if k.svc.launchCancels == nil {
+		k.svc.launchCancels = make(map[uint64]context.CancelFunc)
+	}
+	k.svc.launchNext++
+	launchID := k.svc.launchNext
+	k.svc.launchCancels[launchID] = cancel
 	k.svc.launchWG.Add(1)
+	k.svc.launchMu.Unlock()
 	go func() {
 		defer k.svc.launchWG.Done()
+		defer func() {
+			cancel()
+			k.svc.launchMu.Lock()
+			delete(k.svc.launchCancels, launchID)
+			k.svc.launchMu.Unlock()
+		}()
 		started, err := k.svc.kindDeps.Resumer.ResumeTaskSession(launchCtx, claim.TargetTaskID, sessionID)
 		if abandoned.Load() {
 			k.svc.logger.Warn("execute_settle_fenced",
@@ -115,4 +133,12 @@ func (k *resumeKind) launch(ctx context.Context, claim Claim, sessionID string) 
 
 // WaitResumeLaunchesStopped blocks until every resume launch goroutine has
 // returned, so a graceful shutdown or a test can join them.
-func (s *Service) WaitResumeLaunchesStopped() { s.launchWG.Wait() }
+func (s *Service) WaitResumeLaunchesStopped() {
+	s.launchMu.Lock()
+	s.launchClosed = true
+	for _, cancel := range s.launchCancels {
+		cancel()
+	}
+	s.launchMu.Unlock()
+	s.launchWG.Wait()
+}

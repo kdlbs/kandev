@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -74,14 +75,16 @@ func (cmd *recordedCommand) closeFiles() error {
 }
 
 type runReport struct {
-	Inventory inventory
-	Cohorts   [2]cohort
-	Commands  []*recordedCommand
-	Complete  bool
-	Failure   string
+	Inventory      inventory
+	Cohorts        []cohort
+	SelectedCohort int
+	TotalCohorts   int
+	Commands       []*recordedCommand
+	Complete       bool
+	Failure        string
 }
 
-func runNative(directory string) (report runReport, result error) {
+func runNative(directory string, selected, total int) (report runReport, result error) {
 	listing := newCommand(directory, "inventory", "")
 	report.Commands = append(report.Commands, listing)
 	if err := joinCommands([]command{listing}); err != nil {
@@ -92,13 +95,23 @@ func runNative(directory string) (report runReport, result error) {
 		return report, err
 	}
 	report.Inventory = inv
-	report.Cohorts, err = partition(inv)
+	groups, err := partition(inv, total)
+	if err != nil {
+		return report, err
+	}
+	report.SelectedCohort = selected
+	report.TotalCohorts = total
+	report.Cohorts, err = selectCohorts(groups, selected)
 	if err != nil {
 		return report, err
 	}
 	var commands []command
 	for index, group := range report.Cohorts {
-		cmd := newCommand(directory, fmt.Sprintf("cohort-%d", index+1), group.Selector)
+		number := index + 1
+		if selected != 0 {
+			number = selected
+		}
+		cmd := newCommand(directory, fmt.Sprintf("cohort-%d", number), group.Selector)
 		report.Commands = append(report.Commands, cmd)
 		commands = append(commands, cmd)
 	}
@@ -164,6 +177,13 @@ func publishFile(path string) (result error) {
 }
 
 func main() {
+	selected := flag.Int("cohort", 0, "Native cohort to run: 0 (all) or a one-based index")
+	total := flag.Int("cohorts", 2, "Native partition count: 2 (local default) or 4 (hosted)")
+	flag.Parse()
+	if (*total != 2 && *total != 4) || *selected < 0 || *selected > *total || flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "Specify -cohorts=2 or 4 and -cohort=0 or an index within that count")
+		os.Exit(1)
+	}
 	if runtime.GOOS != "windows" {
 		fmt.Fprintln(os.Stderr, "Windows process cohorts require a native Windows runner")
 		os.Exit(1)
@@ -173,7 +193,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	report, err := runNative(directory)
+	report, err := runNative(directory, *selected, *total)
 	err = errors.Join(err, publishReport(directory, report, err))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

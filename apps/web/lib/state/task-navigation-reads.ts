@@ -3,6 +3,8 @@ import type { StoreApi } from "zustand";
 import { ApiError } from "@/lib/api/client";
 import { fetchTask, listTaskSessions } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
+import { toKanbanTask } from "@/lib/kanban/map-task";
+import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 import type { Task, TaskSessionsResponse } from "@/lib/types/http";
 import type { AppState } from "./store";
 
@@ -84,7 +86,16 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(abortError());
     signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
   });
 }
 
@@ -432,20 +443,49 @@ export function createTaskNavigationReads(
   return new TaskNavigationReads(loadIdentity, scopeIsCurrent);
 }
 
-function fetchTaskNavigationIdentity(
+async function fetchTaskNavigationIdentity(
+  store: StoreApi<AppState>,
   taskId: string,
   signal: AbortSignal,
+  sessionReads: TaskSessionReads,
+  scopeIsCurrent: () => boolean,
 ): Promise<TaskNavigationIdentity> {
-  return Promise.all([
-    fetchTask(taskId, { cache: "no-store", init: { signal } }),
-    listTaskSessions(taskId, { cache: "no-store", init: { signal } }).then(
-      (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
-      (error) => {
-        if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
-        return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
-      },
-    ),
-  ]).then(([task, sessionList]) => ({ task, ...sessionList }));
+  // The HTTP attempt owns reconciliation; joined and cached callers do not publish again.
+  const overviewReadId = store.getState().beginTaskOverviewRead();
+  try {
+    const taskRequest = fetchTask(taskId, { cache: "no-store", init: { signal } });
+    const release = sessionReads.retain(taskId);
+    const sessionList = raceAbort(
+      sessionReads.read(taskId, (readSignal) =>
+        listTaskSessions(taskId, { cache: "no-store", init: { signal: readSignal } }),
+      ),
+      signal,
+    ).finally(release);
+    const [task, sessionResponse] = await Promise.all([
+      taskRequest,
+      sessionList.then(
+        (allSessionsResponse) => ({ allSessionsResponse, sessionListUnavailable: false }),
+        (error) => {
+          if (isTaskNavigationAbort(error) || signal.aborted) throw abortError();
+          return { allSessionsResponse: { sessions: [], total: 0 }, sessionListUnavailable: true };
+        },
+      ),
+    ]);
+    if (signal.aborted || !scopeIsCurrent()) throw abortError();
+    if (isCurrentTaskDetailRead(store, taskId)) {
+      store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
+    }
+    return { task, ...sessionResponse };
+  } finally {
+    store.getState().finishTaskOverviewRead(overviewReadId);
+  }
+}
+
+function isCurrentTaskDetailRead(store: StoreApi<AppState>, taskId: string): boolean {
+  return (
+    store.getState().tasks.activeTaskId === taskId ||
+    owners.get(store)?.navigationContext?.taskId === taskId
+  );
 }
 
 function storeIdentity(state: AppState) {
@@ -465,6 +505,7 @@ type NavigationReadOwner = {
   navigationContext?: {
     navigationOwner: object;
     routeKey: string;
+    taskId?: string;
     context: TaskNavigationContext;
   };
 };
@@ -480,9 +521,13 @@ function getTaskNavigationOwner(store: StoreApi<AppState>): NavigationReadOwner 
       identity,
       token: Object.freeze({}),
     } as NavigationReadOwner;
+    const sessionReads = getTaskSessionReads(store);
+    const scopeIsCurrent = () =>
+      owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity;
     nextOwner.reads = new TaskNavigationReads(
-      fetchTaskNavigationIdentity,
-      () => owners.get(store) === nextOwner && storeIdentity(store.getState()) === identity,
+      (taskId, signal) =>
+        fetchTaskNavigationIdentity(store, taskId, signal, sessionReads, scopeIsCurrent),
+      scopeIsCurrent,
     );
     owner = nextOwner;
     owners.set(store, nextOwner);
@@ -549,6 +594,10 @@ export function readTaskNavigationIdentity(
     (owner.token !== options.context.ownerToken || owner.identity !== options.context.identity)
   ) {
     return Promise.reject(abortError());
+  }
+  // Route identity can be admitted before its shell activates the task.
+  if (options.context && owner.navigationContext?.context === options.context) {
+    owner.navigationContext.taskId = taskId;
   }
   return owner.reads.read(taskId, options.context?.generation ?? options.generation, {
     refresh: options.refresh,

@@ -39,8 +39,8 @@ import (
 // session (the turn-complete path dies with the process), leaving
 // task_sessions stuck in STARTING/RUNNING forever on tasks that were never
 // archived. Every tick, stale STARTING/RUNNING sessions with no live
-// in-memory execution backing them return to WAITING_FOR_INPUT for lazy
-// recovery.
+// in-memory execution and no exact pending remote owner return to
+// WAITING_FOR_INPUT for lazy recovery.
 //
 // Both passes follow the exact periodic-sweep shape StartAutoArchiveLoop
 // already uses and re-invoke the same finalize transitions; as long as the
@@ -57,10 +57,32 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
+				s.runTurnChangeRetentionSweep(ctx, now)
 			}
 		}
 	}()
 	s.logger.Info("session reconciliation loop started (every 1 minute)")
+}
+
+func (s *Service) runTurnChangeRetentionSweep(ctx context.Context, now time.Time) {
+	if s.turnChanges == nil {
+		return
+	}
+	result, err := s.turnChanges.ApplyTurnChangeRetention(ctx, models.TurnChangeRetentionPolicy{
+		RetainFor:         30 * 24 * time.Hour,
+		TaskBytes:         128 << 20,
+		InstallationBytes: 1 << 30,
+	}, now.UTC())
+	if err != nil {
+		s.logger.Warn("turn-change retention sweep failed", zap.Error(err))
+		return
+	}
+	if result.ExpiredChangeSets > 0 || result.DeletedContents > 0 {
+		s.logger.Info("turn-change retention sweep expired historical content",
+			zap.Int64("change_sets", result.ExpiredChangeSets),
+			zap.Int64("content_objects", result.DeletedContents),
+			zap.Int64("freed_payload_bytes", result.FreedPayloadBytes))
+	}
 }
 
 // StartArchivedSessionReconciliationLoop keeps the pre-stall-sweep entry
@@ -110,7 +132,7 @@ func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
 const orphanedSessionGraceAllowance = 5 * time.Minute
 
 // orphanedSessionGracePeriod is how stale a STARTING/RUNNING session's last
-// write must be before the sweep may consider it unbacked. A session in those
+// write must be before the sweep may consider it stale. A session in those
 // states whose row is fresher than one full launch budget can still belong to
 // an in-flight launch whose execution has not reached the in-memory store
 // yet, so the sweep leaves it alone.
@@ -131,7 +153,8 @@ type orphanedSessionRepository interface {
 
 // runOrphanedSessionReconciliation is pass 2 of the reconciliation loop: it
 // returns stale STARTING/RUNNING sessions of unarchived tasks to
-// WAITING_FOR_INPUT when no live in-memory execution backs them. An
+// WAITING_FOR_INPUT when no live in-memory execution or pending remote owner
+// backs them. An
 // interrupted turn is settled without a completion event, so the same
 // conversation remains available for lazy recovery. Sessions backed by a
 // live execution — including survivors re-tracked by startup recovery — are
@@ -194,6 +217,15 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 				zap.Time("deadline", deadline))
 			return
 		}
+		pending, err := s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("orphaned-session reconciliation: failed to inspect pending remote owner; skipping session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if pending {
+			continue
+		}
 		// Re-check liveness at the moment of the write, not just at the
 		// candidate read: a launch that raced the grace window since the read
 		// must not be recovered. The staleBefore predicate inside the recovery
@@ -226,9 +258,18 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 				zap.Error(err))
 			continue
 		}
-		// The turn read above can take long enough for a replacement
-		// execution to register. Re-check immediately before the guarded write
-		// so a live successor keeps ownership of the session.
+		pending, err = s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			s.logger.Warn("orphaned-session reconciliation: failed to recheck pending remote owner; skipping session",
+				zap.String("session_id", session.ID), zap.Error(err))
+			continue
+		}
+		if pending {
+			continue
+		}
+		// The pending-owner lookup can complete as an owner attaches. Read
+		// liveness after it so that a newly registered execution keeps the
+		// session instead of being settled from the earlier snapshot.
 		if s.executionLivenessChecker.HasLiveExecution(session.ID) {
 			continue
 		}
@@ -255,6 +296,46 @@ func (s *Service) reconcileOrphanedSessionsUntil(
 			zap.String("session_id", session.ID),
 			zap.String("previous_state", string(session.State)))
 	}
+}
+
+func (s *Service) pendingRemoteRecoveryForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.pendingRemoteRecoveryChecker == nil || sessionID == "" {
+		return false, nil
+	}
+	if s.executors == nil {
+		return false, errors.New("executor repository is unavailable")
+	}
+	row, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read executor owner: %w", err)
+	}
+	if row == nil || row.AgentExecutionID == "" {
+		return false, nil
+	}
+	return s.pendingRemoteRecoveryChecker(sessionID, row.AgentExecutionID), nil
+}
+
+func (s *Service) pendingRemoteRecoverySessions(
+	ctx context.Context,
+	sessions []*models.TaskSession,
+) (map[string]struct{}, error) {
+	pending := make(map[string]struct{})
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		isPending, err := s.pendingRemoteRecoveryForSession(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("session %s: %w", session.ID, err)
+		}
+		if isPending {
+			pending[session.ID] = struct{}{}
+		}
+	}
+	return pending, nil
 }
 
 // captureRecoveryExecutorSnapshot records the executor identity observed with

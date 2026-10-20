@@ -63,10 +63,10 @@ export async function expectPromptAlignedAtStart(row: Locator): Promise<void> {
 /**
  * Boots an idle session, sends `FIRST_PROMPT_MARKER` as the first user
  * prompt, buries it under filler, sends `LAST_PROMPT_MARKER` as a second,
- * later prompt (the "last prompt"), then buries that under more trailing
- * filler so the transcript auto-scrolls both prompts out of view above the
- * fold — exactly the "scrolled way down" scenario the scroll-to-last-prompt
- * and scroll-to-start affordances exist for. Keeping the two prompts
+ * later prompt (the "last prompt"), then seeds trailing filler and scrolls to
+ * its final message. This places both prompts above the fold for the "scrolled
+ * way down" scenario the scroll-to-last-prompt and scroll-to-start affordances
+ * exist for. Keeping the two prompts
  * distinct lets tests assert each button jumps to its own target.
  */
 export async function seedScrolledPastLastPrompt(
@@ -127,9 +127,11 @@ export async function seedScrolledPastLastPrompt(
   await send(opts.lastPromptText ?? LAST_PROMPT_MARKER);
   const trailingFillerCount = opts.trailingFillerCount ?? TRAILING_FILLER_COUNT;
   await apiClient.seedAgentMessages(sessionId, trailingFillerCount);
-  await expect(
-    session.activeChat().getByText(`filler message ${trailingFillerCount}`, { exact: false }),
-  ).toBeVisible({ timeout: 15_000 });
+  const lastFiller = session
+    .activeChat()
+    .getByText(`filler message ${trailingFillerCount}`, { exact: false });
+  await expect(lastFiller).toBeVisible({ timeout: 15_000 });
+  await lastFiller.scrollIntoViewIfNeeded();
 
   return session;
 }

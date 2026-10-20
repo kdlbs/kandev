@@ -1,4 +1,14 @@
 import type {
+  RepositoryDeletedPayload,
+  RepositorySetPayload,
+  RepositoryBranchPolicyPayload,
+} from "./repository-events";
+export type {
+  RepositoryDeletedPayload,
+  RepositorySetPayload,
+  RepositoryBranchPolicyPayload,
+} from "./repository-events";
+import type {
   TaskPlanCommentEventPayload,
   TaskPlanEventPayload,
   TaskPlanRevisionEventPayload,
@@ -284,32 +294,6 @@ export type WorkspacePayload = {
   updated_at?: string;
 };
 
-/**
- * A `repository_set.*` event. `repositories` is absent on the delete event, whose
- * payload only has to identify the set and its workspace.
- */
-export type RepositorySetPayload = {
-  id: string;
-  workspace_id: string;
-  name?: string;
-  description?: string;
-  repositories?: Array<{ repository_id: string; position: number; base_branch?: string }>;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type RepositoryBranchPolicyPayload = {
-  id: string;
-  repository_id: string;
-  name?: string;
-  description?: string;
-  base_branch?: string;
-  branch_template?: string;
-  pull_request_target?: string;
-  created_at?: string;
-  updated_at?: string;
-};
-
 export type WorkflowPayload = {
   id: string;
   workspace_id: string;
@@ -554,6 +538,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
     "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
     "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;
+    "repository.deleted": BackendMessage<"repository.deleted", RepositoryDeletedPayload>;
     "repository_branch_policy.created": BackendMessage<
       "repository_branch_policy.created",
       RepositoryBranchPolicyPayload
@@ -588,6 +573,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 
     "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
+    "executor.catalogue.invalidated": BackendMessage<
+      "executor.catalogue.invalidated",
+      Record<string, never>
+    >;
     "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
     "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
     "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;

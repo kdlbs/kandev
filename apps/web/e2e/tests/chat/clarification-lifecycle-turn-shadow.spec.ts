@@ -9,15 +9,8 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { watchWs, waitForHttp } from "../../helpers/causal-waits";
+import { watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
-
-/** Matches GET /api/v1/task-sessions/:id/turns, the REST snapshot that backs
- * ensureSessionTurnsLoaded — a separate, fire-and-forget fetch from the WS
- * message.list round trip (use-session-messages.ts fires it `void` before
- * message.list is even awaited). The clarification overlay's turn-scoping
- * depends on this fetch too, so a test must wait for both. */
-const TURNS_FETCH_PATH = /\/task-sessions\/[^/]+\/turns/;
 
 const QUESTION_PROMPT = "Which environment should I deploy to?";
 const STAGING_LABEL = "Staging";
@@ -45,7 +38,7 @@ async function seedShadowedClarification(
   seedData: SeedData,
   title: string,
   markedLifecycle: boolean,
-): Promise<{ taskId: string; sessionId: string }> {
+): Promise<{ taskId: string; sessionId: string; turnIds: string[] }> {
   const task = await apiClient.createTask(seedData.workspaceId, title, {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -57,7 +50,7 @@ async function seedShadowedClarification(
   const turnAStartedAt = new Date(Date.now() - 120_000).toISOString();
   const turnBStartedAt = new Date(Date.now() - 119_200).toISOString();
 
-  await apiClient.seedSessionMessage(sessionId, {
+  const clarification = await apiClient.seedSessionMessage(sessionId, {
     type: "clarification_request",
     newTurn: true,
     turnStartedAt: turnAStartedAt,
@@ -81,7 +74,7 @@ async function seedShadowedClarification(
     },
   });
 
-  await apiClient.seedSessionMessage(sessionId, {
+  const lifecycle = await apiClient.seedSessionMessage(sessionId, {
     type: "script_execution",
     content: "Resuming session.",
     newTurn: true,
@@ -90,7 +83,8 @@ async function seedShadowedClarification(
     ...(markedLifecycle ? { turnMetadata: { lifecycle_only: true } } : {}),
   });
 
-  return { taskId: task.id, sessionId };
+  if (!clarification.turnId || !lifecycle.turnId) throw new Error("seeded turns must have IDs");
+  return { taskId: task.id, sessionId, turnIds: [clarification.turnId, lifecycle.turnId] };
 }
 
 test.describe("Duplicate lifecycle turn does not hide a pending clarification", () => {
@@ -99,7 +93,7 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId } = await seedShadowedClarification(
+    const { taskId, turnIds } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - marked",
@@ -108,9 +102,11 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
 
     const wsWatcher = watchWs(testPage);
     const messagesLoaded = wsWatcher.waitForResponse("message.list");
-    const turnsLoaded = waitForHttp(testPage, "GET", TURNS_FETCH_PATH);
     await testPage.goto(`/t/${taskId}`);
-    await Promise.all([messagesLoaded, turnsLoaded]);
+    const windowSnapshot = await messagesLoaded;
+    expect(windowSnapshot.payload.turns).toEqual(
+      expect.arrayContaining(turnIds.map((id) => expect.objectContaining({ id }))),
+    );
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -128,7 +124,7 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
     apiClient,
     seedData,
   }) => {
-    const { taskId } = await seedShadowedClarification(
+    const { taskId, turnIds } = await seedShadowedClarification(
       apiClient,
       seedData,
       "Lifecycle shadow - unmarked legacy",
@@ -137,9 +133,11 @@ test.describe("Duplicate lifecycle turn does not hide a pending clarification", 
 
     const wsWatcher = watchWs(testPage);
     const messagesLoaded = wsWatcher.waitForResponse("message.list");
-    const turnsLoaded = waitForHttp(testPage, "GET", TURNS_FETCH_PATH);
     await testPage.goto(`/t/${taskId}`);
-    await Promise.all([messagesLoaded, turnsLoaded]);
+    const windowSnapshot = await messagesLoaded;
+    expect(windowSnapshot.payload.turns).toEqual(
+      expect.arrayContaining(turnIds.map((id) => expect.objectContaining({ id }))),
+    );
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 

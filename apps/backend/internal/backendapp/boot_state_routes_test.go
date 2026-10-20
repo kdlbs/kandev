@@ -1,12 +1,21 @@
 package backendapp
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	taskdto "github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	userservice "github.com/kandev/kandev/internal/user/service"
 )
 
 func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
@@ -28,6 +37,15 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	})
 	if task["wipAdmitted"] != false || task["queuedForStepId"] != "step-review" {
 		t.Fatalf("kanban task WIP fields = %#v, want queued task metadata", task)
+	}
+}
+
+func TestMapUserSettingsStateIncludesTurnChangedFilesPreference(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{ShowTurnChangedFiles: false},
+	}, "workspace-1")
+	if state["showTurnChangedFiles"] != false {
+		t.Fatalf("showTurnChangedFiles = %#v, want false", state["showTurnChangedFiles"])
 	}
 }
 
@@ -323,5 +341,80 @@ func TestMapUserSettingsStateNormalizesNilSubtaskOrder(t *testing.T) {
 	order, ok := prefs["subtaskOrderByParentId"].(map[string][]string)
 	if !ok || order == nil || len(order) != 0 {
 		t.Fatalf("subtaskOrderByParentId = %#v, want empty map", prefs["subtaskOrderByParentId"])
+	}
+}
+
+// recordingTaskRepo captures the order-by sort the boot first-page query hands
+// to the repository, so a test can tell a resolved sort from a leaked facet.
+type recordingTaskRepo struct {
+	*sqlitetaskrepo.Repository
+	sorts []string
+}
+
+func (r *recordingTaskRepo) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	r.sorts = append(r.sorts, sort)
+	return r.Repository.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+}
+
+// bootFacetPage boots the tasks page with a stored sort and an optional sort
+// query, returning the boot payload and the sorts the first-page query received.
+func bootFacetPage(t *testing.T, storedSort, querySort string) (map[string]any, []string) {
+	t.Helper()
+	var recorder *recordingTaskRepo
+	harness := newBootStateTestHarnessWithTasks(t, func(repo *sqlitetaskrepo.Repository) taskrepo.TaskRepository {
+		recorder = &recordingTaskRepo{Repository: repo}
+		return recorder
+	})
+	ctx := context.Background()
+	if _, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{Name: "Facet Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workspace := nonFallbackWorkspace(t, ctx, harness.taskSvc)
+	if _, err := harness.userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{
+		WorkspaceID:   &workspace.ID,
+		TasksListSort: &storedSort,
+	}); err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	target := "/tasks"
+	if querySort != "" {
+		target += "?" + url.Values{"sort": {querySort}}.Encode()
+	}
+	builder := bootStateBuilder{p: routeParams{taskSvc: harness.taskSvc, userCtrl: harness.userCtrl}}
+	_, routeData := builder.tasksPageBootData(ctx, httptest.NewRequest(http.MethodGet, target, nil))
+	if routeData == nil {
+		t.Fatal("tasksPageBootData returned no route data")
+	}
+	return routeData, recorder.sorts
+}
+
+// TestTasksPageBootDataResolvesFacetQueryWithoutDiscardingSelection pins the
+// boot split: the payload keeps the facet selection, while the first-page query
+// receives only a built-in sort.
+func TestTasksPageBootDataResolvesFacetQueryWithoutDiscardingSelection(t *testing.T) {
+	const (
+		storedFacet = "facet:kandev-plugin-tags:stored"
+		queryFacet  = "facet:kandev-plugin-tags:tags"
+	)
+	cases := []struct {
+		name        string
+		stored      string
+		query       string
+		wantPayload string
+	}{
+		{name: "query facet wins over the stored facet", stored: storedFacet, query: queryFacet, wantPayload: queryFacet},
+		{name: "stored facet survives boot without a query", stored: storedFacet, wantPayload: storedFacet},
+		{name: "padded query facet is trimmed in the payload", stored: usermodels.TasksListSortDefault, query: " facet:plugin:tags ", wantPayload: "facet:plugin:tags"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			routeData, sorts := bootFacetPage(t, tc.stored, tc.query)
+			if got := routeData["tasksListSort"]; got != tc.wantPayload {
+				t.Fatalf("payload tasksListSort = %v, want %q", got, tc.wantPayload)
+			}
+			if len(sorts) != 1 || sorts[0] != usermodels.TasksListSortDefault {
+				t.Fatalf("first-page query sorts = %q, want exactly one built-in %q: a facet is page-local and must not reach the order-by input", sorts, usermodels.TasksListSortDefault)
+			}
+		})
 	}
 }

@@ -36,6 +36,12 @@ var noTurnStartPaths = []noTurnStartCase{
 	{name: "conversation route", run: noTurnStartConversationRoute},
 	{name: "startup cleanup pass", run: noTurnStartStartupCleanup},
 	{name: "session recovery on restart", run: noTurnStartSessionRecovery},
+	{name: "wake recovery duties", run: noTurnStartWakeBackstop},
+	{name: "wake delivery with admission held", run: noTurnStartWakeAdmissionHeld},
+	{name: "wake delivery with admission passed", run: noTurnStartWakeDelivery},
+	{name: "improvement approve", run: noTurnStartImprovementApprove},
+	{name: "improvement apply", run: noTurnStartImprovementApply},
+	{name: "automatic approval", run: noTurnStartAutomaticApproval},
 }
 
 // TestCoordinatorConversationNoTurnStart proves that no backend path capable

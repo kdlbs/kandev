@@ -11,6 +11,7 @@ export type LastAgentError = {
   occurredAt?: string;
   agentExecutionId?: string;
   executionId?: string;
+  deliverySubmissionId?: string;
   phase?: string;
   attemptId?: string;
   causes?: AgentErrorCause[];
@@ -171,6 +172,12 @@ export function normalizeAgentErrorCauses(value: unknown): AgentErrorCause[] {
     .filter((cause) => Boolean(cause.operation || cause.code || cause.detail));
 }
 
+function readCleanupPromptEvidence(cause: AgentErrorCause, record: Record<string, unknown>) {
+  if (cause.code === "runtime_cleanup_failed" && typeof record.prompt_not_sent === "boolean") {
+    cause.prompt_not_sent = record.prompt_not_sent;
+  }
+}
+
 function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
   const cause: AgentErrorCause = {
     ...(boundedString(record.operation, 64)
@@ -179,6 +186,7 @@ function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
     ...(boundedString(record.code, 64) ? { code: boundedString(record.code, 64) } : {}),
     ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
   };
+  readCleanupPromptEvidence(cause, record);
   const reason = typeof record.reason === "string" ? record.reason : "";
   if (!isKnownSelectionReason(cause.code, reason)) return cause;
   cause.reason = reason;
@@ -264,6 +272,10 @@ function readStructuredFailureMetadata(record: Record<string, unknown>) {
   const startupAttempts = record.startup_attempts ?? record.startupAttempts;
   return {
     code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
+    deliverySubmissionId: readFirstOptionalString(record, [
+      "delivery_submission_id",
+      "deliverySubmissionId",
+    ]),
     details: readFirstOptionalString(record, [
       "details",
       "failure_details",

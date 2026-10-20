@@ -40,7 +40,7 @@ func (s *Service) handleAzureDevOpsWorkItemWatchMatch(ctx context.Context, event
 	if src == nil {
 		src = NewAzureDevOpsWorkItemWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, src, evt,
+	s.dispatchOwnedWatcherEvent(ctx, src, evt, evt.CreatedByUserID,
 		zap.String("work_item_watch_id", evt.WatchID), zap.String("project", evt.ProjectID), zap.Int("work_item_id", evt.WorkItem.ID))
 	return nil
 }
@@ -54,7 +54,7 @@ func (s *Service) handleAzureDevOpsPullRequestWatchMatch(ctx context.Context, ev
 	if src == nil {
 		src = NewAzureDevOpsPullRequestWatcherSource(nil, s.logger)
 	}
-	s.dispatchWatcherEvent(ctx, src, evt,
+	s.dispatchOwnedWatcherEvent(ctx, src, evt, evt.CreatedByUserID,
 		zap.String("pull_request_watch_id", evt.WatchID), zap.String("project", evt.ProjectID), zap.Int("pull_request_id", evt.PullRequest.ID))
 	return nil
 }

@@ -5,7 +5,9 @@ test("existing Resume recovers interrupted Quick Chat on a phone", async ({
   testPage,
   apiClient,
   backend,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
-  await verifyQuickChatResumeRecovery(testPage, apiClient, backend.tmpDir, true);
+  await testPage.setViewportSize({ width: 320, height: 720 });
+  await verifyQuickChatResumeRecovery(testPage, apiClient, backend.tmpDir, true, prCapture);
 });

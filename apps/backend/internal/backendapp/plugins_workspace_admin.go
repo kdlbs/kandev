@@ -515,6 +515,8 @@ func workflowStepFromAdminConfig(value pluginsdk.WorkflowStepConfiguration, curr
 		step.Events.OnHeartbeat = append([]workflowmodels.GenericAction(nil), current.Events.OnHeartbeat...)
 		step.Events.OnBudgetAlert = append([]workflowmodels.GenericAction(nil), current.Events.OnBudgetAlert...)
 		step.Events.OnAgentError = append([]workflowmodels.GenericAction(nil), current.Events.OnAgentError...)
+		step.Events.OnPRMerged = append([]workflowmodels.GenericAction(nil), current.Events.OnPRMerged...)
+		step.Events.OnPRClosed = append([]workflowmodels.GenericAction(nil), current.Events.OnPRClosed...)
 	}
 	if current != nil {
 		step.Events.OnEnter = mergeAdminOnEnterActions(current.Events.OnEnter, value.OnEnterActionTypes)

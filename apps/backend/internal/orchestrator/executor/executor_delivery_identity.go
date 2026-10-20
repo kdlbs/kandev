@@ -8,14 +8,18 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// RecoveryActionFreshStart is the explicit recovery action that replaces the
+// session's native conversation.
+const RecoveryActionFreshStart = "fresh_start"
+
 type harnessSessionGenerationReader interface {
 	GetCurrentHarnessSessionGeneration(context.Context, string, string) (*models.HarnessSessionGeneration, error)
 }
 
 // applyDeliveryIdentity resolves the durable stream owner before an executor
 // launch. A process replacement keeps the same generation and stream; an
-// explicit context continuation advances the generation before its new native
-// conversation can publish events.
+// explicit context continuation or fresh start advances the generation before
+// its new native conversation can publish events.
 func (e *Executor) applyDeliveryIdentity(
 	ctx context.Context,
 	req *LaunchAgentRequest,
@@ -37,8 +41,16 @@ func (e *Executor) applyDeliveryIdentity(
 	} else if req.OriginalWorkspacePath == "" {
 		req.OriginalWorkspacePath = session.WorkspacePath
 	}
-	if req.ForceContextContinuation && current != nil {
+	// Without a committed predecessor, a fresh start is the first generation.
+	req.ReplaceNativeConversation = req.ReplaceNativeConversation && current != nil
+	if (req.ForceContextContinuation || req.ReplaceNativeConversation) && current != nil {
 		generation++
+	}
+	if req.InterruptedSubmissionID != "" {
+		if current == nil || req.RequiredNativeConversationID == "" || current.NativeSessionID != req.RequiredNativeConversationID || uint64(current.Generation) != req.InterruptedHarnessGeneration || req.InterruptedStreamID == "" || req.ForceContextContinuation {
+			return errors.New("interrupted native continuation identity changed")
+		}
+		generation = current.Generation + 1
 	}
 	req.DeliveryIncarnationID = incarnationID
 	req.DeliveryHarnessGeneration = uint64(generation)

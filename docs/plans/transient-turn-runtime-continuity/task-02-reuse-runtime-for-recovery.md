@@ -143,3 +143,51 @@ Additional verification passed:
 - `make -C apps/backend build`: passed for host binaries and configured cross-build targets.
 
 Final catalog, specification, documentation-coverage, and whitespace validation results are recorded in the manifest after work order 03.
+
+## PR 4311 waiting-retry cancellation correction
+
+Status: local correction and verification complete. An exact CI-merge shard replay
+dispatched the cancel RPC
+at 05:57:08.984935 UTC after a retained replay failed at 05:57:08.561. The next
+backoff entry inherited `started=1` and had no `acceptedExecution`.
+`cancelRetainedRuntimeRetry` required zero past attempts before taking its idle
+path, so active-turn cancellation rejected the new waiting owner.
+
+The regression `TestRetainedRetryCancellationAfterFailedReplayKeepsRuntime`
+fails before the correction because cancellation returns false (Go race RED,
+0.267s). Use accepted prompt ownership to choose idle cancellation, preserve
+the historical dispatch count, and retain current active-turn generation fences.
+Changed files: `event_handlers_transient_state.go` and
+`event_handlers_transient_retained_runtime_test.go` in the orchestrator.
+
+Focused race GREEN: retained/transient/cancel/continuation-cancellation tests
+passed three runs in 3.302s, with GOMAXPROCS=2, GOMEMLIMIT=1GiB, GOGC=30,
+MemoryMax=4G, no swap, and CPUQuota=200%. Exact backend command:
+
+```bash
+go test -trimpath -race -p=1 ./internal/orchestrator -run '^(TestRetained|TestTransient|TestCancelTransient|TestContinuationCancellation)' -count=3
+```
+
+Final local results are recorded below. Remote delivery remains pending externally.
+
+Focused managed Playwright GREEN: 9/9 tests passed in 9.8m, three repetitions
+per desktop cancellation/exhaustion, phone cancellation, and profile-editor
+case, with retries disabled after a fresh production build. Log:
+`/tmp/clone-fixup-e2e-local/kandev-run.e2e.AN57mwam.log`. Catalog validation
+(362 decisions, 1438 specifications), full specification lint, and whitespace
+checks passed. Scoped lint and current-base composition passed as recorded below.
+
+Final local checks: scoped Go lint reported zero issues; all three browser
+specs passed ESLint and Prettier. A conflict-free merge with the latest main
+passed 124 clone/routing/editor tests across 12 suites, 24 archived-sidebar
+freshness tests, and web TypeScript. The original 13-suite command supplied
+an incorrect sidebar path and ran only 12 suites; the sidebar suite then ran
+separately at `lib/sidebar/sidebar-archived-update-freshness.test.ts`. Logs:
+`/tmp/kandev-run.vitest.21UlgosQ.log`,
+`/tmp/kandev-run.vitest.p4wCbkEc.log`,
+`/tmp/kandev-run.typecheck.2e9Djqxo.log`.
+Actual changed-file work-order coverage passed with all unchanged referenced
+platform requirement/design inputs loaded. Full catalog/specification and
+whitespace checks passed. The primary session records exact merge/head IDs,
+normal hook receipts and fresh remote CI/review results in the external task
+plan, avoiding a documentation-only push that would invalidate those results.

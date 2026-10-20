@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskSessionId, useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { formatCompactDuration } from "@/lib/i18n/formats";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
@@ -280,7 +280,7 @@ export function PRCIPopover({
   onOpenDetailPanel?: () => void;
   refreshTaskPR?: () => void | Promise<void>;
 }) {
-  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(pr.task_id);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
   const { feedback, isFetching, isRefreshing, lastUpdatedAt, refetch } = usePRCIPopover(
@@ -322,7 +322,7 @@ export function PRCIPopover({
 // --- Add-to-context wiring (mirrors pr-detail-panel.tsx for failed checks) ---
 function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
   const { t } = useTranslation();
-  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const sessionId = useTaskSessionId(pr.task_id);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
   const prNumber = pr.pr_number;

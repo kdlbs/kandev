@@ -38,12 +38,20 @@ type Props = {
 
 type SidebarFilterSurfaceProps = Pick<Props, "trigger" | "open" | "onOpenChange"> & {
   editor: React.ReactNode;
+  contentRef: RefObject<HTMLDivElement | null>;
   deletion: {
     target: SavedTaskViewDeleteTarget | null;
     anchorRef: RefObject<HTMLButtonElement | null>;
     close: () => void;
   };
 };
+
+function preventReorderDismissal(event: KeyboardEvent, content: HTMLDivElement | null) {
+  if (content?.querySelector('[data-sidebar-reorder-list] [data-dragging="true"]')) {
+    // Keep the surface mounted while the keyboard sensor receives Escape during bubbling.
+    event.preventDefault();
+  }
+}
 
 function inlineViewDeleteConfirmation({
   shouldRender,
@@ -168,6 +176,7 @@ export function SidebarFilterPopover({
       onOpenChange={onOpenChange}
       editor={editor}
       deletion={deletion}
+      contentRef={popoverContentRef}
       title={t("task:sidebarFilters")}
     />
   );
@@ -183,7 +192,6 @@ function DesktopSidebarFilterSurface({
   isFinePointer,
   onDelete,
 }: SidebarFilterSurfaceProps & {
-  contentRef: RefObject<HTMLDivElement | null>;
   isFinePointer: boolean;
   onDelete: (id: string) => void;
 }) {
@@ -203,6 +211,7 @@ function DesktopSidebarFilterSurface({
           style={{ maxHeight: "var(--radix-popper-available-height, calc(100dvh - 1rem))" }}
           align="end"
           data-testid="sidebar-filter-popover"
+          onEscapeKeyDown={(event) => preventReorderDismissal(event, contentRef.current)}
           onFocusOutside={(event) => {
             if (deletion.target && isActionConfirmationTarget(event.target)) event.preventDefault();
           }}
@@ -236,6 +245,7 @@ function MobileSidebarFilterSurface({
   onOpenChange,
   editor,
   deletion,
+  contentRef,
   title,
 }: SidebarFilterSurfaceProps & { title: string }) {
   return (
@@ -250,8 +260,13 @@ function MobileSidebarFilterSurface({
         >
           <DrawerTrigger asChild>{trigger}</DrawerTrigger>
           <DrawerContent
+            ref={contentRef}
             aria-describedby={undefined}
             {...contentProps}
+            onEscapeKeyDown={(event) => {
+              contentProps.onEscapeKeyDown?.(event);
+              if (!event.defaultPrevented) preventReorderDismissal(event, contentRef.current);
+            }}
             data-testid="sidebar-filter-drawer"
             className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
           >

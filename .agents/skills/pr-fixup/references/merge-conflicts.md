@@ -35,9 +35,10 @@ synthetic merge.
 Treat `mergeable:"CONFLICTING"` or `mergeStateStatus:"DIRTY"` as an actionable merge-conflict blocker. Treat `mergeable:"UNKNOWN"` as inconclusive: wait one short cadence and query again before deciding. States such as `BEHIND`, `BLOCKED`, `UNSTABLE`, or `HAS_HOOKS` may require an update or more CI/review work, but they are not by themselves proof of file-level conflicts.
 
 If a current-base merge exposes Go-lint violations in files outside the PR
-diff, run the CI-equivalent changed-scope check against the authoritative base,
-such as `golangci-lint run ./... --new-from-rev=<base> --timeout=5m`, and verify
-the violation paths before proceeding. Only when the violations are confirmed
+diff, run `bash scripts/lint-go-changed <changed-go-files>` from the repository
+root against the authoritative base, following `apps/backend/AGENTS.md`, and
+verify the violation paths before proceeding. `--new-from-rev` filters findings,
+so adding it to `./...` does not narrow analysis. Only when violations are confirmed
 outside the changed scope and the scoped check passes may a local merge hook be
 run with `SKIP=go-lint`; record that hook omission and never use it to bypass
 lint for changed files.
@@ -86,8 +87,8 @@ merge. Recheck it immediately before pushing; use the explicit lease shown in
    to finish the conflict resolution.
 3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>`, `git show :3:<path>`, and `git log -- <path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Do not choose ours/theirs merely to remove markers; preserve each side's behavioral invariant, compare analogous provider implementations and their tests, then run the focused test for the conflicted feature.
    If `git show :2:<path>` or `:3:<path>` output will be copied, compared
-   byte-for-byte, or used to make a patch, run it through `rtk proxy` or
-   `rtk bash -lc`; ordinary RTK output is diagnostic only.
+   byte-for-byte, or used to make a patch, run Git directly and preserve its
+   unmodified output.
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u

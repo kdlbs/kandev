@@ -47,11 +47,21 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if len(events) == 0 {
 		return nil, nil
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	sessionIDs := make([]string, 0, len(events))
+	for _, event := range events {
+		sessionIDs = append(sessionIDs, event.SessionID)
+	}
+	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), sessionIDs, []string{streamID}, sharedCanonicalDeliverySession(events, effects)); err != nil {
+		return nil, err
+	}
 
 	var projectedSequence int64
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -96,7 +106,11 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if loadErr != nil {
 			return loadErr
 		}
-		if !sameAgentDeliveryEvent(&stored, event) {
+		matches, err := sameAgentDeliveryEvent(&stored, event)
+		if err != nil {
+			return err
+		}
+		if !matches {
 			return repoerrors.ErrAgentDeliveryEventConflict
 		}
 		if projectedAt.Valid {
@@ -152,6 +166,22 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 	group []canonicalDeliveryBatchEntry,
 	appendMessages []bool,
 ) error {
+	for _, item := range group {
+		if item.agentEvent.Type == streams.EventTypeToolCall {
+			appended, err := r.persistCanonicalShellStartTx(ctx, tx, &item.stored, item.agentEvent)
+			if err != nil {
+				return err
+			}
+			appendMessages[item.index] = appended
+		} else if item.agentEvent.ShellOutput != nil || item.agentEvent.Type == streams.EventTypeShellOutputUpdate {
+			if err := r.persistCanonicalShellOutputTx(ctx, tx, &item.stored, item.agentEvent); err != nil {
+				return err
+			}
+		}
+	}
+	if group[0].agentEvent.Type == streams.EventTypeToolCall {
+		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
+	}
 	firstContent, content := canonicalDeliveryBatchContent(group)
 	if firstContent != -1 {
 		aggregate := group[firstContent].agentEvent

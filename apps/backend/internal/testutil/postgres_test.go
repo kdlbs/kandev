@@ -2,46 +2,63 @@ package testutil
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"testing"
 )
 
-func TestOpenIsolatedPostgresScopesEveryPoolConnection(t *testing.T) {
+func TestIsolatedPostgresPoolSharesSchema(t *testing.T) {
 	db := OpenIsolatedPostgres(t, PostgresDSNFromEnv(t))
 	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	ctx := context.Background()
-	first, err := db.Connx(ctx)
+	first, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = first.Close() })
-	var schema string
-	if err := first.GetContext(ctx, &schema, "SELECT current_schema()"); err != nil {
+	t.Cleanup(func() {
+		if err := first.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := first.ExecContext(context.Background(), "CREATE TABLE pool_probe (value INTEGER)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.ExecContext(ctx, "CREATE TABLE pool_scope_probe (value INTEGER)"); err != nil {
+	if _, err := first.ExecContext(context.Background(), "INSERT INTO pool_probe VALUES (42)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := first.ExecContext(ctx, "INSERT INTO pool_scope_probe VALUES (1)"); err != nil {
-		t.Fatal(err)
-	}
-	second, err := db.Connx(ctx)
+	second, err := db.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = second.Close() })
-	var secondSchema string
-	if err := second.GetContext(ctx, &secondSchema, "SELECT current_schema()"); err != nil {
+	t.Cleanup(func() {
+		if err := second.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	var value int
+	if err := second.QueryRowContext(context.Background(), "SELECT value FROM pool_probe").Scan(&value); err != nil {
 		t.Fatal(err)
 	}
-	if secondSchema != schema {
-		t.Fatalf("second connection schema = %q, want isolated schema %q", secondSchema, schema)
+	if value != 42 {
+		t.Fatalf("pooled connection value = %d, want 42", value)
 	}
-	var count int
-	if err := second.GetContext(ctx, &count, "SELECT COUNT(*) FROM pool_scope_probe"); err != nil {
+}
+
+func TestIsolatedPostgresConnectionReplacement(t *testing.T) {
+	database := OpenIsolatedPostgres(t, PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`CREATE TABLE retained_schema_probe (value INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("pooled connection sees %d rows, want 1", count)
+	connection, err := database.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.Raw(func(any) error { return driver.ErrBadConn }); err != driver.ErrBadConn {
+		t.Fatal(err)
+	}
+	if err := connection.Close(); err != nil && err != sql.ErrConnDone {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO retained_schema_probe (value) VALUES (1)`); err != nil {
+		t.Fatalf("replacement connection lost isolated schema: %v", err)
 	}
 }

@@ -283,6 +283,7 @@ describe("useTaskRemoval — bounded fallback query", () => {
       WORKSPACE_ID,
       expect.objectContaining({
         filters: [{ dimension: "archived", op: "is", value: false }],
+        sort: { key: "createdAt", direction: "asc" },
         page: 1,
         page_size: 100,
       }),

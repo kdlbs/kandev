@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- AppState keeps the explicit cross-slice store contract in one type. */
+import type { ActiveTurnWindowObservation } from "./slices/session/types";
 import type { HydrationOptions } from "./hydration/hydrator";
 import type {
   Repository,
@@ -80,6 +81,7 @@ import type {
 } from "./slices";
 import type { TaskOverviewSlice } from "./slices/task-overview-types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
+import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import type { GitStatusRefreshState } from "./slices/session-runtime/types";
 import type {
   AvailableCommand,
@@ -133,6 +135,7 @@ export type AppState = KanbanSlice & {
   messages: (typeof defaultSessionState)["messages"];
   messagePrompts: (typeof defaultSessionState)["messagePrompts"];
   turns: (typeof defaultSessionState)["turns"];
+  turnChanges: (typeof defaultSessionState)["turnChanges"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
   pendingActionProjectionsBySessionId: (typeof defaultSessionState)["pendingActionProjectionsBySessionId"];
@@ -460,12 +463,27 @@ export type AppState = KanbanSlice & {
   ) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
+  mergeTurnChangePage: (
+    sessionId: string,
+    summaries: TurnChangeSetSummary[],
+    page: { offset: number; nextOffset?: number },
+  ) => void;
+  mergeTurnChangeSummary: (sessionId: string, summary: TurnChangeSetSummary) => void;
+  markTurnChangesLoaded: (sessionId: string, nextOffset: number | undefined) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
   mergeTurnsSnapshot: (
     sessionId: string,
     turns: Turn[],
     hydrationEpoch: number,
     options?: { replace?: boolean },
+  ) => void;
+  /** Merges turn rows covered by one retained message window. */
+  mergeTurnsWindow: (
+    sessionId: string,
+    turns: Turn[],
+    coverage: { message_ids: string[]; active_turn_id: string | null },
+    hydrationEpoch: number,
+    observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
   completeTurn: (
     sessionId: string,

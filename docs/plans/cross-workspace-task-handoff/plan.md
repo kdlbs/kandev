@@ -1,5 +1,5 @@
 ---
-status: done
+status: in_progress
 requirements:
   - REQ-CROSS-WORKSPACE-TASK-HANDOFF-CLI-ROUTE-001
   - REQ-CROSS-WORKSPACE-TASK-HANDOFF-AUTHORIZATION-001
@@ -88,9 +88,20 @@ carried forward unchanged from that iteration.
 
 - [Task 01: Cross-workspace task handoff](task-01-cross-workspace-task-handoff.md)
   — delivers the CLI/route mechanism described above.
+- [Task 02: Launch-session run token](task-02-launch-session-run-token.md)
+  — re-mints the Office run token for the launch session so a first-launch
+  run carries a source session id.
 
 ## Delivery notes
 
 The source specification is `docs/specs/cross-workspace-task-handoff/README.md`
 plus its `requirements/` and `system-design/` subdirectories. No public UI or
 public documentation surface is part of this delivery.
+
+## Launch-session token verification
+
+Task 02 is in progress while exact-head hosted verification is pending. The
+review adds credential identity and error coverage, concrete-session dispatch
+coverage, and early/late replay failure tests. The early refresh return carries
+its cause through the current replay-result contract. Local controlled helper
+proofs do not qualify SQL, lifecycle, or installed Office behavior.

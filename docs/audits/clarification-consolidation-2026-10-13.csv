@@ -1,0 +1,5 @@
+original_title,keeper_title,disposition
+"Escape dismisses the bundle locally from anywhere in the carousel, without rejecting it","Escape preserves the pending bundle, blocked agent and answers through restoration",named executed step
+Escape leaves the agent blocked on the pending clarification,"Escape preserves the pending bundle, blocked agent and answers through restoration",named executed step
+dismissing with Escape and restoring lets the user answer normally,"Escape preserves the pending bundle, blocked agent and answers through restoration",named executed step
+dismissing mid-bundle preserves recorded answers through the round trip,"Escape preserves the pending bundle, blocked agent and answers through restoration",named executed step

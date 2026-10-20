@@ -22,7 +22,19 @@ type unclassifiedFingerprintInput struct {
 	Diagnostic string                    `json:"diagnostic"`
 }
 
+// emptyTurnDiagnostic stands in for the diagnostic of an empty end_turn
+// completion. It is a constant, so consecutive empty turns share one identity
+// and no transcript or provider text is hashed.
+const emptyTurnDiagnostic = "end_turn without output"
+
 func unclassifiedFailureFingerprint(evidence UnclassifiedFailureEvidence, failure *routingerr.Error) (string, error) {
+	if evidence.Origin == UnclassifiedOriginEmptyTurn {
+		return hashUnclassifiedFingerprint(unclassifiedFingerprintInput{
+			Version: 1, Code: failure.Code, Origin: evidence.Origin,
+			Phase: evidence.Phase, Diagnostic: emptyTurnDiagnostic,
+		})
+	}
+
 	diagnostic := evidence.DiagnosticText
 	if !evidence.DiagnosticComplete || diagnostic == "" || !utf8.ValidString(diagnostic) ||
 		len([]byte(diagnostic)) > 1024 || routingerr.SanitizeFullUnbounded(diagnostic) != diagnostic {
@@ -32,10 +44,14 @@ func unclassifiedFailureFingerprint(evidence UnclassifiedFailureEvidence, failur
 	if diagnostic == "" || strings.TrimSpace(evidence.ProviderID) == "" {
 		return "", errIncompleteUnclassifiedDiagnostic
 	}
-	payload, err := json.Marshal(unclassifiedFingerprintInput{
+	return hashUnclassifiedFingerprint(unclassifiedFingerprintInput{
 		Version: 1, Code: failure.Code, Origin: evidence.Origin,
 		Phase: evidence.Phase, ProviderID: evidence.ProviderID, Diagnostic: diagnostic,
 	})
+}
+
+func hashUnclassifiedFingerprint(input unclassifiedFingerprintInput) (string, error) {
+	payload, err := json.Marshal(input)
 	if err != nil {
 		return "", err
 	}

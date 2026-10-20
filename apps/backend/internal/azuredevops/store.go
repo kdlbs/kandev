@@ -199,6 +199,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if _, err := store.db.Exec(schemaSQLForDriver(createWatchTablesSQL, store.db.DriverName())); err != nil {
 		return nil, fmt.Errorf("azure devops watcher schema init: %w", err)
 	}
+	if err := store.migrateExecutorCreators(); err != nil {
+		return nil, err
+	}
 	return store, nil
 }
 

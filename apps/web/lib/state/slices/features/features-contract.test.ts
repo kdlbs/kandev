@@ -35,6 +35,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
+  it("keeps Integrated control opt-in in the frontend", () => {
+    expect(defaultFeatureFlags.integratedControl).toBe(false);
+  });
+
   it("omits the graduated remote executor plugins flag", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("remoteExecutorPlugins");
   });

@@ -99,3 +99,18 @@ Completed on 2026-08-31.
 - `pnpm exec eslint components/task/tab-rename-input.tsx e2e/tests/session/session-tab-rename.spec.ts`
   passed.
 - `git diff --check` passed.
+
+
+CI remediation on 2026-10-14 preserves the existing rename-focus contract.
+`SessionContextMenuItems` now waits for close-autofocus before starting the
+inline editor, preventing a blur commit caused by menu focus restoration.
+A real-menu/real-editor component test reproduced one premature commit before
+the fix; afterward it requires a focused editor and no commit. Ordinary menu
+dismissal still returns focus without rename. No new fields, persistence, or
+user actions were introduced.
+
+`pnpm exec vitest run components/task/session-tab-menu.test.tsx components/task/preview-session-tabs.test.tsx`
+passed all 45 tests from `apps/web`. The rebuilt managed Chromium run containing
+`e2e/tests/session/session-tab-rename.spec.ts`, both agents-browse cases, and the
+complete workflow override spec passed all 9 tests with retries disabled.
+Focused ESLint passed. Remote CI and review completion remain pending.

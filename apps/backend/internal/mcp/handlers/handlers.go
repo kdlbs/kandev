@@ -153,6 +153,13 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// taskStepTransitionIDReader reads a task's latest step-transition ledger id.
+// The production task repository implements it; deferMoveTask type-asserts so a
+// fake that omits it simply keeps the legacy ordering behavior.
+type taskStepTransitionIDReader interface {
+	GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error)
+}
+
 // RemoteContributionService resolves provider URLs before task creation and
 // associates an already-existing PR/MR after the target task-repository row
 // exists. Implementations must return only server-authored identity data.
@@ -211,6 +218,15 @@ type SessionLauncher interface {
 	// the change. Used by spawn_session_kandev's optional name parameter.
 	RenameSession(ctx context.Context, sessionID, name string) error
 }
+
+// liveClarificationReader reports whether a session's agent turn is still
+// blocked on a live clarification. The orchestrator implements it; launchers
+// without it keep the direct-prompt behavior.
+type liveClarificationReader interface {
+	SessionHasLiveClarification(ctx context.Context, sessionID string) bool
+}
+
+var _ liveClarificationReader = (*orchestrator.Service)(nil)
 
 type peerMessageStartAdmissionProvider interface {
 	BeginPeerMessageStart(
@@ -365,6 +381,8 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -569,8 +587,10 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 
@@ -751,6 +771,9 @@ func (h *Handlers) handleListByField(
 	resp, err := fn(ctx, value)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, errCoordinatorProjectsRead) {
+			clientErrMsg = clientErrMsg + ": " + err.Error()
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -831,6 +854,10 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
 			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)
+			if err != nil {
+				return nil, err
+			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
 			if err != nil {
 				return nil, err
 			}
@@ -2843,7 +2870,8 @@ func (h *Handlers) publishStepCompletionEvent(
 // one of three paths depending on the target session state:
 //
 //   - RUNNING/STARTING : message is queued and drained at turn end
-//   - WAITING/COMPLETED: message is recorded and the agent is prompted (auto-resuming if needed)
+//   - WAITING          : a live clarification holds queued-mode messages in the queue
+//   - WAITING/COMPLETED: otherwise record and prompt the agent (auto-resuming if needed)
 //   - CREATED          : message is recorded then the agent is started with it as initial prompt
 //
 // Strict validation: missing sender_task_id, same-session targets, and unknown
@@ -3621,7 +3649,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		if err != nil {
 			return taskMessageDispatchResult{}, err
 		}
-		return h.dispatchPreparedTaskMessage(ctx, taskID, resumed, prompt, metadata)
+		return h.dispatchPreparedTaskMessage(ctx, taskID, resumed, prompt, metadata, interruptIfBusy)
 
 	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		if interruptIfBusy {
@@ -3630,8 +3658,19 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 
 	default:
+		if !interruptIfBusy && h.sessionHasLiveClarification(ctx, session.ID) {
+			return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+		}
 		return h.dispatchUnpreparedTaskMessage(ctx, taskID, session, prompt, metadata, pinnedTarget, interruptIfBusy)
 	}
+}
+
+// sessionHasLiveClarification keeps a peer message from becoming a newer turn
+// while the target agent waits on its own question; the queue drain delivers
+// it once the question no longer owns the turn.
+func (h *Handlers) sessionHasLiveClarification(ctx context.Context, sessionID string) bool {
+	reader, ok := h.sessionLauncher.(liveClarificationReader)
+	return ok && reader.SessionHasLiveClarification(ctx, sessionID)
 }
 
 func (h *Handlers) dispatchUnpreparedTaskMessage(
@@ -3857,8 +3896,8 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 	return resumed, nil
 }
 
-func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}) (taskMessageDispatchResult, error) {
-	return h.dispatchPreparedTaskMessageWithAdmission(ctx, taskID, session, prompt, metadata, nil)
+func (h *Handlers) dispatchPreparedTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}, interruptIfBusy bool) (taskMessageDispatchResult, error) {
+	return h.dispatchPreparedTaskMessageWithAdmission(ctx, taskID, session, prompt, metadata, nil, interruptIfBusy)
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithAdmission(
@@ -3868,8 +3907,9 @@ func (h *Handlers) dispatchPreparedTaskMessageWithAdmission(
 	prompt string,
 	metadata map[string]interface{},
 	admission orchestrator.PeerMessageStartAdmission,
+	interruptIfBusy bool,
 ) (taskMessageDispatchResult, error) {
-	return h.dispatchPreparedTaskMessageWithAdmissionAndInterrupt(ctx, taskID, session, prompt, metadata, admission, false)
+	return h.dispatchPreparedTaskMessageWithAdmissionAndInterrupt(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy)
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithAdmissionAndInterrupt(
@@ -3889,6 +3929,11 @@ func (h *Handlers) dispatchPreparedTaskMessageWithAdmissionAndInterrupt(
 		releasePeerMessageStartAdmission(admission)
 		return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
 	default:
+		// Workflow preparation can select a different primary session.
+		if !interruptIfBusy && h.sessionHasLiveClarification(ctx, session.ID) {
+			releasePeerMessageStartAdmission(admission)
+			return h.queueTaskMessage(ctx, taskID, session, prompt, metadata)
+		}
 		if h.shouldStartTaskMessageSession(ctx, session) {
 			return h.startPreparedPeerTaskMessage(ctx, taskID, session, prompt, metadata, admission, interruptIfBusy)
 		}

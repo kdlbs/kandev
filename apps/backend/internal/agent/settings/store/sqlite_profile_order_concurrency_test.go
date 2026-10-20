@@ -13,7 +13,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
-	"github.com/kandev/kandev/internal/testutil"
 )
 
 func TestSQLiteProfileMembershipMutationsSerializeWithReorder(t *testing.T) {
@@ -204,17 +203,6 @@ func profileOrderMutationScenarios() []profileOrderMutationScenario {
 			},
 		},
 	}
-}
-
-func openPostgresProfileOrderRaceRepo(t *testing.T) *sqliteRepository {
-	t.Helper()
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	db.SetMaxOpenConns(8)
-	repo, err := newSQLiteRepositoryWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("initialize profile order schema: %v", err)
-	}
-	return repo
 }
 
 func openSQLiteProfileOrderRaceRepo(t *testing.T) *sqliteRepository {

@@ -583,6 +583,7 @@
   "pauseAgent": "Pause Agent",
   "pauseReasonPlaceholder": "Why are you pausing this workspace?",
   "pauseRequestFailed": "Failed to update the pause state. Please try again.",
+  "pauseStateLoading": "Reading the pause state...",
   "pauseStateStale": "May be stale",
   "pauseStateUnavailable": "Pause state unavailable. The workspace may or may not be paused.",
   "pauseUnavailable": "No workspace is selected.",

@@ -920,7 +920,7 @@ func (r *StandaloneExecutor) discoverDeliveryStatus(
 		status, err := client.GetDeliveryStatus(attemptCtx, "")
 		cancel()
 		if err == nil {
-			if status.Version != journal.CurrentVersion {
+			if !journal.SupportsDeliveryVersion(status.Version) {
 				return nil, false, fmt.Errorf("unsupported durable delivery version %d", status.Version)
 			}
 			if status.Durable {

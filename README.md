@@ -138,7 +138,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
-Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
+Executors support profiles for reusable runtime configuration: prepare scripts, environment variables, credentials, and settings. On shared instances, [private executor ownership](docs/public/executors.md#private-executors-and-profiles) limits compute and profile access to the owner and configuration administrators. Worktree-based tasks can also attach multiple repositories or multiple branches from the same repository, which lets one task produce several PRs when the work needs it.
 
 ## Quick Start
 

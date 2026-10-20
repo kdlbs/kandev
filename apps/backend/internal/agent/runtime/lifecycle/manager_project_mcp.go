@@ -58,7 +58,7 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if err != nil {
 		return fmt.Errorf("build project MCP config: %w", err)
 	}
-	return m.writePassthroughMCPFiles(execution, artifacts.Files)
+	return m.writePassthroughMCPFiles(ctx, execution, artifacts.Files)
 }
 
 func (m *Manager) runtimeProjectMCPServers(

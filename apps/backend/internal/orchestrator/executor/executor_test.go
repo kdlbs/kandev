@@ -617,6 +617,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.CausingRunID != "office-run-1" {
+				t.Errorf("causing run ID = %q, want office-run-1", req.CausingRunID)
+			}
 			if !req.StartAgent {
 				t.Error("expected lifecycle launch to retain initial-agent activity")
 			}
@@ -650,7 +653,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 		Description: "Test description",
 	}
 
-	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true})
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123", Prompt: "test prompt", StartAgent: true, CausingRunID: "office-run-1",
+	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession failed: %v", err)
 	}
@@ -1625,6 +1630,7 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	}
 
 	var commandConfigured atomic.Bool
+	var admissions, starts atomic.Int32
 	var executionDescription string
 	startDone := make(chan error, 1)
 	agentManager := &mockAgentManager{
@@ -1638,7 +1644,13 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			executionDescription = description
 			return nil
 		},
-		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if admissions.Load() != 0 {
+				return nil, errors.New("admission consumed before full-launch promotion")
+			}
+			if req.SessionID != session.ID || req.InitialDeliverySubmissionID != "reserved-submission" {
+				return nil, errors.New("promotion lost immutable launch identity")
+			}
 			if executionDescription != "implement the approved plan" {
 				return nil, fmt.Errorf("execution description was not updated before promotion: %q", executionDescription)
 			}
@@ -1649,6 +1661,10 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 			}, nil
 		},
 		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			starts.Add(1)
+			if admissions.Load() != 1 {
+				return errors.New("provider start did not have exactly one admission")
+			}
 			if !commandConfigured.Load() {
 				err := errors.New(`execution "exec-workspace-only" has no agent command configured`)
 				startDone <- err
@@ -1662,9 +1678,23 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
 
 	_, err := executor.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
-		AgentProfileID: session.AgentProfileID,
-		Prompt:         "implement the approved plan",
-		StartAgent:     true,
+		AgentProfileID:       session.AgentProfileID,
+		Prompt:               "implement the approved plan",
+		StartAgent:           true,
+		TurnID:               "reserved-turn",
+		DeliverySubmissionID: "reserved-submission",
+		BeforeAgentStart: func(_ context.Context, executionID, dispatchPrompt string) error {
+			if dispatchPrompt != "implement the approved plan" {
+				return errors.New("promotion lost final prompt")
+			}
+			if !commandConfigured.Load() || executionID != "exec-workspace-only" {
+				return errors.New("admission did not belong to promoted execution")
+			}
+			if !admissions.CompareAndSwap(0, 1) {
+				return errors.New("admission already consumed")
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("LaunchPreparedSession: %v", err)
@@ -1679,6 +1709,9 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for StartAgentProcess")
+	}
+	if admissions.Load() != 1 || starts.Load() != 1 {
+		t.Fatalf("admission/start counts = %d/%d", admissions.Load(), starts.Load())
 	}
 }
 

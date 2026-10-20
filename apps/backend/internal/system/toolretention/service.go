@@ -14,6 +14,7 @@ type Options struct {
 	VerifyBackup func(context.Context, string) error
 	Changed      func(context.Context, []string)
 	Report       func(context.Context, *Operation)
+	Log          func(context.Context, string, error)
 	Now          func() time.Time
 }
 
@@ -81,12 +82,14 @@ func (s *Service) Save(ctx context.Context, u Update) (Status, error) {
 		switch {
 		case !u.Enabled:
 			r.Preparation = Preparation{State: stateNone}
+			r.PreparationDetail = ""
 			r.ApprovedRevision = 0
 			r.Receipt = ""
 			r.NextDueAt = nil
 		case needsReview:
 			r.Policy.Enabled = false
 			r.Preparation = Preparation{State: statePending, Choice: u.BackupChoice}
+			r.PreparationDetail = ""
 			r.ApprovedRevision = 0
 			r.Receipt = ""
 			r.FirstMutation = false
@@ -105,6 +108,15 @@ func (s *Service) Save(ctx context.Context, u Update) (Status, error) {
 		s.notify()
 	}
 	return r.Status, err
+}
+
+// logFailure reports an internal failure cause that the status endpoint does
+// not expose. The scheduler only counts returned errors, so without this the
+// cause of a failed preparation is lost once it is stored as a code.
+func (s *Service) logFailure(ctx context.Context, message string, err error) {
+	if s.opts.Log != nil {
+		s.opts.Log(ctx, message, err)
+	}
 }
 
 func (s *Service) notify() {

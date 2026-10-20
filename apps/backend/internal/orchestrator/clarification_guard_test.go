@@ -106,6 +106,42 @@ func TestSessionHasLiveClarificationIgnoresDetachedBundle(t *testing.T) {
 	}
 }
 
+func TestSessionHasLiveClarificationExportedReportsCurrentTurnWait(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-live", "session-live", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID: "turn-live", TaskSessionID: "session-live", TaskID: "task-live",
+		StartedAt: now, CreatedAt: now,
+	}))
+	requireNoError(t, repo.CreateMessage(ctx, &models.Message{
+		ID: "clarification-live", TaskSessionID: "session-live", TaskID: "task-live",
+		TurnID: "turn-live", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypeClarificationRequest, Content: "question", CreatedAt: now,
+		Metadata: map[string]any{"pending_id": "pending-live", "status": "pending"},
+	}))
+
+	if !svc.SessionHasLiveClarification(ctx, "session-live") {
+		t.Fatal("a current-turn clarification with a live waiter must be reported")
+	}
+	if svc.SessionHasLiveClarification(ctx, "session-without-question") {
+		t.Fatal("a session without a clarification must not be reported")
+	}
+}
+
+func TestSessionHasLiveClarificationExportedFailsClosedOnRepositoryError(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-live-error", "session-live-error", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !svc.SessionHasLiveClarification(ctx, "session-live-error") {
+		t.Fatal("repository error must retain the live-clarification queue barrier")
+	}
+}
+
 // TestSessionHasPendingClarificationSurvivesLifecycleShadowViaRealWritePath
 // covers the guard-level consumer named in the spec's Verification Notes as
 // "the most severe consumer": sessionHasPendingClarification must still see

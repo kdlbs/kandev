@@ -86,6 +86,87 @@ describe("resource-guard.sh", () => {
     ).toBe("1");
   });
 
+  it("resolves the current unified subgroup before checking remaining memory", () => {
+    const fixture = fixtureMemory("MemAvailable: 16777216 kB\n", {
+      "memory.max": String(16 * 1024 ** 3),
+      "memory.current": "0",
+      "worker/memory.max": String(4 * 1024 ** 3),
+      "worker/memory.current": String(3 * 1024 ** 3),
+    });
+    const membership = path.join(path.dirname(fixture.meminfoPath), "membership");
+    fs.writeFileSync(membership, "0::/worker\n");
+    const resolved = runGuard("e2e_resolve_cgroup_root", [fixture.cgroupRoot, membership]);
+    expect(resolved.status).toBe(0);
+    expect(resolved.stdout.trim()).toBe(path.join(fixture.cgroupRoot, "worker"));
+    expect(
+      runGuard("e2e_available_memory_kib", [
+        fixture.meminfoPath,
+        resolved.stdout.trim(),
+      ]).stdout.trim(),
+    ).toBe("1048576");
+  });
+
+  it("retains the mounted namespace root and v1 fallback", () => {
+    const fixture = fixtureMemory("MemAvailable: 16777216 kB\n", {
+      "memory.max": String(4 * 1024 ** 3),
+      "memory.current": "0",
+    });
+    const membership = path.join(path.dirname(fixture.meminfoPath), "membership");
+    for (const scope of ["0::/\n", "3:memory:/worker\n"]) {
+      fs.writeFileSync(membership, scope);
+      expect(
+        runGuard("e2e_resolve_cgroup_root", [fixture.cgroupRoot, membership])
+          .stdout.trim()
+          .replace(/\/$/, ""),
+      ).toBe(fixture.cgroupRoot);
+    }
+  });
+
+  it.each([
+    [4, "1"],
+    [6, "2"],
+    [8, "3"],
+    [10, "4"],
+    [16, "4"],
+  ])("reserves two GiB before budgeting planned stacks at %i GiB", (gib, expected) => {
+    const fixture = fixtureMemory(`MemAvailable: ${Number(gib) * 1024 * 1024} kB\n`, {});
+    const result = runGuard("e2e_max_planned_processes", [fixture.meminfoPath, fixture.cgroupRoot]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(expected);
+  });
+
+  it("keeps planned processes within lower cgroup remaining memory", () => {
+    const fixture = fixtureMemory("MemAvailable: 16777216 kB\n", {
+      "memory.max": String(12 * 1024 ** 3),
+      "memory.current": String(5 * 1024 ** 3),
+    });
+    expect(
+      runGuard("e2e_max_planned_processes", [
+        fixture.meminfoPath,
+        fixture.cgroupRoot,
+      ]).stdout.trim(),
+    ).toBe("2");
+  });
+
+  it("retains managed local limits while allowing a separately measured planned budget", () => {
+    const fixture = fixtureMemory("MemAvailable: 10485760 kB\n", {});
+    expect(
+      runGuard("e2e_max_local_shards", [fixture.meminfoPath, fixture.cgroupRoot]).stdout.trim(),
+    ).toBe("2");
+    expect(
+      runGuard("e2e_max_planned_processes", [
+        fixture.meminfoPath,
+        fixture.cgroupRoot,
+      ]).stdout.trim(),
+    ).toBe("4");
+  });
+
+  it("keeps an unknown planned memory budget at one process", () => {
+    expect(
+      runGuard("e2e_max_planned_processes", ["/missing/meminfo", "/missing/cgroup"]).stdout.trim(),
+    ).toBe("1");
+  });
+
   it("defaults to one shard when memory cannot be measured", () => {
     expect(
       runGuard("e2e_max_local_shards", [

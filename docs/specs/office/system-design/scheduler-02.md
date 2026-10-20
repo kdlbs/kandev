@@ -285,6 +285,7 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 | Agent session fails (crash, timeout, unrecoverable) | `HandleWakeupFailure` -> parse rate-limit reset OR exponential backoff (4 attempts at 2m / 10m / 30m / 2h with 25% jitter). After cap: mark `failed`, create `agent.error` inbox item, fire `agent_error` wakeup for coordinator. |
 | Rate-limit error with parseable reset | Wakeup scheduled for `reset + 30s`; backoff skipped; `RetryCount` still incremented. |
 | Rate-limit error without parseable reset | Falls through to exponential backoff. |
+| Launch carries the built-command validator's typed failure | Escalated at once without backoff, including wrapped agent or continue-command failures. Error text from a provider or environment read is not sufficient. |
 | Retry promoted but task reassigned | Cancelled with `retry_stale_assignee`; execution locks cleared. |
 | Retry promoted but task cancelled | Cancelled with `retry_task_cancelled`. |
 | Budget pre-check fails | Agent paused per policy; wakeup skipped (not retried); `wakeup_budget_blocked` activity entry. |

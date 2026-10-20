@@ -195,7 +195,7 @@ func (m *Manager) handleCompleteEventMarkState(
 		// shows no red error banner. MarkCompleted applies the same guard, but
 		// routing here keeps the misleading "marking as failed" WARN out of logs.
 		if m.IsShuttingDown() {
-			_ = m.markStoppedDuringShutdown(execution, 1, errorMsg, event.TurnID)
+			_ = m.markStoppedDuringShutdownForEvent(execution, 1, errorMsg, event)
 			return
 		}
 		m.logger.Warn("error completion received, marking execution as failed",
@@ -207,7 +207,9 @@ func (m *Manager) handleCompleteEventMarkState(
 			zap.Any("event_data", event.Data),
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
-		if err := m.markCompletedWithTurnIDAndAttempt(execution.ID, 1, errorMsg, event.TurnID, failureEvidence, event.AttemptID); err != nil {
+		if err := m.markCompletedWithTurnIDAndAttempt(
+			execution.ID, 1, errorMsg, event.TurnID, failureEvidence, event.AttemptID, event,
+		); err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
 				zap.String("execution_id", execution.ID),
 				zap.Error(err))
@@ -240,7 +242,7 @@ func (m *Manager) handleCompleteEventMarkState(
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
 	if err := m.markReadyEventForExecution(
-		context.Background(), execution, events.AgentReady, false, event.AttemptID,
+		context.Background(), execution, events.AgentReady, false, event.AttemptID, event,
 	); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
@@ -309,6 +311,12 @@ func (m *Manager) claimPromptCompletion(
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
 			current.promptGeneration = event.PromptGeneration
+			if event.TurnID != "" {
+				if current.promptTurnIDs == nil {
+					current.promptTurnIDs = make(map[uint64]string)
+				}
+				current.promptTurnIDs[event.PromptGeneration] = event.TurnID
+			}
 		}
 		if current.promptGeneration != event.PromptGeneration {
 			return
@@ -332,8 +340,17 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
+		copyDeliveryTerminalIdentity(&claim.readyPayload, event)
+		// The Office cause belongs to the launch's first turn. Preserve it on
+		// that completion event, then clear it so later user turns on this
+		// session cannot inherit stale run causation.
+		current.CausingRunID = ""
+		current.deleteMetadataValues(MetadataKeyCausingRunID)
 	})
 	if err == nil && claimed {
+		if m.turnChangeCaptureHandler != nil && eligibleTurnChangeExecution(execution) && event.TurnID != "" {
+			beginTurnChangeCaptureLocked(execution, event.PromptGeneration)
+		}
 		return claim, true
 	}
 
@@ -370,6 +387,7 @@ func (m *Manager) finishPromptCompletion(
 	if claim.locked && event.PromptGeneration != 0 && isError {
 		setProviderError(execution, event.ProviderError)
 		if payload, retained := m.retainPromptFailureRuntime(execution, event, failureEvidence); retained {
+			finishTurnChangeCaptureLocked(execution, event.PromptGeneration)
 			// Keep the prompt generation fenced through durable owner settlement,
 			// but do not hold the lifecycle lock across publication: explicit
 			// cancellation reads this generation while it owns the session guard.
@@ -416,6 +434,7 @@ func (m *Manager) finishPromptCompletion(
 			}
 			return
 		}
+		m.finishTurnChangeCapture(execution, event, isError, toolStatusError)
 		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
 		if err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
@@ -435,6 +454,7 @@ func (m *Manager) finishPromptCompletion(
 		return
 	}
 
+	m.startTurnChangeCapture(execution, event, isError, completeEventStopReason(event))
 	handleCompleteEventSignalLeased(execution, event, isError)
 	if claim.locked && event.PromptGeneration != 0 {
 		// Finalization and signal delivery are complete, so a later prompt can
@@ -458,6 +478,14 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
+func completeEventStopReason(event *agentctl.AgentEvent) string {
+	if event == nil {
+		return "end_turn"
+	}
+	_, reason := completeEventResult(event)
+	return reason
 }
 
 const claudeACPAgentID = "claude-acp"
@@ -484,6 +512,7 @@ func (m *Manager) retainPromptFailureRuntime(
 		current.ErrorMessage = ""
 		current.promptSettlementGeneration = event.PromptGeneration
 		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
+		copyDeliveryTerminalIdentity(&payload, event)
 		payload.ErrorMessage = extractErrorMessage(event)
 		payload.PromptFailureDisposition = event.PromptFailureDisposition
 		if event.AttemptID != "" {
@@ -586,7 +615,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
-		event.TurnID = execution.promptTurnIDSnapshot()
+		event.TurnID = execution.promptTurnIDForEvent(*event)
 	}
 	isError, stopReason := completeEventResult(event)
 	if isError && isUninitializedStartupFailure(execution, event) {
@@ -603,6 +632,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	if event.DeliverySubmissionID != "" {
 		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
 	}
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
@@ -620,7 +650,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")
 
-	execution.markAgentActivity()
+	if event.Recovered {
+		execution.markRecoveredAgentActivity(event.RecoveredActivityAt)
+	} else {
+		execution.markAgentActivity()
+	}
 
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
@@ -847,7 +881,12 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	if isTurnContent {
 		execution.lastActivityAtMu.Lock()
-		execution.lastActivityAt = time.Now()
+		if event.Recovered {
+			execution.setRecoveredActivityAtLocked(event.RecoveredActivityAt)
+		} else {
+			execution.lastActivityAt = time.Now()
+			execution.lastLiveActivityAt = execution.lastActivityAt
+		}
 		if isProviderDiagnostic {
 			execution.providerDiagnosticCandidate = true
 			if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {
@@ -951,8 +990,8 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 	} else {
 		m.logger.Warn("agent updates stream disconnected", disconnectFields...)
 	}
-	if promptGeneration == 0 && execution.deliverySubmissionIDSnapshot() != "" {
-		m.recordUncertainPromptFailure(execution, promptGeneration, execution.deliverySubmissionIDSnapshot())
+	if promptGeneration == 0 && currentDeliverySubmissionID(execution) != "" {
+		m.recordUncertainPromptFailure(execution, promptGeneration, currentDeliverySubmissionID(execution))
 		m.publishStreamDisconnectErrorWithAttempt(execution, errors.Join(ErrUncertainPromptDelivery, err), attemptID)
 		return
 	}
@@ -969,7 +1008,7 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 
 		var claimed bool
 		var cancelEscalation bool
-		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertainSubmissionID := currentDeliverySubmissionID(execution)
 		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
@@ -1025,6 +1064,17 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 			m.publishStreamDisconnectErrorWithAttempt(execution, errors.Join(ErrUncertainPromptDelivery, err), attemptID)
 			return
 		}
+		var terminal *agentctl.AgentEvent
+		turnID := execution.promptTurnIDs[promptGeneration]
+		if turnID != "" && execution.promptCompletionGeneration != promptGeneration &&
+			m.turnChangeCaptureHandler != nil && eligibleTurnChangeExecution(execution) {
+			execution.promptCompletionGeneration = promptGeneration
+			beginTurnChangeCaptureLocked(execution, promptGeneration)
+			terminal = &agentctl.AgentEvent{PromptGeneration: promptGeneration, TurnID: turnID}
+		}
+		if terminal != nil {
+			m.finishTurnChangeCapture(execution, terminal, true, "stream_disconnected")
+		}
 		execution.promptLifecycleMu.Unlock()
 		if completionErr := m.markCompletedWithTurnIDAndAttempt(
 			execution.ID,
@@ -1077,7 +1127,7 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 				zap.Uint64("startup_generation", startupGeneration))
 			return
 		}
-		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertainSubmissionID := currentDeliverySubmissionID(execution)
 		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		if uncertain {
 			m.recordUncertainPromptFailure(execution, promptGeneration, uncertainSubmissionID)
@@ -1203,7 +1253,7 @@ func (m *Manager) recordDeliveryReconciliationPhaseWithRuntimeDisposition(
 	}
 	execution.startupCallbackMu.RLock()
 	execution.promptLifecycleMu.Lock()
-	submissionID := execution.deliverySubmissionIDSnapshot()
+	submissionID := currentDeliverySubmissionID(execution)
 	matched := false
 	err := m.executionStore.WithLock(identity.ExecutionID, func(current *AgentExecution) {
 		matched = applyDeliveryReconciliationPhase(current, execution, identity, submissionID, phase, code)
@@ -1302,7 +1352,7 @@ func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	attemptID string,
 ) {
 	message := "agent stream disconnected: " + err.Error()
-	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
+	if submissionID := currentDeliverySubmissionID(execution); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
 		message = fmt.Sprintf(
 			"%s: agent stream disconnected; reconcile submission %q before retrying",
 			ErrUncertainPromptDelivery,
@@ -1552,7 +1602,7 @@ func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentct
 			if event.PromptGeneration != 0 {
 				event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
 			} else {
-				event.TurnID = execution.promptTurnIDSnapshot()
+				event.TurnID = execution.promptTurnIDForEvent(event)
 			}
 		}
 	case "tool_call":
@@ -1632,6 +1682,9 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 	startupGeneration uint64,
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if agentEventBelongsToRetiredProcess(execution, event) {
+			return
+		}
 		event.AttemptID = attemptID
 		event.SessionSettingsSourceGeneration = startupGeneration
 		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -183,5 +185,31 @@ func TestGetTaskUsageTotals_ZeroUsageReturnsZeroedTotals(t *testing.T) {
 	}
 	if totals.FirstEventAt != nil || totals.LastEventAt != nil {
 		t.Errorf("timestamps = (%v, %v), want (nil, nil)", totals.FirstEventAt, totals.LastEventAt)
+	}
+}
+
+type noSpendUsageRepo struct{ repository.UsageRepository }
+
+func TestSumUsageForTasks_ReadsLedgerWithoutCallerScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	seedUsageEvent(t, repo, "evt-spend-1", "task-b", "sess-b")
+
+	now := time.Now().UTC()
+	got, err := svc.SumUsageForTasks(context.Background(), []string{"task-b"}, time.Time{}, now.Add(time.Hour))
+	if err != nil || got.CostSubcents != 42 {
+		t.Fatalf("SumUsageForTasks = %+v, %v", got, err)
+	}
+}
+
+func TestSumUsageForSpend_RepositoryWithoutReaderFailsClosed(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.usage = noSpendUsageRepo{}
+	now := time.Now().UTC()
+	if _, err := svc.SumUsageForTasks(context.Background(), []string{"t"}, now, now); err == nil {
+		t.Fatal("SumUsageForTasks: want error")
+	}
+	if _, err := svc.SumUsageForTurn(context.Background(), "s", "t", now); err == nil {
+		t.Fatal("SumUsageForTurn: want error")
 	}
 }

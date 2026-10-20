@@ -91,6 +91,10 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 		return err
 	}
 
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, nil, env.Repos); err != nil {
+		return err
+	}
+
 	for _, repo := range env.Repos {
 		repo.TaskEnvironmentID = env.ID
 		if err := r.insertTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
@@ -329,6 +333,9 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, env.ID); err != nil {
+		return err
+	}
 
 	var taskID string
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), env.ID).Scan(&taskID); err != nil {
@@ -353,6 +360,14 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 			return fmt.Errorf("finalize task environment: ready status requires repository inventory for repo-backed task (id=%s)", env.ID)
 		}
 	}
+	existing, err := listTaskEnvironmentReposTx(ctx, r, tx, env.ID)
+	if err != nil {
+		return err
+	}
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), env.ID); err != nil {
 		return err
 	}
@@ -386,6 +401,192 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 		return fmt.Errorf("finalize task environment: materialization claim was not current")
 	}
 	return tx.Commit()
+}
+
+// reelectTaskEnvironmentMaterializationSQL hands an environment to a new
+// materialization owner. The WHERE clause is the guard: the row must still be
+// in the state and claim the caller read, and must hold no workspace path,
+// container, sandbox, or live repository inventory, so no physical workspace
+// changes hands. A Kubernetes inventory row that recorded runtime metadata
+// (PVC, Pod, executor identity) is retained physical evidence too, including
+// when its control credentials were never saved; only a bare claim row with
+// empty metadata stays re-electable. Stale container handles and secret
+// references are cleared so the new owner provisions fresh ones.
+const reelectTaskEnvironmentMaterializationSQL = `
+	UPDATE task_environments
+	SET status = ?, materialization_session_id = ?,
+		container_id = '', container_bootstrap_nonce_secret_id = '',
+		container_control_auth_token_secret_id = '', sandbox_id = '',
+		updated_at = ?
+	WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	  AND COALESCE(workspace_path, '') = ''
+	  AND COALESCE(container_id, '') = ''
+	  AND COALESCE(sandbox_id, '') = ''
+	  AND NOT EXISTS (
+		SELECT 1 FROM task_environment_repos
+		WHERE task_environment_id = task_environments.id AND deleted_at IS NULL
+	  )
+	  AND NOT EXISTS (
+		SELECT 1 FROM task_environment_kubernetes k
+		WHERE k.environment_id = task_environments.id
+		  AND COALESCE(k.metadata, '') NOT IN ('', '{}')
+	  )
+`
+
+// reelectTaskEnvironmentMaterializationTx makes sessionID the creating owner of
+// environmentID inside the caller's transaction. The caller holds the task
+// cleanup barrier and has passed the recovery-claim admission. It reports
+// false when the row changed since the caller read it or holds physical
+// workspace evidence.
+func (r *Repository) reelectTaskEnvironmentMaterializationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	expectedStatus models.TaskEnvironmentStatus,
+	expectedOwnerID, sessionID string,
+) (bool, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(reelectTaskEnvironmentMaterializationSQL),
+		string(models.TaskEnvironmentStatusCreating), sessionID, r.nowUTC(),
+		environmentID, string(expectedStatus), expectedOwnerID)
+	if err != nil {
+		return false, fmt.Errorf("re-elect task environment materialization: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return changed > 0, nil
+}
+
+// reelectFailedWorkspaceMaterializationTx makes sessionID the owner of a failed
+// environment that never created anything physical, inside a binding
+// transaction that holds the task cleanup barrier. A concurrent binding that
+// re-elected it first yields workspace_preparing; a failed environment that
+// holds workspace resources requires a reset.
+func (r *Repository) reelectFailedWorkspaceMaterializationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID, sessionID string,
+) error {
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return err
+	}
+	reelected, err := r.reelectTaskEnvironmentMaterializationTx(
+		ctx, tx, environmentID, models.TaskEnvironmentStatusFailed, "", sessionID,
+	)
+	if err != nil || reelected {
+		return err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT status FROM task_environments WHERE id = ?`), environmentID).Scan(&status); err != nil {
+		return fmt.Errorf("reload failed workspace materialization: %w", err)
+	}
+	switch models.TaskEnvironmentStatus(status) {
+	case models.TaskEnvironmentStatusCreating:
+		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the workspace materialization completes"}
+	case models.TaskEnvironmentStatusFailed:
+		return models.ErrTaskEnvironmentResetRequired
+	default:
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+}
+
+// ReelectFailedTaskEnvironmentMaterialization makes sessionID the owner of a
+// failed environment that never created anything physical, so the launch of a
+// session already bound to it runs full preparation. It reports false when the
+// row is no longer failed, has an owner, or holds workspace resources.
+func (r *Repository) ReelectFailedTaskEnvironmentMaterialization(
+	ctx context.Context,
+	environmentID, sessionID string,
+) (bool, error) {
+	if environmentID == "" || sessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return false, err
+	}
+
+	var taskID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load failed task environment owner: %w", err)
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	reelected, err := r.reelectTaskEnvironmentMaterializationTx(
+		ctx, tx, environmentID, models.TaskEnvironmentStatusFailed, "", sessionID,
+	)
+	if err != nil || !reelected {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// FailTaskEnvironmentMaterialization stores failed for the creating
+// environment that sessionID still owns and clears its claim. It reports false
+// when the session owns no creating environment, including when another
+// session took the claim over, so a former owner cannot change the row.
+func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var environmentID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && environmentID == "") {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load owned task environment materialization: %w", err)
+	}
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ? AND materialization_session_id = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(),
+		environmentID, string(models.TaskEnvironmentStatusCreating), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("fail owned task environment materialization: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // PersistTaskEnvironmentTransition atomically updates an existing environment
@@ -530,6 +731,10 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	existing, repos []*models.TaskEnvironmentRepo,
 	replacePhysical bool,
 ) error {
+	if err := lockEnvironmentPhysicalClaims(ctx, tx, existing, repos); err != nil {
+		return err
+	}
+
 	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
@@ -679,6 +884,10 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 		row.WorktreeBranchCompactedAt = nil
 	}
 	row.UpdatedAt = time.Now().UTC()
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, row); err != nil {
+		return err
+	}
+
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, workspace_relative_path = ?, worktree_id = ?, worktree_path = ?, worktree_branch = ?,
@@ -911,6 +1120,10 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	if err := r.ensureKubernetesInventoryAbsent(ctx, tx, id); err != nil {
 		return err
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, id); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -959,6 +1172,10 @@ func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID st
 			return err
 		}
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, environmentIDs...); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environments WHERE task_id = ?`), taskID); err != nil {
 		return err
 	}
@@ -1003,6 +1220,10 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		repo.Status = worktreeRepoStatusActive
 	}
 
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, workspace_relative_path, branch_slug,
@@ -1038,6 +1259,10 @@ func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.T
 	repo.UpdatedAt = now
 	if repo.Status == "" {
 		repo.Status = worktreeRepoStatusActive
+	}
+
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
 	}
 
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1135,6 +1360,10 @@ func (r *Repository) UpdateTaskEnvironmentRepo(ctx context.Context, repo *models
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return err
 	}
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, repo); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET
 			branch_slug = ?, workspace_relative_path = ?,
@@ -1181,6 +1410,10 @@ func (r *Repository) DeleteTaskEnvironmentRepo(ctx context.Context, id string) e
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return err
 	}
+	if err := guardTaskEnvironmentRepoTx(ctx, tx, &models.TaskEnvironmentRepo{ID: id}); err != nil {
+		return err
+	}
+
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE id = ?`), id)
 	if err != nil {
 		return err
@@ -1202,6 +1435,10 @@ func (r *Repository) DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID 
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, envID); err != nil {
 		return err
 	}
+	if err := r.guardEnvironmentPhysicalClaims(ctx, tx, envID); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_environment_repos WHERE task_environment_id = ?`), envID); err != nil {
 		return err
 	}

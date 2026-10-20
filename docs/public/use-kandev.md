@@ -102,6 +102,26 @@ If model discovery requires authentication, the tour's **Settings** link opens t
 saved agent profile without saving the tour draft or marking it complete. Use the
 profile's authentication controls, then return to the tour.
 
+## Browse coordinator conversations across workspaces
+
+Enable **Integrated control** and **Workspace coordinators** in
+**Settings > System > Feature Toggles** and
+restart Kandev, then select **Integrated control** in the workspace picker. The
+toggle is off by default. Its dedicated navigation lists available workspaces,
+coordinators and each coordinator’s existing current conversation. The phone
+navigation menu provides the same tree.
+
+Select a conversation to open its original task and runtime sessions in the
+center while keeping this navigation visible. The conversation keeps its source
+workspace, permissions and draft; browsing it does not switch the active
+workspace or start an agent. An unavailable conversation shows its state rather
+than creating a replacement. This first view does not create additional
+coordinator conversations or aggregate archived conversations.
+
+The **Provider / model** and **History** views summarize the current coordinator
+records available in this first slice. They do not provide provider usage totals
+or a searchable archive of past conversations.
+
 ## Find a setting
 
 Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are

@@ -299,9 +299,11 @@ function deleteAgentProfileError(error: unknown): DeleteProfileResult {
 
 export async function getAgentProfileMcpConfigAction(
   profileId: string,
+  init?: RequestInit,
 ): Promise<AgentProfileMcpConfig> {
   return agentSettingsRequest<AgentProfileMcpConfig>(
     `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
+    init,
   );
 }
 

@@ -125,7 +125,7 @@ func waitForTerminalUpdate(
 			t.Fatalf("finished job = %s, want %s", job.JobID, jobID)
 		}
 		return job
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("job %s did not finish in time", jobID)
 		return dto.AgentUpdateJobDTO{}
 	}

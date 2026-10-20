@@ -92,6 +92,14 @@ func (s *Service) ResolveExecutionAfterFailure(
 	return resolver.ResolveExecutionAfterFailure(ctx, sessionID, profileID, currentExecutionProfileID, expectedGeneration, failure)
 }
 
+func (s *Service) ResumePendingRoute(ctx context.Context, sessionID string, generation int64) (agentruntime.ProfileExecution, error) {
+	resolver, ok := s.executionResolver.(profileRouteResumer)
+	if !ok {
+		return agentruntime.ProfileExecution{}, ErrExecutionRouting
+	}
+	return resolver.ResumePendingRoute(ctx, sessionID, generation)
+}
+
 // NewService creates a new utility agents service.
 func NewService(repo store.Repository) *Service {
 	return &Service{

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef, useState } from "react";
 
@@ -9,6 +9,7 @@ import {
   DeleteSessionPopover,
   SessionContextMenuItems,
 } from "./session-tab-menu";
+import { TabRenameInput } from "./tab-rename-input";
 
 describe("DeleteSessionDialog", () => {
   it("states conversation deletion and workspace retention", () => {
@@ -58,9 +59,79 @@ describe("DeleteSessionDialog", () => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
+function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
+  const [renaming, setRenaming] = useState(false);
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger tabIndex={0} data-testid="session-rename-trigger">
+        {renaming ? (
+          <TabRenameInput
+            initial="Implementation"
+            seqBadge={null}
+            onCommit={() => {
+              onCommit();
+              setRenaming(false);
+            }}
+            onCancel={() => setRenaming(false)}
+          />
+        ) : (
+          "Session"
+        )}
+      </ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="COMPLETED"
+        isPrimary
+        canShare={false}
+        taskId={null}
+        sessionId={undefined}
+        actions={{ handleSetPrimary: vi.fn(), handleStop: vi.fn(), handleResume: vi.fn() }}
+        onDelete={vi.fn()}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={() => setRenaming(true)}
+      />
+    </ContextMenu>
+  );
+}
+
 describe("SessionContextMenuItems", () => {
+  // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1
+  it("keeps the inline rename focused after menu focus restoration settles", async () => {
+    vi.useFakeTimers();
+    const onCommit = vi.fn();
+    render(<SessionRenameMenuHarness onCommit={onCommit} />);
+    const trigger = screen.getByTestId("session-rename-trigger");
+    act(() => trigger.focus());
+    fireEvent.contextMenu(trigger, { clientX: 100, clientY: 100 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename…" }));
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(onCommit).not.toHaveBeenCalled();
+    const input = screen.getByTestId("tab-rename-input");
+    expect(document.activeElement).toBe(input);
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("tab-rename-input")).toBeNull();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("restores focus on ordinary menu dismissal without starting rename", async () => {
+    vi.useFakeTimers();
+    render(<SessionRenameMenuHarness onCommit={vi.fn()} />);
+    const trigger = screen.getByTestId("session-rename-trigger");
+    act(() => trigger.focus());
+    fireEvent.contextMenu(trigger, { clientX: 100, clientY: 100 });
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await act(async () => vi.runAllTimersAsync());
+
+    expect(document.activeElement).toBe(trigger);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByTestId("tab-rename-input")).toBeNull();
+  });
+
   it("keeps the delete menu action open for its local confirmation", () => {
     const onDelete = vi.fn<(event: Event) => void>();
     render(

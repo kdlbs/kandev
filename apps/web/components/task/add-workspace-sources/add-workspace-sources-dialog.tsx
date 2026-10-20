@@ -17,6 +17,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
+import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
@@ -272,6 +273,7 @@ function AddWorkspaceSourcesSurface({
   onSubmit,
 }: AddWorkspaceSourcesSurfaceProps) {
   const { t } = useTranslation();
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   const footer = (
     <div className="flex justify-end gap-2">
       <Button
@@ -303,6 +305,7 @@ function AddWorkspaceSourcesSurface({
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent
+          ref={setPopoverContainer}
           data-testid="add-workspace-sources-drawer"
           onCloseAutoFocus={onCloseAutoFocus}
           onAnimationEnd={(event) => {
@@ -316,7 +319,9 @@ function AddWorkspaceSourcesSurface({
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
             {errorMessage}
-            {form}
+            <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
+              {form}
+            </TaskCreateDialogPopoverContainerProvider>
             <div className="my-4">{consequences}</div>
           </div>
           <div className="shrink-0 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -328,6 +333,7 @@ function AddWorkspaceSourcesSurface({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={setPopoverContainer}
         data-testid="add-workspace-sources-dialog"
         className="flex max-h-[calc(100dvh-2rem)] max-w-[960px] sm:max-w-[960px] flex-col overflow-hidden"
         onCloseAutoFocus={onCloseAutoFocus}
@@ -341,7 +347,9 @@ function AddWorkspaceSourcesSurface({
           className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
         >
           {errorMessage}
-          {form}
+          <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
+            {form}
+          </TaskCreateDialogPopoverContainerProvider>
           {consequences}
         </div>
         <DialogFooter className="shrink-0">{footer}</DialogFooter>

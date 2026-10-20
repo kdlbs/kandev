@@ -2,8 +2,21 @@ import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import { assertDeliveryRecoveryGeometry } from "../../helpers/delivery-recovery-controls";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { verifyNativeResumeClearsRecoveryNotice } from "../../helpers/native-resume-notice";
+
+test("native resume clears the uncertain notice after reload and accepts another prompt", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir);
+});
 
 async function seedUncertainDeliverySession(apiClient: ApiClient, seedData: SeedData) {
   const task = await apiClient.createTask(seedData.workspaceId, "Durable stream recovery", {
@@ -45,6 +58,9 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
 }) => {
   const capture = attachGatewayTrafficCapture(testPage);
   const { task, sessionId } = await seedUncertainDeliverySession(apiClient, seedData);
+  const proxy = await routeSessionEntryRecovery(testPage);
+  proxy.holdResponses("session.recover", { sessionId });
+  proxy.rejectResponsesUntilReleased("session.stop", "Stop was refused", { sessionId });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -55,9 +71,29 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
   await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(banner.getByTestId("recovery-fresh-button")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
+  const retryBox = await banner.getByTestId("recovery-retry-connection-button").boundingBox();
+  const stopBox = await banner.getByTestId("recovery-stop-button").boundingBox();
+  expect(retryBox).not.toBeNull();
+  expect(stopBox).not.toBeNull();
+  expect(Math.abs(retryBox!.y - stopBox!.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(retryBox!.height - stopBox!.height)).toBeLessThanOrEqual(1);
   await banner.getByTestId("recovery-retry-connection-button").click();
-  await expect(session.recoveryError()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => proxy.heldResponseCount("session.recover")).toBe(1);
+  for (const width of [767, 768, 1280]) {
+    await testPage.setViewportSize({ width, height: 900 });
+    await assertDeliveryRecoveryGeometry(testPage);
+  }
+  await expect(banner.getByTestId("recovery-stop-button")).toBeEnabled();
+  await banner.getByTestId("recovery-stop-button").click();
+  await expect(banner.getByTestId("delivery-stop-failed")).toBeVisible();
+  await assertDeliveryRecoveryGeometry(testPage);
+  proxy.releaseHeldResponses("session.recover");
+  await banner.getByTestId("recovery-retry-connection-button").click();
+  await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -71,7 +107,11 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
     )
     .toBe(true);
 
-  await banner.getByTestId("recovery-stop-button").click();
+  await testPage.evaluate(() => {
+    document.cookie = "kandev_locale=pseudo; path=/; SameSite=Lax";
+  });
+  await testPage.reload();
+  await assertDeliveryRecoveryGeometry(testPage);
   await expect
     .poll(
       () =>
@@ -84,4 +124,52 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
       { timeout: 10_000, message: "Stop must remain reachable after retry failure" },
     )
     .toBe(true);
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("legacy empty delivery fence exposes Resume without replaying the old prompt", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(testPage, apiClient, seedData, backend.tmpDir, true);
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5
+test("ordinary native resume surfaces recovery before first send and retains the draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(120_000);
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "readiness",
+  );
+});
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+test("cancelled prompt recovery remains reachable without an error record", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.skip(
+    process.platform !== "linux",
+    "isolated original-process death proof is Linux-specific",
+  );
+  await verifyNativeResumeClearsRecoveryNotice(
+    testPage,
+    apiClient,
+    seedData,
+    backend.tmpDir,
+    "cancelled",
+  );
 });

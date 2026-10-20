@@ -17,8 +17,10 @@ import {
   HelpTip,
   getTransitionType,
   getOnTurnStartTransitionType,
-  getChildrenCompletedTransitionType,
+  getEventTransitionType,
+  getEventTransitionTargetStepId,
   hasDisablePlanMode,
+  type TransitionEventKey,
 } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
 import { settingsControlClassName } from "./settings-control";
@@ -59,18 +61,22 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     onUpdate({ events: { ...currentEvents, on_turn_start: onTurnStart } });
   };
 
-  const setChildrenCompletedTransition = (type: string, targetStepId?: string) => {
+  const setEventTransition = (
+    eventKey: TransitionEventKey,
+    type: string,
+    targetStepId?: string,
+  ) => {
     const currentEvents = step.events ?? {};
-    const onChildrenCompleted = (currentEvents.on_children_completed ?? []).filter(
+    const actions = (currentEvents[eventKey] ?? []).filter(
       (a) => !["move_to_next", "move_to_previous", "move_to_step"].includes(a.type),
     );
     if (type === "move_to_step") {
       if (!targetStepId) return;
-      onChildrenCompleted.push({ type, config: { step_id: targetStepId } } as GenericAction);
+      actions.push({ type, config: { step_id: targetStepId } } as GenericAction);
     } else if (type !== "none") {
-      onChildrenCompleted.push({ type } as GenericAction);
+      actions.push({ type } as GenericAction);
     }
-    onUpdate({ events: { ...currentEvents, on_children_completed: onChildrenCompleted } });
+    onUpdate({ events: { ...currentEvents, [eventKey]: actions } });
   };
 
   const toggleDisablePlanMode = () => {
@@ -97,7 +103,7 @@ export function useStepActions({ step, onUpdate }: UseStepActionsArgs) {
     toggleOnEnterAction,
     setTransition,
     setOnTurnStartTransition,
-    setChildrenCompletedTransition,
+    setEventTransition,
     toggleDisablePlanMode,
     toggleOnExitAction,
   };
@@ -398,42 +404,53 @@ export function TurnCompleteSelect({
   );
 }
 
-// --- ChildrenCompletedSelect ---
+// --- EventTransitionSelect ---
 
-type ChildrenCompletedSelectProps = StepSelectProps & {
-  setChildrenCompletedTransition: (t: string, targetStepId?: string) => void;
+type EventTransitionSelectProps = StepSelectProps & {
+  eventKey: TransitionEventKey;
+  /** Stable data-testid segment, e.g. "children-completed". */
+  testIdSegment: string;
+  label: string;
+  help: string;
+  helpAria: string;
+  setEventTransition: (eventKey: TransitionEventKey, t: string, targetStepId?: string) => void;
 };
 
-export function ChildrenCompletedSelect({
+export function EventTransitionSelect({
   step,
   savedStep,
   otherSteps,
   onUpdate,
-  setChildrenCompletedTransition,
+  eventKey,
+  testIdSegment,
+  label,
+  help,
+  helpAria,
+  setEventTransition,
   readOnly,
-}: ChildrenCompletedSelectProps) {
+}: EventTransitionSelectProps) {
   const { t } = useTranslation();
-  const transitionType = getChildrenCompletedTransitionType(step);
-  const configuredTargetStepId =
-    (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
-      ?.step_id as string) ?? "";
+  const transitionType = getEventTransitionType(step, eventKey);
+  const configuredTargetStepId = getEventTransitionTargetStepId(step, eventKey);
   const validConfiguredTargetStepId = otherSteps.find((s) => s.id === configuredTargetStepId)?.id;
   const defaultTargetStepId = validConfiguredTargetStepId || otherSteps[0]?.id || "";
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium">{t("workflows:whenChildTasksComplete")}</Label>
+        <Label className="text-xs font-medium">{label}</Label>
         <HelpTip
-          testId={`${step.id}-children-completed-help`}
-          ariaLabel={t("workflows:childrenCompletedHelpAria")}
-          text={t("workflows:childrenCompletedHelp")}
+          testId={`${step.id}-${testIdSegment}-help`}
+          ariaLabel={helpAria}
+          text={help}
+          mobileTouchTarget
         />
       </div>
       <Select
         value={transitionType}
         onValueChange={(value) => {
           if (readOnly) return;
-          setChildrenCompletedTransition(
+          setEventTransition(
+            eventKey,
             value,
             value === "move_to_step" ? defaultTargetStepId : undefined,
           );
@@ -442,11 +459,9 @@ export function ChildrenCompletedSelect({
       >
         <SelectTrigger
           className={settingsControlClassName("w-full")}
-          data-testid={`${step.id}-children-completed-transition-select`}
-          data-settings-dirty={isWorkflowStepValueDirty(
-            step,
-            savedStep,
-            getChildrenCompletedTransitionType,
+          data-testid={`${step.id}-${testIdSegment}-transition-select`}
+          data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+            getEventTransitionType(item, eventKey),
           )}
         >
           <SelectValue placeholder={t("workflows:selectAction")} />
@@ -466,24 +481,18 @@ export function ChildrenCompletedSelect({
           onValueChange={(value) => {
             if (readOnly) return;
             const currentEvents = step.events ?? {};
-            const onChildrenCompleted = (currentEvents.on_children_completed ?? []).map((a) =>
+            const actions = (currentEvents[eventKey] ?? []).map((a) =>
               a.type === "move_to_step" ? { ...a, config: { step_id: value } } : a,
             );
-            onUpdate({
-              events: { ...currentEvents, on_children_completed: onChildrenCompleted },
-            });
+            onUpdate({ events: { ...currentEvents, [eventKey]: actions } });
           }}
           disabled={readOnly}
         >
           <SelectTrigger
             className={settingsControlClassName("w-full")}
-            data-testid={`${step.id}-children-completed-step-select`}
-            data-settings-dirty={isWorkflowStepValueDirty(
-              step,
-              savedStep,
-              (item) =>
-                item.events?.on_children_completed?.find((action) => action.type === "move_to_step")
-                  ?.config?.step_id ?? "",
+            data-testid={`${step.id}-${testIdSegment}-step-select`}
+            data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+              getEventTransitionTargetStepId(item, eventKey),
             )}
           >
             <SelectValue placeholder={t("workflows:selectStep")} />

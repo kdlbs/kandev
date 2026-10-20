@@ -45,7 +45,7 @@ function RefreshPauseStateButton({
 
 // AC-OFFICE-KILL-SWITCH-006.4: persistent indicator naming actor, reason and
 // time, plus a resume control. Rendered whenever a record is present, even
-// while `status` is `unknown` (marked stale) — a pause already read stays on
+// while `status` is `error` (marked stale) — a pause already read stays on
 // screen per the design's "Frontend state" GET-failure rule.
 export type WorkspacePauseViewProps = {
   activeWorkspaceId: string | null;
@@ -114,7 +114,7 @@ function PausedBanner({
   );
 }
 
-// AC-OFFICE-KILL-SWITCH-006.4's "Frontend state" unknown-with-no-record case:
+// Shown when a read failed and no pause record is available:
 // the absence of a banner must never be read as "running", so an explicit
 // affordance is shown instead. The pause control stays reachable here too.
 function PauseStateUnavailableBar() {
@@ -126,6 +126,23 @@ function PauseStateUnavailableBar() {
     >
       <IconAlertTriangle className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
       <span className="min-w-0 flex-1">{t("office:pauseStateUnavailable")}</span>
+    </div>
+  );
+}
+
+// Shown while a read is in flight and no state was read before, so a
+// remount re-read never flashes the failure warning. Like the warning, it
+// keeps the absence of a banner from reading as "running".
+function PauseStateLoadingBar() {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-muted bg-muted/40 px-3 py-2 text-sm"
+      data-testid="office-workspace-pause-loading"
+      role="status"
+    >
+      <IconRefresh className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+      <span className="min-w-0 flex-1">{t("office:pauseStateLoading")}</span>
     </div>
   );
 }
@@ -208,14 +225,15 @@ export function WorkspacePauseState({ view }: { view: WorkspacePauseViewProps })
     return (
       <PausedBanner
         record={view.record}
-        stale={view.status === "unknown"}
+        stale={view.status === "error"}
         sweep={view.sweep}
         onRetryPause={view.retryPause}
         isMutating={view.isMutating}
       />
     );
   }
-  if (view.status === "unknown") return <PauseStateUnavailableBar />;
+  if (view.status === "loading" || view.status === "unknown") return <PauseStateLoadingBar />;
+  if (view.status === "error") return <PauseStateUnavailableBar />;
   return null;
 }
 

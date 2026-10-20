@@ -57,7 +57,7 @@ func (s *Service) writeSnapshot(ctx context.Context, verify bool) (RetentionRece
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
 	path := filepath.Join(stage, "snapshot.db")
-	size, err := persistence.SnapshotSQLiteContext(ctx, s.pool.Writer(), path)
+	size, err := persistence.CopySQLiteSnapshotContext(ctx, s.pool.Reader(), path)
 	if err != nil {
 		return RetentionReceipt{}, err
 	}

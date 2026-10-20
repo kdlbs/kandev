@@ -498,7 +498,7 @@ func (r *Repository) tableColumns(tx *sqlx.Tx, table string) (map[string]bool, e
 // cutoverSwap drops the legacy schema and renames the shadow tables into
 // place. The environment-repository table is dropped before the environment
 // table because PostgreSQL refuses to drop a table referenced by a foreign
-// key; the environment-owned snapshot FK is rebound to the environment
+// key; environment-owned snapshot, claim and receipt FKs are rebound to the environment
 // shadow before the parent is dropped. SQLite has FK enforcement disabled for
 // the swap. Postgres constraint names are restored to their canonical form
 // afterwards.
@@ -521,6 +521,9 @@ func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 		return err
 	}
 	if err := r.rebindTaskEnvironmentRecoveryClaimForeignKey(c, tx); err != nil {
+		return err
+	}
+	if err := r.rebindWorkspaceAdoptionEnvironmentForeignKey(tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(r.migrationContext(), `DROP TABLE task_environments`); err != nil {

@@ -31,7 +31,14 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	RequiredNativeConversationID string
-	ID                           string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+
+	ID string
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// execution. RunID remains reserved for run-owned runtime identity.
+	CausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -59,6 +66,7 @@ type AgentExecution struct {
 	TaskID                          string
 	SessionID                       string
 	TaskEnvironmentID               string // Env owning this execution; sessions in the same task share one env
+	TurnChangeCheckouts             []TurnChangeCheckout
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
@@ -79,6 +87,10 @@ type AgentExecution struct {
 	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
 	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
 	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	// Fresh native startup buffers delivery until its initial SQL generation exists.
+	deliveryBootstrap          atomic.Bool
+	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
 	// replay cannot observe an undiscovered peer as legacy.
@@ -108,6 +120,9 @@ type AgentExecution struct {
 	// ForceContextContinuation records that this execution was explicitly
 	// authorized to replace native context with a bounded Kandev snapshot.
 	ForceContextContinuation bool
+	// ReplacesNativeConversation records an explicit fresh start whose new
+	// native conversation succeeds the committed harness generation.
+	ReplacesNativeConversation bool
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
@@ -141,6 +156,8 @@ type AgentExecution struct {
 	promptSettlementGeneration               uint64
 	promptSettlementAcknowledgedGeneration   uint64
 	promptSettlementWaiterReleasedGeneration uint64
+	turnChangeCaptureGeneration              uint64
+	turnChangeCaptureDone                    chan struct{}
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -244,9 +261,13 @@ type AgentExecution struct {
 	// passthroughLifecycleMu serializes process replacement paths. A workflow
 	// context reset and a delayed exit auto-restart must not both replace the
 	// same PTY, or the execution can point at the wrong process.
-	passthroughLifecycleMu sync.Mutex
-	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
-	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	remotePassthroughMu       sync.Mutex
+	remotePassthroughRecordMu sync.Mutex
+	remotePassthrough         remotePassthroughState
+	sshApprovedEnvKeys        []string
+	passthroughLifecycleMu    sync.Mutex
+	PassthroughProcessID      string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt      time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 	// passthroughInitialPromptProcessID identifies the fresh PTY process that
 	// still needs its initial task prompt through stdin.
 	passthroughInitialPromptProcessID string
@@ -267,6 +288,9 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// suppressBootStatusMessage is set only for silent restart restore, where a
+	// boot status would otherwise create a synthetic completed transcript turn.
+	suppressBootStatusMessage bool
 
 	// Buffers for accumulating agent response during a prompt
 	messageBuffer  strings.Builder
@@ -285,6 +309,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// lastAssistantMessageIDByGeneration outlives streaming correlation reset
+	// until the terminal turn-change record has persisted its reply anchor.
+	lastAssistantMessageIDByGeneration map[uint64]string
 	// responseAttemptMessageIDs preserves allocation order for assistant and
 	// thinking records created since the latest committed response boundary.
 	responseAttemptMessageIDs []string
@@ -342,7 +369,7 @@ type AgentExecution struct {
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that
 	// prompt is accepted or fails before acceptance.
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	initialPromptDispatchCallbackMu sync.Mutex
@@ -367,6 +394,9 @@ type AgentExecution struct {
 	// so a never-started prompt cannot be kept alive by traffic that carries
 	// no evidence of a turn.
 	lastActivityAt time.Time
+	// lastLiveActivityAt belongs to this backend process. Unknown replay may
+	// discard restored history but cannot discard activity observed here.
+	lastLiveActivityAt time.Time
 	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
 	// true by the first genuine agent event (recordActivity/handleCompleteEvent)
 	// that follows. It lets the stall watchdog distinguish "the agent never
@@ -400,6 +430,8 @@ type AgentExecution struct {
 	// promptLifecycleMu is held by workspace rebind waiting for readiness.
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
+	startupRecoveryCancelled bool // A stopped execution cannot start another replacement.
+	startupRecoveryCancel    context.CancelCauseFunc
 	// startupAttemptIDs preserves the recovery identity for each startup
 	// generation. The execution ID can be reused by managed-runtime repair, so
 	// callbacks must use their captured generation identity instead of the
@@ -520,7 +552,7 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 }
 
 func (e *AgentExecution) setInitialPromptDispatchCallbacks(
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) {
 	e.initialPromptDispatchCallbackMu.Lock()
@@ -530,7 +562,7 @@ func (e *AgentExecution) setInitialPromptDispatchCallbacks(
 	e.initialPromptDispatchCallbackMu.Unlock()
 }
 
-func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func() error, func(), func()) {
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(context.Context, string, []v1.MessageAttachment) error, func(), func()) {
 	e.initialPromptDispatchCallbackMu.Lock()
 	beforeAdmission := e.initialPromptAdmissionCallback
 	onDispatched := e.initialPromptDispatchCallback
@@ -686,6 +718,7 @@ func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bo
 func (e *AgentExecution) armPromptActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = false
 	e.providerDiagnosticCandidate = false
 	e.providerDiagnosticText = ""
@@ -696,14 +729,56 @@ func (e *AgentExecution) armPromptActivity() {
 func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = true
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
 
+// markRecoveredAgentActivity records output and advances the activity epoch
+// using the retained observation time, never the time of replay.
+func (e *AgentExecution) markRecoveredAgentActivity(at *time.Time) {
+	e.lastActivityAtMu.Lock()
+	e.setRecoveredActivityAtLocked(at)
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+const idleActivityMetadataKey = "idle_activity"
+
+func (e *AgentExecution) restoreIdleActivity(metadata map[string]interface{}) {
+	snapshot, ok := metadata[idleActivityMetadataKey].(map[string]interface{})
+	if !ok || getMetadataString(snapshot, "execution_id") != e.ID {
+		return
+	}
+	at, err := time.Parse(time.RFC3339Nano, getMetadataString(snapshot, "activity_at"))
+	if err != nil || at.IsZero() || at.After(time.Now()) {
+		return
+	}
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = at
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+// Unknown replay time discards uncertain restored history while preserving
+// observations made by this backend. Without live activity, the idle owner
+// starts a full interval at the first settled observation.
+func (e *AgentExecution) setRecoveredActivityAtLocked(at *time.Time) {
+	if at == nil || at.IsZero() || at.After(time.Now()) {
+		e.lastActivityAt = e.lastLiveActivityAt
+		return
+	}
+	if at.After(e.lastActivityAt) {
+		e.lastActivityAt = *at
+	}
+}
+
 func (e *AgentExecution) markLifecycleActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
@@ -825,18 +900,37 @@ func (e *AgentExecution) recordExpectedWorkspaceRebindDisconnect(generation uint
 // beginStartupRecovery advances the startup generation exactly once. The
 // caller uses the returned generation when wiring the replacement streams.
 func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	return e.beginStartupRecoveryWithCancel(nil)
+}
+
+// beginStartupRecoveryWithCancel registers recovery cancellation with its execution owner.
+func (e *AgentExecution) beginStartupRecoveryWithCancel(cancel context.CancelCauseFunc) (uint64, bool) {
 	e.startupCallbackMu.Lock()
 	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
-	if e.startupRecoveryStarted {
+	if e.startupRecoveryStarted || e.startupRecoveryCancelled {
 		return e.startupAttemptGeneration, false
 	}
 	e.startupRecoveryStarted = true
+	e.startupRecoveryCancel = cancel
 	e.startupAttemptGeneration++
 	currentAttemptID := e.startupAttemptIDs[e.startupAttemptGeneration-1]
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, currentAttemptID)
 	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) cancelStartupRecovery() {
+	if e == nil {
+		return
+	}
+	e.startupLifecycleMu.Lock()
+	e.startupRecoveryCancelled = true
+	cancel := e.startupRecoveryCancel
+	e.startupLifecycleMu.Unlock()
+	if cancel != nil {
+		cancel(context.Canceled)
+	}
 }
 
 func (e *AgentExecution) recordStartupAttemptIDLocked(generation uint64, attemptID string) {
@@ -883,6 +977,7 @@ func (e *AgentExecution) currentStartupAttemptID() string {
 func (e *AgentExecution) finishStartupRecovery() {
 	e.startupLifecycleMu.Lock()
 	e.startupRecoveryStarted = false
+	e.startupRecoveryCancel = nil
 	e.startupLifecycleMu.Unlock()
 }
 
@@ -1009,6 +1104,31 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 	e.promptLifecycleMu.Lock()
 	defer e.promptLifecycleMu.Unlock()
 	return e.promptTurnID
+}
+
+// promptTurnIDForEvent only inherits a dispatched turn while the event has
+// dispatch ownership or a prompt is pending. Native async activity has no such
+// owner; the orchestrator captures its active turn at the readiness boundary.
+func (e *AgentExecution) promptTurnIDForEvent(event agentctl.AgentEvent) string {
+	if event.TurnID != "" || e == nil {
+		return event.TurnID
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	if event.PromptGeneration != 0 {
+		if turnID := e.promptTurnIDs[event.PromptGeneration]; turnID != "" {
+			return turnID
+		}
+		// A surviving prompt keeps its restored turn while the first live
+		// completion adopts its generation. New dispatch clears this allowance.
+		if event.PromptGeneration != e.promptGeneration && !e.recoveredPromptGenerationPending.Load() {
+			return ""
+		}
+	}
+	if event.PromptGeneration != 0 || event.DeliverySubmissionID != "" || e.dispatchedPromptPending.Load() {
+		return e.promptTurnID
+	}
+	return ""
 }
 
 func (e *AgentExecution) promptTurnIDForGeneration(generation uint64) string {
@@ -1438,6 +1558,10 @@ type WorkspaceFolderSpec struct {
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
 	RepositoryID            string
+	TaskRepositoryID        string
+	TaskEnvironmentRepoID   string
+	RepositorySubpath       string
+	RepositorySubpathKnown  bool
 	RepositoryPath          string
 	WorktreePath            string
 	WorktreeBranch          string
@@ -1478,13 +1602,28 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	// ResumePassthrough preserves provider resume intent after runtime cleanup.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
-	TaskID                       string
-	TaskScope                    TaskLaunchScope
-	SessionSettingsPolicy        SessionSettingsPolicy
-	WorkspaceID                  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID                    string
-	TaskEnvironmentID            string // Env this session belongs to (shared across sessions in same task)
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID is a fresh per-process identity persisted by the
+	// orchestrator before this request can load a native conversation.
+	CandidateExecutionID string `json:"-"`
+	// OnExecutionAllocated advances the restore checkpoint before launch
+	// side effects. It is runtime-only and never serialized with deferred work.
+	OnExecutionAllocated func(context.Context, string) error `json:"-"`
+
+	TaskID                string
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	// CausingRunID is carried separately from Owner.RunID because Office task
+	// sessions remain task-owned while a scheduler run initiates their launch.
+	CausingRunID string
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1493,6 +1632,9 @@ type LaunchRequest struct {
 	// ForceContextContinuation starts a new native conversation with the
 	// bounded continuation prompt instead of loading a native session.
 	ForceContextContinuation bool
+	// ReplaceNativeConversation starts a new native conversation on the
+	// harness generation after the committed one, with its own stream.
+	ReplaceNativeConversation bool
 	// RecoveryAction is a server-authorized recovery settlement. It remains
 	// internal to the lifecycle launch boundary and is never client-controlled.
 	RecoveryAction string
@@ -1502,15 +1644,18 @@ type LaunchRequest struct {
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID    string
-	StartAgent            bool                // Transfer launch activity through initial startup/prompt
-	TurnID                string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath         string              // Host path to workspace (original repository path)
-	OriginalWorkspacePath string              // First agent-visible path for native restore policy
-	TaskDescription       string              // Task description to send via ACP prompt
-	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                   map[string]string   // Additional env vars
-	WorkspaceLayout       string
+	ExecutionProfileID string
+	StartAgent         bool // Transfer launch activity through initial startup/prompt
+	// SuppressBootStatusMessage keeps silent restore initialization out of the
+	// transcript without changing the resumed agent startup itself.
+	SuppressBootStatusMessage bool
+	TurnID                    string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath             string              // Host path to workspace (original repository path)
+	OriginalWorkspacePath     string              // First agent-visible path for native restore policy
+	TaskDescription           string              // Task description to send via ACP prompt
+	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                       map[string]string   // Additional env vars
+	WorkspaceLayout           string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

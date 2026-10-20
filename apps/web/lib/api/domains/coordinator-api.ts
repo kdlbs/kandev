@@ -1,10 +1,21 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import type { RunsWith } from "./coordinator-runs-with";
+import type {
+  ImprovementSpec,
+  PendingChangeStatus,
+} from "@/lib/api/domains/coordinator-changes-api";
 
 // Mirrors internal/coordinator/validate.go's ProfileStatus.
 export type ProfileStatus = "ok" | "missing" | "passthrough";
 
 // Mirrors internal/coordinator/models.go's ProposalStatus.
-export type ProposalStatus = "pending" | "approving" | "approved" | "rejected" | "failed";
+export type ProposalStatus =
+  | "pending"
+  | "approving"
+  | "approved"
+  | "rejected"
+  | "failed"
+  | "returned";
 
 // Mirrors internal/coordinator/models.go's ProposalSpec.
 export type ProposalSpec = {
@@ -33,13 +44,25 @@ export type Coordinator = {
   open_proposals?: number;
   agent_profile_status?: ProfileStatus;
   executor_profile_status?: ProfileStatus;
+  task_agent_profile_id: string;
+  task_executor_profile_id: string;
+  task_agent_profile_status?: ProfileStatus;
+  task_executor_profile_status?: ProfileStatus;
   // Present only while features.coordinatorPhase2 is on.
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
-  watches?: { scope: "all" | "selected"; workflow_ids: string[] };
+  watches?: Projects.CoordinatorWatches;
+  // Present only while features.coordinatorPhase3 is effective. The ceiling is
+  // a dollar string with two decimals, or null when unset.
+  autonomy_enabled?: boolean;
+  cost_ceiling_usd?: string | null;
   // Present only on the list route while features.coordinatorPhase2 is on.
   summary?: CoordinatorSummary;
 };
+
+import type * as Projects from "./coordinator-projects-types";
+
+export type * from "./coordinator-projects-types";
 
 // Mirrors internal/coordinator/dto.go's SummaryDTO.
 export type CoordinatorSummary = {
@@ -57,11 +80,16 @@ export type CoordinatorSettings = {
   policy: { actions: Record<ControlAction, ControlSetting> };
   policy_revision: number;
   watches: { scope: "all" | "selected"; workflow_ids: string[] };
+  // Resolved scope for the client filter; present while the stored scope is selected.
+  projects?: Projects.SettingsProjects;
+  // Present only while features.coordinatorPhase31 is effective.
+  projects_config?: Projects.ProjectsConfig;
 };
 
 export type PutSettingsRequest = {
   policy?: { actions: Record<ControlAction, ControlSetting> };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
+  projects?: Projects.ProjectsRequest;
 };
 
 export type CoordinatorListResponse = {
@@ -73,6 +101,8 @@ export type CreateCoordinatorRequest = {
   name: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_agent_profile_id: string;
+  task_executor_profile_id: string;
   context?: string;
 };
 
@@ -85,11 +115,16 @@ export type PatchCoordinatorRequest = {
   name?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
+  task_agent_profile_id?: string;
+  task_executor_profile_id?: string;
   context?: string;
+  // Phase 3: the ceiling is a two-place dollar string, or null to clear it.
+  autonomy_enabled?: boolean;
+  cost_ceiling_usd?: string | null;
 };
 
 // Mirrors internal/coordinator/models.go's ProposalKind* constants.
-export type OtherProposalKind = "message" | "move" | "resume";
+export type OtherProposalKind = "message" | "move" | "resume" | "improvement";
 
 // Mirrors internal/coordinator/dto.go's ProposalDTO (Build decision 10).
 // claim_token is never serialized by the backend and has no field here.
@@ -106,11 +141,18 @@ type ProposalBase = {
   decided_by: string | null;
   created_at: string;
   updated_at: string;
+  runs_with?: RunsWith | null;
   target_task_id?: string | null;
   standing_order_ids?: string[];
   starts_agent?: boolean;
   // Parsed outcome_json; null until the proposal has an outcome.
   outcome?: unknown;
+  // Present only while features.coordinatorPhase3 is effective.
+  reply_text?: string | null;
+  reply_delivered_at?: string | null;
+  in_reply_to?: string | null;
+  // Present on an improvement proposal only, while phase 3 is effective.
+  change_status?: PendingChangeStatus | null;
 };
 
 export type CreateTaskProposal = ProposalBase & {
@@ -154,17 +196,22 @@ export type ResumeProposal = KindProposalOf<"resume", ResumeSpec>;
 export type MessageProposal = KindProposalOf<"message", MessageSpec>;
 export type MoveProposal = KindProposalOf<"move", MoveSpec>;
 export type KindProposal = ResumeProposal | MessageProposal | MoveProposal;
+export type ImprovementProposal = KindProposalOf<"improvement", ImprovementSpec>;
 
 // Every proposal the client caches and renders: create_task, or a phase-2 kind
 // it knows. A row of any other kind is never stored.
-export type StoredProposal = CreateTaskProposal | KindProposal;
+export type StoredProposal = CreateTaskProposal | KindProposal | ImprovementProposal;
 
 export function isKindProposal(p: WireProposal): p is KindProposal {
   return p.kind === "resume" || p.kind === "message" || p.kind === "move";
 }
 
+export function isImprovementProposal(p: WireProposal): p is ImprovementProposal {
+  return p.kind === "improvement";
+}
+
 export function isStoredProposal(p: WireProposal): p is StoredProposal {
-  return isCreateTaskProposal(p) || isKindProposal(p);
+  return isCreateTaskProposal(p) || isKindProposal(p) || isImprovementProposal(p);
 }
 
 // isCreateTaskProposal narrows to the create_task kind; phase-1 rows carry
@@ -224,6 +271,8 @@ export type CoordinatorUpdatedPayload = {
   workspace_id: string;
   coordinator_id: string;
   open_proposals: number;
+  // Present only when the event is an autonomy re-read signal.
+  autonomy_changed?: boolean;
 };
 
 // Mirrors internal/coordinator/dto.go's ConversationResponse: the
@@ -326,11 +375,11 @@ export type PutGoalRequest = {
   criteria: { id?: string; text: string }[];
 };
 
-function workspacePath(workspaceId: string, suffix: string): string {
+export function workspacePath(workspaceId: string, suffix: string): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}${suffix}`;
 }
 
-function coordinatorPath(workspaceId: string, coordinatorId: string, suffix = ""): string {
+export function coordinatorPath(workspaceId: string, coordinatorId: string, suffix = ""): string {
   return workspacePath(workspaceId, `/coordinators/${encodeURIComponent(coordinatorId)}${suffix}`);
 }
 
@@ -450,6 +499,38 @@ export function rejectProposal(
     proposalPath(workspaceId, coordinatorId, proposalId, "/reject"),
     "POST",
     reason === undefined ? {} : { reason },
+    options,
+  );
+}
+
+// replyToProposal resolves to the returned Proposal on 200, delivered or not,
+// and throws an ApiError on any non-2xx status.
+export function replyToProposal(
+  workspaceId: string,
+  coordinatorId: string,
+  proposalId: string,
+  text: string,
+  options?: ApiRequestOptions,
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
+    proposalPath(workspaceId, coordinatorId, proposalId, "/reply"),
+    "POST",
+    { text },
+    options,
+  );
+}
+
+// deliverProposalReply re-runs delivery of a returned proposal's reply.
+export function deliverProposalReply(
+  workspaceId: string,
+  coordinatorId: string,
+  proposalId: string,
+  options?: ApiRequestOptions,
+): Promise<WireProposal> {
+  return mutate<WireProposal>(
+    proposalPath(workspaceId, coordinatorId, proposalId, "/reply/deliver"),
+    "POST",
+    {},
     options,
   );
 }
@@ -631,7 +712,7 @@ export function markGoalMet(
   );
 }
 
-function mutate<T>(
+export function mutate<T>(
   path: string,
   method: "POST" | "PATCH" | "PUT" | "DELETE",
   body: unknown,
@@ -672,31 +753,4 @@ export function putCoordinatorSettings(
   );
 }
 
-// Mirrors internal/coordinator/setup.go's body: one request creates the
-// coordinator with its policy, Watches and optional goal, or none of them.
-export type SetupCoordinatorRequest = {
-  name: string;
-  agent_profile_id: string;
-  executor_profile_id: string;
-  context: string;
-  watches: { scope: "all" | "selected"; workflow_ids?: string[] };
-  policy: { actions: Record<ControlAction, ControlSetting> };
-  goal?: {
-    name: string;
-    due_on: string | null;
-    criteria: Array<{ text: string }>;
-  };
-};
-
-export function setupCoordinator(
-  workspaceId: string,
-  req: SetupCoordinatorRequest,
-  options?: ApiRequestOptions,
-): Promise<Coordinator> {
-  return mutate<Coordinator>(
-    workspacePath(workspaceId, "/coordinators/setup"),
-    "POST",
-    req,
-    options,
-  );
-}
+export { setupCoordinator, type SetupCoordinatorRequest } from "./coordinator-setup-api";

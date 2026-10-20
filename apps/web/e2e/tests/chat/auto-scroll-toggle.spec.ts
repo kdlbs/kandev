@@ -175,6 +175,26 @@ async function seedTwoSessionOverflowingTask(
   };
 }
 
+async function moveReaderIntoHistory(page: Page): Promise<number> {
+  const list = chatList(page);
+  await list.hover();
+  const initial = await list.evaluate((el) => el.scrollTop);
+  await page.mouse.wheel(0, -Math.floor(initial / 2));
+  let previous = initial;
+  await expect
+    .poll(
+      async () => {
+        const current = await list.evaluate((el) => el.scrollTop);
+        const settled = current < initial - 100 && current === previous;
+        previous = current;
+        return settled;
+      },
+      { message: "reader wheel should interrupt catch-up and settle in history" },
+    )
+    .toBe(true);
+  return previous;
+}
+
 function chatList(testPage: Page) {
   return testPage.locator(".chat-message-list:visible").first();
 }
@@ -402,8 +422,8 @@ test.describe("Transcript auto-scroll toggle", () => {
       .toBeLessThan(10);
 
     // Deliver new content while that bottom-following transcript is hidden.
-    // Wait for the store event before switching back so the assertion proves
-    // activation reconciliation, not a delayed initial fetch.
+    // Hidden transcripts release rich demand. Activation must hydrate the
+    // persisted message and reconcile auto-follow without a hidden stream.
     await refreshedSession.sessionTabBySessionId(secondSessionId).click();
     await waitForStableActiveSession(testPage, secondSessionId);
     await apiClient.seedSessionMessage(firstSessionId, {
@@ -411,24 +431,22 @@ test.describe("Transcript auto-scroll toggle", () => {
       content: INACTIVE_SESSION_MARKER,
       authorType: "agent",
     });
-    await expect
-      .poll(
-        async () =>
-          testPage.evaluate(
-            ({ sid, marker }) => {
-              const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
-              return store
-                ?.getState()
-                .messages.bySession[sid]?.some((message) => message.content === marker);
-            },
-            { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
-          ),
-        {
-          timeout: 15_000,
-          message: "hidden message should arrive in the inactive transcript cache",
+    expect(
+      (await apiClient.listSessionMessages(firstSessionId)).messages.some(
+        (message) => message.content === INACTIVE_SESSION_MARKER,
+      ),
+    ).toBe(true);
+    expect(
+      await testPage.evaluate(
+        ({ sid, marker }) => {
+          const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
+          return store
+            ?.getState()
+            .messages.bySession[sid]?.some((message) => message.content === marker);
         },
-      )
-      .toBe(true);
+        { sid: firstSessionId, marker: INACTIVE_SESSION_MARKER },
+      ),
+    ).toBe(false);
 
     await refreshedSession.sessionTabBySessionId(firstSessionId).click();
     await waitForStableActiveSession(testPage, firstSessionId);
@@ -573,196 +591,6 @@ test.describe("Transcript auto-scroll toggle", () => {
     await expect(icon).toHaveClass(/text-green-600/);
   });
 
-  test("disabling freezes the position and suppresses auto-scroll for new messages", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Toggle Freeze",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
-    expect(targetScrollTop).toBeGreaterThan(100);
-
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    // A brand-new message arrives (a real follow-up turn over the live WS
-    // pipeline) while scrolled away from the bottom and disabled.
-    await session.sendMessage('e2e:message("New content while disabled")');
-    await expect(session.chat.getByText("New content while disabled").last()).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // The view must not have jumped — scrollTop stays put even though the
-    // transcript grew taller.
-    await expect
-      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
-      .toBeLessThan(targetScrollTop + 10);
-    expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
-  });
-
-  test("enabled auto-scroll stays at the bottom for live messages", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Toggle Enabled Live Message",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-    await session.sendMessage('e2e:message("New content while enabled")');
-    await expect(session.chat.getByText("New content while enabled").last()).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect
-      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
-        timeout: 5_000,
-        message: "enabled auto-scroll should stay at the bottom after live content",
-      })
-      .toBeLessThan(10);
-  });
-
-  test("disabling while genuinely at the bottom still freezes the view when new content arrives", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Toggle Bottom Anchor",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    // Establish the scenario's true-bottom precondition explicitly. The
-    // sticky prompt bar can settle after the renderer's initial auto-scroll,
-    // which is unrelated to the disabled-state behavior under test.
-    await expect
-      .poll(
-        async () =>
-          list.evaluate((el) => {
-            el.scrollTop = el.scrollHeight;
-            return el.scrollHeight - el.scrollTop - el.clientHeight;
-          }),
-        {
-          timeout: 5_000,
-          message: "expected to be at the bottom before disabling",
-        },
-      )
-      .toBeLessThan(5);
-    const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
-
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await expect(list).toHaveCSS("overflow-anchor", "none");
-
-    // A new message arrives while disabled from the true bottom. The
-    // browser's native bottom overflow-anchor must not override the
-    // toggle: without disabling it too, the anchor keeps itself pinned to
-    // the viewport, dragging scrollTop down to chase the new content.
-    await session.sendMessage('e2e:message("New content while disabled at bottom")');
-    await expect(session.chat.getByText("New content while disabled at bottom").last()).toBeVisible(
-      { timeout: 15_000 },
-    );
-
-    await expect
-      .poll(
-        async () =>
-          list.evaluate(
-            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
-            bottomScrollTop,
-          ),
-        { timeout: 2_000 },
-      )
-      .toBeLessThanOrEqual(2);
-  });
-
-  test("preserves the frozen scroll position across navigating away and back", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Toggle Nav",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
-    expect(targetScrollTop).toBeGreaterThan(100);
-
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    // Navigate away to the kanban board, then back into the same task —
-    // this remounts the chat panel via dockview's layout rebuild.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Auto-scroll Toggle Nav");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const sessionAfter = new SessionPage(testPage);
-    await sessionAfter.waitForLoad();
-
-    const listAfter = chatList(testPage);
-    await listAfter.waitFor({ state: "visible", timeout: 10_000 });
-
-    // Position is restored, not reset to the bottom — and the toggle itself
-    // still reflects the disabled preference.
-    await expect
-      .poll(async () => listAfter.evaluate((el) => el.scrollTop), {
-        timeout: 5_000,
-        message: "scroll position should be restored after navigating back",
-      })
-      .toBeGreaterThan(targetScrollTop - 20);
-    const toggleAfter = sessionAfter.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggleAfter).toHaveAttribute("aria-pressed", "false");
-
-    // Re-enabling must NOT jump to the bottom: nothing new arrived while
-    // disabled — the unseen content below is pre-existing history the user
-    // was already scrolled away from before disabling, not progression.
-    await toggleAfter.click();
-    await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
-    await dwell(
-      testPage,
-      300,
-      "negative-assertion",
-      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
-    );
-    expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
-  });
-
   test("re-enabling does not jump to the bottom when nothing progressed while disabled", async ({
     testPage,
     apiClient,
@@ -799,9 +627,36 @@ test.describe("Transcript auto-scroll toggle", () => {
     );
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
     expect(await list.evaluate((el) => el.scrollTop)).toBeLessThan(targetScrollTop + 20);
+    await test.step("re-enabling does not jump when the user scrolls further away themselves while disabled", async () => {
+      const list = chatList(testPage);
+      await list.evaluate((el) => {
+        el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      });
+
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      // The user scrolls further up on their own — no new content arrives.
+      const scrolledUpTarget = await list.evaluate((el) => {
+        el.scrollTop = 0;
+        return el.scrollTop;
+      });
+      expect(scrolledUpTarget).toBe(0);
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
+      await dwell(
+        testPage,
+        300,
+        "negative-assertion",
+        'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+      );
+      expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
+    });
   });
 
-  test("re-enabling does not jump when the user scrolls further away themselves while disabled", async ({
+  test("auto-scroll state transitions preserve reader position and live catch-up", async ({
     testPage,
     apiClient,
     seedData,
@@ -810,101 +665,218 @@ test.describe("Transcript auto-scroll toggle", () => {
       testPage,
       apiClient,
       seedData,
-      "Auto-scroll Toggle Manual Scroll",
+      "Auto-scroll Toggle State Transitions",
     );
     await waitForOverflow(testPage);
+    await test.step("enabled auto-scroll stays at the bottom for live messages", async () => {
+      const list = chatList(testPage);
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
-    const list = chatList(testPage);
-    await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
+      await session.sendMessage('e2e:message("New content while enabled")');
+      await expect(
+        session.chat.getByText("New content while enabled", { exact: true }),
+      ).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect
+        .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+          timeout: 5_000,
+          message: "enabled auto-scroll should stay at the bottom after live content",
+        })
+        .toBeLessThan(10);
+      await session.waitForChatIdle({ timeout: 30_000 });
     });
+    await test.step("disabling while genuinely at the bottom still freezes the view when new content arrives", async () => {
+      const list = chatList(testPage);
+      // Establish the scenario's true-bottom precondition explicitly. The
+      // sticky prompt bar can settle after the renderer's initial auto-scroll,
+      // which is unrelated to the disabled-state behavior under test.
+      await expect
+        .poll(
+          async () =>
+            list.evaluate((el) => {
+              el.scrollTop = el.scrollHeight;
+              return el.scrollHeight - el.scrollTop - el.clientHeight;
+            }),
+          {
+            timeout: 5_000,
+            message: "expected to be at the bottom before disabling",
+          },
+        )
+        .toBeLessThan(5);
+      const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
 
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+      await expect(list).toHaveCSS("overflow-anchor", "none");
 
-    // The user scrolls further up on their own — no new content arrives.
-    const scrolledUpTarget = await list.evaluate((el) => {
-      el.scrollTop = 0;
-      return el.scrollTop;
+      // A new message arrives while disabled from the true bottom. The
+      // browser's native bottom overflow-anchor must not override the
+      // toggle: without disabling it too, the anchor keeps itself pinned to
+      // the viewport, dragging scrollTop down to chase the new content.
+      await session.sendMessage('e2e:message("New content while disabled at bottom")');
+      await expect(
+        session.chat.getByText("New content while disabled at bottom", { exact: true }),
+      ).toBeVisible({ timeout: 15_000 });
+
+      await expect
+        .poll(
+          async () =>
+            list.evaluate(
+              (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+              bottomScrollTop,
+            ),
+          { timeout: 2_000 },
+        )
+        .toBeLessThanOrEqual(2);
+      await session.waitForChatIdle({ timeout: 30_000 });
     });
-    expect(scrolledUpTarget).toBe(0);
-
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await dwell(
-      testPage,
-      300,
-      "negative-assertion",
-      'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.chatStatusBar().getByTestId("auto-scroll-toggle-button").click();
+    await expect(session.chatStatusBar().getByTestId("auto-scroll-toggle-button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
-  });
-
-  test("catches up on re-enable when content arrives after remounting while already disabled", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Toggle Remount Progress",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
-    expect(targetScrollTop).toBeGreaterThan(100);
-
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-pressed", "false");
-
-    // Navigate away and back — the panel remounts while the persisted
-    // preference is still disabled, exercising the mount-time baseline
-    // initialization (not a live enabled->disabled transition).
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Auto-scroll Toggle Remount Progress");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const sessionAfter = new SessionPage(testPage);
-    await sessionAfter.waitForLoad();
-    const toggleAfter = sessionAfter.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggleAfter).toHaveAttribute("aria-pressed", "false");
-
-    const listAfterRemount = chatList(testPage);
-    await listAfterRemount.waitFor({ state: "visible", timeout: 10_000 });
     await expect
-      .poll(async () => listAfterRemount.evaluate((el) => el.scrollTop), {
-        timeout: 5_000,
-        message: "scroll position should be restored after remounting while disabled",
-      })
-      .toBeGreaterThan(targetScrollTop - 20);
-
-    // Genuinely new content arrives now, after the remount, while still disabled.
-    await sessionAfter.sendMessage('e2e:message("New content after remount while disabled")');
-    await expect(
-      sessionAfter.chat.getByText("New content after remount while disabled", { exact: true }),
-    ).toBeVisible({ timeout: 15_000 });
-
-    await sessionAfter.waitForChatIdle({ timeout: 30_000 });
-    const listAfter = chatList(testPage);
-    await toggleAfter.click();
-    await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
-    await expect
-      .poll(
-        async () => listAfter.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
-        { timeout: 5_000, message: "re-enabling should catch up to the genuinely new content" },
+      .poll(async () =>
+        chatList(testPage).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
       )
       .toBeLessThan(10);
+    await test.step("disabling freezes the position and suppresses auto-scroll for new messages", async () => {
+      const list = chatList(testPage);
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
+      expect(targetScrollTop).toBeGreaterThan(100);
+
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      // A brand-new message arrives (a real follow-up turn over the live WS
+      // pipeline) while scrolled away from the bottom and disabled.
+      await session.sendMessage('e2e:message("New content while disabled")');
+      await expect(
+        session.chat.getByText("New content while disabled", { exact: true }),
+      ).toBeVisible({
+        timeout: 15_000,
+      });
+
+      // The view must not have jumped — scrollTop stays put even though the
+      // transcript grew taller.
+      await expect
+        .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
+        .toBeLessThan(targetScrollTop + 10);
+      expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
+      await session.waitForChatIdle({ timeout: 30_000 });
+    });
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.chatStatusBar().getByTestId("auto-scroll-toggle-button").click();
+    await expect(session.chatStatusBar().getByTestId("auto-scroll-toggle-button")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect
+      .poll(async () =>
+        chatList(testPage).evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+      )
+      .toBeLessThan(10);
+    await test.step("preserves the frozen scroll position across navigating away and back", async () => {
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
+      expect(targetScrollTop).toBeGreaterThan(100);
+
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      // Navigate away to the kanban board, then back into the same task —
+      // this remounts the chat panel via dockview's layout rebuild.
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      const card = kanban.taskCardByTitle("Auto-scroll Toggle State Transitions");
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      await card.click();
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+      const sessionAfter = new SessionPage(testPage);
+      await sessionAfter.waitForLoad();
+
+      const listAfter = chatList(testPage);
+      await listAfter.waitFor({ state: "visible", timeout: 10_000 });
+
+      // Position is restored, not reset to the bottom — and the toggle itself
+      // still reflects the disabled preference.
+      await expect
+        .poll(async () => listAfter.evaluate((el) => el.scrollTop), {
+          timeout: 5_000,
+          message: "scroll position should be restored after navigating back",
+        })
+        .toBeGreaterThan(targetScrollTop - 20);
+      const toggleAfter = sessionAfter.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await expect(toggleAfter).toHaveAttribute("aria-pressed", "false");
+
+      // Re-enabling must NOT jump to the bottom: nothing new arrived while
+      // disabled — the unseen content below is pre-existing history the user
+      // was already scrolled away from before disabling, not progression.
+      await toggleAfter.click();
+      await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
+      await dwell(
+        testPage,
+        300,
+        "negative-assertion",
+        'asserts a negative (no jump to bottom); there is no event for "the scroll that must not happen", so a regression needs the smooth-scroll window to elapse before the position is sampled',
+      );
+      expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
+    });
+    await test.step("catches up on re-enable when content arrives after remounting while already disabled", async () => {
+      const targetScrollTop = await moveReaderIntoHistory(testPage);
+      expect(targetScrollTop).toBeGreaterThan(100);
+
+      const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+      // Navigate away and back — the panel remounts while the persisted
+      // preference is still disabled, exercising the mount-time baseline
+      // initialization (not a live enabled->disabled transition).
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      const card = kanban.taskCardByTitle("Auto-scroll Toggle State Transitions");
+      await expect(card).toBeVisible({ timeout: 15_000 });
+      await card.click();
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+      const sessionAfter = new SessionPage(testPage);
+      await sessionAfter.waitForLoad();
+      const toggleAfter = sessionAfter.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+      await expect(toggleAfter).toHaveAttribute("aria-pressed", "false");
+
+      const listAfterRemount = chatList(testPage);
+      await listAfterRemount.waitFor({ state: "visible", timeout: 10_000 });
+      await expect
+        .poll(async () => listAfterRemount.evaluate((el) => el.scrollTop), {
+          timeout: 5_000,
+          message: "scroll position should be restored after remounting while disabled",
+        })
+        .toBeGreaterThan(targetScrollTop - 20);
+
+      // Genuinely new content arrives now, after the remount, while still disabled.
+      await sessionAfter.sendMessage('e2e:message("New content after remount while disabled")');
+      await expect(
+        sessionAfter.chat.getByText("New content after remount while disabled", { exact: true }),
+      ).toBeVisible({ timeout: 15_000 });
+
+      await sessionAfter.waitForChatIdle({ timeout: 30_000 });
+      const listAfter = chatList(testPage);
+      await toggleAfter.click();
+      await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
+      await expect
+        .poll(
+          async () => listAfter.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight),
+          { timeout: 5_000, message: "re-enabling should catch up to the genuinely new content" },
+        )
+        .toBeLessThan(10);
+    });
   });
 
   test("follows a live turn from the bottom, then pauses after a small upward wheel", async ({
@@ -935,7 +907,7 @@ test.describe("Transcript auto-scroll toggle", () => {
         'e2e:message("LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("LIVE-FOLLOW-TAIL")',
       );
       await expect(
-        session.activeChat().getByText("LIVE-FOLLOW-START", { exact: false }),
+        session.activeChat().locator("[data-agent-message-body]").getByText("LIVE-FOLLOW-START"),
       ).toBeVisible();
       const runningStatus = list.getByRole("status", { name: "Agent is running" });
       await expect(runningStatus).toBeVisible({ timeout: 10_000 });
@@ -974,7 +946,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       releaseOutput();
 
       await expect(
-        session.activeChat().getByText("LIVE-FOLLOW-TAIL", { exact: false }),
+        session.activeChat().locator("[data-agent-message-body]").getByText("LIVE-FOLLOW-TAIL"),
       ).toBeVisible({
         timeout: 10_000,
       });

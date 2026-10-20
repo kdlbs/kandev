@@ -190,6 +190,7 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 	// If the context expires before all agents respond, return partial results.
 	slots := make([]Availability, len(sweep))
 	valid := make([]bool, len(sweep))
+	var versionChecks sync.WaitGroup
 	for range sweep {
 		select {
 		case res := <-ch:
@@ -202,6 +203,11 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 			}
 			slots[res.index] = res.avail
 			valid[res.index] = true
+			versionChecks.Add(1)
+			go func(index int) {
+				defer versionChecks.Done()
+				r.ApplyHostCLI(ctx, r.registry.Get, slots[index:index+1])
+			}(res.index)
 		case <-ctx.Done():
 			r.logger.Warn("discovery: detectAll timed out, returning partial results")
 			goto collect
@@ -209,12 +215,13 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 	}
 collect:
 
+	versionChecks.Wait()
+
 	results := make([]Availability, 0, len(sweep))
 	for i, v := range valid {
 		if v {
 			results = append(results, slots[i])
 		}
 	}
-	r.ApplyHostCLI(ctx, r.registry.Get, results)
 	return results
 }

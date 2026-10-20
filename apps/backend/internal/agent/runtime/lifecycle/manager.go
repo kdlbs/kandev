@@ -82,9 +82,17 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider          WorkspaceInfoProvider
 	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+	turnChangeCaptureHandler       TurnChangeCaptureHandler
 
 	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
 	taskRuntimeFences taskRuntimeOwnershipFences
+
+	// passthroughMCPMu serializes project-local MCP materialization and cleanup.
+	// The file is shared by executions that use the same workspace, so the
+	// filesystem operation and its ownership claim must be one critical section.
+	passthroughMCPMu               sync.Mutex
+	passthroughMCPActiveClaims     map[string]map[string]passthroughMCPFileClaim
+	passthroughMCPActiveExecutions map[string]map[string]*AgentExecution
 
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
@@ -103,7 +111,8 @@ type Manager struct {
 	// the caller a shell, a file write, or a port preview. Reading a
 	// transcript and running a command in the worktree are different
 	// permissions, so they get different checks.
-	sessionExecCheck func(ctx context.Context, sessionID string) error
+	sessionExecCheck  func(ctx context.Context, sessionID string) error
+	executorAdmission func(context.Context, string, string, string) (context.Context, error)
 
 	// recoveryGuard is the in-memory per-session acquire-or-observe map of
 	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
@@ -210,11 +219,17 @@ type Manager struct {
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
+	remoteRecoveryMu         sync.Mutex
+	remoteRecoveryPending    map[string]*remoteRecoveryRetry
+	remoteRecoveryCursor     string
+	stopContext              context.Context
+	cancelStop               context.CancelFunc
 	// Bounds the non-mutating contribution push check before agent launch.
 	// A zero value uses the production default and keeps test Manager literals safe.
 	remoteContributionPreflightTimeout time.Duration
 	stopCh                             chan struct{}
 	stopOnce                           sync.Once
+	turnChangeRetryMu                  sync.Mutex
 	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
@@ -455,6 +470,7 @@ func NewManager(
 
 	// Create stop channel for graceful shutdown
 	stopCh := make(chan struct{})
+	stopContext, cancelStop := context.WithCancel(context.Background())
 
 	// Initialize session manager
 	sessionManager := NewSessionManager(log, stopCh)
@@ -472,28 +488,33 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:                 reg,
-		eventBus:                 eventBus,
-		executorRegistry:         executorRegistry,
-		executorFallbackPolicy:   fallbackPolicy,
-		credsMgr:                 credsMgr,
-		profileResolver:          profileResolver,
-		mcpProvider:              mcpProvider,
-		logger:                   componentLogger,
-		dataDir:                  dataDir,
-		executionStore:           executionStore,
-		commandBuilder:           commandBuilder,
-		sessionManager:           sessionManager,
-		eventPublisher:           eventPublisher,
-		historyManager:           historyManager,
-		remoteStatusPollInterval: 60 * time.Second,
-		remoteStatusBySession:    make(map[string]*RemoteStatus),
-		stopCh:                   stopCh,
-		skillDeployer:            NoopSkillDeployer(),
-		remediateNpxCache:        routingerr.RemediateNpxCache,
-		recoveryGuard:            NewRecoveryGuard(),
-		retrackedSessions:        make(map[string]struct{}),
-		standaloneOwnSessions:    make(map[string]struct{}),
+		registry:                       reg,
+		eventBus:                       eventBus,
+		executorRegistry:               executorRegistry,
+		executorFallbackPolicy:         fallbackPolicy,
+		credsMgr:                       credsMgr,
+		profileResolver:                profileResolver,
+		mcpProvider:                    mcpProvider,
+		logger:                         componentLogger,
+		dataDir:                        dataDir,
+		executionStore:                 executionStore,
+		commandBuilder:                 commandBuilder,
+		sessionManager:                 sessionManager,
+		eventPublisher:                 eventPublisher,
+		historyManager:                 historyManager,
+		remoteStatusPollInterval:       60 * time.Second,
+		remoteStatusBySession:          make(map[string]*RemoteStatus),
+		remoteRecoveryPending:          make(map[string]*remoteRecoveryRetry),
+		stopContext:                    stopContext,
+		cancelStop:                     cancelStop,
+		stopCh:                         stopCh,
+		skillDeployer:                  NoopSkillDeployer(),
+		remediateNpxCache:              routingerr.RemediateNpxCache,
+		recoveryGuard:                  NewRecoveryGuard(),
+		retrackedSessions:              make(map[string]struct{}),
+		standaloneOwnSessions:          make(map[string]struct{}),
+		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
+		passthroughMCPActiveExecutions: make(map[string]map[string]*AgentExecution),
 	}
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
@@ -522,7 +543,9 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
+	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -531,6 +554,13 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+// SetTurnChangeCaptureHandler installs the task-owned immutable interval
+// coordinator. Set this during backend composition before runtime prompts are
+// accepted.
+func (m *Manager) SetTurnChangeCaptureHandler(handler TurnChangeCaptureHandler) {
+	m.turnChangeCaptureHandler = handler
 }
 
 func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
@@ -634,6 +664,12 @@ func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository)
 		return
 	}
 	m.streamManager.setAgentDeliveryRepository(repository)
+}
+
+// CredentialsManager returns the credentials manager the manager launches
+// agents with, for read-only inspection by admission checks.
+func (m *Manager) CredentialsManager() CredentialsManager {
+	return m.credsMgr
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -978,4 +1014,11 @@ func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) 
 		return m.sessionExecCheck
 	}
 	return m.sessionAccessCheck
+}
+
+func (m *Manager) SetExecutorAdmission(admit func(context.Context, string, string, string) (context.Context, error)) {
+	m.executorAdmission = admit
+	if m.sessionManager != nil {
+		m.sessionManager.executorAdmission = admit
+	}
 }

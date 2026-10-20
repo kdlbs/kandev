@@ -62,6 +62,14 @@ handler remains unchanged and continues to own double-clicks that originate
 outside the editor. This boundary also protects the shared task terminal rename
 editor without changing terminal naming behavior.
 
+The shared `SessionContextMenuItems` records a pending Rename selection and
+starts the inline editor after the menu's close-autofocus boundary. It prevents
+focus restoration for that handoff and queues the rename callback after the
+menu scope closes. This keeps restored menu focus from blurring and immediately
+committing the new editor. Ordinary menu dismissal retains normal focus return.
+The same boundary serves task Agent tabs and kanban preview session tabs;
+terminal tabs retain their equivalent existing handoff.
+
 ## Data and contracts
 
 No new API, persisted value, or store field is required. The existing
@@ -137,6 +145,11 @@ Playwright regression enters Agent-tab rename mode, double-clicks the input,
 and verifies that native text selection remains active while the Dockview group
 stays unmaximized. Mobile coverage is unchanged because phone and tablet do not
 mount the affected Dockview tab surface.
+
+A component regression uses the real menu and rename editor, drains the menu
+focus-restoration timers, and requires focused rename without a premature blur
+commit. A separate dismissal case requires ordinary focus return without rename.
+The preview session-tab component suite covers the shared menu consumer.
 
 A restoration unit test covers a valid secondary Agent selection, invalid
 saved selections, mixed stale and valid selections, and delayed environment

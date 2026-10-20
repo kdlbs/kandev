@@ -1,0 +1,97 @@
+name: Windows Isolated Launch Tests
+
+on:
+  push:
+    branches: [main, 'ci/**']
+    paths:
+      - 'scripts/*.ps1'
+      - 'scripts/*.psm1'
+      - 'scripts/*.cs'
+      - 'scripts/tests/isolated-*'
+      - '.gitattributes'
+      - '.github/workflows/isolated-windows-tests.yml'
+      - 'apps/backend/cmd/winjob/**'
+      - 'apps/backend/internal/common/winproc/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/*.ps1'
+      - 'scripts/*.psm1'
+      - 'scripts/*.cs'
+      - 'scripts/tests/isolated-*'
+      - '.gitattributes'
+      - '.github/workflows/isolated-windows-tests.yml'
+      - 'apps/backend/cmd/winjob/**'
+      - 'apps/backend/internal/common/winproc/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Validate workflow and documentation contracts
+        run: |
+          python3 .github/scripts/changed-paths_test.py
+          python3 .github/scripts/lint-action-pinning_test.py
+          python3 .github/scripts/lint-action-pinning.py
+          python3 scripts/list-docs.py validate
+          python3 scripts/lint-spec-files.py --all
+          node --test scripts/validate-public-docs.test.mjs
+          node scripts/validate-public-docs.mjs
+  isolated-launch:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Existing home and environment guards
+        shell: cmd
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
+      - name: Set up Go
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
+      - name: Test native isolated supervisor
+        working-directory: apps/backend
+        run: go test -trimpath -race -count=1 -timeout 3m ./cmd/winjob
+      - name: Build native isolated supervisor
+        id: build_supervisor
+        working-directory: apps/backend
+        run: go build -trimpath -o bin/winjob.exe ./cmd/winjob
+      - name: Record native supervisor build identity
+        shell: pwsh
+        run: |
+          $identity = @{
+            checkout_sha = (git rev-parse HEAD)
+            workflow_sha = $env:GITHUB_WORKFLOW_SHA
+            event_sha = $env:GITHUB_SHA
+            binary_sha256 = (Get-FileHash apps/backend/bin/winjob.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          $identity | ConvertTo-Json | Set-Content -LiteralPath apps/backend/bin/winjob-build-identity.json
+      - name: Real Windows launch and cleanup regressions
+        shell: cmd
+        run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-launch.Tests.ps1
+      - name: Retain native supervisor and build identity
+        if: always() && steps.build_supervisor.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: isolated-windows-supervisor
+          path: |
+            apps/backend/bin/winjob.exe
+            apps/backend/bin/winjob-build-identity.json
+          if-no-files-found: error

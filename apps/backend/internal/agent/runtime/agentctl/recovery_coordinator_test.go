@@ -148,9 +148,9 @@ func startRecoveryControlProcess(t *testing.T) (int, string, int, func()) {
 	deadline := time.Now().Add(3 * time.Second)
 	var endpoint string
 	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(readyPath)
+		published, err := readRecoveryControlEndpoint(readyPath)
 		if err == nil {
-			endpoint = string(data)
+			endpoint = published
 			break
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -375,10 +375,8 @@ func TestRuntimeRecoverStaleEpoch(t *testing.T) {
 func TestRuntimeReplacementStableWindowResetsBudget(t *testing.T) {
 	owner, current := newPublishedRecoveryOwner(t)
 	clock := newRecoveryTestClock()
-	started := make(chan struct{}, 5)
+	started := make(chan recoveryStartedBinding, 5)
 	attempts := 0
-	var latest *RuntimeBindingCandidate
-	var notify RuntimeLossHandler
 	coordinator := NewRecoveryCoordinator(owner, func(_ context.Context, onRuntimeLoss RuntimeLossHandler) error {
 		attempts++
 		candidate, err := owner.PrepareBinding()
@@ -391,22 +389,20 @@ func TestRuntimeReplacementStableWindowResetsBudget(t *testing.T) {
 		if err := candidate.Commit(); err != nil {
 			return err
 		}
-		latest = candidate
-		notify = onRuntimeLoss
-		started <- struct{}{}
+		started <- recoveryStartedBinding{candidate: candidate, notify: onRuntimeLoss, number: attempts}
 		return nil
 	}, RecoveryCoordinatorOptions{Clock: clock})
 	t.Cleanup(coordinator.Stop)
 	current.MarkUnexpectedExit()
 	coordinator.NotifyRuntimeLoss(current.Epoch(), AvailabilityReasonAgentctlExited, true)
 	coordinator.Start(context.Background())
-	waitRecoveryAttempt(t, started)
+	latest := waitRecoveryBinding(t, started)
 	waitRecoverySnapshot(t, owner, AvailabilityStatusAvailable)
 	<-clock.stableStarted
 
-	latest.MarkUnexpectedExit()
-	notify(latest.Epoch(), AvailabilityReasonAgentctlExited, true)
-	waitRecoveryAttempt(t, started)
+	latest.candidate.MarkUnexpectedExit()
+	latest.notify(latest.candidate.Epoch(), AvailabilityReasonAgentctlExited, true)
+	latest = waitRecoveryBinding(t, started)
 	waitRecoverySnapshot(t, owner, AvailabilityStatusAvailable)
 	<-clock.stableStarted
 	close(clock.stableRelease)
@@ -418,14 +414,14 @@ func TestRuntimeReplacementStableWindowResetsBudget(t *testing.T) {
 		t.Fatalf("starts since stable health = %d, want 0", got)
 	}
 
-	latest.MarkUnexpectedExit()
-	notify(latest.Epoch(), AvailabilityReasonAgentctlExited, true)
-	waitRecoveryAttempt(t, started)
+	latest.candidate.MarkUnexpectedExit()
+	latest.notify(latest.candidate.Epoch(), AvailabilityReasonAgentctlExited, true)
+	latest = waitRecoveryBinding(t, started)
 	waitRecoverySnapshot(t, owner, AvailabilityStatusAvailable)
-	latest.MarkUnexpectedExit()
-	notify(latest.Epoch(), AvailabilityReasonAgentctlExited, true)
+	latest.candidate.MarkUnexpectedExit()
+	latest.notify(latest.candidate.Epoch(), AvailabilityReasonAgentctlExited, true)
 	select {
-	case <-started:
+	case latest = <-started:
 	case <-time.After(2 * time.Second):
 		snapshot, _ := owner.Snapshot()
 		coordinator.mu.Lock()
@@ -433,10 +429,10 @@ func TestRuntimeReplacementStableWindowResetsBudget(t *testing.T) {
 		pending := coordinator.pending != nil
 		coordinator.mu.Unlock()
 		t.Fatalf("stable health did not restore the replacement start budget: snapshot=%+v starts=%d active=%t pending=%t attempts=%d",
-			snapshot, coordinator.currentStarts(), active, pending, attempts)
+			snapshot, coordinator.currentStarts(), active, pending, latest.number)
 	}
-	if attempts != 4 {
-		t.Fatalf("replacement starts after stable reset = %d, want 4", attempts)
+	if latest.number != 4 {
+		t.Fatalf("replacement starts after stable reset = %d, want 4", latest.number)
 	}
 }
 

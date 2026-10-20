@@ -278,6 +278,15 @@ the launch before creating an execution until an adapter passes the complete
 restriction tests and a real provider smoke. Do not treat the manifest surface
 or an approved capability as evidence that a provider is supported.
 
+Kandev lists a plugin's tools only while the plugin is active and every field in
+its `config_schema.required` list has a value. A required field counts as unset
+when it is missing, null, or a blank string; `false` and `0` count as set. A
+connector that needs a URL or token therefore stays out of the agent tool list
+until the operator saves its settings, and its tools appear right after the
+save, without restarting the agent or task session. Saving config still restarts
+a running plugin subprocess. A plugin without required fields is listed as soon as
+it is active.
+
 Tools are not exposed to configuration or external MCP clients. Kandev validates
 the input and optional output JSON Schemas, supplies task/session/workspace/surface
 context, enforces a 30-second deadline and 1 MiB result limit, and does not retry
@@ -555,7 +564,7 @@ before submitting the request.
 | registerTaskPanel               | { id, title, titleKey?, icon?, Component, mobileEnabled?, visible?(context) }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, sessionKind, presentation, conversation: { openMessage(messageId), history } }; `titleKey` is a plugin translation key with literal `title` fallback | Active ui.bundle | Panel renders behind its own error boundary with reactive localized titles; a throwing `visible` hides the item; handles are generation-bound and independently scoped, inert after unmount, identity change, disable, reload, or uninstall; `host.conversation` outside a panel returns stable empty state; desktop preserves layout identity on navigation and mobile uses the full-height Chat surface | registry.registerTaskPanel({ id: "notes", title: "Notes", titleKey: "panels.notes", Component: NotesPanel }) |
 | registerTaskMenuAction          | { id, label, icon?, group: "edit" \| "primary", visible?(context), items?(context), run(context) }; "edit" is card-only inside Edit, while "primary" is a top-level item on cards and desktop/mobile task-row menus; a synchronous `items(context)` returning TaskMenuSubItemRegistration[] ({ id, label, icon?, disabled?, run(context) }) renders the action as a submenu of those children instead | Active ui.bundle                                                       | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged; an items() that throws or yields nothing usable falls back to the flat item, and unusable children are dropped                                                                                                                           | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "primary", run: doEnhance })              |
 | registerTaskFilter              | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository                                                                                                                         | Active ui.bundle                                                       | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching                  | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
-| registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds page-local Sort and Group choices on `/tasks`                                                                                                                                                                                      | Active ui.bundle                                                       | Values apply only to the loaded page, callbacks are isolated, and registrations are revoked on disable/unload                                                                                                   | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |
+| registerTaskListFacet           | { id, label, getValues({ taskId, workspaceId }), subscribe? }; adds Sort and Group choices on `/tasks` after built-ins                                                                                                                                                                                     | Active ui.bundle                                                       | Values apply only to the loaded page; selections use the host `tasks_list_sort` / `tasks_list_group` preference; callbacks are isolated and registrations are revoked on disable/unload                         | registry.registerTaskListFacet({ id: "tags", label: "Tag", getValues: taskTags })                                   |
 | host.React / host.jsx           | Shared React instance and React.createElement alias                                                                                                                                                                                                                                                    | Active ui.bundle                                                       | No cleanup; never bundle a second React/Radix runtime                                                                                                                                                           | const h = host.jsx                                                                                                  |
 | host.context                    | Versioned provider-neutral reads/subscriptions for active workspace, all workspace ids, native task creation, and exact provider repository identity                                                                                                                                                   | Active ui.bundle                                                       | Subscriptions are generation-owned and revoked on unload; records are stable SDK shapes, not private app state                                                                                                  | const ids = host.context.getWorkspaceIds()                                                                          |
 | host.useSettingsSaveContributor | Registers one plugin-owned contributor for the native save bar; the host prefixes ids with `plugin:<pluginId>:` before shared coordination                                                                                                                                                             | Active ui.bundle                                                       | Contributor lifecycle follows the rendering component; save and discard remain plugin-owned                                                                                                                     | host.useSettingsSaveContributor({ id: "credentials", revision, isDirty, save, discard })                            |
@@ -2010,11 +2019,17 @@ single host-wide capability check performed once at install time: it does
 not name `task-dependencies` or any other capability, unlike the
 capability-keyed `min_kandev_version` requirement on `api_read:messages`
 described above, which the host re-validates per declared capability. A dev
-or otherwise non-release build of the host always satisfies the floor check
+or otherwise non-release development build of the host always satisfies the floor check
 regardless of its actual age, so a plugin installed on such a build can still
 receive the same ambiguous zero-value bytes; do not rely on the floor check
 alone as proof the fields are populated when running against a non-release
 host.
+
+Published npm Nightlies enforce the same install-time floor as Stable hosts.
+A Nightly is a prerelease below the Stable release with the same numeric core:
+`1.2.4-nightly.sha123456789abc` accepts a minimum of `1.2.3` but rejects
+`1.2.4` or a newer minimum. The manifest minimum must still use a stable
+numeric release value; prerelease minimums are not accepted.
 
 `host.Messages().List(ctx, MessageFilter{...}, Page{...})` reads historical
 conversation content (capability `api_read:messages`). Filter by `SessionIDs`,
@@ -3579,13 +3594,21 @@ called once at least one option is selected, and a `matches` that throws is
 caught, logged, and treated as non-matching for that task.
 
 Use `registerTaskListFacet` when a plugin owns values that users should sort or group on in the
-`/tasks` list. Values are synchronous and apply only to the currently loaded page. A facet is
-removed automatically when its plugin unloads; optional subscriptions let it refresh the page.
-Return each value at most once for a task. Keep the same label and color for a value across all
-tasks. Facet sorting uses the first value label after a case-insensitive alphabetical comparison.
-Tasks with multiple values appear in every matching group. A task without a value is shown in the
-host's `Ungrouped` section. A child whose parent does not match a group is rendered at that group's
-root.
+`/tasks` list. `getValues({ taskId, workspaceId })` is synchronous. Values apply only to the
+currently loaded page; the host does not store facet values. The host stores the choice as
+`facet:<pluginId>:<facetId>` in its `tasks_list_sort` or `tasks_list_group` preference and
+in the `/tasks` query. While the plugin is unavailable, the controls and list show the
+built-in default without replacing the stored choice; it returns when the plugin registers.
+See the [facet selection persistence decision](../../docs/decisions/2026-09-22-plugin-facet-selection-persistence.md).
+
+Return each value at most once for a task and keep the same label and color for a value across
+all tasks. An entry with an empty label or value counts as no value for that entry. The plugin's facet
+and value labels are displayed verbatim. Facet sorting uses the alphabetically first value
+label, case-insensitively, with tasks without a value last. A task with multiple values appears
+in every matching group; a task without a value appears in the trailing `Unassigned` section.
+A child whose parent does not match a group renders at that group's root. A facet identifier
+is never sent to a task-list query; ordering and grouping by values remain page-local.
+Registrations are removed when their plugin unloads; optional subscriptions refresh the list.
 
 ```js
 registry.registerTaskListFacet({

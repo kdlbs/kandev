@@ -36,9 +36,20 @@ type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
+type DeliveryRecordEvidenceRequest = lifecycle.DeliveryRecordEvidenceRequest
+type DeliveryRecordEvidence = lifecycle.DeliveryRecordEvidence
+type DeliveryRecordSubmissionRequest = lifecycle.DeliveryRecordSubmissionRequest
+type DeliveryRecordSubmission = lifecycle.DeliveryRecordSubmission
 type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
+type TurnChangeCheckout = lifecycle.TurnChangeCheckout
+type TurnChangeAdmission = lifecycle.TurnChangeAdmission
+type TurnChangeTerminal = lifecycle.TurnChangeTerminal
+type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
+type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
+type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
@@ -55,6 +66,11 @@ var (
 	ErrCursorMCPAuthenticationUnsupported = lifecycle.ErrCursorMCPAuthenticationUnsupported
 	ErrCursorMCPRecoverySessionBusy       = lifecycle.ErrCursorMCPRecoverySessionBusy
 	ErrCursorMCPRecoveryUnavailable       = lifecycle.ErrCursorMCPRecoveryUnavailable
+	ErrDeliveryRecordEvidenceTruncated    = lifecycle.ErrDeliveryRecordEvidenceTruncated
+	ErrDeliveryRecordEvidenceAmbiguous    = lifecycle.ErrDeliveryRecordEvidenceAmbiguous
+	ErrDeliveryRecordEvidenceStale        = lifecycle.ErrDeliveryRecordEvidenceStale
+	ErrDeliveryRecordEvidenceConflict     = lifecycle.ErrDeliveryRecordEvidenceConflict
+	ErrDeliveryRecordEvidenceUnsupported  = lifecycle.ErrDeliveryRecordEvidenceUnsupported
 )
 
 // SessionExecutionControl is the runtime seam for looking up an execution by
@@ -90,6 +106,14 @@ type Runtime interface {
 
 	// Resume sends a follow-up prompt to an existing execution.
 	Resume(ctx context.Context, executionID string, prompt string) error
+
+	// InspectDeliveryRecordEvidence returns bounded retained delivery metadata
+	// for one SQL-owned session generation without prompting or mutating it.
+	InspectDeliveryRecordEvidence(ctx context.Context, request DeliveryRecordEvidenceRequest) (*DeliveryRecordEvidence, error)
+
+	// ReadDeliveryRecordSubmission fetches one uniquely selected immutable
+	// payload through the backend-only runtime boundary.
+	ReadDeliveryRecordSubmission(ctx context.Context, request DeliveryRecordSubmissionRequest) (*DeliveryRecordSubmission, error)
 
 	// Stop terminates an execution and records the supplied reason.
 	Stop(ctx context.Context, executionID string, reason string) error
@@ -229,4 +253,16 @@ var _ Backend = (*lifecycle.Manager)(nil)
 // Implemented by the shared lifecycle backend; uncertain liveness is an error.
 type RunOwnerRecovery interface {
 	StopRunOwnerForRecovery(context.Context, ExecutionOwner) error
+}
+
+// TurnChangeCaptureHandlerBinder installs the task-owned turn-change adapter
+// without exposing lifecycle implementation types to higher-level packages.
+type TurnChangeCaptureHandlerBinder interface {
+	SetTurnChangeCaptureHandler(TurnChangeCaptureHandler)
+}
+
+// InstallTurnChangeCaptureHandler binds turn-change capture through the public
+// runtime seam.
+func InstallTurnChangeCaptureHandler(binder TurnChangeCaptureHandlerBinder, handler TurnChangeCaptureHandler) {
+	binder.SetTurnChangeCaptureHandler(handler)
 }

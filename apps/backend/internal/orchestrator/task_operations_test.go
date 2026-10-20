@@ -2683,6 +2683,11 @@ func TestQueueAndInterruptForPeerMessageRejectsReplacementIncarnationWhileWaitin
 	coordinatorStopWaitForGuardRefs(t, svc, original.ID, 2)
 
 	require.NoError(t, repo.DeleteTaskSession(ctx, original))
+	_, err = repo.DB().ExecContext(ctx, `
+		DELETE FROM agent_delivery_cleanup_jobs
+		WHERE session_id = ? AND incarnation_id = ?
+	`, original.ID, original.QueueIncarnationID)
+	require.NoError(t, err)
 	replacement := &models.TaskSession{
 		ID: original.ID, TaskID: original.TaskID, State: models.TaskSessionStateRunning,
 		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -5552,6 +5557,32 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
+}
+
+func TestStartTaskWithLaunchContextPassesCausingRunID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cause", "session-cause", models.TaskSessionStateCompleted)
+	task, err := repo.GetTask(ctx, "task-cause")
+	require.NoError(t, err)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[task.ID] = task.ToAPI()
+
+	var launchReq *executor.LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchReq = req
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-cause"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	_, err = svc.StartTaskWithLaunchContext(ctx, task.ID, "profile-1", executor.LaunchContext{
+		CausingRunID: "office-run-1",
+		Prompt:       "Run the Office step",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, launchReq)
+	require.Equal(t, "office-run-1", launchReq.CausingRunID)
 }
 
 func TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch(t *testing.T) {

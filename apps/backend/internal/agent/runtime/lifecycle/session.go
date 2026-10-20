@@ -64,15 +64,19 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger               *logger.Logger
-	eventPublisher       *EventPublisher
-	streamManager        *StreamManager
-	executionStore       *ExecutionStore
-	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(failure InitialPromptFailure)
-	historyManager       *SessionHistoryManager
-	attachmentReader     AttachmentReader
-	stopCh               <-chan struct{} // For graceful shutdown coordination
+	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
+	logger                   *logger.Logger
+	eventPublisher           *EventPublisher
+	streamManager            *StreamManager
+	executionStore           *ExecutionStore
+	promptStarter            func(executionID string) (uint64, error)
+	persistPromptTurnBinding func(context.Context, *AgentExecution) error
+	initialPromptFailure     func(failure InitialPromptFailure)
+	historyManager           *SessionHistoryManager
+	attachmentReader         AttachmentReader
+	stopCh                   <-chan struct{} // For graceful shutdown coordination
+	turnChangeAdmitted       func(context.Context, *AgentExecution, uint64) error
+	turnChangeFailed         func(context.Context, *AgentExecution, uint64, error)
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -96,7 +100,7 @@ type InitialPromptFailure struct {
 }
 
 type sendPromptCallbacks struct {
-	beforeAdmission      func() error
+	beforeAdmission      func(context.Context, string, []v1.MessageAttachment) error
 	onAdmissionRejected  func(InitialPromptFailure)
 	onDispatched         func()
 	onFailure            func(InitialPromptFailure)
@@ -132,6 +136,14 @@ func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uin
 
 func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(failure InitialPromptFailure)) {
 	sm.initialPromptFailure = handler
+}
+
+func (sm *SessionManager) SetTurnChangeCaptureCallbacks(
+	admitted func(context.Context, *AgentExecution, uint64) error,
+	failed func(context.Context, *AgentExecution, uint64, error),
+) {
+	sm.turnChangeAdmitted = admitted
+	sm.turnChangeFailed = failed
 }
 
 // InitializeResult contains the result of session initialization
@@ -230,7 +242,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		}
 	}
 	deliveryDecision := NegotiateDurableDelivery(
-		journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+		journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true},
 		peerVersion,
 		peerDurable,
 		peerUnresolved,
@@ -242,6 +254,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		// Publish the negotiated mode before session/new or session/load can
 		// emit events on the already-connected updates stream.
 		execution.DeliveryMode = deliveryDecision.Mode
+		execution.deliveryNegotiation.Load().finish(nil)
 	}
 	sm.logger.Info("agentctl delivery capability negotiated",
 		zap.String("agent_type", agentConfig.ID()),
@@ -536,6 +549,16 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	runtimeConfigOptions map[string]string,
 	startModelPolicy StartModelPolicy,
 ) error {
+	negotiation := execution.beginDeliveryNegotiation()
+	defer negotiation.finish(ErrDurableAdoptionBlocked)
+	// A restored native conversation can be entering durable delivery for the
+	// first time. Its setup frames still need to wait for SQL authority.
+	execution.deliveryBootstrap.Store(execution.DeliveryHarnessGeneration == 1)
+	defer func() {
+		if !execution.isSessionInitialized() {
+			execution.deliveryBootstrap.Store(false)
+		}
+	}()
 	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
 		return err
@@ -543,6 +566,11 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
+	}
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
@@ -605,13 +633,6 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
-
-	// Publish session created event
-	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
-			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
-		)
-	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
@@ -721,6 +742,9 @@ func (sm *SessionManager) initializeACPConnection(
 		sm.streamManager.ConnectAll(execution, updatesReady)
 		select {
 		case <-updatesReady:
+			if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+				return ctx, nil, err
+			}
 			sm.logger.Debug("updates stream ready")
 		case <-time.After(10 * time.Second):
 			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")
@@ -750,7 +774,14 @@ func (sm *SessionManager) initializeACPConnection(
 			NativeStateReference: execution.ACPSessionID,
 		},
 	)
-	if err == nil && execution.ForceContextContinuation {
+	if err == nil && execution.InterruptedSubmissionID != "" {
+		if result == nil || result.SessionID != execution.RequiredNativeConversationID {
+			err = ErrDeliveryOwnerMismatch
+		} else {
+			err = retireInterruptedDeliverySubmission(ctx, client, execution)
+		}
+	}
+	if err == nil && execution.replacesPredecessorGeneration() {
 		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
 			err = retireErr
 		}
@@ -797,6 +828,12 @@ func retireUnresolvedDeliverySubmissions(
 		}
 	}
 	return nil
+}
+
+// replacesPredecessorGeneration reports whether this execution starts a new
+// native conversation that supersedes the committed harness generation.
+func (e *AgentExecution) replacesPredecessorGeneration() bool {
+	return e.ForceContextContinuation || e.ReplacesNativeConversation
 }
 
 func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
@@ -1620,7 +1657,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallback(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return sm.SendPromptWithAdmissionCallbackAndSubmissionID(
@@ -1637,7 +1674,7 @@ func (sm *SessionManager) SendPromptWithAdmissionCallbackAndSubmissionID(
 	validateStatus bool,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -1861,6 +1898,7 @@ func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt 
 	}
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.lastLiveActivityAt = execution.lastActivityAt
 	execution.lastActivityAtMu.Unlock()
 }
 
@@ -1874,6 +1912,11 @@ func (sm *SessionManager) sendPrompt(
 	callbacks sendPromptCallbacks,
 	steer bool,
 ) (*PromptResult, error) {
+	var admissionErr error
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -1894,6 +1937,9 @@ func (sm *SessionManager) sendPrompt(
 	if err := waitForPendingDispatchedPrompt(ctx, execution); err != nil {
 		return nil, err
 	}
+	if err := sm.waitForTurnChangeCapture(ctx, execution); err != nil {
+		return nil, err
+	}
 
 	// Drain any stale signal left in the channel by a prior dispatch-only prompt
 	// whose completion arrived after SendPrompt returned. Without this, the next
@@ -1912,6 +1958,10 @@ func (sm *SessionManager) sendPrompt(
 		defer beginPromptBarrier(execution)()
 	}
 
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	preparedCtx, effectivePrompt, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
 	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
@@ -1924,15 +1974,37 @@ func (sm *SessionManager) sendPrompt(
 	}
 	flushStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 	if callbacks.beforeAdmission != nil {
-		if err := callbacks.beforeAdmission(); err != nil {
-			sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		if err := callbacks.beforeAdmission(preparedCtx, effectivePrompt, materializedAttachments); err != nil {
+			handler := callbacks.onAdmissionRejected
+			var persistenceFailure *PromptAdmissionPersistenceError
+			if errors.As(err, &persistenceFailure) {
+				handler = callbacks.onFailure
+			}
+			sm.reportPromptFailure(execution, 0, err, handler)
 			return nil, err
 		}
+	}
+	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
+		return nil, err
 	}
 	promptGeneration, err := sm.admitPrompt(execution, validateStatus)
 	if err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
+	}
+	if callbacks.deliverySubmissionID != "" {
+		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))
+	}
+	if err := sm.persistDurablePromptTurnBinding(preparedCtx, execution, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		return nil, err
+	}
+	if sm.turnChangeAdmitted != nil {
+		if err := sm.turnChangeAdmitted(preparedCtx, execution, promptGeneration); err != nil {
+			sm.logger.Warn("failed to capture turn-change start checkpoint",
+				zap.String("execution_id", execution.ID), zap.Uint64("prompt_generation", promptGeneration), zap.Error(err))
+		}
 	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
@@ -1941,6 +2013,9 @@ func (sm *SessionManager) sendPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,
 	); err != nil {
+		if sm.turnChangeFailed != nil {
+			sm.turnChangeFailed(preparedCtx, execution, promptGeneration, err)
+		}
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -2102,6 +2177,10 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 	default:
 		execution.promptLifecycleMu.Lock()
 		if execution.promptSettlementGeneration != 0 {
+			execution.promptLifecycleMu.Unlock()
+			return 0, ErrPromptSettlementPending
+		}
+		if execution.turnChangeCaptureGeneration != 0 {
 			execution.promptLifecycleMu.Unlock()
 			return 0, ErrPromptSettlementPending
 		}
@@ -2409,6 +2488,11 @@ const (
 	jsonRPCInvalidParams         = -32602
 	missingProviderRolloutPrefix = "no rollout found for thread id "
 	missingProviderSessionPrefix = "Session not found: "
+	// Codex reports a session it has archived with an internal error whose
+	// details name the requested session ("session <id> is archived. ...").
+	// The stored native session can no longer be loaded, like the other
+	// missing-provider-session shapes.
+	missingProviderArchivedSessionSuffix = " is archived"
 )
 
 type sessionLoadRequestError struct {
@@ -2420,24 +2504,25 @@ type sessionLoadRequestError struct {
 }
 
 // isMissingProviderSessionErr recognizes Codex's explicit not-found response
-// after its process-local rollout state disappeared and Auggie's session not
-// found error. The session ID must match the one Kandev attempted to load so an
-// unrelated provider error cannot be classified as missing native state.
-func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
+// after its process-local rollout state disappeared, Codex's archived-session
+// response, and Auggie's session not found error. The session ID must match the
+// one Kandev attempted to load so an unrelated provider error cannot be
+// classified as missing native state.
+func isMissingProviderSessionErr(err error, expectedSessionID, agentType string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
 	}
 	var reqErr *acp.RequestError
 	if errors.As(err, &reqErr) {
 		encoded, marshalErr := json.Marshal(reqErr)
-		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID) {
+		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID, agentType) {
 			return true
 		}
 	}
 	message := err.Error()
 	for offset := strings.IndexByte(message, '{'); offset >= 0; {
 		candidate := message[offset:]
-		if matchesMissingProviderSession([]byte(candidate), expectedSessionID) {
+		if matchesMissingProviderSession([]byte(candidate), expectedSessionID, agentType) {
 			return true
 		}
 		next := strings.IndexByte(candidate[1:], '{')
@@ -2449,7 +2534,7 @@ func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	return false
 }
 
-func matchesMissingProviderSession(encoded []byte, expectedSessionID string) bool {
+func matchesMissingProviderSession(encoded []byte, expectedSessionID, agentType string) bool {
 	var projected sessionLoadRequestError
 	if err := json.Unmarshal(encoded, &projected); err != nil {
 		return false
@@ -2457,6 +2542,13 @@ func matchesMissingProviderSession(encoded []byte, expectedSessionID string) boo
 	if projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
 		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	archivedDetail := "session " + expectedSessionID + missingProviderArchivedSessionSuffix
+	if agentType == codexACPAgentID && projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		(projected.Data.Details == archivedDetail || projected.Data.Details == archivedDetail+"." ||
+			strings.HasPrefix(projected.Data.Details, archivedDetail+". ")) {
 		return true
 	}
 	if projected.Code == jsonRPCInvalidParams &&

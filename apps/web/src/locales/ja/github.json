@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "この削除の修復を要求済み。",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "修復要求済み。再キュー前に新しいコミット待ち。",
   "mergeQueueRecoveryStatusWaitingForCommit": "再キュー前に新しいコミット待ち。",
-  "mergeQueueRecoveryStatusWaitingForChecks": "新しい head 検出。必須チェック待ち。"
+  "mergeQueueRecoveryStatusWaitingForChecks": "新しい head 検出。必須チェック待ち。",
+  "mergeAccessLoading": "マージ権限を確認しています。",
+  "mergeAccessUnavailable": "マージ権限を確認できません。",
+  "mergeAccessDeniedByActor": "{{actor}} は {{repository}} にマージできません。",
+  "mergeAccessDenied": "このアカウントは {{repository}} にマージできません。",
+  "checkMergeAccess": "再確認",
+  "mergeAsActor": "{{actor}} として"
 }

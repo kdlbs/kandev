@@ -3,12 +3,16 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestQueueUserPrompt_RuntimeUnavailableSurvivesFastPathRedispatch is the
@@ -60,6 +64,137 @@ func TestQueueUserPrompt_RuntimeUnavailableSurvivesFastPathRedispatch(t *testing
 	if entries[0].Content != "hello" {
 		t.Fatalf("surviving entry content = %q, want %q", entries[0].Content, "hello")
 	}
+}
+
+func TestQueueUserPrompt_RetryableRecoveryGuardRetainsPersistedTurnAndMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	const turnID = "turn-accepted-before-recovery"
+	const messageID = "message-accepted-before-recovery"
+	acceptedAt := time.Now().UTC()
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID: turnID, TaskSessionID: "s1", TaskID: "t1", StartedAt: acceptedAt,
+	}); err != nil {
+		t.Fatalf("seed accepted turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: messageID, TaskSessionID: "s1", TaskID: "t1", TurnID: turnID,
+		AuthorType: models.MessageAuthorUser, Content: "accepted prompt", CreatedAt: acceptedAt,
+	}); err != nil {
+		t.Fatalf("seed accepted message: %v", err)
+	}
+	assertAcceptedRecords := func(stage string) {
+		t.Helper()
+		turns, turnErr := repo.ListTurnsBySession(ctx, "s1")
+		if turnErr != nil {
+			t.Fatalf("%s: list turns: %v", stage, turnErr)
+		}
+		if len(turns) != 1 || turns[0].ID != turnID || turns[0].CompletedAt != nil {
+			t.Fatalf("%s: persisted turns = %+v, want the same one open turn %q", stage, turns, turnID)
+		}
+		messages, messageErr := repo.ListMessages(ctx, "s1")
+		if messageErr != nil {
+			t.Fatalf("%s: list messages: %v", stage, messageErr)
+		}
+		if len(messages) != 1 || messages[0].ID != messageID || messages[0].TurnID != turnID ||
+			messages[0].Content != "accepted prompt" {
+			t.Fatalf("%s: persisted messages = %+v, want original message %q on turn %q", stage, messages, messageID, turnID)
+		}
+	}
+	assertAcceptedRecords("before queueing")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-retained")
+
+	guardErr := &SessionRecoveryGuardError{
+		Cause: errors.New("remote owner is still being reconciled"), SessionID: "s1", Retryable: true,
+	}
+	var ready atomic.Bool
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		isAgentRunningFn:         func(context.Context, string) bool { return ready.Load() },
+		isAgentReadyFn:           func(context.Context, string) bool { return ready.Load() },
+		currentPromptExecutionID: "exec-retained",
+		promptDone:               make(chan struct{}),
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, guardErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+
+	workerDone := make(chan struct{}, 2)
+	svc.onQueuedMessageExecutionComplete = func() { workerDone <- struct{}{} }
+	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "accepted prompt", "", false, nil, nil, true); err != nil {
+		t.Fatalf("QueueUserPrompt: %v", err)
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the accepted prompt to be deferred")
+	}
+
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("snapshot queue: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "accepted prompt" {
+		t.Fatalf("accepted prompt queue = %+v, want one retained accepted prompt", entries)
+	}
+	if entries[0].ID == "" {
+		t.Fatal("accepted prompt lost its queue identity")
+	}
+	finalSession, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if finalSession.State == models.TaskSessionStateFailed {
+		t.Fatalf("retryable recovery guard terminally failed the session: %q", finalSession.ErrorMessage)
+	}
+	registry := svc.resumeAttemptStore()
+	registry.mu.Lock()
+	hasRecoveryHistory := registry.hasRecoveryHistoryLocked("s1")
+	tombstoneCount := len(registry.tombstones["s1"])
+	registry.mu.Unlock()
+	if !hasRecoveryHistory || tombstoneCount == 0 {
+		t.Fatalf("retryable cold-resume attempt did not leave a tombstone: history=%t tombstones=%d", hasRecoveryHistory, tombstoneCount)
+	}
+	assertAcceptedRecords("after retryable recovery refusal")
+
+	ready.Store(true)
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-retained",
+		Status: string(v1.AgentStatusReady), RecoveredAvailabilityOnly: true,
+	})
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("availability did not dispatch the retained accepted prompt after recovery")
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for retained prompt dispatch to finish")
+	}
+	if len(agentMgr.capturedPrompts) != 1 || agentMgr.capturedPrompts[0] != "accepted prompt" {
+		t.Fatalf("recovered prompt dispatches = %v, want exactly the accepted prompt once", agentMgr.capturedPrompts)
+	}
+	entries, _, err = svc.messageQueue.SnapshotSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("snapshot queue after availability dispatch: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("queue after availability dispatch = %+v, want empty", entries)
+	}
+	assertAcceptedRecords("after availability dispatch")
 }
 
 // TestPromptTask_SessionAwaitingLaunchClassifiedRuntimeUnavailable pins the
@@ -192,5 +327,49 @@ func TestPromptTask_ExecutorLookupErrorNotClassifiedRuntimeUnavailable(t *testin
 	if errors.Is(err, ErrSessionRuntimeUnavailable) {
 		t.Fatalf("a genuine executor lookup error must not classify as ErrSessionRuntimeUnavailable "+
 			"(it would be silently queued with no future drain trigger): %v", err)
+	}
+}
+
+func TestPromptTask_NonRetryableRecoveryGuardRemainsVisible(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-retained")
+	guardErr := fmt.Errorf("resume admission: %w", &SessionRecoveryGuardError{
+		Cause: errors.New("recovery owner was superseded"), SessionID: "s1", Retryable: false,
+	})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		isAgentRunningFn:         func(context.Context, string) bool { return false },
+		isAgentReadyFn:           func(context.Context, string) bool { return false },
+		currentPromptExecutionID: "exec-retained",
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, guardErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.PromptTask(ctx, "t1", "s1", "prompt", "", false, nil, false)
+	if err == nil {
+		t.Fatal("expected the superseded recovery guard to remain a visible error")
+	}
+	if errors.Is(err, ErrSessionRuntimeUnavailable) {
+		t.Fatalf("non-retryable recovery guard was reclassified as runtime-unavailable: %v", err)
+	}
+	finalSession, loadErr := repo.GetTaskSession(ctx, "s1")
+	if loadErr != nil {
+		t.Fatalf("reload session: %v", loadErr)
+	}
+	if finalSession.State != models.TaskSessionStateFailed {
+		t.Fatalf("non-retryable recovery guard session state = %q, want visible failed state", finalSession.State)
 	}
 }

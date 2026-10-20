@@ -23,7 +23,7 @@ otherwise have to be rediscovered at build time.
 | --- | --- |
 | `REQ-TASKS-KANBAN-TASK-REORDERING-001` `.1`, `.36` | Ordering keys and the promotion comparators |
 | `.2`, `.38` | Surfaces |
-| `.12` | Surfaces, Position allocation |
+| `.9`, `.12` | Surfaces, Keyboard gesture availability, Position allocation |
 | `.8`, `.16`, `.17`, `.18`, `.19`, `.20`, `.25` | Reorder contract |
 | `.15`, `.28`, `.29`, `.30`, `.31` | Position allocation |
 | `.26`, `.27`, `.37` | Concurrency |
@@ -502,6 +502,38 @@ duration of a drag both satisfy the stated outcomes.
 The in-repo keyboard-sortable convention (a keyboard sensor with sortable
 coordinate resolution) already exists in the quick-chat tab strip and the task
 row settings list, and matches the key bindings the requirement names.
+
+## Keyboard gesture availability
+
+`SwimlaneKanbanContent` keeps `useKeyboardReorder(workflowId, displayTasks)`
+mounted across task-list changes. The hook owns the transient picked identity
+and band draft. For AC-TASKS-KANBAN-TASK-REORDERING-001.9/.12, reconcile stored
+pickup availability before it can block subsequent card keys: at least one task
+in the current hook input must have the picked ID. Otherwise retire the stored
+gesture, clear all exposed draft fields and never call `reorderBand`. Returning
+null alone must not leave a stored draft that revives when the ID reappears.
+An empty input cancels too.
+
+This input is `displayTasks`, after caller filtering and orphan remapping,
+before per-column virtualization. Global persisted inventory and mounted DOM
+rows do not determine availability. Virtual-row unmounting, equivalent list or
+object refreshes and changes to other tasks do not alone cancel a still-present
+picked ID. Do not compare whole-list equality. Still-present task step/band
+transitions, whole-band normalization and existing merge/conflict/pending rules
+are outside this correction. Preserve descendant-event rejection and normal
+pick/move/commit/Escape handling.
+
+`KanbanCardShell` routes phone Enter/Space to navigation before the reorder
+handler, per [mobile scrolling](mobile-kanban-scroll.md). Preserve that boundary,
+current desktop/tablet composition, insertion indicators and localized position
+announcements. Cancellation adds no focus transfer, layout, touch control or copy.
+
+Cover the input transition in hook tests and a real
+`SwimlaneKanbanContent`/`KanbanCard` composition regression. A focused desktop
+browser scenario removes the picked task through the existing API on the same
+mounted board, then verifies another card's reorder and persisted result.
+Existing phone real-card navigation and mobile scroll/no-mutation browser tests
+protect the phone exception.
 
 ## Related
 

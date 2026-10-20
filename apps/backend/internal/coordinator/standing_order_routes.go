@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -41,7 +42,8 @@ func (h *Handlers) httpListStandingOrders(c *gin.Context) {
 // httpAddStandingOrder backs POST .../standing-orders.
 func (h *Handlers) httpAddStandingOrder(c *gin.Context) {
 	var body map[string]json.RawMessage
-	if err := c.ShouldBindJSON(&body); err != nil {
+	raw, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxSettingsBodyBytes))
+	if err != nil || json.Unmarshal(raw, &body) != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse("invalid request body"))
 		return
 	}
@@ -70,7 +72,7 @@ func parseAddStandingOrder(body map[string]json.RawMessage) (AddStandingOrderInp
 		return AddStandingOrderInput{}, &FieldError{Field: fieldStandingOrderText, Message: "text is required"}
 	}
 	in := AddStandingOrderInput{Text: *text}
-	if raw, ok := body[fieldSourceProposalID]; ok && string(raw) != "null" {
+	if raw, ok := body[fieldSourceProposalID]; ok && string(raw) != jsonNullLiteral {
 		id, _, err := rawStringField(body, fieldSourceProposalID)
 		if err != nil {
 			return AddStandingOrderInput{}, err

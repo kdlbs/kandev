@@ -68,6 +68,21 @@ beforeEach(() => {
 });
 
 describe("useSessionPrompts authority", () => {
+  it("defers prompt reads and subscription leases until the panel is visible", async () => {
+    const before = readinessLease.subscribers;
+    const hook = renderHook(({ detailActive }) => useSessionPrompts("session", { detailActive }), {
+      initialProps: { detailActive: false },
+    });
+    await act(async () => Promise.resolve());
+    expect(readinessLease.subscribers).toBe(before);
+    expect(listTaskSessionMessages).not.toHaveBeenCalled();
+    hook.rerender({ detailActive: true });
+    await waitFor(() => expect(listTaskSessionMessages).toHaveBeenCalledTimes(1));
+    expect(readinessLease.subscribers).toBe(before + 1);
+    hook.rerender({ detailActive: false });
+    expect(readinessLease.subscribers).toBe(before);
+  });
+
   it("requests only user-authored prompt messages", async () => {
     renderHook(() => useSessionPrompts("session"));
 

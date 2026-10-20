@@ -35,7 +35,7 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	sessions, err := h.service.ListTaskSessions(ctx, taskID)
+	sessions, err := h.service.ListTaskSessionSummaryObservations(ctx, taskID)
 	if err != nil {
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)

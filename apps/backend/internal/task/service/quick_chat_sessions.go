@@ -131,12 +131,7 @@ func (s *Service) listQuickChatTasks(ctx context.Context, workspaceID string) ([
 // (docs/specs/coordinator/system-design/copilot.md#conversation-task): the
 // coordinator popover is the conversation task's only surface.
 func IsRestorableQuickChatTask(task *models.Task) bool {
-	return task != nil &&
-		task.IsEphemeral &&
-		task.WorkflowID == "" &&
-		task.Origin != models.TaskOriginAutomationRun &&
-		task.Origin != models.TaskOriginCoordinator &&
-		!IsManagedConversationTask(task)
+	return models.IsRestorableQuickChatTask(task)
 }
 
 func quickChatSessionKind(task *models.Task) string {

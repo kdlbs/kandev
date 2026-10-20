@@ -32,6 +32,8 @@ import { TasksSection } from "./sections/tasks-section";
 import { SidebarNavigationSplit } from "./sidebar-navigation-split";
 import { SidebarLayoutNavigation } from "./sidebar-layout-navigation";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
+import { useIntegratedControl } from "@/components/integrated-control/integrated-control-provider";
+import { IntegratedControlNavigation } from "@/components/integrated-control/integrated-control-navigation";
 
 const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean }> = [
   {
@@ -105,10 +107,11 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
       {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
     </div>
   );
-  if (!inOffice && !collapsed)
+  if (!inOffice)
     return (
       <SidebarNavigationSplit
         key={workspaceId}
+        collapsed={collapsed}
         navigation={navigation}
         tasks={<TasksSection collapsed={collapsed} />}
       />
@@ -133,8 +136,10 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
 }
 
 function AppSidebarNavigation({ collapsed, mode, settingsMode }: AppSidebarNavigationProps) {
+  const control = useIntegratedControl();
   function content() {
     if (settingsMode && !collapsed) return <AppSidebarSettingsMode />;
+    if (control?.active) return <IntegratedControlNavigation collapsed={collapsed} />;
     if (mode === "unknown") return <AppSidebarUnresolvedNav collapsed={collapsed} />;
     return <AppSidebarModeNav collapsed={collapsed} inOffice={mode === "office"} />;
   }

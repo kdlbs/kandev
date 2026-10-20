@@ -9,6 +9,7 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-005
   - REQ-EXECUTORS-PLUGIN-006
   - REQ-EXECUTORS-PLUGIN-007
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
 ---
 
 # Remote executor plugins system design
@@ -36,6 +37,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 | REQ-EXECUTORS-PLUGIN-005 | Plugin lifecycle |
 | REQ-EXECUTORS-PLUGIN-006 | Effective capabilities and expiry |
 | REQ-EXECUTORS-PLUGIN-007 | User interfaces |
+| REQ-EXECUTORS-PORT-COLLISION-SAFETY-001 | Bootstrap and reverse connectivity (loopback probe for Windows test listeners and the task-process port allocator) |
 
 ## Registration and profiles
 
@@ -148,6 +150,19 @@ already configured for remote executors, and replaces any launch-supplied value.
 credentials; reject loopback-only or missing addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
+On Windows the fixture's own unit tests advertise a loopback address
+(`KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK=1`) so the ephemeral test binary binds loopback instead of
+a non-loopback interface and does not request Firewall access. The fixture's default advertised
+address and listener are unchanged outside tests. This mapping is scoped to the loopback probe: the
+loopback-only regression policy also covers the launcher's Windows port-occupied regression test,
+which holds the probed port with a loopback listener, while production port probing and backend
+port ownership remain owned by the
+[port collision and backend ownership safety](../requirements/port-collision-safety.md) requirement.
+The task-process port allocator (`portutil.AllocatePort`) only needs a port number, so its probe
+binds `127.0.0.1:0` rather than a wildcard address, the same loopback availability signal.
+It closes the probe before returning. The caller must bind the port and may lose
+that race; the result is neither a reservation nor a guarantee of uniqueness or
+availability on wildcard or non-loopback interfaces.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases
@@ -249,6 +264,11 @@ An unsupported state version requires a compatible plugin; the host does not rei
 
 Ordinary agent Stop uses core agentctl behavior and detaches transient transport as appropriate.
 Backend shutdown closes local connections and stops plugin processes without destroying remote compute.
+It must also preserve the remote agentctl and its active agent process. Stopping a local proxy or plugin host must not terminate its remote children.
+This remote lifetime rule is independent of `features.agentSurvival`, which remains an opt-in for local/worktree processes and defaults to off.
+Normal local/worktree shutdown therefore stops local agents by default; remote shutdown detaches transport and preserves ongoing work.
+Startup obtains fresh connection credentials, verifies recorded ownership, and reattaches to the same remote execution.
+The [durable delivery contract](../../platform/requirements/durable-agent-delivery.md) owns long-outage output retention and replay.
 Archive, delete, reset, and failed-launch rollback use host-authorized resource destruction.
 Acquire the existing cleanup claim for environment owner and generation before external teardown.
 Late callbacks and stale claims cannot mutate inventory or destroy a successor resource.

@@ -75,9 +75,8 @@ func (s *sidebarQuerySnapshot) prepare(
 			return "", nil, fmt.Errorf("index sidebar candidates: %w", err)
 		}
 	}
-	if _, err := s.tx.ExecContext(ctx, "ANALYZE "+sidebarScratchTable); err != nil {
-		return "", nil, fmt.Errorf("analyze sidebar candidates: %w", err)
-	}
+	// Empty parent IDs can dominate this relation; recursive lookups use task IDs.
+	// Default index estimates preserve indexed child lookups for flat task forests.
 	if err := s.checkpoint("indexed"); err != nil {
 		return "", nil, err
 	}
