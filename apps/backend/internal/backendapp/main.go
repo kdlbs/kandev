@@ -1035,6 +1035,8 @@ func startAgentInfrastructure(
 			func(fn func() error) { addRuntimeCleanup(fn) })
 	}
 
+	startConversationSearch(ctx, repos.Task, log, func(stop func() error) { addRuntimeCleanup(stop) })
+
 	// Start the task delivery ledger sweep. Must run after task/repository
 	// tables exist (already true here, provided in provideRepositories) —
 	// the ledger's foreign keys require them present at CREATE TABLE time

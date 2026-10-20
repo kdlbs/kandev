@@ -551,5 +551,15 @@
   "sidebarYearsMax": "99+ŷ",
   "integrationSettings": "Ĩńţēĝŕàţĩōń śēţţĩńĝś",
   "pageNavigation": "Ōń ţĥĩś ƥàĝē",
-  "viewOptions": "Vĩēŵ ōƥţĩōńś"
+  "viewOptions": "Vĩēŵ ōƥţĩōńś",
+  "conversationSearch_open": "Śēàŕćĥ ţàśķś",
+  "conversationSearch_match": "Ćōńvēŕśàţĩōń ḿàţćĥ",
+  "conversationSearch_searching": "Śēàŕćĥĩńĝ ćōńvēŕśàţĩōńś…",
+  "conversationSearch_indexing": "Ćōńvēŕśàţĩōń ĩńďēxĩńĝ ĩś ĩń ƥŕōĝŕēśś.",
+  "conversationSearch_limited": "Śōḿē ćōńvēŕśàţĩōń ḿàţćĥēś àŕē ōḿĩţţēď. Ŕēƒĩńē ŷōũŕ śēàŕćĥ.",
+  "conversationSearch_unavailable": "Ćōńvēŕśàţĩōń śēàŕćĥ ĩś ũńàvàĩĺàƀĺē.",
+  "conversationSearch_query_too_short": "Ũśē àţ ĺēàśţ 3 ćĥàŕàćţēŕś ţō śēàŕćĥ ćōńvēŕśàţĩōńś.",
+  "conversationSearch_query_too_long": "Ũśē àţ ḿōśţ 200 ćĥàŕàćţēŕś ţō śēàŕćĥ ćōńvēŕśàţĩōńś.",
+  "conversationSearch_query_too_broad": "Ũśē àţ ĺēàśţ 3 ćōńśēćũţĩvē ĺēţţēŕś ōŕ ďĩĝĩţś.",
+  "conversationSearch_title": "Ćōḿḿàńď Ƥàĺēţţē"
 }

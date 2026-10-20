@@ -120,6 +120,14 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
 
+Conversation search uses SQLite FTS5 trigram indexing or PostgreSQL `pg_trgm`.
+Kandev attempts to install `pg_trgm` in the `public` schema at startup. If the
+application database role cannot install extensions, a database administrator can
+run `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;` in the Kandev
+database, then restart Kandev. Missing text-index support disables conversation
+search while task metadata search remains available. History is indexed after
+startup; the index uses additional disk space.
+
 `database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
 ### Default SQLite continuity

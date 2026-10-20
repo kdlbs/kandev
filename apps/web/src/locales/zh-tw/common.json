@@ -551,5 +551,15 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "整合設定",
   "pageNavigation": "本頁導覽",
-  "viewOptions": "檢視選項"
+  "viewOptions": "檢視選項",
+  "conversationSearch_open": "搜尋任務",
+  "conversationSearch_match": "對話匹配",
+  "conversationSearch_searching": "正在搜尋對話…",
+  "conversationSearch_indexing": "正在為對話建立索引。",
+  "conversationSearch_limited": "部分對話匹配已省略。請縮小搜尋範圍。",
+  "conversationSearch_unavailable": "對話搜尋不可用。",
+  "conversationSearch_query_too_short": "請使用至少 3 個字元搜尋對話。",
+  "conversationSearch_query_too_long": "搜尋對話時請最多使用 200 個字元。",
+  "conversationSearch_query_too_broad": "請使用至少 3 個連續的字母、漢字或數字。",
+  "conversationSearch_title": "命令面板"
 }

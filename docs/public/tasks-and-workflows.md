@@ -154,6 +154,26 @@ otherwise, review the current assignment and form choices before deciding whethe
 to retry. A multi-task selection keeps the separate bulk workflow action and does
 not support per-task profile mappings.
 
+## Find a task from its conversation
+
+Open `Cmd/Ctrl+K` and enter a phrase from a user message or an assistant reply.
+The Commands and Tasks scopes search titles, descriptions, repository details,
+and saved conversation text across the selected workspace. On a phone, open the
+navigation menu and select **Search tasks**.
+
+Conversation search uses literal text, ignores case, and keeps accents significant.
+Enter 3 to 200 characters with at least three consecutive letters or digits.
+Quotes and punctuation have no special search meaning. Tool output, thinking,
+plans, and attachments are not included.
+
+A conversation result shows a highlighted excerpt. Select it to open the matching
+session. Archived tasks can appear after active tasks; opening one does not restore
+it or start an agent. Files and Contents continue to search repository files.
+
+Existing history is indexed in the background. During indexing, some matches can
+be missing. Refine the phrase if the palette reports limited results. Title and
+description search remain available if conversation search is unavailable.
+
 ## Task actions from the command palette
 
 While a task is open, `Cmd/Ctrl+K` offers the task actions available from its sidebar
@@ -164,8 +184,8 @@ also shows other tasks. Duplicate remains disabled.
 
 Use arrow keys and Enter to choose an action or nested option. Back or Escape
 returns to the previous choices. Archive and Delete retain their confirmations.
-On phones, task overflow retains touch access; an attached keyboard can open the
-palette, whose choices also support touch.
+On phones, open **Search tasks** from the navigation menu to use the palette,
+or use task overflow for actions on the current task.
 
 ## Prepare a workspace
 
