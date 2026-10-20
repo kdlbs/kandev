@@ -298,11 +298,12 @@ func (s *Service) startSilentRestoreCandidate(
 		)
 	}
 	ownedResumeCtx := context.WithValue(ownerCtx, continuationOwnedContextKey{}, true)
+	ownedResumeCtx = context.WithValue(ownedResumeCtx, silentRestoreStartupContextKey{}, true)
 	execution, err := s.resumeTaskSessionWithContinuationAndReservation(
 		ownedResumeCtx, inputs.task.ID, inputs.session.ID, options, commitWhenReady, reservation,
 	)
 	if err != nil {
-		return err
+		return errors.Join(err, s.settleFailedSilentRestoreCandidate(ctx, store, attemptID, checkpoint, inputs))
 	}
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
@@ -740,6 +741,13 @@ func (s *Service) markSilentRestoreCandidateDead(
 	if !ok || prober.RowLiveness(running) != models.ProcessLivenessDead {
 		return models.SilentRestoreCheckpoint{}, errors.New("candidate execution liveness is not proven dead")
 	}
+	return s.recordSilentRestoreCandidateDead(ctx, store, attemptID, expected, inputs)
+}
+
+func (s *Service) recordSilentRestoreCandidateDead(
+	ctx context.Context, store taskrepo.SilentRestoreRepository, attemptID string,
+	expected models.SilentRestoreCheckpoint, inputs *silentRestoreInputs,
+) (models.SilentRestoreCheckpoint, error) {
 	ownerCtx, err := s.revalidateSilentRestoreInputs(ctx, inputs, expected)
 	if err != nil {
 		return models.SilentRestoreCheckpoint{}, err

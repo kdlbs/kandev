@@ -1122,6 +1122,13 @@ func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Contex
 	return err
 }
 
+func (a *lifecycleAdapter) CleanupFailedRestoreIfCurrent(
+	ctx context.Context, sessionID, executionID string, updatedAt time.Time,
+	checkpoint func(context.Context) error,
+) error {
+	return a.mgr.CleanupFailedRestoreIfCurrent(ctx, sessionID, executionID, updatedAt, checkpoint)
+}
+
 func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
 }

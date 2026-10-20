@@ -1045,6 +1045,10 @@ func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 	if attempt == nil || s.executor == nil {
 		return
 	}
+	if owned, _ := attempt.ctx.Value(silentRestoreStartupContextKey{}).(bool); owned {
+		// The restore owner must checkpoint termination before inventory cleanup.
+		return
+	}
 	executionID := attempt.execution()
 	if executionID == "" || !s.resumeAttemptStore().canCleanup(attempt) {
 		return

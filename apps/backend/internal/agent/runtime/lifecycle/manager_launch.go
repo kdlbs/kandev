@@ -1926,6 +1926,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		m.markAgentStartPending(execution)
 		m.trackActivity(executionActivityKey(execution.ID), activityLease)
 	}
+	execution.bindSuccessorGenerationOwner(ctx, req)
 	return execution, nil
 }
 
