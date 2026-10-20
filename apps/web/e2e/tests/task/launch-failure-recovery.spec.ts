@@ -492,6 +492,7 @@ test.describe("task launch failure recovery", () => {
     await expect(failureRow).toContainText("Required contribution access was denied.");
     await failureRow.getByText("Technical details", { exact: true }).click();
     await expect(failureRow.locator("details")).toContainText("Attempt: resume-1");
+    await expect(failureRow.locator("details")).toContainText(failureText);
     await failureRow.getByText("Technical details", { exact: true }).click();
     await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
     const transcript = session.activeChat().locator(".chat-message-list").first();

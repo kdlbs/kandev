@@ -144,3 +144,18 @@ pnpm --dir apps/web exec vitest run components/task/chat/message-list-native.tes
 pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/git/turn-changed-files-scroll.spec.ts e2e/tests/session/durable-stream-recovery.spec.ts e2e/tests/task/launch-failure-recovery.spec.ts -- --grep 'follows delayed|native resume clears|retains session failure' --retries=0
 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/git/mobile-turn-changed-files-scroll.spec.ts e2e/tests/session/mobile-durable-stream-recovery.spec.ts e2e/tests/task/mobile-launch-failure-recovery.spec.ts -- --grep 'follows delayed|native resume clears|retains session failure' --retries=0
 ```
+
+### Typed history detail follow-up
+
+CodeRabbit identified a typed historical error whose cause had no detail text.
+The localized summary replaced its specific message in the transcript. Keep
+that message in the existing Technical details disclosure, with the existing
+sanitation applied to display and copy. Typed entries still exclude raw
+`metadata.error_output`, and legacy fallback behavior is unchanged.
+
+The extended historical-error test failed before the change because the
+provider rejection text was absent. All 75 focused recovery tests pass after
+the change, including preview-secret redaction, raw-output exclusion, clipboard
+content, and a missing recovery card. Desktop and phone browser assertions
+now check that the original failure text remains in the disclosure. Both browser cases passed with retries disabled and fresh captures. Changed-file
+ESLint, TypeScript, catalog validation, and specification lint also passed.

@@ -92,10 +92,8 @@ function RecoveryHistoryView({
   const { t } = useTranslation();
   const summary =
     typed?.summary ?? readableFailureSummary(comment.content) ?? t("task:anErrorOccurred");
-  const legacyDetails = typed ? "" : (metadata?.error_output ?? comment.content);
-  const showDetails = Boolean(
-    typed?.detailFields.length || (legacyDetails && legacyDetails !== summary),
-  );
+  const detailText = typed ? comment.content : (metadata?.error_output ?? comment.content);
+  const showDetails = Boolean(typed?.detailFields.length || (detailText && detailText !== summary));
   return (
     <div
       className="min-w-0 py-2 text-xs text-muted-foreground"
@@ -108,7 +106,7 @@ function RecoveryHistoryView({
           testId="session-recovery-history-details"
           structuredFields={typed?.detailFields}
         >
-          {legacyDetails}
+          {detailText !== summary ? detailText : ""}
         </SessionErrorDetails>
       )}
     </div>
