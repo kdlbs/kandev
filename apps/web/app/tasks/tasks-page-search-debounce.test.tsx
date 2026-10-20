@@ -6,6 +6,8 @@ import type { TasksListViewProps } from "./tasks-list-view";
 import { TasksListFilters } from "./tasks-list-filters";
 import { taskId, type Repository, type Task } from "@/lib/types/http";
 
+const UNAVAILABLE_FILTER_LABEL = "Unavailable filter";
+
 const controls = vi.hoisted(() => ({
   mobile: false,
   display: {
@@ -27,7 +29,14 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: controls.toast }) }));
 vi.mock("@/hooks/use-kanban-display-settings", () => ({
-  useKanbanDisplaySettings: () => controls.display,
+  useKanbanDisplaySettings: () => ({
+    ...controls.display,
+    repositories: useAppStore(
+      (state) =>
+        state.repositories.itemsByWorkspaceId[controls.display.activeWorkspaceId] ??
+        controls.display.repositories,
+    ),
+  }),
 }));
 vi.mock("@/hooks/use-user-display-settings", () => ({
   useUserDisplaySettings: () => ({
@@ -82,7 +91,7 @@ vi.mock("./tasks-list-view", () => ({
       <output aria-label="Total">{total}</output>
       <output aria-label="Loading">{String(isLoading)}</output>
       <output aria-label="Page">{pagination.pageIndex + 1}</output>
-      <output aria-label="Unavailable filter">{unavailableFilter ?? ""}</output>
+      <output aria-label={UNAVAILABLE_FILTER_LABEL}>{unavailableFilter ?? ""}</output>
       <button onClick={() => setPagination((prev) => ({ ...prev, pageIndex: 1 }))}>Page two</button>
       <button onClick={() => setPagination((prev) => ({ ...prev, pageSize: 10 }))}>Ten rows</button>
       <button onClick={() => setArchiveMode("all")}>Include archived</button>
@@ -124,7 +133,7 @@ function page(fromBoot = true, metadataLoaded = fromBoot) {
         initialTasks={[]}
         initialTotal={0}
         initialDataLoaded={fromBoot}
-        initialMetadataLoaded={metadataLoaded}
+        initialMetadataLoaded={{ workflows: metadataLoaded, repositories: metadataLoaded }}
         initialSort="title_asc"
         initialGroup="none"
       />
@@ -264,7 +273,7 @@ describe("List search admission", () => {
 it("waits for metadata before treating a saved workflow as unavailable", async () => {
   const view = render(page(false));
   await act(async () => {});
-  expect(screen.getByLabelText("Unavailable filter").textContent).toBe("");
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
   expect(screen.getByLabelText("Loading").textContent).toBe("true");
   expect(controls.list).not.toHaveBeenCalled();
 
@@ -283,11 +292,37 @@ it("waits for metadata before treating a saved workflow as unavailable", async (
   });
   view.rerender(page(false, true));
   await act(async () => {});
-  expect(screen.getByLabelText("Unavailable filter").textContent).toBe("");
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
   expect(screen.getByLabelText("Loading").textContent).toBe("false");
   expect(controls.list).toHaveBeenCalledWith(
     "ws1",
     expect.objectContaining({ workflowId: "wf1", repositoryId: "repo1" }),
+    expect.anything(),
+  );
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+it("waits for a fresh repository read before rejecting an ID absent from cached metadata", async () => {
+  window.history.replaceState({}, "", "/tasks?workflow=all&repository=repo2");
+  const view = render(page(false));
+  await act(async () => {
+    testStore.getState().setRepositories("ws1", []);
+  });
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("true");
+  expect(controls.list).not.toHaveBeenCalled();
+  await act(async () => {
+    testStore
+      .getState()
+      .setRepositories("ws1", [{ id: "repo2", name: "New repository" } as Repository]);
+  });
+  view.rerender(page(false, true));
+  await act(async () => {});
+  expect(screen.getByLabelText(UNAVAILABLE_FILTER_LABEL).textContent).toBe("");
+  expect(screen.getByLabelText("Loading").textContent).toBe("false");
+  expect(controls.list).toHaveBeenCalledWith(
+    "ws1",
+    expect.objectContaining({ workflowId: null, repositoryId: "repo2" }),
     expect.anything(),
   );
 });

@@ -17,6 +17,7 @@ async function activate(control: Locator, touch: boolean) {
 }
 
 export function taskListWorkspaceScenarios(touch: boolean) {
+  taskListPartialMetadataScenario();
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
   test("restores each linked workspace and its filters through browser history", async ({
     testPage,
@@ -96,5 +97,36 @@ export function taskListWorkspaceScenarios(touch: boolean) {
       "on",
     );
     await expect(testPage.getByRole("alert")).toHaveCount(0);
+  });
+}
+
+function taskListPartialMetadataScenario() {
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
+  test("loads a workflow when unused repository metadata fails", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const archived = await apiClient.createTask(seedData.workspaceId, "Partial metadata archive", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.archiveTask(archived.id);
+    await testPage.goto("/settings");
+    await testPage.route("**/api/v1/workspaces/*/repositories", (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Repository metadata unavailable" }),
+      }),
+    );
+    await navigateInSpa(
+      testPage,
+      `/tasks?workspace=${seedData.workspaceId}&archive=archived&workflow=${seedData.workflowId}&repository=all`,
+    );
+    await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([
+      "Partial metadata archive",
+    ]);
+    await expect(testPage.getByTestId("tasks-list-error")).toHaveCount(0);
   });
 }

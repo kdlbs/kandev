@@ -170,9 +170,11 @@ workspace lookup shows a translated route error with Retry and Home. An unknown
 workspace shows Workspace not found with Home. Neither state mounts List or
 falls back to another workspace.
 
-Only the initial Tasks boot metadata or successful SPA workflow and repository
-reads set `initialMetadataLoaded`. A matching workspace ID alone does not prove
-readiness. Invalidate the Tasks boot seed after leaving Tasks or changing its
+The initial Tasks boot metadata marks both fields of `initialMetadataLoaded`
+ready. SPA workflow and repository reads mark their own field ready on success.
+A failed read does not block a query that does not use that filter. Cached
+repository data alone does not complete the current read. A matching workspace
+ID alone does not prove readiness. Invalidate the Tasks boot seed after leaving Tasks or changing its
 workspace. Keep this invalidation in the SPA owner so returning from Settings
 cannot reuse metadata from a previous visit. Pending metadata remains loading;
 failed reads retain the existing metadata recovery path.

@@ -351,10 +351,16 @@ describe("Tasks URL workspace ownership", () => {
     window.history.replaceState({}, "", `/tasks?workspace=${DEFAULT_WORKSPACE_ID}&workflow=all`);
     renderTasksWorkspace();
     await screen.findByTestId(TASKS_PAGE_TEST_ID);
-    expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toBe(false);
+    expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+      workflows: false,
+      repositories: false,
+    });
     await act(async () => workflows.resolve({ workflows: [] }));
     await waitFor(() =>
-      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toBe(true),
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: true,
+        repositories: true,
+      }),
     );
   });
 
@@ -434,6 +440,23 @@ describe("Tasks URL workspace ownership", () => {
     }
   });
 });
+
+it.each(["workflows", "repositories"] as const)(
+  "keeps successful metadata ready when the %s read fails",
+  async (failed) => {
+    mockGitHubWorkspaceBootstrap();
+    const read = failed === "workflows" ? mocks.listWorkflows : mocks.listRepositories;
+    read.mockRejectedValueOnce(new Error("metadata read failed"));
+    window.history.replaceState({}, "", `/tasks?workspace=${SELECTED_WORKSPACE_ID}`);
+    renderTasksWorkspace();
+    await waitFor(() =>
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: failed !== "workflows",
+        repositories: failed !== "repositories",
+      }),
+    );
+  },
+);
 
 function renderTasksWorkspace() {
   return render(

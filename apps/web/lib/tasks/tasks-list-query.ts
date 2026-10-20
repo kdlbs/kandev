@@ -1,5 +1,6 @@
 export type TasksListArchiveMode = "active" | "archived" | "all";
 export type TasksListScope = { workflowId: string | null; repositoryId: string | null };
+export type TasksListMetadataReady = { workflows: boolean; repositories: boolean };
 export type TasksListQuery = TasksListScope & {
   archiveMode: TasksListArchiveMode;
   searchQuery: string;

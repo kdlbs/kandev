@@ -408,3 +408,17 @@ Validation before the remediation commit:
 Logs are in `/tmp/kandev-archive-pr-delivery-1n02tpi8`. The desktop browser log is
 `kandev-run.e2e.7U9t9I8J.log`; the initial phone log is
 `kandev-run.e2e.T4VD6W6L.log`.
+
+### Independent filter metadata readiness
+
+A later regression exposed that combining workflow and repository readiness
+could keep a valid workflow loading after an unused repository read failed.
+The route now tracks each collection separately. The filter client also waits
+for the current repository read instead of treating cached metadata as complete.
+
+Three unit regressions and the real-browser unused-repository case failed
+before this refinement. Validation passed 175 tests in 22 unit suites,
+17 desktop browser scenarios, 14 phone browser scenarios, typecheck, and
+changed-file lint without warnings. The browser logs are
+`kandev-run.e2e.GC5ujdUu.log` and `kandev-run.e2e.ez4PLAOe.log` in the same
+artifact directory.

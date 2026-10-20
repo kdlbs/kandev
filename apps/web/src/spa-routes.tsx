@@ -70,7 +70,7 @@ import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
-import { canUseTasksListBootData } from "@/lib/tasks/tasks-list-query";
+import { canUseTasksListBootData, type TasksListMetadataReady } from "@/lib/tasks/tasks-list-query";
 import { isIntegratedControlPath } from "@/lib/navigation/integrated-control";
 const IntegratedControlPage = lazy(() =>
   import("@/components/integrated-control/integrated-control-page").then((mod) => ({
@@ -92,6 +92,8 @@ const ThreadsPageClient = lazy(() =>
   })),
 );
 const EMPTY_REPOSITORIES: Repository[] = [];
+const EMPTY_TASKS_METADATA: TasksListMetadataReady = { workflows: false, repositories: false };
+const READY_TASKS_METADATA: TasksListMetadataReady = { workflows: true, repositories: true };
 
 type SpaRoute =
   | {
@@ -164,7 +166,7 @@ type RouteDataState = {
 
 type RouteBootstrapState = RouteDataState & {
   workspaceStatus: "loading" | "ready" | "not_found" | "error";
-  metadataLoaded: boolean;
+  metadataLoaded: TasksListMetadataReady;
 };
 
 type SpaRouteOptions = {
@@ -601,7 +603,7 @@ function resolveTasksDataRouteInitialData(
       : sortTasksForList(tasks, initialSort),
     initialTotal: eligible ? (tasksPage.total ?? 0) : 0,
     initialDataLoaded: eligible,
-    initialMetadataLoaded: tasksPage !== undefined || bootstrapped.metadataLoaded,
+    initialMetadataLoaded: tasksPage ? READY_TASKS_METADATA : bootstrapped.metadataLoaded,
   };
 }
 
@@ -705,7 +707,7 @@ function useRouteData({
     requestedWorkspaceId,
     retryVersion: workspaceContextRetryVersion,
     status: "loading" as RouteBootstrapState["workspaceStatus"],
-    metadataLoaded: false,
+    metadataLoaded: EMPTY_TASKS_METADATA,
   });
   const repositories = useAppStore((state) =>
     activeWorkspaceId
@@ -737,7 +739,7 @@ function useRouteData({
       const nextResolution = {
         requestedWorkspaceId,
         retryVersion: workspaceContextRetryVersion,
-        metadataLoaded: false,
+        metadataLoaded: EMPTY_TASKS_METADATA,
       };
       if (requestedWorkspaceId !== null) {
         if (!workspacesResponse) {
@@ -863,7 +865,7 @@ function useRouteData({
       setResolution({
         ...nextResolution,
         status: "ready",
-        metadataLoaded: workflowsResult.ok && repositoriesResult.ok,
+        metadataLoaded: { workflows: workflowsResult.ok, repositories: repositoriesResult.ok },
       });
     }
 
@@ -890,15 +892,18 @@ function useRouteData({
     resolution.requestedWorkspaceId === requestedWorkspaceId &&
     resolution.retryVersion === workspaceContextRetryVersion;
   let workspaceStatus: RouteBootstrapState["workspaceStatus"] = "loading";
+  let metadataLoaded = EMPTY_TASKS_METADATA;
   if (currentResolution) workspaceStatus = resolution.status;
+  if (currentResolution) metadataLoaded = resolution.metadataLoaded;
   if (skipBootstrap) workspaceStatus = "ready";
+  if (skipBootstrap) metadataLoaded = READY_TASKS_METADATA;
   return {
     activeWorkspaceId,
     workflows,
     steps,
     repositories,
     workspaceStatus,
-    metadataLoaded: skipBootstrap || (currentResolution && resolution.metadataLoaded),
+    metadataLoaded,
   };
 }
 

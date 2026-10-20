@@ -179,3 +179,8 @@ PR review remediation adds URL workspace resolution, bootstrap cancellation,
 translated route recovery, and explicit metadata readiness. Unit regressions
 failed before the fix. Desktop and phone browser cases now cover cross-workspace
 history and recovery. See [PR review remediation](plan.md#pr-review-remediation).
+
+The readiness flags are independent for workflows and repositories. An unused
+filter's failed metadata read cannot hold the current query in loading. Cached
+repository data does not prove that a pending fresh read completed. These
+regressions failed before the refinement in unit tests and a real browser.

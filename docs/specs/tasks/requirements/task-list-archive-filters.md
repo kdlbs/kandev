@@ -134,6 +134,7 @@ including portable workflow defaults, sorting, grouping, and row details.
   workspace shall show an unavailable-filter state until cleared or replaced.
   Filter validation shall wait for metadata reads to finish. A failed workspace
   lookup shall offer Retry. An unknown workspace shall offer Home.
+  A failed metadata read shall block only queries that use that filter.
   It shall not silently broaden the scope. Existing authorization failures
   shall not display rows from another workspace.
 
