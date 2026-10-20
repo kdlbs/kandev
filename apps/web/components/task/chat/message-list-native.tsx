@@ -20,7 +20,7 @@ import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionTurnChanges } from "@/hooks/domains/session/use-turn-changes";
 import { TurnChangedFilesCard } from "./turn-changed-files-card";
-import { projectTurnChangeSummary } from "@/lib/turn-changes/projection";
+import { isTurnChangeCardVisible } from "@/lib/turn-changes/projection";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
@@ -780,7 +780,7 @@ function TranscriptMessageItems({
   const fallbackByItem = new Map<number, NonNullable<MessageListProps["turnChangeSummaries"]>>();
   if (showTurnChangedFiles && sessionId) {
     turnChangeSummaries.forEach((summary) => {
-      if (!projectTurnChangeSummary(summary).visible) return;
+      if (!isTurnChangeCardVisible(summary)) return;
       if (
         !shouldRenderTurnChangeFallback(
           summary.final_assistant_message_id,
@@ -916,8 +916,7 @@ function TurnChangedFilesAfterMessage({
   return summaries
     .filter(
       (summary) =>
-        summary.final_assistant_message_id === item.message.id &&
-        projectTurnChangeSummary(summary).visible,
+        summary.final_assistant_message_id === item.message.id && isTurnChangeCardVisible(summary),
     )
     .map((summary) => (
       <TurnChangedFilesCard
@@ -1094,8 +1093,8 @@ export const NativeMessageList = memo(
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
             onOpenHistoricalDiff={onOpenHistoricalDiff}
-            turnChangeSummaries={turnChanges.summaries.filter(
-              (summary) => projectTurnChangeSummary(summary).visible,
+            turnChangeSummaries={turnChanges.summaries.filter((summary) =>
+              isTurnChangeCardVisible(summary),
             )}
             messageHistoryHasMore={hasMore}
             showTurnChangedFiles={showTurnChangedFiles}

@@ -12,14 +12,14 @@ test("saves the turn changed-files preference from the mobile conversation setti
   const initialResponse = await apiClient.rawRequest("GET", "/api/v1/user/settings");
   expect(initialResponse.ok).toBe(true);
   const initial = ((await initialResponse.json()) as UserSettingsResponse).settings;
-  const originalValue = initial.show_turn_changed_files ?? true;
+  const originalValue = initial.show_turn_changed_files ?? false;
 
   try {
     await testPage.goto("/settings/preferences/task-behavior");
     await testPage.getByRole("tab", { name: "Conversation", exact: true }).tap();
     const row = testPage.getByTestId("turn-changed-files-settings-row");
     const toggle = row.getByRole("switch", { name: "Show changed files after each turn" });
-    await expect(toggle).toBeChecked();
+    await expect(toggle).not.toBeChecked();
     const rowBox = await row.boundingBox();
     expect(rowBox).not.toBeNull();
     expect(rowBox!.height).toBeGreaterThanOrEqual(44);
@@ -28,7 +28,7 @@ test("saves the turn changed-files preference from the mobile conversation setti
     });
 
     await toggle.tap();
-    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeChecked();
     await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
     const beforeSave = await apiClient.rawRequest("GET", "/api/v1/user/settings");
     expect(
@@ -39,7 +39,7 @@ test("saves the turn changed-files preference from the mobile conversation setti
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: "Reset" })
       .tap();
-    await expect(toggle).toBeChecked();
+    await expect(toggle).not.toBeChecked();
     await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
 
     await toggle.tap();
@@ -50,7 +50,7 @@ test("saves the turn changed-files preference from the mobile conversation setti
     await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
     await testPage.reload();
     await testPage.getByRole("tab", { name: "Conversation", exact: true }).tap();
-    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeChecked();
   } finally {
     const restore = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       show_turn_changed_files: originalValue,

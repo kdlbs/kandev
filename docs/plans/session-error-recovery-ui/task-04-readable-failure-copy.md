@@ -131,4 +131,16 @@ identified browser anchoring during delayed content growth and contraction. A
 local fix passed its regression tests and browser checks. Before delivery,
 `main` gained the overlapping scrolling correction in PR #4616. The local
 scrolling changes were removed so this PR can use the upstream implementation.
-Integration and final validation of that revision remain in progress.
+Integrated that revision. The new grow/shrink regression fails against the old
+implementation and passes against upstream. All 119 tests across the native
+message-list, scroll geometry, and scroll-motion suites pass. After rebuilding both runtime and frontend, all three desktop and three phone
+browser checks passed without retries. These cover delayed changed-file cards,
+native recovery followed by another prompt, and visible error history with
+current recovery actions. Fresh screenshots show both viewports. TypeScript,
+localization, and specification checks also passed.
+
+```bash
+pnpm --dir apps/web exec vitest run components/task/chat/message-list-native.test.tsx components/task/chat/message-list-native-scroll.test.ts components/task/chat/use-chat-scroll-motion.test.tsx
+pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/git/turn-changed-files-scroll.spec.ts e2e/tests/session/durable-stream-recovery.spec.ts e2e/tests/task/launch-failure-recovery.spec.ts -- --grep 'follows delayed|native resume clears|retains session failure' --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/git/mobile-turn-changed-files-scroll.spec.ts e2e/tests/session/mobile-durable-stream-recovery.spec.ts e2e/tests/task/mobile-launch-failure-recovery.spec.ts -- --grep 'follows delayed|native resume clears|retains session failure' --retries=0
+```

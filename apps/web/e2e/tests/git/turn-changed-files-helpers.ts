@@ -27,7 +27,7 @@ export async function enableTurnChangedFiles(apiClient: ApiClient): Promise<() =
   expect(enabled.ok).toBe(true);
   return async () => {
     const restore = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      show_turn_changed_files: original ?? true,
+      show_turn_changed_files: original ?? false,
     });
     expect(restore.ok).toBe(true);
   };

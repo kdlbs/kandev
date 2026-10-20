@@ -3596,9 +3596,12 @@ it.each([
   { enabled: true, reading: false, pending: true, expected: 900 },
   { enabled: true, reading: true, pending: true, expected: 570 },
   { enabled: false, reading: false, pending: true, expected: 600 },
+  { enabled: true, reading: false, pending: true, shrink: true, expected: 800 },
+  { enabled: true, reading: true, pending: true, shrink: true, expected: 500 },
+  { enabled: false, reading: false, pending: true, shrink: true, expected: 500 },
 ])(
-  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending",
-  ({ enabled, reading, pending, expected }) => {
+  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending shrink=$shrink",
+  ({ enabled, reading, pending, shrink = false, expected }) => {
     let contentResize: (() => void) | undefined;
     vi.stubGlobal(
       "ResizeObserver",
@@ -3641,8 +3644,14 @@ it.each([
           metrics.scrollTop = 570;
         }
         metrics.scrollHeight = 1300;
-        container.dispatchEvent(new Event("scroll"));
+        if (!shrink) container.dispatchEvent(new Event("scroll"));
         contentResize?.();
+        if (shrink) {
+          metrics.scrollHeight = 1200;
+          metrics.scrollTop = 500;
+          container.dispatchEvent(new Event("scroll"));
+          contentResize?.();
+        }
       });
       view.rerender(
         <AutoScrollHarness
