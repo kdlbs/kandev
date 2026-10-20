@@ -65,7 +65,7 @@ Typecheck passed with NODE_OPTIONS=--max-old-space-size=8192 after the default
 4 GiB heap was insufficient. Changed Go lint: zero issues. Frontend eslint passed;
 changed files were formatted with Prettier. Public-doc validators, spec/catalog
 checks, documentation coverage preflight and git diff whitespace passed.
-PostgreSQL-specific cases were not exercised without a DSN. Browser E2E: five desktop Chromium cases and four mobile-chrome cases passed,
+PostgreSQL-specific cases were not exercised without a DSN. Browser E2E: six desktop Chromium cases and five mobile-chrome cases passed,
 including saved opt-in from off, existing historical diff/file-list retry flows,
 and hiding an unavailable zero-entry card after reload. Desktop/mobile PR assets
 were captured in the isolated runner, inspected, and compressed. Desktop built
@@ -77,3 +77,8 @@ context between entries. The deterministic cancellation regression cancels after
 the first entry and verifies both scans stop; normal-context positive controls
 remain successful. Focused checkpoint/change tests passed again. No rendered UI
 changed, so the verified desktop/mobile captures remain applicable.
+
+Capture-dependent desktop/mobile scroll fixtures now explicitly opt in and restore
+the saved preference. Their additional managed E2E runs passed (one case per
+viewport), bringing browser coverage to eleven passing cases. No product code
+or rendered composition changed in this follow-up.
