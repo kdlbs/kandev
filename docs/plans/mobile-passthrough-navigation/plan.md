@@ -149,7 +149,15 @@ committed. A layout effect now synchronizes that input state. Unit regressions
 reproduced both findings before their fixes. The browser regression also
 reproduced the Quick Terminal failure against the prior build.
 
-Remote checks and review disposition remain pending until the fix is pushed.
+Claude later recommended removing the single-use JSX factory. The toolbar now
+renders the terminal inline, and its existing composer hook owns composer state,
+focus, and shortcut handling. This preserves behavior and removes 26 source lines.
+
+The frontend CI project-selection contract exposed a stale reviewed test path
+after the PTY input helper moved. The manifest now retains that test in its
+existing browser project under its new path.
+
+Remote checks and review disposition remain pending until the final fix is pushed.
 See the work order for local verification.
 
 ## Risks

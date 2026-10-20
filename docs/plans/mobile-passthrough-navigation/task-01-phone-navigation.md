@@ -159,3 +159,27 @@ whitespace checks passed. The desktop path is unchanged by these fixes; its
 12-test result above remains the prior verification baseline.
 
 Final remote CI and review state will be verified after pushing.
+
+### Claude review suggestion
+
+Inlined the one-use terminal JSX factory. The existing composer hook now groups
+composer state, focus, and shortcut handling. Rendered structure and input
+behavior are unchanged; no additional behavior test is needed. The existing
+120 unit tests, typecheck, and changed-file lint passed after this refactor.
+
+The affected mobile composer/navigation suites passed all 10 tests with retries
+disabled. An earlier run hit a local backend port collision before the failing
+test body; rerunning on verified free `E2E_PORT_OFFSET=29` passed. No production
+change was made for that fixture-startup failure.
+The desktop command also passed all 12 tests with retries disabled.
+
+### Frontend CI manifest correction
+
+Frontend shard 1 failed the existing project-selection contract because the
+reviewed browser manifest retained the moved `pty-terminal-input.test.ts` path.
+The contract reproduced locally before the correction. The manifest now lists
+`lib/terminal/send-pty-input.test.ts` in the same browser project. This changes
+only the file identity, not the test setup or discovery contract.
+
+The corrected project-selection contract and seven terminal suites passed all
+124 tests across eight files. The moved input test retained its browser setup.
