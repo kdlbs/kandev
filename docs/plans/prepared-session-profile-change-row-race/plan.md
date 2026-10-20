@@ -1,6 +1,6 @@
 ---
 created: 2026-10-20
-status: planned
+status: implemented
 requirements:
   - REQ-OFFICE-SESSION-IDENTITY-001
   - REQ-OFFICE-ROUTING-001
@@ -78,7 +78,7 @@ No system-design change: the design already states the intended outcome.
 
 | ID | Title | Depends on | Status |
 | -- | ----- | ---------- | ------ |
-| [01](task-01-tolerate-cleared-executor-row.md) | Tolerate a cleared executor row on profile change | none | planned |
+| [01](task-01-tolerate-cleared-executor-row.md) | Tolerate a cleared executor row on profile change | none | done |
 
 ## Verification
 

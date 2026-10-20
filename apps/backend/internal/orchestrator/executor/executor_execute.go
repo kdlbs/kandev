@@ -2097,7 +2097,10 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 					return nil, fmt.Errorf("stop previous execution profile: %w", err)
 				}
 			}
-			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			// Stopping the agent can already have removed the row; the profile
+			// binding is cleared either way.
+			if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil &&
+				!errors.Is(err, models.ErrExecutorRunningNotFound) {
 				return nil, fmt.Errorf("clear previous execution profile: %w", err)
 			}
 			running = nil

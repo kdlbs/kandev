@@ -1,7 +1,7 @@
 ---
 id: "01-tolerate-cleared-executor-row"
 title: "Tolerate a cleared executor row on profile change"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -85,4 +85,14 @@ None.
 
 ## Results
 
-_Pending implementation._
+- `LaunchPreparedSession` now ignores `models.ErrExecutorRunningNotFound` from
+  the clear-previous-profile delete; every other delete error still fails the
+  launch.
+- Added `deleteExecutorRunningFunc` to the executor mock repository and
+  `executor_profile_change_test.go` with both tests. The regression test failed
+  before the fix with `clear previous execution profile: executor running not
+  found for session: session-prepared`.
+- Verified with:
+  - `go test ./internal/orchestrator/executor -run 'TestLaunchPreparedSession_ProfileChange' -count=1 -race`
+  - `go test ./internal/orchestrator/... -count=1`
+  - `make -C apps/backend fmt lint` (0 issues)
