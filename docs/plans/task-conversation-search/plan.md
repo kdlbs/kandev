@@ -209,3 +209,9 @@ samples are retained as timing observations, without retroactively claiming
 that their result-page outcomes were validated. Backend race validation of the follow-up changes passes across the repository,
 worker, runtime wiring, service, and HTTP handler packages. The strengthened message-edit browser regression and phone search check both
 pass. Remote CI remains in progress. Its phone-header fixture failure reproduced locally and is corrected with the real command registry provider. All 55 targeted frontend tests pass after the correction.
+
+Backend CI also exposed a test-fixture PID collision in `TestRunOrphanReapPhaseDoesNotReportCapForTrailingPreSignalSkips`. Its fixed fake-PID range could include the current test process, which production ownership checks correctly protect. A forced collision reproduced the exact 255-versus-256 signal assertion. The fixture now allocates fake PIDs above the current process. Twenty repeated orphan-cleanup race runs pass. This correction changes test setup only and preserves production cleanup behavior.
+
+The phone Quick Chat cancellation E2E also reproduced a palette regression: synchronous selection unmounted the drawer before the touch click finished bubbling, dismissing the underlying dialog. The palette now stops that click at its content boundary. Both existing Quick Chat cancellation scenarios pass on a fresh build. The expected modal behavior is unchanged; this is a regression correction, with no public-copy change.
+
+Final local validation of both CI corrections passes: 55 frontend tests, TypeScript, five phone E2E scenarios, twenty repeated orphan-cleanup race runs, and the complete task-service race suite (`GOMAXPROCS=3 go test -tags fts5 -race ./internal/task/service -count=1 -timeout 10m`, 599.166 seconds). The initial full-package attempt exceeded a five-minute local budget while still entering later tests; the ten-minute package budget matches CI. No per-test timeout was changed.

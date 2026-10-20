@@ -28,6 +28,8 @@ export function CommandPanelDialog(props: ComponentProps<typeof CommandDialog>) 
             {props.open && (
               <DrawerContent
                 {...contentProps}
+                // Closing a selection must not dismiss the dialog beneath the palette.
+                onClick={(event) => event.stopPropagation()}
                 onEscapeKeyDown={
                   active ? contentProps.onEscapeKeyDown : props.contentProps?.onEscapeKeyDown
                 }
