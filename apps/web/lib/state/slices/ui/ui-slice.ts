@@ -1,7 +1,7 @@
 import {
-  readImagePreviewExpansionEnabled,
-  writeImagePreviewExpansionEnabled,
-} from "@/lib/settings/image-preview-expansion";
+  readImagePreviewsExpandedByDefault,
+  writeImagePreviewsExpandedByDefault,
+} from "@/lib/settings/image-preview-defaults";
 import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
@@ -199,7 +199,7 @@ export const defaultUIState: UISliceState = {
     expandedKeys: [],
   },
   chatMotion: { enabled: true, savedEnabled: true },
-  imagePreviewExpansionEnabled: true,
+  imagePreviewsExpandedByDefault: true,
   richOutputMotion: {
     enabled: true,
     savedEnabled: true,
@@ -430,11 +430,11 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
   appSidebar: loadAppSidebarState(),
   settingsMenu: loadSettingsMenuState(),
-  imagePreviewExpansionEnabled: readImagePreviewExpansionEnabled(),
-  commitImagePreviewExpansion: (enabled) => {
-    writeImagePreviewExpansionEnabled(enabled);
+  imagePreviewsExpandedByDefault: readImagePreviewsExpandedByDefault(),
+  commitImagePreviewsExpandedByDefault: (enabled) => {
+    writeImagePreviewsExpandedByDefault(enabled);
     set((draft) => {
-      draft.imagePreviewExpansionEnabled = enabled;
+      draft.imagePreviewsExpandedByDefault = enabled;
     });
   },
   richOutputMotion: loadRichOutputMotionState(),

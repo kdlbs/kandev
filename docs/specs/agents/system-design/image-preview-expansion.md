@@ -93,15 +93,21 @@ defines exact commands and acceptance coverage.
 
 ## Appearance preference
 
-`Expand image previews` is a default-on device-local preference under
+`Show image previews by default` is a default-on device-local preference under
 Settings > Preferences > Appearance. Store its saved boolean in the UI slice
-and `kandev.settings.imagePreviewExpansion` local storage. Invalid stored values
+and `kandev.settings.imagePreviewsExpandedByDefault` local storage. Invalid values
 fall back to enabled. A dedicated settings contributor owns a local draft and
 uses the shared Save and Reset controls. Apply the choice only on Save.
 
-`FilePreviewContent` reads the preference and passes it as `interactive` to
-`ImagePreviewDialog`. The disabled branch renders an accessible plain image.
-Attachment callers keep the default interactive behavior. Register the control
-for settings discovery and translate its label and device-local description.
-Use the existing touch-friendly switch row. Browser checks cover Reset, Save,
-reload, disabled image activation, and re-enabling on desktop and phone.
+`FilePreview` combines this preference with the image classifier for the initial
+value passed to `useRichOutputViewState`. The hook preserves retained manual
+choices. No effect forces already-mounted cards open or closed. Collapsed cards
+perform no preview reads until opened. `FilePreviewContent` always uses the
+interactive `ImagePreviewDialog`; enlargement has no user preference.
+
+The initial PR used a setting for enlargement. That unshipped setting is removed,
+including its storage key. Do not migrate its value to a different meaning.
+Register the corrected control for discovery and translate its label and
+description. Use the existing touch-friendly switch row. Desktop and phone
+checks cover Reset, Save, reload, initial collapse, manual preview and dialog
+opening, and restored automatic disclosure after re-enabling.

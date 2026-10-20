@@ -19,7 +19,7 @@ export const TASK_BEHAVIOR_SETTINGS_HREF = `${PREFERENCES_SETTINGS_HREF}/task-be
 export const GENERAL_SETTINGS_TARGETS = {
   colorTheme: "setting-color-theme",
   chatMotion: "setting-chat-motion",
-  imagePreviewExpansion: "setting-image-preview-expansion",
+  imagePreviewDefaults: "setting-image-preview-defaults",
   richOutputMotion: "setting-rich-output-motion",
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
@@ -110,14 +110,14 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     order: 12,
   },
   {
-    id: "appearance-image-preview-expansion",
+    id: "appearance-image-preview-defaults",
     kind: "control",
-    labelKey: "settings:expandImagePreviews",
-    aliasesKey: "settings:expandImagePreviewsDescription",
+    labelKey: "settings:showImagePreviewsByDefault",
+    aliasesKey: "settings:showImagePreviewsByDefaultDescription",
     parentId: APPEARANCE_ID,
     groupId: "preferences",
     href: APPEARANCE_SETTINGS_HREF,
-    targetId: GENERAL_SETTINGS_TARGETS.imagePreviewExpansion,
+    targetId: GENERAL_SETTINGS_TARGETS.imagePreviewDefaults,
     order: 12,
   },
   {

@@ -4,7 +4,7 @@ import { immer } from "zustand/middleware/immer";
 import { createUISlice } from "./ui-slice";
 import type { UISlice } from "./types";
 
-const storageKey = "kandev.settings.imagePreviewExpansion";
+const storageKey = "kandev.settings.imagePreviewsExpandedByDefault";
 function makeStore() {
   return create<UISlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -12,24 +12,29 @@ function makeStore() {
   );
 }
 
-describe("image preview expansion preference", () => {
+describe("initial image preview disclosure preference", () => {
   beforeEach(() => window.localStorage.clear());
 
   it.each([null, "{invalid", '"false"', "42"])(
     "defaults on for absent or invalid storage: %s",
     (value) => {
       if (value !== null) window.localStorage.setItem(storageKey, value);
-      expect(makeStore().getState().imagePreviewExpansionEnabled).toBe(true);
+      expect(makeStore().getState().imagePreviewsExpandedByDefault).toBe(true);
     },
   );
 
+  it("does not reinterpret the removed enlargement preference", () => {
+    window.localStorage.setItem("kandev.settings.imagePreviewExpansion", "false");
+    expect(makeStore().getState().imagePreviewsExpandedByDefault).toBe(true);
+  });
+
   it("persists both choices and hydrates them on the next store", () => {
     const store = makeStore();
-    store.getState().commitImagePreviewExpansion(false);
-    expect(store.getState().imagePreviewExpansionEnabled).toBe(false);
+    store.getState().commitImagePreviewsExpandedByDefault(false);
+    expect(store.getState().imagePreviewsExpandedByDefault).toBe(false);
     expect(window.localStorage.getItem(storageKey)).toBe("false");
-    expect(makeStore().getState().imagePreviewExpansionEnabled).toBe(false);
-    store.getState().commitImagePreviewExpansion(true);
-    expect(makeStore().getState().imagePreviewExpansionEnabled).toBe(true);
+    expect(makeStore().getState().imagePreviewsExpandedByDefault).toBe(false);
+    store.getState().commitImagePreviewsExpandedByDefault(true);
+    expect(makeStore().getState().imagePreviewsExpandedByDefault).toBe(true);
   });
 });

@@ -26,7 +26,6 @@ function FilePreviewContent({
   state: WorkspaceFilePreviewState;
 }) {
   const { t } = useTranslation();
-  const expansionEnabled = useOptionalAppStore((store) => store.imagePreviewExpansionEnabled, true);
   if (state.kind === "loading") {
     return (
       <div className="flex min-h-20 items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -51,7 +50,6 @@ function FilePreviewContent({
     return (
       <div className="flex justify-center py-2">
         <ImagePreviewDialog
-          interactive={expansionEnabled}
           src={`data:${getImageMimeType(file.path)};base64,${state.response.content}`}
           alt={file.title || file.path}
           thumbnailClassName="max-h-64 max-w-full rounded-md object-contain ring-1 ring-black/10 dark:ring-white/10"
@@ -81,9 +79,13 @@ type NativeFilePreviewProps = FilePreviewProps & {
 export function FilePreview({ sessionId, onOpenFile, ...file }: NativeFilePreviewProps) {
   const { t } = useTranslation();
   const previewId = useId();
+  const defaultExpanded = useOptionalAppStore(
+    (store) => store.imagePreviewsExpandedByDefault,
+    true,
+  );
   const [expanded, setExpanded] = useRichOutputViewState(
     JSON.stringify([file.repo, file.path]),
-    getFileCategory(file.path) === "image",
+    getFileCategory(file.path) === "image" && defaultExpanded,
   );
   const { load, state } = useWorkspaceFilePreview(sessionId, file.path, file.repo);
 

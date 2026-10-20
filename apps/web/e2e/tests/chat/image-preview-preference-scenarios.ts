@@ -4,13 +4,16 @@ import { RICH_OUTPUT_IMAGE, seedRichOutputImage, seedRichOutputTask } from "./ri
 
 export function imagePreviewPreferenceScenario(mobile: boolean) {
   // @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.6
-  test("image expansion preference resets, saves, and controls file previews", async ({
+  test("image preview default resets, saves, and keeps enlargement available", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     await testPage.goto("/settings/preferences/appearance");
-    const toggle = testPage.getByRole("switch", { name: "Expand image previews", exact: true });
+    const toggle = testPage.getByRole("switch", {
+      name: "Show image previews by default",
+      exact: true,
+    });
     const save = testPage.getByTestId("settings-floating-save");
     const activate = async (control: typeof toggle) => {
       if (mobile) await control.tap();
@@ -21,7 +24,9 @@ export function imagePreviewPreferenceScenario(mobile: boolean) {
     if (mobile) await expectTouchTarget(toggle);
     await activate(toggle);
     expect(
-      await testPage.evaluate(() => localStorage.getItem("kandev.settings.imagePreviewExpansion")),
+      await testPage.evaluate(() =>
+        localStorage.getItem("kandev.settings.imagePreviewsExpandedByDefault"),
+      ),
     ).toBeNull();
     await activate(save.getByRole("button", { name: "Reset", exact: true }));
     await expect(toggle).toBeChecked();
@@ -31,7 +36,7 @@ export function imagePreviewPreferenceScenario(mobile: boolean) {
     await testPage.reload();
     await expect(toggle).not.toBeChecked();
     await testPage
-      .getByTestId("image-preview-expansion-settings")
+      .getByTestId("image-preview-defaults-settings")
       .evaluate((row) => row.scrollIntoView({ block: "center" }));
     expect(
       await testPage.evaluate(
@@ -44,7 +49,7 @@ export function imagePreviewPreferenceScenario(mobile: boolean) {
       page: testPage,
       apiClient,
       seedData,
-      title: "Image expansion preference",
+      title: "Image preview default",
       payload: seedRichOutputImage(seedData.repositoryPath),
     });
     const sessionUrl = testPage.url();
@@ -52,17 +57,19 @@ export function imagePreviewPreferenceScenario(mobile: boolean) {
       .activeChat()
       .getByTestId("rich-output-file")
       .filter({ hasText: RICH_OUTPUT_IMAGE });
-    const image = card.getByRole("img", { name: RICH_OUTPUT_IMAGE, exact: true });
-    await expect(image).toBeVisible();
-    await expect(
-      card.getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true }),
-    ).toHaveCount(0);
-    await activate(image);
-    await expect(testPage.getByRole("dialog", { name: "Image preview" })).toHaveCount(0);
-    await expect(card.getByTestId("rich-output-file-preview-toggle")).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    const disclosure = card.getByTestId("rich-output-file-preview-toggle");
+    const trigger = card.getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true });
+    await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    await expect(card.locator("img")).toHaveCount(0);
+    await activate(disclosure);
+    await expect(trigger).toBeVisible();
+    await activate(trigger);
+    const dialog = testPage.getByRole("dialog", { name: "Image preview" });
+    await expect(dialog).toBeVisible();
+    await activate(dialog.getByRole("button", { name: "Close", exact: true }));
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await activate(disclosure);
+    await expect(card.locator("img")).toHaveCount(0);
 
     await testPage.goto("/settings/preferences/appearance");
     await activate(toggle);
@@ -70,7 +77,8 @@ export function imagePreviewPreferenceScenario(mobile: boolean) {
     await expect(save).toBeHidden();
     await testPage.goto(sessionUrl);
     await session.waitForLoad();
-    await activate(card.getByRole("button", { name: `Open ${RICH_OUTPUT_IMAGE}`, exact: true }));
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await activate(trigger);
     await expect(testPage.getByRole("dialog", { name: "Image preview" })).toBeVisible();
   });
 }

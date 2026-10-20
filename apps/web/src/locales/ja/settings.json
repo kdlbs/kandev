@@ -1,6 +1,6 @@
 {
-  "expandImagePreviews": "画像プレビューを拡大",
-  "expandImagePreviewsDescription": "ファイルプレビューの画像をクリックまたはタップすると、大きなダイアログで表示します。この設定はこのデバイスに保存されます。",
+  "showImagePreviewsByDefault": "画像プレビューを既定で表示",
+  "showImagePreviewsByDefaultDescription": "会話内で画像ファイルのプレビューを自動的に表示します。オフにすると、最初は折りたたまれた状態になります。この設定はこのデバイスに保存されます。",
   "agentTabCloseButton": "エージェントタブの閉じるボタン",
   "agentTabCloseButtonDescription": "デスクトップのエージェントタブで、×ボタンを押したときの動作を選択します。",
   "deleteSession": "セッションを削除",

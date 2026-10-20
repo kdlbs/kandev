@@ -16,6 +16,10 @@ system_design:
 
 # Task 02: Configure image expansion
 
+This completed work order records the initial interpretation. Its preference
+behavior is superseded by [task 03](task-03-configure-initial-disclosure.md) after
+the user clarified that the setting controls initial inline disclosure.
+
 ## Summary
 
 Add a default-on Expand image previews switch under Appearance. Store the saved

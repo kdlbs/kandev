@@ -275,7 +275,7 @@ export type AppState = KanbanSlice & {
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
   settingsMenu: (typeof defaultUIState)["settingsMenu"];
-  imagePreviewExpansionEnabled: (typeof defaultUIState)["imagePreviewExpansionEnabled"];
+  imagePreviewsExpandedByDefault: (typeof defaultUIState)["imagePreviewsExpandedByDefault"];
   richOutputMotion: (typeof defaultUIState)["richOutputMotion"];
   chatMotion: (typeof defaultUIState)["chatMotion"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
@@ -734,7 +734,7 @@ export type AppState = KanbanSlice & {
   commitSettingsMenuMode: UIA["commitSettingsMenuMode"];
   restoreSettingsMenuMode: UIA["restoreSettingsMenuMode"];
   setSettingsMenuExpandedKeys: UIA["setSettingsMenuExpandedKeys"];
-  commitImagePreviewExpansion: UIA["commitImagePreviewExpansion"];
+  commitImagePreviewsExpandedByDefault: UIA["commitImagePreviewsExpandedByDefault"];
   previewRichOutputAnimations: UIA["previewRichOutputAnimations"];
   commitRichOutputAnimations: UIA["commitRichOutputAnimations"];
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];

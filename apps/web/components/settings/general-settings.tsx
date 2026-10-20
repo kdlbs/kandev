@@ -1,5 +1,5 @@
 "use client";
-import { ImagePreviewExpansionSettings } from "./image-preview-expansion-settings";
+import { ImagePreviewDefaultsSettings } from "./image-preview-defaults-settings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/components/theme/app-theme";
@@ -227,7 +227,7 @@ function AppearanceThemeSection({
         isDirty={isChatMotionDirty}
         onChange={onChatMotionChange}
       />
-      <ImagePreviewExpansionSettings />
+      <ImagePreviewDefaultsSettings />
     </SettingsSection>
   );
 }

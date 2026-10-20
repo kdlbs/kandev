@@ -8,13 +8,13 @@ import { Switch } from "@kandev/ui/switch";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { SettingsRow } from "./settings-group";
 
-export function ImagePreviewExpansionSettings() {
-  const saved = useAppStore((state) => state.imagePreviewExpansionEnabled);
-  const commit = useAppStore((state) => state.commitImagePreviewExpansion);
+export function ImagePreviewDefaultsSettings() {
+  const saved = useAppStore((state) => state.imagePreviewsExpandedByDefault);
+  const commit = useAppStore((state) => state.commitImagePreviewsExpandedByDefault);
   const [enabled, setEnabled] = useState(saved);
   const isDirty = enabled !== saved;
   useSettingsSaveContributor({
-    id: "general-image-preview-expansion",
+    id: "general-image-preview-defaults",
     order: 11,
     revision: String(enabled),
     isDirty,
@@ -27,16 +27,16 @@ export function ImagePreviewExpansionSettings() {
   return (
     <SettingsRow
       isDirty={isDirty}
-      discoveryTargetId={GENERAL_SETTINGS_TARGETS.imagePreviewExpansion}
-      data-testid="image-preview-expansion-settings"
-      label={t("settings:expandImagePreviews")}
-      description={t("settings:expandImagePreviewsDescription")}
-      controlId="expand-image-previews"
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.imagePreviewDefaults}
+      data-testid="image-preview-defaults-settings"
+      label={t("settings:showImagePreviewsByDefault")}
+      description={t("settings:showImagePreviewsByDefaultDescription")}
+      controlId="show-image-previews-by-default"
       touchTarget="switch"
-      controlWrapperTestId="image-preview-expansion-toggle-row"
+      controlWrapperTestId="image-preview-defaults-toggle-row"
       control={
         <Switch
-          id="expand-image-previews"
+          id="show-image-previews-by-default"
           checked={enabled}
           onCheckedChange={setEnabled}
           data-settings-dirty={isDirty}

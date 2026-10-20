@@ -1,6 +1,6 @@
 {
-  "expandImagePreviews": "이미지 미리보기 확대",
-  "expandImagePreviewsDescription": "파일 미리보기 이미지를 클릭하거나 탭하면 더 큰 대화 상자에서 표시합니다. 이 설정은 이 기기에 저장됩니다.",
+  "showImagePreviewsByDefault": "기본으로 이미지 미리보기 표시",
+  "showImagePreviewsByDefaultDescription": "대화에서 이미지 파일 미리보기를 자동으로 표시합니다. 끄면 처음에는 접힌 상태로 표시됩니다. 이 설정은 이 기기에 저장됩니다.",
   "aSecretNameAndValueAreRequired": "비밀 이름과 값이 필요합니다.",
   "aSecretNameIsRequired": "비밀 이름이 필요합니다.",
   "aboutAffectedKandevMcpTools": "영향받는 Kandev MCP 도구 정보",

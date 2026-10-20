@@ -1,6 +1,6 @@
 {
-  "expandImagePreviews": "Expand image previews",
-  "expandImagePreviewsDescription": "Open file-preview images in a larger dialog when clicked or tapped. Saved on this device.",
+  "showImagePreviewsByDefault": "Show image previews by default",
+  "showImagePreviewsByDefaultDescription": "Automatically show image file previews in the conversation. Turn this off to start them collapsed. Saved on this device.",
   "aSecretNameAndValueAreRequired": "A secret name and value are required.",
   "aSecretNameIsRequired": "A secret name is required.",
   "aboutAffectedKandevMcpTools": "About affected Kandev MCP tools",

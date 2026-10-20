@@ -3,8 +3,10 @@ created: 2026-10-19
 status: implemented
 requirements:
   - REQ-AGENTS-IMAGE-PREVIEW-EXPANSION-001
+  - REQ-AGENTS-IMAGE-PREVIEW-DEFAULTS-001
 system_design:
   - ../../specs/agents/system-design/image-preview-expansion.md
+  - ../../specs/agents/system-design/image-preview-defaults.md
 legacy_specs: []
 ---
 
@@ -76,8 +78,8 @@ Appearance
   Color theme                  [selection]
   Animate rich-output charts   [switch]
   Chat animations              [switch]
-  Expand image previews        [switch]
-  Open file-preview images in a larger dialog when clicked or tapped.
+  Show image previews by default [switch]
+  Automatically show image file previews. Off starts them collapsed.
   Saved on this device.
 
 Shared save controls: [Reset] [Save changes]
@@ -85,8 +87,8 @@ Shared save controls: [Reset] [Save changes]
 
 Desktop and phone use the same row order. On phones, description text wraps
 within the page and the switch has a 44px touch target. The page owns scrolling;
-the existing shared save controls retain their layout. Disabled file previews
-show the same inline image without a button. Ordering, labels, and interaction
+the existing shared save controls retain their layout. With the preference off, fresh image cards start collapsed. Opening Preview
+always reveals a button that opens the larger image. Ordering, labels, and interaction
 are required; ASCII spacing is illustrative.
 
 ## Tests
@@ -111,7 +113,8 @@ shared dialog classes change. Scope selectors to the active card or portal.
 ## Work orders
 
 - [x] [Task 01: Expand preview images](task-01-expand-preview-images.md)
-- [x] [Task 02: Configure image expansion](task-02-configure-image-expansion.md)
+- [x] [Task 02: Initial preference implementation (superseded)](task-02-configure-image-expansion.md)
+- [x] [Task 03: Configure initial image disclosure](task-03-configure-initial-disclosure.md)
 
 ## Verification results
 
@@ -153,3 +156,15 @@ settings-discovery tests, seven desktop and seven phone browser checks,
 localization, static checks, public-doc validation, and the final focused
 phone rerun after preserving image drag behavior. The phone settings screenshot
 was inspected. Both work orders are done.
+
+## Clarified preference scope
+
+The user clarified that the setting controls initial inline disclosure, not
+permission to enlarge an image. Task 03 supersedes the preference behavior in
+task 02. Initial disclosure remains on by default, retained manual choices win,
+and every visible image always opens the larger dialog. Task 02 results record
+the earlier implementation only.
+
+Task 03 completed on 2026-10-20. The final preference controls initial disclosure
+only. Targeted unit, desktop, phone, static, translation, and documentation checks
+passed. Fresh screenshots show the corrected setting and manual enlargement.
