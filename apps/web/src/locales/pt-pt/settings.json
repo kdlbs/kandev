@@ -1,4 +1,6 @@
 {
+  "expandImagePreviews": "Ampliar pré-visualizações de imagens",
+  "expandImagePreviewsDescription": "Abra as imagens das pré-visualizações de ficheiros numa caixa de diálogo maior ao clicar ou tocar. Guardado neste dispositivo.",
   "aSecretNameAndValueAreRequired": "São obrigatórios um nome e um valor para o segredo.",
   "aSecretNameIsRequired": "É obrigatório um nome para o segredo.",
   "aboutAffectedKandevMcpTools": "Sobre as ferramentas MCP do Kandev afetadas",

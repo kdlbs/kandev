@@ -1,4 +1,6 @@
 {
+  "expandImagePreviews": "画像プレビューを拡大",
+  "expandImagePreviewsDescription": "ファイルプレビューの画像をクリックまたはタップすると、大きなダイアログで表示します。この設定はこのデバイスに保存されます。",
   "agentTabCloseButton": "エージェントタブの閉じるボタン",
   "agentTabCloseButtonDescription": "デスクトップのエージェントタブで、×ボタンを押したときの動作を選択します。",
   "deleteSession": "セッションを削除",

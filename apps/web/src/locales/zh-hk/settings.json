@@ -1,4 +1,6 @@
 {
+  "expandImagePreviews": "放大圖片預覽",
+  "expandImagePreviewsDescription": "點擊或輕觸檔案預覽中的圖片，在更大的對話框中查看。此設定儲存在目前設備上。",
   "aSecretNameAndValueAreRequired": "需要填寫密鑰名稱和值。",
   "aSecretNameIsRequired": "需要填寫密鑰名稱。",
   "aboutAffectedKandevMcpTools": "關於受影響的 Kandev MCP 工具",

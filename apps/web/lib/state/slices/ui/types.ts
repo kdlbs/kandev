@@ -359,6 +359,8 @@ export type UISliceState = {
   appSidebar: AppSidebarState;
   /** Settings menu shape + open branches (localStorage). */
   settingsMenu: SettingsMenuState;
+  /** File-preview image expansion preference (localStorage). */
+  imagePreviewExpansionEnabled: boolean;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
   chatMotion: ChatMotionState;
@@ -377,6 +379,7 @@ export type UISliceState = {
 };
 
 export type UISliceActions = {
+  commitImagePreviewExpansion: (enabled: boolean) => void;
   setPreviewOpen: (sessionId: string, open: boolean) => void;
   togglePreviewOpen: (sessionId: string) => void;
   setPreviewView: (sessionId: string, view: PreviewViewMode) => void;

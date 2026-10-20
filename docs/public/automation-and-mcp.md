@@ -655,7 +655,12 @@ change the accepted chart or table.
 
 File bytes do not persist. Image file cards expand and load automatically when
 they appear in the conversation. Select **Hide preview** to collapse an image
-and **Preview** to reopen it. Other files load only after you select
+and **Preview** to reopen it. Click or tap the image to inspect it in a larger
+dialog, as with image attachments. Close the dialog to return to the preview.
+To disable this action, turn off **Expand image previews** in **Settings >
+Preferences > Appearance** and select **Save changes**. This preference is saved
+on this device. Inline image previews and attachment clicks remain available.
+Other files load only after you select
 **Preview**. **Open file** uses the native desktop or mobile viewer. If the
 workspace disappears, the report remains and the file preview reports that it
 is unavailable.

@@ -1,4 +1,6 @@
 {
+  "expandImagePreviews": "Expand image previews",
+  "expandImagePreviewsDescription": "Open file-preview images in a larger dialog when clicked or tapped. Saved on this device.",
   "aSecretNameAndValueAreRequired": "A secret name and value are required.",
   "aSecretNameIsRequired": "A secret name is required.",
   "aboutAffectedKandevMcpTools": "About affected Kandev MCP tools",

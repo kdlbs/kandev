@@ -1,4 +1,6 @@
 {
+  "expandImagePreviews": "放大图片预览",
+  "expandImagePreviewsDescription": "点击或轻触文件预览中的图片，在更大的对话框中查看。此设置保存在当前设备上。",
   "aSecretNameAndValueAreRequired": "需要填写密钥名称和值。",
   "aSecretNameIsRequired": "需要填写密钥名称。",
   "aboutAffectedKandevMcpTools": "关于受影响的 Kandev MCP 工具",

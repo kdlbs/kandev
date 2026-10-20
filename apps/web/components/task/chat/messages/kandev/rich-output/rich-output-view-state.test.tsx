@@ -49,7 +49,7 @@ it("retains hidden image choices across metadata changes and layout remounts ind
   };
   transport.read.mockResolvedValue({ content: "aW1hZ2U=", is_binary: true });
   const view = render(<Harness {...props} />);
-  expect(await screen.findAllByRole("img")).toHaveLength(2);
+  expect(await screen.findAllByRole("button", { name: "Open shared.png" })).toHaveLength(2);
   fireEvent.click(screen.getAllByTestId(TOGGLE)[0]);
   const renamed = { ...props, args: { ...props.args, title: "Renamed images" } };
   view.rerender(<Harness {...renamed} />);
@@ -64,7 +64,7 @@ it("retains hidden image choices across metadata changes and layout remounts ind
     "false",
     "true",
   ]);
-  expect(await screen.findAllByRole("img")).toHaveLength(1);
+  expect(await screen.findAllByRole("button", { name: "Open shared.png" })).toHaveLength(1);
   expect(transport.read).toHaveBeenCalledTimes(3);
 });
 
