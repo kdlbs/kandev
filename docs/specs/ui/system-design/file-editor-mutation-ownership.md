@@ -36,6 +36,7 @@ closure. No common coordinator or responsive layout change is introduced.
 | `AC-UI-FILE-EDITOR-MUTATION-001.7` | Workspace refresh admission and ordering |
 | `AC-UI-FILE-EDITOR-MUTATION-001.8` | Refresh consumer lifetime |
 | `AC-UI-FILE-EDITOR-MUTATION-001.9` | Live refresh reconciliation; Refresh verification and surfaces |
+| `AC-UI-FILE-EDITOR-MUTATION-001.10` | Save receipt and workspace observation reconciliation |
 
 ## Components and current lifecycle
 
@@ -92,8 +93,8 @@ completions settle their promises without publishing or retrying.
 Build the save diff/request from the captured dirty buffer and use its session
 and stored repository. After acceptance, reread only the still-owned buffer.
 Publish the saved snapshot/hash as baseline; derive dirty state from the latest
-buffer versus that saved snapshot. Preserve the existing remote-indication
-clearing and overwritten-save feedback for owned success. Pass the captured
+buffer versus that saved snapshot, subject to the newer workspace observation
+rule below. Preserve overwritten-save feedback for owned success. Pass the captured
 disk text and the owned live text to LSP. Only a clean result clears panel dirty
 state/title through the existing panel helper. Suppress LSP entirely for a
 retired owner, rather than combining one session's disk boundary with another
@@ -285,3 +286,39 @@ removal handlers. Include session navigation, return, replacement, unmount,
 same-session typing, clean success, active/retired failures, repo independence,
 replacement saving cleanup and current remote reload. Inspect real state,
 panel effects, persistence and LSP arguments rather than isolated predicates.
+
+## Save receipt and workspace observation reconciliation
+
+`FileEditorState.workspaceSnapshot` holds the last accepted workspace content
+and hash as a transient immutable object. Refresh installs a new object when
+it publishes changed content, baseline or remote state. Equal-content no-ops
+retain their object: they introduce no independently changed snapshot.
+Save admission captures that object with its existing buffer owner. Typing
+preserves it; persistence and wire payloads explicitly project descriptors and
+never serialize it. No counter, cache, backend ordering or API is introduced.
+
+At save publication, reread the owned buffer and compare its workspace snapshot
+identity with the admitted snapshot. If the observation changed and its text
+differs from the saved text, preserve the current remote warning/content/hash.
+If refresh already accepted that observation as baseline, retain its baseline
+and hash too. Otherwise install the acknowledged saved text/hash as baseline.
+Compute dirtiness against the selected baseline and retain live content. A save
+echo equal to the submitted text and preexisting observations do not keep an
+obsolete conflict. An accepted echo followed by a distinct clean refresh must
+also survive the old receipt. LSP still receives the actual saved text and live
+buffer, not an assertion that the saved receipt is the newest disk observation.
+
+Revalidate the owner immediately before publication and before panel/feedback
+sinks after synchronous store subscribers. Reload's optional hash preparation
+must also verify that the selected remote content/hash and workspace snapshot
+still match before applying them; a same-buffer newer snapshot is not permission
+to apply the older selection. There is no await between this check and update.
+
+This is a local extension of the existing baseline/refresh contract. Preserving
+all warnings would retain pre-save conflicts and save echoes; unconditional
+clearing loses newer observations. Object identity plus content equality states
+the bounded policy without claiming physical filesystem transaction chronology.
+The requirement/design and regression tests preserve this rationale; no ADR is
+needed. The separate tablet tabs and phone viewer are unchanged. Desktop E2E
+proves Reload after a delayed successful receipt with real disk content; the
+existing mobile file viewer scenario proves the separate Files entry path.

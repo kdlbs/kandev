@@ -294,6 +294,12 @@ For an idle, non-archived task with a prepared workspace, **Files → + → Add 
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
+In the desktop file editor, an agent change detected while you have local edits
+keeps your text and offers **Reload** to use the detected agent version. If a
+save is still finishing, its receipt does not dismiss a newer detected version.
+A successful save records the text submitted; typing made afterward stays unsaved.
+Choose **Reload** only when you want to replace the current text with that version.
+
 Files and workspace search omit only recovery artifacts that Kandev has registered for that workspace. A similarly named user file remains visible. A repository label changes display text only; file open, search, and chat-context actions continue to use the canonical path.
 
 ### Preview an HTML file
