@@ -104,12 +104,13 @@ test.describe("Changes panel Git refresh recovery", () => {
     git.createFile(filePath, "refresh recovery content\n");
 
     const bridge = await routeGitStatusRefresh(testPage);
+    bridge.holdFreshGitRefreshRequests();
     const gate = createGitEnrichmentGate(backend.tmpDir);
     gate.arm();
 
     try {
       const profile = await createStandardProfile(apiClient, "Git Refresh Recovery Profile");
-      await apiClient.createTaskWithAgent(
+      const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Git Refresh Recovery",
         profile.id,
@@ -120,12 +121,16 @@ test.describe("Changes panel Git refresh recovery", () => {
           repository_ids: [seedData.repositoryId],
         },
       );
+      if (!task.session_id) throw new Error("The Git refresh task should have a session identity");
       const priorFreshResponses = bridge.responseCount("fresh");
       const session = await openTaskSession(testPage, "Git Refresh Recovery");
       await gate.waitUntilStarted();
 
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
+      // Admit the foreground read after the controlled enrichment command has started.
+      await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
+      bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
       expect(bridge.responseIncludesFile("fresh", filePath)).toBe(true);
@@ -187,6 +192,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(refreshStatus).toHaveCount(0);
     } finally {
       gate.dispose();
+      bridge.releaseFreshGitRefreshRequests();
     }
   });
 

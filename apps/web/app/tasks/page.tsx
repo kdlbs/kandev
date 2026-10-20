@@ -12,8 +12,9 @@ import { TasksPageClient } from "./tasks-page-client";
 import {
   parseTasksListGroup,
   parseTasksListSort,
-  type TasksListGroup,
-  type TasksListSort,
+  resolveTasksListApiSort,
+  type TasksListGroupPreference,
+  type TasksListSortPreference,
 } from "@/lib/tasks/tasks-list-options";
 import type { Workflow, Task, Repository, Workspace, UserSettingsResponse } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
@@ -27,8 +28,8 @@ type WorkspaceData = {
 };
 
 type TasksListPreferences = {
-  sort: TasksListSort;
-  group: TasksListGroup;
+  sort: TasksListSortPreference;
+  group: TasksListGroupPreference;
 };
 
 function resolveTasksListPreferences(
@@ -54,7 +55,7 @@ function resolveTasksPageWorkspaceId(
 async function fetchWorkspaceData(
   workspaceId: string,
   settingsResponse: UserSettingsResponse | null,
-  tasksListSort: TasksListSort,
+  tasksListSort: TasksListSortPreference,
 ): Promise<WorkspaceData> {
   const savedWorkflowId = settingsResponse?.settings?.workflow_filter_id ?? null;
   const savedRepositoryId = settingsResponse?.settings?.repository_ids?.[0] ?? null;
@@ -67,7 +68,7 @@ async function fetchWorkspaceData(
       pageSize: 25,
       workflowId: savedWorkflowId,
       repositoryId: savedRepositoryId,
-      sort: tasksListSort,
+      sort: resolveTasksListApiSort(tasksListSort),
     }),
   ]);
 
@@ -103,8 +104,8 @@ export default async function TasksPage({
   let workspaceId = workspaceParam;
   let userSettingsResponse: UserSettingsResponse | null = null;
   let activeWorkflowId: string | null = null;
-  let tasksListSort: TasksListSort = parseTasksListSort(null);
-  let tasksListGroup: TasksListGroup = parseTasksListGroup(null);
+  let tasksListSort: TasksListSortPreference = parseTasksListSort(null);
+  let tasksListGroup: TasksListGroupPreference = parseTasksListGroup(null);
 
   try {
     const [workspacesResponse, settingsResponse] = await Promise.all([

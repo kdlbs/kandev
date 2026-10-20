@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "Ŕēƥàĩŕ ŕēqũēśţēď ƒōŕ ţĥĩś ŕēḿōvàĺ.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Ŕēƥàĩŕ ŕēqũēśţēď. Ŵàĩţĩńĝ ƒōŕ à ńēŵ ćōḿḿĩţ ƀēƒōŕē ŕēqũēũē.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Ŵàĩţĩńĝ ƒōŕ à ńēŵ ćōḿḿĩţ ƀēƒōŕē ŕēqũēũē.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "Ńēŵ ĥēàď ďēţēćţēď. Ŵàĩţĩńĝ ƒōŕ ŕēqũĩŕēď ćĥēćķś."
+  "mergeQueueRecoveryStatusWaitingForChecks": "Ńēŵ ĥēàď ďēţēćţēď. Ŵàĩţĩńĝ ƒōŕ ŕēqũĩŕēď ćĥēćķś.",
+  "mergeAccessLoading": "Ćĥēćķĩńĝ ḿēŕĝē ƥēŕḿĩśśĩōńś.",
+  "mergeAccessUnavailable": "Ḿēŕĝē ƥēŕḿĩśśĩōńś àŕē ũńàvàĩĺàƀĺē.",
+  "mergeAccessDeniedByActor": "{{actor}} ćàńńōţ ḿēŕĝē ĩńţō {{repository}}.",
+  "mergeAccessDenied": "Ţĥĩś àććōũńţ ćàńńōţ ḿēŕĝē ĩńţō {{repository}}.",
+  "checkMergeAccess": "Ćĥēćķ àĝàĩń",
+  "mergeAsActor": "àś {{actor}}"
 }

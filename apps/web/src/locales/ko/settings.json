@@ -623,6 +623,8 @@
   "showTheJumpControlAfterYour": "최신 프롬프트가 대화 위로 스크롤된 후 이동 컨트롤을 표시합니다.",
   "showThePerSessionButtonThat": "대화 자동 스크롤을 일시적으로 켜거나 끄는 세션별 버튼을 표시합니다. 숨겨도 기본값은 바뀌지 않습니다. 새 대화는 여전히 자동 스크롤됩니다.",
   "showTranscriptAutoScrollControl": "대화 자동 스크롤 컨트롤 표시",
+  "showTurnChangedFiles": "각 턴 후 변경된 파일 표시",
+  "showTurnChangedFilesDescription": "완료된 에이전트 답변 아래에 파일 요약과 차이점을 표시합니다.",
   "showsKandevHostValuesOnlyCollection": "Kandev 호스트 값만 표시합니다. 클라이언트가 표시하는 동안 수집이 시작됩니다.",
   "simplifiedMetrics": "간소화된 지표",
   "sleepInhibitionActive": "작업이 시작 중이거나 실행 중일 때 활성입니다.",

@@ -93,6 +93,9 @@ func TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails(t *t
 	if err := repo.UpdateTaskSession(ctx, current); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.SetSessionPrimary(ctx, current.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 		ID: current.TaskEnvironmentID, TaskID: current.TaskID,
 		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,

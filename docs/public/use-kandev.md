@@ -102,6 +102,26 @@ If model discovery requires authentication, the tour's **Settings** link opens t
 saved agent profile without saving the tour draft or marking it complete. Use the
 profile's authentication controls, then return to the tour.
 
+## Browse coordinator conversations across workspaces
+
+Enable **Integrated control** and **Workspace coordinators** in
+**Settings > System > Feature Toggles** and
+restart Kandev, then select **Integrated control** in the workspace picker. The
+toggle is off by default. Its dedicated navigation lists available workspaces,
+coordinators and each coordinator’s existing current conversation. The phone
+navigation menu provides the same tree.
+
+Select a conversation to open its original task and runtime sessions in the
+center while keeping this navigation visible. The conversation keeps its source
+workspace, permissions and draft; browsing it does not switch the active
+workspace or start an agent. An unavailable conversation shows its state rather
+than creating a replacement. This first view does not create additional
+coordinator conversations or aggregate archived conversations.
+
+The **Provider / model** and **History** views summarize the current coordinator
+records available in this first slice. They do not provide provider usage totals
+or a searchable archive of past conversations.
+
 ## Find a setting
 
 Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are
@@ -184,6 +204,10 @@ full list. This labelled link sits inside the group on desktop and phones, like
 
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
 workspace with a **Kanban** or **Office** badge and ends with the workspace-creation actions.
+
+Office is experimental and disabled by default. To evaluate a persistent agent team,
+follow [Get started with Office](office-getting-started.md); the [Office guide](office.md)
+covers its separate project, task, review, routine, and operations flows.
 
 From anywhere, press `Cmd/Ctrl+E` to open it with the keyboard: focus lands inside the menu,
 so arrow keys move between workspaces and **Enter** switches to the highlighted one. If the sidebar

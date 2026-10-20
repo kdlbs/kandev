@@ -82,11 +82,13 @@ function MCPTaskProfileRadioGroup({
   isDirty,
   onValueChange,
   ariaDescribedBy,
+  className,
 }: {
   value: MCPTaskAgentProfileDefault;
   isDirty: boolean;
   onValueChange: (value: MCPTaskAgentProfileDefault) => void;
   ariaDescribedBy?: string;
+  className?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -96,7 +98,7 @@ function MCPTaskProfileRadioGroup({
       value={value}
       onValueChange={(nextValue) => onValueChange(nextValue as MCPTaskAgentProfileDefault)}
       data-settings-dirty={isDirty}
-      className="gap-3"
+      className={className}
     >
       {OPTIONS.map((option) => {
         const labelId = `mcp-task-profile-${option.value}-label`;
@@ -178,6 +180,8 @@ export function MCPTaskAgentProfileDefaultSettings({
   if (presentation === "row") {
     return (
       <SettingsRow
+        className="md:flex-col md:items-stretch"
+        controlWrapperClassName="w-full md:max-w-none md:justify-start"
         label={t(PROFILE_LABEL_KEY)}
         description={t("settings:agentProfileShort")}
         info={
@@ -190,6 +194,7 @@ export function MCPTaskAgentProfileDefaultSettings({
         isDirty={isDirty}
         control={
           <MCPTaskProfileRadioGroup
+            className="grid w-full gap-2 md:grid-cols-2"
             value={draft}
             isDirty={isDirty}
             onValueChange={setDraft}

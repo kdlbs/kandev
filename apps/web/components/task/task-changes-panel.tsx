@@ -39,6 +39,7 @@ import {
   type WorkspaceRestorationResult,
 } from "@/hooks/domains/session/use-workspace-restoration";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { HistoricalTurnDiffViewer } from "./historical-turn-diff-viewer";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
@@ -426,7 +427,7 @@ function ChangesPanelHeader({
   );
 }
 
-const TaskChangesPanel = memo(function TaskChangesPanel({
+const TaskChangesPanelLive = memo(function TaskChangesPanelLive({
   mode = "all",
   filePath,
   fileRepositoryName,
@@ -486,7 +487,6 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   });
 
   if (isArchived) return <ArchivedPanelPlaceholder />;
-
   return (
     <PanelRoot>
       <ChangesPanelHeader
@@ -524,6 +524,18 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       </PanelBody>
     </PanelRoot>
   );
+});
+
+const TaskChangesPanel = memo(function TaskChangesPanel(props: TaskChangesPanelProps) {
+  if (props.selectedDiff?.historical) {
+    return (
+      <HistoricalTurnDiffViewer
+        target={props.selectedDiff.historical}
+        onClose={props.onClearSelected}
+      />
+    );
+  }
+  return <TaskChangesPanelLive {...props} />;
 });
 
 function ChangesPanelContent({

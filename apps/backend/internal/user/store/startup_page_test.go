@@ -85,7 +85,7 @@ func assertStartupPageSettings(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if other.StartupPage != models.StartupPageTaskOverview || other.Revision != 0 {
+	if other.StartupPage != models.StartupPageTaskOverview || other.Revision != 0 || !other.ShowTurnChangedFiles {
 		t.Fatalf("other user's settings changed: startup=%q revision=%d", other.StartupPage, other.Revision)
 	}
 }

@@ -34,6 +34,8 @@ export type KanbanStepEvents = {
   on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
   on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+  on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
 };
 
 /**
@@ -125,6 +127,7 @@ export type KanbanState = {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       branch_policy_id?: string;
       branch_policy_name?: string;
       branch_policy_base_branch?: string;
@@ -138,6 +141,7 @@ export type KanbanState = {
       display_name: string;
       position: number;
     }>;
+    initialWorkspaceLayout?: "repository" | "task_root";
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;

@@ -560,24 +560,16 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	)
 	if err != nil {
 		cleanup()
-		stderrTail := stderr.tail()
-		// The tail goes to the log rather than into the response: handlers
-		// deliberately keep subprocess diagnostics and tmp paths out of client
-		// payloads. An empty tail is itself a result — the child produced no
-		// diagnostics, rather than producing some we failed to record.
-		failureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
-		failureMessage := withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail)
+		stderrTail, logTail := stderr.probeTails()
+		// Classification uses raw evidence; only the complete-line projection
+		// reaches the sanitized diagnostic log.
+		managedFailureCode := managedRuntimeProbeFailureCode(cfg.Command, stderrTail)
+		failureCode := managedFailureCode
+		failureMessage := sanitizeProbeDiagnostic(withUpstreamHint(err, cfg.ProviderGatewayAuth, stderrTail))
 		if req.ProfileContext {
 			failureMessage, failureCode = sanitizeProfileProbeFailure(err, stderrTail)
-			e.logger.Error("ACP profile probe failed",
-				zap.String("agent_id", req.AgentID),
-				zap.String("failure_code", string(failureCode)))
-		} else {
-			e.logger.Error("ACP probe failed",
-				zap.String("agent_id", req.AgentID),
-				zap.Error(err),
-				zap.String("stderr", stderrTail))
 		}
+		e.logProbeFailure(req, err, logTail, failureCode, managedFailureCode)
 		return &ProbeResponse{
 			Success:     false,
 			Error:       failureMessage,
@@ -655,13 +647,13 @@ func (e *ACPInferenceExecutor) loadOpenCodeModels(
 ) []ProbeModel {
 	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir, refresh, configs...)
 	if err != nil {
+		message := "ACP probe: failed to list opencode models"
 		if profileContext {
-			e.logger.Warn("ACP profile probe: secondary model discovery failed",
-				zap.String("agent_id", "opencode-acp"))
-		} else {
-			e.logger.Warn("ACP probe: failed to list opencode models",
-				zap.String("agent_id", "opencode-acp"), zap.Error(err))
+			message = "ACP profile probe: secondary model discovery failed"
 		}
+		safeError := sanitizeProbeDiagnostic(err.Error())
+		e.logger.Warn(message+": "+safeError,
+			zap.String("agent_id", "opencode-acp"), zap.String("error", safeError))
 		return nil
 	}
 	if len(models) == 0 {
@@ -1392,15 +1384,12 @@ const stderrTailLimit = 4 << 10
 
 // stderrBuffer collects a spawned agent's stderr.
 //
-// os/exec copies stderr on a goroutine of its own whenever the writer is not an
-// *os.File, and the tail is read while the child is still being torn down —
-// cleanup calls Wait from a defer, after the response has been built. Writer and
-// reader therefore overlap, and the mutex is what makes that legal: an
-// unsynchronised bytes.Buffer here trips the race detector in
-// TestProbeCleansUpDescendantProcessOnTimeout.
+// os/exec copies stderr on its own goroutine. The mutex protects both the
+// retained bytes and their first-line boundary while readers take snapshots.
 type stderrBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu               sync.Mutex
+	buf              bytes.Buffer
+	partialFirstLine bool
 }
 
 // Write keeps only the trailing stderrTailLimit bytes, so an agent that chatters
@@ -1413,11 +1402,15 @@ func (b *stderrBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	written := len(p)
 	if len(p) > stderrTailLimit {
-		p = p[len(p)-stderrTailLimit:]
+		cut := len(p) - stderrTailLimit
+		b.partialFirstLine = p[cut-1] != '\n'
+		b.buf.Reset()
+		p = p[cut:]
 	}
 	b.buf.Write(p)
 	if excess := b.buf.Len() - stderrTailLimit; excess > 0 {
-		b.buf.Next(excess)
+		discarded := b.buf.Next(excess)
+		b.partialFirstLine = discarded[len(discarded)-1] != '\n'
 	}
 	return written, nil
 }
@@ -1430,6 +1423,20 @@ func (b *stderrBuffer) tail() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return strings.TrimSpace(b.buf.String())
+}
+
+// probeTails keeps classification and complete-line log input on one snapshot.
+// A partial first line can contain a credential separated from its key by a cut.
+func (b *stderrBuffer) probeTails() (string, string) {
+	b.mu.Lock()
+	raw := b.buf.String()
+	partial := b.partialFirstLine
+	b.mu.Unlock()
+	logTail := raw
+	if partial {
+		_, logTail, _ = strings.Cut(logTail, "\n")
+	}
+	return strings.TrimSpace(raw), strings.TrimSpace(logTail)
 }
 
 // describeACPFailure names an expired or cancelled context as the cause instead

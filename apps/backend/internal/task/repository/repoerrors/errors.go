@@ -2,6 +2,10 @@ package repoerrors
 
 import "errors"
 
+// ErrWorkspaceCloneConfiguration reports a source setting that cannot be
+// copied into an independent workspace.
+var ErrWorkspaceCloneConfiguration = errors.New("workspace configuration cannot be cloned")
+
 // ErrWorkspaceNameMismatch reports that a confirmed workspace delete did not
 // match the workspace row's current name.
 var ErrWorkspaceNameMismatch = errors.New("workspace name mismatch")
@@ -14,6 +18,20 @@ var ErrWorkflowNotFound = errors.New("workflow not found")
 
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
+
+// ErrTurnChangeSetNotFound reports that no historical turn-change summary
+// matched the task, session, and server-owned change-set identity.
+var ErrTurnChangeSetNotFound = errors.New("turn change set not found")
+
+// ErrTurnChangeSetIdentityConflict reports a duplicate immutable turn identity.
+var ErrTurnChangeSetIdentityConflict = errors.New("turn change set identity conflict")
+
+// ErrTurnChangeRelationship reports a change-set identity whose task, session,
+// turn, or environment ownership no longer matches.
+var ErrTurnChangeRelationship = errors.New("turn change ownership relationship changed")
+
+// ErrTurnChangeContentNotFound reports unavailable or expired retained content.
+var ErrTurnChangeContentNotFound = errors.New("turn change content not found")
 
 // ErrTaskVersionConflict reports an exact task update based on a stale
 // workspace or resource version.

@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -42,6 +43,7 @@ import (
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -202,6 +204,16 @@ func provideOrchestrator(
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
+	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
+	turnChangeCoordinator.SetLogger(log.Zap())
+	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	}
+	agentruntime.InstallTurnChangeCaptureHandler(
+		lifecycleMgr,
+		&runtimeTurnChangeCaptureHandler{coordinator: turnChangeCoordinator, publisher: taskSvc},
+	)
 
 	// Route orchestrator task.updated events through the task service, which
 	// owns the canonical rich payload. Covers workflow transitions, workflow
@@ -272,6 +284,8 @@ func provideOrchestrator(
 	// workspace.manage, not session.prompt, to start a turn on a coordinator
 	// conversation task.
 	orchestratorSvc.SetTaskPromptChecker(taskSvc.AuthorizeTaskPromptScope)
+	orchestratorSvc.SetExecutorAdmission(taskSvc.PrepareExecutorAdmission)
+	orchestratorSvc.SetAutonomousExecutorContext(taskSvc.PrepareAutonomousExecutor)
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
@@ -358,7 +372,7 @@ func startupRecoveryOwnerContext(
 	if !ok || identity.UserID != ownerID || identity.OrgID != orgID {
 		return nil, errors.New("workspace owner identity is unavailable or changed organizations")
 	}
-	return authn.WithIdentity(ctx, identity), nil
+	return authn.WithIdentity(taskmodels.WithExecutorActor(ctx, ""), identity), nil
 }
 
 type githubCredentialPolicyService interface {

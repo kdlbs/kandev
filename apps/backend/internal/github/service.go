@@ -121,6 +121,7 @@ type WorkspaceGroupOwnerSessionResolver interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
+	executorContext             func(context.Context, string, string) (context.Context, error)
 	mu                          sync.Mutex
 	connectionMutationLocks     [64]sync.Mutex
 	client                      Client

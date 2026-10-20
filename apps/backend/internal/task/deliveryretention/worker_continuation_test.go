@@ -2,6 +2,7 @@ package deliveryretention
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -49,6 +50,7 @@ func (r *drainingRepository) RunAgentDeliveryRetentionBatch(context.Context, mod
 	if r.calls["retention"] <= 70 {
 		if r.discoveryOnly {
 			result.DiscoveryAdvanced = true
+			result.DiscoveryAfter.SubmissionID = fmt.Sprintf("%03d", r.calls["retention"])
 		} else {
 			result.EventPayloadsPruned = 1
 		}

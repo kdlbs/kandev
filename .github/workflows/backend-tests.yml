@@ -89,6 +89,10 @@ jobs:
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
             scripts/check-agentctl-deps.sh
+            scripts/*.ps1
+            scripts/*.psm1
+            scripts/tests/isolated-*
+            .gitattributes
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -909,23 +913,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run PostgreSQL 18 materialization and history gates
+      - name: Run PostgreSQL 18 repository contract gates
         run: |
           set -euo pipefail
           output_file="$(mktemp)"
           go test -v -race \
             ./internal/task/repository/sqlite ./internal/office/repository/sqlite \
-            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership|TestPostgresQuickChatHistoryCAS)$' \
+            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership|TestPostgresQuickChatHistoryCAS|TestPostgresPrimaryPromotionAndStaleWrite|TestPostgresTurnEntryStampAcrossRevisit|TestPostgresTurnEntryReceiptStampAcrossRevisit|TestPostgresStateRepairRequiresCurrentEntry)$' \
             2>&1 | tee "${output_file}"
 
           for test_name in \
             TestPostgresMaterializationSerializesAndRechecksOwner \
             TestPostgresWorkspaceGroupOwnershipRoundTrip \
             TestWorkspaceBindingRetryOwnership \
-            TestPostgresQuickChatHistoryCAS; do
+            TestPostgresQuickChatHistoryCAS \
+            TestPostgresPrimaryPromotionAndStaleWrite \
+            TestPostgresTurnEntryStampAcrossRevisit \
+            TestPostgresTurnEntryReceiptStampAcrossRevisit \
+            TestPostgresStateRepairRequiresCurrentEntry; do
             if ! grep -q "^=== RUN   ${test_name}$" "${output_file}" || \
                ! grep -q "^--- PASS: ${test_name} " "${output_file}"; then
-              echo "::error::PostgreSQL 18 materialization gate did not run and pass ${test_name}"
+              echo "::error::PostgreSQL 18 repository gate did not run and pass ${test_name}"
               exit 1
             fi
           done
@@ -1082,7 +1090,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'

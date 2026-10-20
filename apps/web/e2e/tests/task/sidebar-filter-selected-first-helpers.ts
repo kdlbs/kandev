@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -39,7 +40,7 @@ export async function seedSelectedFilters(api: ApiClient, seed: SeedData, tmpDir
     provider_name: "shared-options",
   });
   const { repositories } = await api.listRepositories(seed.workspaceId);
-  const source = repositories.map(repositorySlug);
+  const source = ["None", ...repositories.map(repositorySlug)];
   const selected = source.slice(-2);
   const unselected = source.slice(0, -2);
   const stepIds: string[] = [];
@@ -149,8 +150,10 @@ export async function verifySelectedFilters(
     expect(rowBox!.height).toBeGreaterThanOrEqual(44);
   }
   const search = picker.getByRole("combobox");
-  await search.fill(seeded.unselected[0]);
-  await expect(rows).toHaveText([seeded.unselected[0]]);
+  const searchTarget = seeded.unselected.find((value) => value !== "None");
+  assert.ok(searchTarget, "Fixture must include an unselected repository for search");
+  await search.fill(searchTarget);
+  await expect(rows).toHaveText([searchTarget]);
   await search.fill("");
   await expect(rows).toHaveCount(seeded.source.length);
   const labelsAfterSearch = (await rows.allTextContents()).map((label) => label.trim());
@@ -160,7 +163,7 @@ export async function verifySelectedFilters(
   await activate(picker.getByRole("option", { name: seeded.selected[0], exact: true }), mobile);
   await expect(rows.nth(0)).toHaveText(seeded.selected[1]);
   await expect(rows.nth(0)).toHaveAttribute("data-checked", "true");
-  await search.fill(seeded.unselected[0]);
+  await search.fill(searchTarget);
   await page.keyboard.press("Escape");
   await expect(picker).toBeHidden();
   await activate(trigger, mobile);

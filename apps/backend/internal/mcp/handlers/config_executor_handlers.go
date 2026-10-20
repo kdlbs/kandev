@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/dto"
@@ -117,6 +119,7 @@ func (h *Handlers) handleListExecutorProfiles(ctx context.Context, msg *ws.Messa
 
 func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
+		OwnerUserID   string                 `json:"owner_user_id,omitzero"`
 		ExecutorID    string                 `json:"executor_id"`
 		Name          string                 `json:"name"`
 		McpPolicy     string                 `json:"mcp_policy"`
@@ -140,6 +143,7 @@ func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Mess
 	}
 
 	profile, err := h.taskSvc.CreateExecutorProfile(ctx, &service.CreateExecutorProfileRequest{
+		OwnerUserID:   req.OwnerUserID,
 		ExecutorID:    req.ExecutorID,
 		Name:          req.Name,
 		McpPolicy:     req.McpPolicy,
@@ -149,6 +153,9 @@ func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Mess
 		EnvVars:       req.EnvVars,
 	})
 	if err != nil {
+		if code := executorOwnershipCode(err); code != "" {
+			return ws.NewError(msg.ID, msg.Action, code, "Executor configuration unavailable", nil)
+		}
 		h.logger.Error("failed to create executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create executor profile: "+err.Error(), nil)
 	}
@@ -157,6 +164,7 @@ func (h *Handlers) handleCreateExecutorProfile(ctx context.Context, msg *ws.Mess
 
 func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
+		OwnerUserID   models.OptionalOwner   `json:"owner_user_id,omitzero"`
 		ProfileID     string                 `json:"profile_id"`
 		Name          *string                `json:"name"`
 		McpPolicy     *string                `json:"mcp_policy"`
@@ -179,6 +187,10 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 	// profile version observed before the request's fields are applied.
 	current, err := h.taskSvc.GetExecutorProfile(ctx, req.ProfileID)
 	if err != nil {
+		if code := executorOwnershipCode(err); code != "" {
+			return ws.NewError(msg.ID, msg.Action, code, "Executor configuration unavailable", nil)
+		}
+
 		h.logger.Error("failed to load executor profile before MCP update", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
 	}
@@ -188,6 +200,7 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 	expectedUpdatedAt := &current.UpdatedAt
 
 	profile, err := h.taskSvc.UpdateExecutorProfile(ctx, req.ProfileID, &service.UpdateExecutorProfileRequest{
+		OwnerUserID:       req.OwnerUserID,
 		Name:              req.Name,
 		McpPolicy:         req.McpPolicy,
 		Config:            req.Config,
@@ -197,6 +210,9 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 		ExpectedUpdatedAt: expectedUpdatedAt,
 	})
 	if err != nil {
+		if code := executorOwnershipCode(err); code != "" {
+			return ws.NewError(msg.ID, msg.Action, code, "Executor configuration unavailable", nil)
+		}
 		h.logger.Error("failed to update executor profile", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update executor profile: "+err.Error(), nil)
 	}
@@ -206,4 +222,18 @@ func (h *Handlers) handleUpdateExecutorProfile(ctx context.Context, msg *ws.Mess
 func (h *Handlers) handleDeleteExecutorProfile(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleDeleteByField(ctx, msg, "profile_id", "failed to delete executor profile", "Failed to delete executor profile",
 		func(ctx context.Context, id string) error { return h.taskSvc.DeleteExecutorProfile(ctx, id) })
+}
+
+func executorOwnershipCode(err error) string {
+	switch {
+	case errors.Is(err, repoerrors.ErrExecutorProfileNotFound), errors.Is(err, models.ErrExecutorNotFound):
+		return ws.ErrorCodeNotFound
+	case errors.Is(err, service.ErrForbidden):
+		return ws.ErrorCodeForbidden
+	case errors.Is(err, models.ErrExecutorOwnershipChanged):
+		return ws.ErrorCodeConflict
+	case errors.Is(err, models.ErrExecutorOwnershipInvalid):
+		return ws.ErrorCodeValidation
+	}
+	return ""
 }

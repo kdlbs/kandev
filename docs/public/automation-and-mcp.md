@@ -137,6 +137,22 @@ stores the plugin ID and instance key, not a private conversation ID; import
 requires an explicit binding to an available conversation in the destination
 workspace.
 
+### Private executor access
+
+Automations and provider watches retain the Kandev user who created them.
+Background dispatch, retries, and deferred launches check that user's current
+executor access. Editing or manually triggering a source also checks the
+caller's access, so another workspace member cannot borrow its creator's
+private compute. A disabled or missing creator cannot authorize private
+compute. Legacy sources without a recorded creator continue to use shared
+executors; recreate the source as the intended user before choosing a private
+executor.
+
+The same executor checks cover workflow execution and existing task sessions.
+A task's MCP principal uses its recorded execution actor for executor access;
+workspace ownership does not supply another user's private authority. See
+[Private executors and profiles](executors.md#private-executors-and-profiles).
+
 ## Trigger behavior
 
 The editor has two exclusive layouts:
@@ -209,7 +225,7 @@ The GitHub evaluator polls every 60 seconds and requires a working GitHub integr
 - exact author-login filters;
 - draft exclusion.
 
-Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, but the evaluator currently ignores the saved event list: clearing that checkbox does not stop polling or firing. Disable the automation/trigger instead. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
+Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, which must be selected for PR polling and firing. Clearing that checkbox stops PR polling and firing; a missing, null, or empty event selection also stays inactive. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
 
 The current evaluator does not apply label filters, and the current form does not offer them.
 
@@ -791,6 +807,23 @@ Every create response from both the MCP tool result and the REST response body a
 
 Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation; update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
+For normal deletion when workspace inspection fails, `delete_task_kandev`
+requires both `discard_worktree_changes: true` and
+`allow_unverified_workspace_changes: true`. These flags acknowledge possible
+loss of local changes. They do not bypass ownership checks for file removal.
+The response reports `cleanup_operation_ids`, `workspace_cleanup_pending`, and
+`runtime_stop_pending`. A successful task deletion can have pending cleanup.
+
+For an authorized task deletion, `delete_task_kandev` accepts the optional
+`workspace_cleanup` value `delete` (default) or `retain`. Use `retain` to delete
+the task and conversation while keeping workspace files and branches, including
+when workspace inspection fails. Existing task scope and authorization rules
+still apply. The response includes `workspace_cleanup`,
+`retention_operation_ids`, and `runtime_stop_pending`. A pending runtime stop
+does not mean the task deletion failed. Retained resources remain excluded from
+automatic cleanup and can continue to consume disk space or provider capacity.
+See [task deletion recovery](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
@@ -1061,6 +1094,14 @@ The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
 - SSE remains a legacy transport. Use `/mcp` when the client supports `2026-07-28`.
 
 Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
+
+For valid notifications with no `id` and no `params._meta`, Kandev can use a supported
+modern protocol header to supply the missing version metadata. Accepted
+notifications return HTTP 202 with no body. This accommodates roots-change
+notifications sent when a client restores a conversation.
+
+Tool requests still require their normal metadata. Explicitly supplied metadata,
+duplicate JSON members, and noncanonical field spellings retain SDK validation.
 
 Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 

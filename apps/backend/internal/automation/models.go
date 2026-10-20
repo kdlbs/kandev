@@ -199,10 +199,11 @@ const (
 
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID          string `json:"id" db:"id"`
-	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
-	Name        string `json:"name" db:"name"`
-	Description string `json:"description" db:"description"`
+	CreatedByUserID string `json:"-" db:"created_by_user_id"`
+	ID              string `json:"id" db:"id"`
+	WorkspaceID     string `json:"workspace_id" db:"workspace_id"`
+	Name            string `json:"name" db:"name"`
+	Description     string `json:"description" db:"description"`
 	// TaskModeAutomationRun is coordinator-only and may omit a workflow. A
 	// TaskModeNormalTask must name a workflow so the generated task enters the
 	// normal task lifecycle and appears in the Kanban/sidebar.

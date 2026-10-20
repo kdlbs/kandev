@@ -79,4 +79,7 @@ live instance, production data, or any state outside the isolated home.
   application data and the per-launch directory for temporary files.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.9:** Windows CI shall run PowerShell tests
   for live-home boundaries, junction paths, inherited environment isolation,
-  and restoration of the caller environment.
+  restoration of the caller environment, caller-pipe EOF while detached listeners
+  remain alive, ownership of backend and web listeners among stale or concurrent
+  candidates, literal paths and host arguments, start-identity mismatch refusal,
+  and full descendant cleanup after discovery or metadata-write failures.

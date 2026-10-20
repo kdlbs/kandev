@@ -1,5 +1,7 @@
 "use client";
 
+import { queueMutationErrorKey } from "@/lib/queue-mutation-error";
+
 import {
   forwardRef,
   useCallback,
@@ -532,7 +534,7 @@ function useQueuedGhostSave({
       if (err instanceof QueueEntryNotFoundError) {
         toast.error(t("chat:queueEditAlreadySent"));
       } else {
-        toast.error(t("chat:queueEditSaveFailed"));
+        toast.error(t(queueMutationErrorKey(err, "chat:queueEditSaveFailed")));
       }
       setEditing(false);
       await onEditComplete?.(editToken, false);

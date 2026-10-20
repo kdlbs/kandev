@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-10-04
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -34,6 +34,7 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-001.12:** Phone and coarse-pointer users shall retain the existing visible Quick Chat close action and touch dismissal paths without depending on a hardware keyboard shortcut.
 
 - **AC-UI-QUICK-TERMINAL-001.13:** On phones, the selected running Quick Terminal exposes the same shortcut controls as a task terminal, including Ctrl/Shift, interrupt, EOF, Escape, Tab, navigation keys, and symbols. Shortcuts and modified keyboard input target only that terminal. The controls retain terminal focus, remain reachable above the on-screen keyboard, and disappear when selecting a conversation or dismissing the dialog. Modifiers reset when leaving the selected terminal.
+- **AC-UI-QUICK-TERMINAL-001.14:** If a terminal start is active in this client, an earlier resync response shall not replace its connecting state. The client shall continue the host-shell start.
 
 ## Out of scope
 

@@ -17,6 +17,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,6 +27,16 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--isolated" {
+		if err := runIsolated(os.Args[2:]); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				os.Exit(exitErr.ExitCode())
+			}
+			die("isolated launch: %v", err)
+		}
+		return
+	}
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: winjob <program> [args...]")
 		os.Exit(2)

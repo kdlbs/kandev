@@ -117,3 +117,18 @@ pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/syste
 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/session/mobile-delivery-retention.spec.ts e2e/tests/session/mobile-session-resume-settings-recovery.spec.ts -- --retries=0
 pnpm --dir apps/web exec vitest run components/task/launch-queue-status.test.tsx
 ```
+
+### Further CI remediation
+
+Updated the shared native-resume assertion to match the new uncertainty message,
+preserving all recovery actions and follow-up prompt checks. All six desktop
+and six phone recovery/scroll scenarios passed without retries. The native
+recovery proof correction and its validation are recorded in the platform
+convergence work order.
+
+The phone scroll failure reproduced three times without retries. Investigation
+identified browser anchoring during delayed content growth and contraction. A
+local fix passed its regression tests and browser checks. Before delivery,
+`main` gained the overlapping scrolling correction in PR #4616. The local
+scrolling changes were removed so this PR can use the upstream implementation.
+Integration and final validation of that revision remain in progress.

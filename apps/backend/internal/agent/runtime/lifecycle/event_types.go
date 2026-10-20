@@ -44,6 +44,7 @@ type AgentEventPayload struct {
 	StartupFailureNPMCode     string                           `json:"startup_npm_code,omitempty"`
 	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
 	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
+	CausingRunID              string                           `json:"causing_run_id,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.
@@ -152,6 +153,9 @@ type ACPSessionCreatedPayload struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
+	// succeeds the committed harness generation.
+	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
@@ -230,6 +234,7 @@ type AgentStreamEventData struct {
 	TurnID                      string                           `json:"turn_id,omitempty"`
 	Data                        interface{}                      `json:"data,omitempty"`
 	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
+	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

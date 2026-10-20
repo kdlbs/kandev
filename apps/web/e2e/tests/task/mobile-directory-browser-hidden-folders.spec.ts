@@ -77,10 +77,10 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
   // On a phone the Files surface is a drawer opened from its own button, and the
   // add-sources surface is a drawer rather than a dialog.
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  const entryPoint = testPage.getByTestId("files-workspace-actions");
+  const entryPoint = testPage.getByTestId("files-create-menu");
   await expect(entryPoint).toBeVisible();
   await entryPoint.tap();
-  await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).tap();
+  await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).tap();
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: "Add folder" }).tap();
@@ -157,9 +157,9 @@ test("a breadcrumb too long to fit keeps the reveal control inside the popover",
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  const entryPoint = testPage.getByTestId("files-workspace-actions");
+  const entryPoint = testPage.getByTestId("files-create-menu");
   await entryPoint.tap();
-  await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).tap();
+  await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).tap();
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: "Add folder" }).tap();

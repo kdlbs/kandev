@@ -20,6 +20,7 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
+	"CreatedByUserID":                  {exported: false}, // Trusted execution authority is rebound to the importer.
 	"Name":                             {exported: true, yamlKey: "name"},
 	"Description":                      {exported: true, yamlKey: "description"},
 	"Prompt":                           {exported: true, yamlKey: "prompt"},

@@ -214,6 +214,7 @@ An event contains an ordered list of actions. Each action has a `type` and an op
 | `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` |
 | `on_exit` | A task leaves the step. | `disable_plan_mode` |
 | `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, all child tasks complete, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
+| `on_pr_merged`, `on_pr_closed` | PR lifecycle events: every GitHub pull request linked to the task is merged, or a linked pull request is closed without merging. They run without an agent turn. | Same as the Office/Phase-2 events. |
 
 `set_session_mode` requires `config.mode` to be a non-empty string. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
 
@@ -231,7 +232,7 @@ Portable validation is deliberately narrow. Beyond `set_session_mode` and positi
 
 ### Office / Phase-2 triggers
 
-The seven Office/Phase-2 triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`. `queue_run_for_each_participant`'s `config.skip_decided` (boolean) excludes any seat that already recorded a decision at the step from that fan-out: the shipped office-default template sets it on `review`/`approval`'s `on_comment` so a gate comment only wakes undecided reviewers/approvers.
+The seven Office/Phase-2 triggers and the two PR triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`. `queue_run_for_each_participant`'s `config.skip_decided` (boolean) excludes any seat that already recorded a decision at the step from that fan-out: the shipped office-default template sets it on `review`/`approval`'s `on_comment` so a gate comment only wakes undecided reviewers/approvers.
 
 What still doesn't round-trip is Office step *metadata* that has no portable representation: `stage_type`, step participants (reviewers/approvers), recorded decisions, task data, and step history (see [Step fields](#step-fields)). The Workflows settings UI filters Office-style workflows from its list and Export All selection because of that metadata gap, not because their trigger events are dropped. Manage participant and decision state through the Office product surface; portable Kanban import/export only carries step behavior, not Office workflow state.
 

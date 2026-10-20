@@ -24,11 +24,13 @@ import type {
   OpenDiffOptions,
   DiffSheetMode,
 } from "@/lib/state/diff-target-types";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
+  onCloseHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
 };
 
 function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelData>) {
@@ -78,13 +80,20 @@ function useOpenSelectedDiff(
   const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
 
   useEffect(() => {
-    if (!selectedDiff?.path) {
+    if (!selectedDiff || (!selectedDiff.path && !selectedDiff.historical)) {
       prevSelectedDiffRef.current = selectedDiff;
       return;
     }
 
     const prevPath = prevSelectedDiffRef.current?.path;
     prevSelectedDiffRef.current = selectedDiff;
+    if (selectedDiff.historical) {
+      queueMicrotask(() => {
+        setDiffSheet({ kind: "historical", target: selectedDiff.historical! });
+        onClearSelected();
+      });
+      return;
+    }
     if (prevPath === selectedDiff.path) return;
 
     // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
@@ -104,6 +113,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   selectedDiff,
   onClearSelected,
   onOpenFile,
+  onCloseHistoricalDiff,
 }: MobileChangesPanelProps) {
   const data = useChangesPanelData();
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
@@ -142,8 +152,10 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   }, []);
 
   const handleCloseDiffSheet = useCallback(() => {
+    const closedMode = diffSheet;
     setDiffSheet(null);
-  }, []);
+    if (closedMode?.kind === "historical") onCloseHistoricalDiff?.(closedMode.target);
+  }, [diffSheet, onCloseHistoricalDiff]);
 
   const bodyProps = buildChangesPanelBodyProps(data, {
     onOpenDiffFile: handleOpenDiffFile,

@@ -82,6 +82,7 @@ type Manager struct {
 	// Workspace info provider for on-demand instance creation
 	workspaceInfoProvider          WorkspaceInfoProvider
 	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+	turnChangeCaptureHandler       TurnChangeCaptureHandler
 
 	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
 	taskRuntimeFences taskRuntimeOwnershipFences
@@ -110,7 +111,8 @@ type Manager struct {
 	// the caller a shell, a file write, or a port preview. Reading a
 	// transcript and running a command in the worktree are different
 	// permissions, so they get different checks.
-	sessionExecCheck func(ctx context.Context, sessionID string) error
+	sessionExecCheck  func(ctx context.Context, sessionID string) error
+	executorAdmission func(context.Context, string, string, string) (context.Context, error)
 
 	// recoveryGuard is the in-memory per-session acquire-or-observe map of
 	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
@@ -227,6 +229,7 @@ type Manager struct {
 	remoteContributionPreflightTimeout time.Duration
 	stopCh                             chan struct{}
 	stopOnce                           sync.Once
+	turnChangeRetryMu                  sync.Mutex
 	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
@@ -542,6 +545,7 @@ func NewManager(
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
 	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
+	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -550,6 +554,13 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+// SetTurnChangeCaptureHandler installs the task-owned immutable interval
+// coordinator. Set this during backend composition before runtime prompts are
+// accepted.
+func (m *Manager) SetTurnChangeCaptureHandler(handler TurnChangeCaptureHandler) {
+	m.turnChangeCaptureHandler = handler
 }
 
 func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
@@ -1003,4 +1014,11 @@ func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) 
 		return m.sessionExecCheck
 	}
 	return m.sessionAccessCheck
+}
+
+func (m *Manager) SetExecutorAdmission(admit func(context.Context, string, string, string) (context.Context, error)) {
+	m.executorAdmission = admit
+	if m.sessionManager != nil {
+		m.sessionManager.executorAdmission = admit
+	}
 }

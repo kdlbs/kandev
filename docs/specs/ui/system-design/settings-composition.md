@@ -60,6 +60,12 @@ Ordinary desktop controls remain 28px. Touch controls retain at least 44px activ
 Content rows grow with text and do not have a fixed height.
 Use theme border and surface tokens without extra shadows or custom colors.
 
+`SettingsGroupContent` owns group insets.
+Its `SettingsCard` wrapper uses `py-0`, overriding the shared Card's default `py-4` only at this composition boundary.
+Keep the inner `px-4 py-2` and the row's first/last 8px padding.
+Together these provide a 16px outer inset, excluding the border.
+Middle rows retain 12px vertical padding. Frameless groups and standalone cards keep their existing geometry.
+
 Use a single page heading followed by ordered group headings.
 Allow `SettingsCardHeader` to use a heading level appropriate to its parent rather than hardcoding nested h3 headings.
 Retain existing header tabs and action placement from the header-tabs contract.
@@ -88,6 +94,15 @@ Remove the redundant introduction below each Task behavior group heading.
 Keep short subgroup labels where they distinguish limits, merging, and power controls.
 Keep profile options as two compact radio choices with one-sentence descriptions.
 The profile precedence algorithm moves to the profile setting's info content.
+
+Bound the Task behavior root to `w-full max-w-5xl` (64rem), aligned with the page's left edge.
+The existing header and all three panels share this bound. Retain right-aligned desktop header tabs within it.
+The profile setting overrides its row composition with `md:flex-col md:items-stretch`.
+Its control wrapper uses full width and removes the desktop half-width limit through `controlWrapperClassName`.
+The row presentation of `MCPTaskProfileRadioGroup` uses two equal columns at `md` and one column below it, with an 8px gap.
+Pass a local optional class name to that private radio component. Preserve the standalone card presentation.
+Keep wrapping descriptions, label activation, radio keyboard behavior, and at least 44px phone/coarse-pointer targets.
+Ordinary switch rows and the shared tab primitive retain their existing composition.
 
 The [work order](../../../plans/settings-composition/task-06-concise-help-and-tabs.md) contains the complete visible-copy inventory.
 Each setting has a short description and an info control with its applicable detail.
@@ -192,3 +207,4 @@ Add the shared composition rule to `apps/web/AGENTS.md` when its implementation 
 - [Control sizing](control-sizing.md)
 - [Route save coordinator](../../../decisions/0046-settings-route-save-coordinator.md)
 - [Implementation plan](../../../plans/settings-composition/plan.md)
+- [Spacing correction](../../../plans/task-behavior-spacing/plan.md)

@@ -1,9 +1,11 @@
 ---
-spec: docs/specs/agents/requirements/mcp-protocol-compatibility.md
-design: docs/specs/agents/system-design/mcp-protocol-compatibility.md
-decision: docs/decisions/2026-08-30-dual-era-mcp-protocol.md
 created: 2026-08-30
 status: complete
+requirements:
+  - REQ-AGENTS-MCP-PROTOCOL-001
+system_design:
+  - ../../specs/agents/system-design/mcp-protocol-compatibility.md
+legacy_specs: []
 ---
 
 # Implementation Plan: MCP 2026-07-28 Compatibility
@@ -27,6 +29,9 @@ authorization, third-party server delivery, or legacy SSE support.
 
 ## Decision summary
 
+Requirements: [MCP protocol compatibility](../../specs/agents/requirements/mcp-protocol-compatibility.md).
+Decision: [dual-era MCP protocol](../../decisions/2026-08-30-dual-era-mcp-protocol.md).
+
 Use one negotiated `/mcp` endpoint. Keep mark3labs and upgrade to its v1 line.
 Retain legacy initialize and SSE. Do not add a runtime feature flag, a second
 endpoint, the MCP Tasks extension, or a Kandev proxy for third-party servers.
@@ -44,6 +49,7 @@ not implement the modern wire contract inside Kandev.
 | 2 | [Preserve stateless MCP observability](task-02-preserve-stateless-mcp-observability.md) | Modern evidence is attempt-owned and legacy evidence stays connection-owned. | Task 01 |
 | 2 | [Protect MCP client and route compatibility](task-03-protect-mcp-client-route-compatibility.md) | Existing clients, routes, auth, and passthrough behavior have regression coverage. | Task 01 |
 | 3 | [Document negotiated MCP support](task-04-document-negotiated-mcp-support.md) | Public docs explain negotiation, compatibility, and exclusions. | Tasks 02 and 03 |
+| 4 | [Accept header-only modern notifications](task-05-accept-header-only-notifications.md) | Header-only modern notifications reach the SDK with version metadata. | Task 01 |
 
 Tasks 02 and 03 can run in parallel if their owners do not edit the same MCP
 server test file. Task 02 owns observability hooks and evidence. Task 03 owns
@@ -68,11 +74,12 @@ The completed change must prove these cases:
 
 | Requirement or criterion | Work orders |
 | --- | --- |
-| `REQ-AGENTS-MCP-PROTOCOL-001` | 01, 02, 03, 04 |
+| `REQ-AGENTS-MCP-PROTOCOL-001` | 01, 02, 03, 04, 05 |
 | `AC-AGENTS-MCP-PROTOCOL-001.1` through `.4` | 01 |
 | `AC-AGENTS-MCP-PROTOCOL-001.5` | 01, 03 |
 | `AC-AGENTS-MCP-PROTOCOL-001.6` and `.7` | 03 |
 | `AC-AGENTS-MCP-PROTOCOL-001.8` | 01 |
+| `AC-AGENTS-MCP-PROTOCOL-001.9` | 05 |
 | `AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.4` and `.9` | 02 |
 
 ## Integrated verification
@@ -118,3 +125,7 @@ git diff --check
 - Updated the public MCP guide and feature-status boundary with protocol versions, routes, authentication, direct third-party delivery, and exclusions.
 - Integrated verification passed: `make -C apps/backend test` with the task-workspace bootstrap configuration unset and a temporary home directory, 363 MCP server race tests, 61 public-doc tests, 41 published-doc validation checks, 20 specification-lint tests, full specification lint, and `git diff --check`. An ambient run first failed because the task process forced `/root/.kandev/config.yaml` into config and launcher discovery; the clean rerun passed without code changes.
 - The implementation uses `github.com/mark3labs/mcp-go v1.0.0-beta.1`; the prerelease SDK remains the primary release risk.
+- Task 05 adds header-only notification handling with duplicate/case preservation,
+  lazy body reads after transport checks, and direct SDK handling for declared
+  ordinary requests. Its hosted race proof passed the complete 14-test
+  notification cohort, including both registered routes and external auth.

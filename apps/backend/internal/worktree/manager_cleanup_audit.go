@@ -22,6 +22,7 @@ const (
 	CleanupInspectionStageBranch       = "branch_lookup"
 	CleanupInspectionStageRegistration = "registration_inspection"
 	CleanupInspectionStageCommit       = "commit_lookup"
+	CleanupInspectionStageOwnership    = "path_ownership"
 	CleanupInspectionStageStatus       = "working_tree_status"
 )
 
@@ -71,6 +72,9 @@ func classifyCleanupInspectionError(stage string, err error, repoPath ...string)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
 		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonDeadlineExceeded, Err: err}
+	}
+	if stage == CleanupInspectionStageOwnership {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonRepoUnavailable, Err: err}
 	}
 	if len(repoPath) > 0 && repoPath[0] != "" {
 		if _, statErr := os.Stat(repoPath[0]); errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr) {
@@ -272,18 +276,10 @@ func (m *Manager) auditCleanupBranchDisposition(
 	removeBranch bool,
 	options WorktreeCleanupOptions,
 ) (bool, error) {
-	if pathPresent && options.RequireCleanCheckout {
-		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
-			return false, err
-		}
-	}
 	if !removeBranch || branchRef == "" || branchOID == "" {
 		return false, nil
 	}
 	if pathPresent && !options.DiscardWorktreeChanges {
-		if options.RequireCleanCheckout {
-			return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
-		}
 		return m.verifyCleanRedundantCheckout(ctx, wt, branchRef)
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)

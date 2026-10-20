@@ -23,6 +23,7 @@ import {
   formatStalled,
   formatStepLabel,
   formatStepProgress,
+  formatTimingDuration,
   percentDone,
 } from "@/lib/startup-progress/format";
 import type { StartupSnapshot, StartupStepSnapshot } from "@/lib/startup-progress/types";
@@ -39,25 +40,28 @@ export function RestartProgressDialog({
   onDismiss,
 }: RestartProgressDialogProps) {
   const { t } = useTranslation();
-  const startupProgress = useStartupProgress(phase === "restarting");
+  const startupProgress = useStartupProgress(
+    phase === "restarting" || phase === "done",
+    phase === "done" || phase === "error",
+  );
   if (phase === "idle") return null;
   const done = phase === "done";
   const failed = phase === "error";
   return (
     <Dialog open onOpenChange={(open) => !open && (done || failed) && onDismiss()}>
       <DialogContent
-        className="sm:max-w-md"
+        className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-md"
         data-testid="restart-progress-dialog"
         data-phase={phase}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <RestartStatusIcon phase={phase} />
             {restartTitle(phase, t)}
           </DialogTitle>
           <DialogDescription>{restartDescription(phase, errorMessage, t)}</DialogDescription>
         </DialogHeader>
-        {phase === "restarting" && (
+        {(phase === "restarting" || ((done || failed) && startupProgress.snapshot)) && (
           <StartupProgressDetail
             snapshot={startupProgress.snapshot}
             lastKnown={startupProgress.lastKnown}
@@ -65,10 +69,10 @@ export function RestartProgressDialog({
           />
         )}
         {(done || failed) && (
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button
               variant={failed ? "outline" : "default"}
-              className="w-full cursor-pointer sm:w-auto"
+              className="h-12 w-full cursor-pointer sm:h-7 sm:w-auto"
               onClick={done ? () => window.location.reload() : onDismiss}
             >
               {done ? t("system:reloadPage") : t("system:dismiss")}
@@ -138,12 +142,48 @@ function StartupProgressDetail({ snapshot, lastKnown, t }: StartupProgressDetail
     );
   }
   return (
-    <div className="text-muted-foreground space-y-1 text-sm" role="status" aria-live="polite">
-      <p>{formatPhaseLabel(t, snapshot.phase)}</p>
-      <p>{formatElapsed(t, snapshot.elapsed_ms)}</p>
-      {snapshot.step && <StartupStepDetail step={snapshot.step} t={t} />}
-      {lastKnown && <p className="opacity-60">{t("startup:page.lastKnown")}</p>}
-    </div>
+    <>
+      <div
+        className="text-muted-foreground shrink-0 space-y-1 text-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <p>{formatPhaseLabel(t, snapshot.phase)}</p>
+        <p>{formatElapsed(t, snapshot.elapsed_ms)}</p>
+        {snapshot.step && <StartupStepDetail step={snapshot.step} t={t} />}
+        {lastKnown && <p className="opacity-60">{t("startup:page.lastKnown")}</p>}
+      </div>
+      {!!snapshot.completed_steps?.length && (
+        <section
+          className="min-h-0 overflow-y-auto overscroll-contain text-sm"
+          aria-label={t("startup:page.timings")}
+          tabIndex={0}
+          data-testid="startup-timings"
+        >
+          <h3 className="mb-2 font-medium">{t("startup:page.timings")}</h3>
+          <dl className="space-y-2">
+            {snapshot.completed_steps.map((step) => (
+              <div
+                key={step.activation_seq}
+                className="flex flex-wrap justify-between gap-x-3 gap-y-0.5"
+              >
+                <dt className="min-w-0 break-words">
+                  {formatStepLabel(t, step)}
+                  {!step.completed && (
+                    <span className="text-muted-foreground block">
+                      {t("startup:page.interrupted")}
+                    </span>
+                  )}
+                </dt>
+                <dd className="text-muted-foreground tabular-nums">
+                  {formatTimingDuration(t, step.elapsed_ms)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+    </>
   );
 }
 
@@ -154,6 +194,7 @@ function StartupStepDetail({ step, t }: { step: StartupStepSnapshot; t: TFunctio
   return (
     <>
       <p>{formatStepLabel(t, step)}</p>
+      <p>{formatElapsed(t, step.elapsed_ms)}</p>
       <p>{formatStepProgress(t, step)}</p>
       {showEta && <p>{formatEta(t, step.eta_ms as number)}</p>}
       {showBar && <Progress value={percentDone(step.done ?? 0, step.total ?? 0)} />}

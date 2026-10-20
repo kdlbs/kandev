@@ -623,6 +623,8 @@
   "showTheJumpControlAfterYour": "最新プロンプトがトランスクリプトより上へスクロールした後に、ジャンプコントロールを表示。",
   "showThePerSessionButtonThat": "セッションごとのボタンを表示。これはトランスクリプトの自動スクロールを一時的にオン、オフ切り替え。非表示でも既定は変わらず。新規トランスクリプトは今も自動スクロール。",
   "showTranscriptAutoScrollControl": "トランスクリプト自動スクロールを表示",
+  "showTurnChangedFiles": "各ターンの後に変更されたファイルを表示",
+  "showTurnChangedFilesDescription": "完了したエージェントの返信の下にファイルの概要と差分を表示します。",
   "showsKandevHostValuesOnlyCollection": "Kandev のホスト値のみ表示。クライアントが表示中に収集開始。",
   "simplifiedMetrics": "簡易メトリクス",
   "sleepInhibitionActive": "タスク開始中、実行中に有効。",

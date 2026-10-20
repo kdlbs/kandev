@@ -253,7 +253,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 78
+	const wantSubscriptions = 79
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -461,6 +461,29 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 	if clientReceived(second) {
 		t.Fatal("cancellation notification crossed the session boundary")
 	}
+}
+
+func TestTaskEventBroadcaster_TurnChangeSummaryIsSessionScoped(t *testing.T) {
+	hub := newTestHub(t)
+	first := newTestClient("turn-changes-first")
+	second := newTestClient("turn-changes-second")
+	registerTestClient(hub, first)
+	registerTestClient(hub, second)
+	hub.SubscribeToSession(first, "session-1")
+	hub.SubscribeToSession(second, "session-2")
+	payload := map[string]any{
+		"session_id": "session-1",
+		"change_set": map[string]any{"id": "set-1", "revision": 2, "file_count": 1},
+	}
+	message, err := ws.NewNotification(ws.ActionSessionTurnChangesUpdated, payload)
+	require.NoError(t, err)
+	broadcaster := &TaskEventBroadcaster{hub: hub, logger: testLogger()}
+	require.NoError(t, broadcaster.routeBroadcast(ws.ActionSessionTurnChangesUpdated, message.Payload, "session-1", "", message))
+	frame := <-first.send
+	var received ws.Message
+	require.NoError(t, json.Unmarshal(frame, &received))
+	require.Equal(t, ws.ActionSessionTurnChangesUpdated, received.Action)
+	require.False(t, clientReceived(second), "summary crossed the session boundary")
 }
 
 func TestTaskEventBroadcaster_PlanCommentsAreTaskScoped(t *testing.T) {

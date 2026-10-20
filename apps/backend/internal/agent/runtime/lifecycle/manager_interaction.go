@@ -1359,6 +1359,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.cancelStartupRecovery()
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
@@ -1418,7 +1419,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Try to gracefully stop via agentctl first, then always close connections.
 	// A retained runtime gets a bounded non-cancelled opportunity to
 	// stop the failed process before its environment is preserved for another retry.
+	if reason != StopReasonBackendShutdown {
+		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	// Backend shutdown retains interrupted delivery outcomes. Its terminal
+	// checkpoint follows confirmed process termination, before runtime cleanup.
+	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
+		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
@@ -2101,7 +2110,7 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
 	// bypassing agentctl's ACP protocol. Check the process directly.
 	if execution.PassthroughProcessID != "" {
-		if runner := m.GetInteractiveRunner(); runner != nil {
+		if runner := m.passthroughRunnerForExecution(execution); runner != nil {
 			return runner.IsProcessReadyOrPending(execution.PassthroughProcessID), nil
 		}
 		return false, fmt.Errorf("interactive runner is unavailable")
@@ -2162,6 +2171,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !exists {
 		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
 	}
+	return m.recoverAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) recoverAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if execution.PassthroughProcessID != "" || execution.IsPassthrough {
 		releaseClient()
@@ -2190,14 +2203,13 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
-		if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
-			execution.FailureCode != durableDeliveryReconnectingFailureCode &&
-			execution.isSessionInitialized() && execution.ACPSessionID != "" {
-			return m.restoreRecoveredFailedExecution(ctx, execution)
-		}
-		return nil
+		return m.restoreExecutionAfterStreamRecovery(ctx, execution)
 	}
 	releaseClient()
+	return m.reconnectAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) reconnectAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	if m.streamManager == nil {
 		return fmt.Errorf("stream manager is not configured")
 	}
@@ -2211,7 +2223,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	client, releaseClient = execution.AcquireAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
@@ -2220,6 +2232,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !hasAgentStream {
 		return fmt.Errorf("agent stream not connected")
 	}
+	return m.restoreExecutionAfterStreamRecovery(ctx, execution)
+}
+
+func (m *Manager) restoreExecutionAfterStreamRecovery(ctx context.Context, execution *AgentExecution) error {
 	if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
 		execution.FailureCode != durableDeliveryReconnectingFailureCode &&
 		execution.isSessionInitialized() && execution.ACPSessionID != "" {
@@ -2551,35 +2567,11 @@ func (m *Manager) markReadyEventForExecution(
 	attemptID string,
 	completion *agentctlclient.AgentEvent,
 ) error {
-	executionID := execution.ID
-	var payload AgentEventPayload
-	var updated *AgentExecution
-	var alreadyReady bool
-	// The payload snapshots promptTurnID, so take promptLifecycleMu before the
-	// store lock. Reading it under the store lock deadlocks against a
-	// concurrent completion claim and blocks every session's store access.
-	if err := m.executionStore.WithPromptLifecycleLock(executionID, func(execution *AgentExecution) {
-		if execution.Status == v1.AgentStatusReady {
-			alreadyReady = true
-			return
-		}
-		execution.Status = v1.AgentStatusReady
-		payload = newAgentEventPayloadPromptLocked(execution)
-		payload.AttemptID = attemptID
-		if completion != nil {
-			payload.TurnID = completion.TurnID
-			payload.PromptGeneration = completion.PromptGeneration
-		}
-		updated = execution
-	}); err != nil {
-		if errors.Is(err, ErrExecutionNotFound) {
-			return fmt.Errorf("execution %q not found", executionID)
-		}
+	updated, payload, err := m.prepareReadyEventForExecution(execution, attemptID, completion)
+	if err != nil || updated == nil {
 		return err
 	}
-	if alreadyReady {
-		return nil
-	}
+	executionID := execution.ID
 	m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
 
 	m.logger.Info("execution ready",
@@ -3187,7 +3179,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		}
 		runtimeInstance.Metadata = metadata
 	}
-	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, rt, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
 		// absent. Only surface this at WARN outside shutdown.
 		if m.IsShuttingDown() {
@@ -3209,7 +3201,7 @@ func (m *Manager) stopPassthroughProcess(ctx context.Context, executionID string
 	if execution.PassthroughProcessID == "" {
 		return
 	}
-	interactiveRunner := rt.GetInteractiveRunner()
+	interactiveRunner := m.passthroughRunnerForExecution(execution)
 	if interactiveRunner == nil {
 		return
 	}

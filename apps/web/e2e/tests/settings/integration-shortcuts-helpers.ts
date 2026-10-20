@@ -5,6 +5,13 @@ import { waitForHttp } from "../../helpers/causal-waits";
 export const INTEGRATION_SHORTCUTS_SETTINGS_PATH = "/settings/preferences/keyboard-shortcuts";
 export const INTEGRATION_CHORD = "Control+Alt+g";
 
+export async function navigateHomeWithinApp(page: Page) {
+  const documentOrigin = await page.evaluate(() => performance.timeOrigin);
+  await page.getByRole("link", { name: "Kandev home", exact: true }).click();
+  await expect(page).toHaveURL((url) => url.pathname === "/");
+  expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentOrigin);
+}
+
 export async function recordIntegrationShortcut(page: Page, slug: string, touch = false) {
   const recorder = page.getByTestId(`shortcut-recorder-integration:${slug}`);
   await expect(recorder).toHaveCount(1);

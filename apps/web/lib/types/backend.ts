@@ -573,6 +573,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 
     "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
+    "executor.catalogue.invalidated": BackendMessage<
+      "executor.catalogue.invalidated",
+      Record<string, never>
+    >;
     "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
     "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
     "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;

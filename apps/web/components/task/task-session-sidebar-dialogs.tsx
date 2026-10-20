@@ -43,6 +43,8 @@ export type SidebarDialogsActions = {
   handleDeleteConfirm: (opts: {
     cascade: boolean;
     discardWorktreeChanges: boolean;
+    workspaceCleanup?: "delete" | "retain";
+    allowUnverifiedWorkspaceChanges?: boolean;
     confirmationId: string;
   }) => Promise<void> | void;
   detachingTask: DetachTarget;

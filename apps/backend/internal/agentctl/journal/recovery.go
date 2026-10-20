@@ -72,7 +72,7 @@ func (j *Journal) RecoveryDescriptor(
 		IncarnationID:     incarnationID,
 		HarnessGeneration: harnessGeneration,
 		StreamID:          streamID,
-		StorageCapability: StorageCapability{Version: CurrentVersion, Durable: true},
+		StorageCapability: StorageCapability{Version: CurrentProtocolVersion, Durable: true},
 	}
 	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {

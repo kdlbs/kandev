@@ -69,11 +69,10 @@ func newDeliveryEventWriter(manager *Manager) *deliveryEventWriter {
 }
 
 func (w *deliveryEventWriter) persist(ctx context.Context, update adapter.AgentEvent) (adapter.AgentEvent, error) {
-	payload, err := json.Marshal(update)
+	size, err := deliveryWriteSize(update)
 	if err != nil {
 		return update, err
 	}
-	size := len(payload)
 	if size > deliveryWriterQueueBytes {
 		return update, fmt.Errorf("%w: delivery queue item is %d bytes", journal.ErrJournalFull, size)
 	}
@@ -229,4 +228,19 @@ func (w *deliveryEventWriter) commit(batch []deliveryWriteRequest) {
 
 func isTerminalDeliveryEvent(event adapter.AgentEvent) bool {
 	return event.Type == adapter.EventTypeComplete || event.Type == adapter.EventTypeError
+}
+
+func deliveryWriteSize(update adapter.AgentEvent) (int, error) {
+	textBytes := 0
+	if update.ShellOutputEligible && update.NormalizedPayload != nil && update.NormalizedPayload.ShellExec() != nil {
+		update.NormalizedPayload = update.NormalizedPayload.Snapshot()
+		output := update.NormalizedPayload.ShellExec().Output
+		if output != nil {
+			textBytes = 4*((len(output.Stdout)+2)/3) + 4*((len(output.Stderr)+2)/3)
+		}
+		update.NormalizedPayload.ShellExec().Output = nil
+		update.ToolCallContents = nil
+	}
+	metadata, err := json.Marshal(update)
+	return len(metadata) + textBytes + 1024, err
 }

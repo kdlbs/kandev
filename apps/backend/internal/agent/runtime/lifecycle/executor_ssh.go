@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"strconv"
 	"strings"
 	"sync"
@@ -1033,9 +1034,17 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		_ = runtimeAPITunnel.Close()
 		return fmt.Errorf("ssh resume: agentctl health: %w", err)
 	}
-	instanceClient, reusingProcess := r.newResumedAgentctlClient(
+	instanceClient, reusingProcess, probeErr := r.newResumedAgentctlClient(
 		ctx, fwd.LocalPort(), req,
 	)
+
+	if probeErr != nil {
+		instanceClient.Close()
+		_ = fwd.Close()
+		_ = client.Close()
+		_ = runtimeAPITunnel.Close()
+		return fmt.Errorf("ssh resume: remote passthrough inspection failed: %w", probeErr)
+	}
 
 	r.mu.Lock()
 	if _, ok := r.sessions[req.InstanceID]; ok {
@@ -1084,17 +1093,28 @@ func (r *SSHExecutor) newResumedAgentctlClient(
 	ctx context.Context,
 	localPort int,
 	req *ExecutorCreateRequest,
-) (*agentctl.Client, bool) {
+) (*agentctl.Client, bool, error) {
 	client := agentctl.NewClient(sshAgentctlLoopbackHost, localPort, r.logger,
 		agentctl.WithExecutionID(resumedSSHAgentctlInstanceID(req)),
 		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(req.AuthToken))
+	if req.IsPassthrough {
+		snapshot, err := client.GetPassthrough(ctx)
+		if err != nil {
+			return client, false, err
+		}
+		if snapshot.InstanceID != resumedSSHAgentctlInstanceID(req) || snapshot.SessionID != req.SessionID {
+			return client, false, agentctl.ErrPassthroughConflict
+		}
+		return client, snapshot.ProcessID != "" && snapshot.Status == agentctltypes.ProcessStatusRunning, nil
+	}
+
 	status, err := client.GetStatus(ctx)
 	if err != nil {
 		r.logger.Debug("ssh resume could not get agent status; starting a new process",
 			zap.String("instance_id", req.InstanceID), zap.Error(err))
-		return client, false
+		return client, false, nil
 	}
-	return client, status != nil && status.IsAgentRunning()
+	return client, status != nil && status.IsAgentRunning(), nil
 }
 
 func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {

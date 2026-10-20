@@ -27,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -414,6 +414,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
+	}
+	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
+		return response, err
 	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil

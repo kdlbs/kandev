@@ -1005,12 +1005,17 @@ var sessionCapacityReadHook func(taskID, agentProfileID string)
 // read of runner seats, say — answers a different question, because the
 // projection's last tier deliberately reads runner rows across every step.
 //
-// The seat half reads the effective slate at the task's current step, which
-// already merges template-level rows under per-task precedence and already
-// spans every role. The step scope is load-bearing: seats are keyed
+// The seat half reads the effective slate at the task's current step via
+// ListTaskParticipantsAtCurrentStep, which already merges template-level
+// rows under per-task precedence and already spans every role. The step
+// scope is load-bearing (AC-OFFICE-SESSION-TERM-002.3): seats are keyed
 // (step, task, role, agent) and survive a step change, so an unscoped read
 // would find a seat naming a previous occupant and suppress every future
-// termination for the pair.
+// termination for the pair. This is deliberately NOT
+// ListAllTaskParticipants: that method became workflow-scoped under
+// AC-OFFICE-SEAT-READ-SCOPE-001.1 for the read projections named there (task
+// DTO, inbox, decision authorization, approver gate, review fan-out), a list
+// that does not include this capacity determination.
 //
 // Both reads run on the read pool and take no lock. The determination is not
 // atomic with the mutation that preceded it and does not need to be: each
@@ -1027,7 +1032,7 @@ func (s *DashboardService) retainsTaskCapacity(
 	if exec != nil && exec.AssigneeAgentProfileID == agentProfileID {
 		return capacityRunner, nil
 	}
-	seats, err := s.repo.ListAllTaskParticipants(ctx, taskID)
+	seats, err := s.repo.ListTaskParticipantsAtCurrentStep(ctx, taskID)
 	if err != nil {
 		return capacityNone, fmt.Errorf("read task participant slate: %w", err)
 	}

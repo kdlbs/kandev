@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "Correção pedida para esta remoção.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Correção pedida. A aguardar um novo commit antes de voltar à fila.",
   "mergeQueueRecoveryStatusWaitingForCommit": "A aguardar um novo commit antes de voltar à fila.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "Novo head detetado. A aguardar verificações obrigatórias."
+  "mergeQueueRecoveryStatusWaitingForChecks": "Novo head detetado. A aguardar verificações obrigatórias.",
+  "mergeAccessLoading": "A verificar permissões para integrar.",
+  "mergeAccessUnavailable": "As permissões para integrar não estão disponíveis.",
+  "mergeAccessDeniedByActor": "{{actor}} não pode integrar em {{repository}}.",
+  "mergeAccessDenied": "Esta conta não pode integrar em {{repository}}.",
+  "checkMergeAccess": "Verificar novamente",
+  "mergeAsActor": "como {{actor}}"
 }

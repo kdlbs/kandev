@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "已请求修复此移除事件。",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "已请求修复。等待新提交后再重新排队。",
   "mergeQueueRecoveryStatusWaitingForCommit": "等待新提交后再重新排队。",
-  "mergeQueueRecoveryStatusWaitingForChecks": "检测到新 head。等待必需的检查。"
+  "mergeQueueRecoveryStatusWaitingForChecks": "检测到新 head。等待必需的检查。",
+  "mergeAccessLoading": "正在检查合并权限。",
+  "mergeAccessUnavailable": "无法获取合并权限。",
+  "mergeAccessDeniedByActor": "{{actor}} 无法合并到 {{repository}}。",
+  "mergeAccessDenied": "此账户无法合并到 {{repository}}。",
+  "checkMergeAccess": "重新检查",
+  "mergeAsActor": "以 {{actor}} 的身份"
 }

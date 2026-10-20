@@ -146,6 +146,12 @@ matching recovery fences. Any independent active record or projection gap
 refuses resolution. The same proof permits normal loaded-session reconciliation
 and explicit Resume; neither path dispatches an old prompt.
 
+Native recovery proof waits up to five seconds for the captured journal
+high-water mark to reach canonical projection. It rereads proof when projection
+or acknowledgments advance under the same authenticated owner. Cancellation,
+owner changes, inventory changes, and unresolved work retain the admission
+fence. This wait does not repeat native Resume or dispatch a prompt.
+
 ## Prompt readiness after native boot
 
 A native boot event establishes runtime availability, not delivery admission.

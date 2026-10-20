@@ -458,7 +458,7 @@ func TestConvertPositionToStepID(t *testing.T) {
 func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 	posToID := map[int]string{0: "new-a", 1: "new-b"}
 
-	t.Run("all seven Phase-2 GenericAction triggers survive conversion", func(t *testing.T) {
+	t.Run("all GenericAction triggers survive conversion", func(t *testing.T) {
 		moveTo := func(pos int) []GenericAction {
 			return []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": pos}}}
 		}
@@ -470,6 +470,8 @@ func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 			OnHeartbeat:         moveTo(0),
 			OnBudgetAlert:       moveTo(0),
 			OnAgentError:        moveTo(0),
+			OnPRMerged:          moveTo(0),
+			OnPRClosed:          moveTo(0),
 		}
 		result := ConvertPositionToStepID(events, posToID)
 
@@ -481,6 +483,8 @@ func TestConvertPositionToStepID_PhaseTwoTriggers(t *testing.T) {
 			"on_heartbeat":          result.OnHeartbeat,
 			"on_budget_alert":       result.OnBudgetAlert,
 			"on_agent_error":        result.OnAgentError,
+			"on_pr_merged":          result.OnPRMerged,
+			"on_pr_closed":          result.OnPRClosed,
 		}
 		for name, actions := range triggers {
 			require.Lenf(t, actions, 1, "%s dropped during ConvertPositionToStepID", name)

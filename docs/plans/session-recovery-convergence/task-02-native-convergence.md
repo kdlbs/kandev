@@ -106,3 +106,26 @@ and follow-up assertions remain; both cases run with retries disabled. The
 Threads grid case in that shard passed on retry and its failure screenshot
 already shows the expected two-row layout; its startup timing remains under
 observation in the next CI run without a speculative production change.
+
+## Projection barrier follow-up (PR #4621)
+
+The native Resume browser regression exposed a setup `session_mode` event that
+was received before its canonical projection. Recovery proof could also capture
+a cursor behind the peer's journal high-water mark. Retain the admission fence
+and wait for complete projection before returning proof. Revalidate advancing
+stream evidence under the same owner; reject changed ownership and honor caller
+cancellation. The wait is bounded to five seconds and issues evidence reads
+only, without repeating Resume or sending an old prompt.
+
+The new lifecycle tests reproduced both incomplete snapshots before the change.
+Focused proof race tests and the wider native recovery regressions passed,
+including cancellation, owner changes, and advancing acknowledgments. All six
+desktop and six phone browser scenarios passed without retries. Changed Go
+package lint passed with zero issues. Public controls and recovery instructions
+are unchanged.
+
+```bash
+cd apps/backend
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 2 ./internal/agent/runtime/lifecycle -run 'Test(NativeResume|AcknowledgedUnknown|LoadedNative)' -count=1
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResumeProof' -count=1
+```

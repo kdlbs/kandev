@@ -1873,7 +1873,10 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
+	// A step move decides about the deferred start only after it knows the
+	// destination step (see autoStartTaskForLoadedStep). Other events keep
+	// consuming it before the step read.
+	if eventName != events.TaskMoved && s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
 		return
 	}
 
@@ -1884,6 +1887,11 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID),
 			zap.Error(err))
+		// A failed read is no evidence that the destination cannot run an
+		// agent, so a step move still gets its deferred start attempt.
+		if eventName == events.TaskMoved && s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
+			return
+		}
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
@@ -2105,7 +2113,11 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
+	// A deferred start is task-level intent. A move into an agentless step
+	// preserves the record for the next agent step. Other events retain their
+	// existing deferred-launch eligibility.
+	retainDeferredStart := eventName == events.TaskMoved && !workflowmove.ShouldAutoStartAgent(step, nil)
+	if !retainDeferredStart && s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
 		return
 	}
 	if !workflowmove.ShouldAutoStartAgent(step, nil) {
@@ -2362,14 +2374,19 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 	if moveOptions != nil && moveOptions.Instructions != "" {
 		payload[officeRunPayloadOneTimeInstructionsKey] = moveOptions.Instructions
 	}
-	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
+	req := engine.QueueRunRequest{
 		AgentProfileID: agentProfileID,
 		TaskID:         task.ID,
+		CausingTaskID:  task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
 		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID, stepTransitionID),
 		Payload:        payload,
-	})
+	}
+	if stepTransitionID != 0 {
+		req.CausingStepTransitionID = strconv.FormatInt(stepTransitionID, 10)
+	}
+	return s.engineRunQueue.QueueRun(ctx, req)
 }
 
 // officeAutoStartIdempotencyKey uses the immutable workflow-step transition
@@ -4941,9 +4958,10 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 // unlike the pre-convergence marker dispatcher this needs no
 // engine.CompileOnEnterAction step of its own.
 func (s *Service) ExecuteMarkerBearingStepEntryAction(
-	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, markerEntryID int64,
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int,
+	stepTransitionID string, markerEntryID int64,
 ) (abandon bool, err error) {
-	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, markerEntryID)
+	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, stepTransitionID, markerEntryID)
 	if failed {
 		if cause == "" {
 			cause = "step entry marker-bearing action failed"
@@ -4956,7 +4974,8 @@ func (s *Service) ExecuteMarkerBearingStepEntryAction(
 // dispatchEngineOwnedOnEnterAction executes a marker-bearing on_enter action
 // once for this step-entry. The marker CAS prevents duplicate execution.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
-	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, entryID int64,
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int,
+	stepTransitionID string, entryID int64,
 ) (abandon, failed bool, cause string) {
 	callback := s.engineOnEnterCallback(action.Kind)
 	if callback == nil {
@@ -4992,11 +5011,12 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 	}
 
 	in := engine.ActionInput{
-		Trigger:     engine.TriggerOnEnter,
-		State:       engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
-		Step:        step,
-		Action:      action,
-		OperationID: operationID,
+		Trigger:                 engine.TriggerOnEnter,
+		State:                   engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
+		Step:                    step,
+		Action:                  action,
+		OperationID:             operationID,
+		CausingStepTransitionID: stepTransitionID,
 	}
 	state, execCause := stepentry.MarkerDone, ""
 	if _, execErr := callback.Execute(ctx, in); execErr != nil {
@@ -5628,7 +5648,9 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return queueDrainSkipped
+	}
 	defer lock.Unlock()
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("skipping drain while cancellation is in progress",
@@ -5897,9 +5919,9 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 	// Send Now before it performs any visible prompt side effects.
 	var reservation *queuedDispatchReservation
 	if identity.SessionIncarnationID != "" {
-		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queuedMsg.ID, queuedMsg)
 	} else {
-		reservation = s.markQueuedDispatchInFlightWithSourceLocked(identity.SessionID, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, identity.SessionID, queuedMsg.ID, queuedMsg)
 	}
 	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
 		go s.executeQueuedPassthroughMessageWithReservation(identity, queuedMsg, reservation)
@@ -5945,7 +5967,7 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 		return false
 	}
-	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, queuedMsg.ID, queuedMsg)
 	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }
@@ -8141,6 +8163,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 
 	casAttempted := false
 	casApplied := false
+	var commitErr error
 	lifecycleApplied := s.applyEngineTransitionWithCommitMode(
 		ctx,
 		taskID,
@@ -8155,11 +8178,12 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, commitErr := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, applied, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
-			if commitErr != nil {
-				return false, commitErr
+			if err != nil {
+				commitErr = err
+				return false, err
 			}
 			if !applied {
 				return false, nil
@@ -8172,6 +8196,9 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			return true, nil
 		},
 	)
+	if commitErr != nil {
+		return false, fmt.Errorf("commit guarded transition: %w", commitErr)
+	}
 	if lifecycleApplied || casApplied {
 		return true, nil
 	}
@@ -8387,6 +8414,10 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
 	case engine.TriggerOnAgentError:
 		historyTrigger = wfmodels.StepTransitionTriggerAgentError
+	case engine.TriggerOnPRMerged:
+		historyTrigger = wfmodels.StepTransitionTriggerPRMerged
+	case engine.TriggerOnPRClosed:
+		historyTrigger = wfmodels.StepTransitionTriggerPRClosed
 	}
 	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 

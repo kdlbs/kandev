@@ -147,7 +147,7 @@ func (s *Service) attachExecutorProvider(executor *models.Executor, providers []
 // ValidateExecutorProfileAdmission is the shared fail-closed check for every
 // path that starts or switches a task onto a provider-owned executor.
 func (s *Service) ValidateExecutorProfileAdmission(ctx context.Context, profileID string) error {
-	profile, err := s.executors.GetExecutorProfile(ctx, profileID)
+	profile, err := s.GetExecutorProfile(ctx, profileID)
 	if err != nil {
 		return err
 	}

@@ -166,6 +166,22 @@ func (r *Repository) projectCanonicalDeliveryBatchGroupTx(
 	group []canonicalDeliveryBatchEntry,
 	appendMessages []bool,
 ) error {
+	for _, item := range group {
+		if item.agentEvent.Type == streams.EventTypeToolCall {
+			appended, err := r.persistCanonicalShellStartTx(ctx, tx, &item.stored, item.agentEvent)
+			if err != nil {
+				return err
+			}
+			appendMessages[item.index] = appended
+		} else if item.agentEvent.ShellOutput != nil || item.agentEvent.Type == streams.EventTypeShellOutputUpdate {
+			if err := r.persistCanonicalShellOutputTx(ctx, tx, &item.stored, item.agentEvent); err != nil {
+				return err
+			}
+		}
+	}
+	if group[0].agentEvent.Type == streams.EventTypeToolCall {
+		return r.markCanonicalDeliveryBatchProjectedTx(ctx, tx, group)
+	}
 	firstContent, content := canonicalDeliveryBatchContent(group)
 	if firstContent != -1 {
 		aggregate := group[firstContent].agentEvent

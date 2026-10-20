@@ -607,6 +607,8 @@
   "showTheJumpControlAfterYour": "Mostrar o controlo de salto depois de o seu último prompt subir acima da transcrição.",
   "showThePerSessionButtonThat": "Mostrar o botão, por sessão, que liga ou desliga temporariamente o deslocamento automático da transcrição. Ocultá-lo não altera a pré-definição: as novas transcrições continuam a deslocar-se automaticamente.",
   "showTranscriptAutoScrollControl": "Mostrar o controlo de deslocamento automático da transcrição",
+  "showTurnChangedFiles": "Mostrar ficheiros alterados após cada turno",
+  "showTurnChangedFilesDescription": "Mostrar um resumo dos ficheiros e diferenças por baixo das respostas concluídas do agente.",
   "showsKandevHostValuesOnlyCollection": "Mostra apenas os valores do anfitrião do Kandev. A recolha começa enquanto um cliente os apresenta.",
   "simplifiedMetrics": "Métricas simplificadas",
   "sleepInhibitionActive": "Ativo enquanto uma tarefa está a arrancar ou em execução.",
