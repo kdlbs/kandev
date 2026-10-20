@@ -37,6 +37,7 @@ type WsActionFn = (
   options?: WsActionOptions,
 ) => Promise<boolean>;
 
+/** Reports a request outcome and returns false when the operation cannot succeed. */
 function useWsAction(): WsActionFn {
   const { toast, updateToast } = useToast();
   const { t } = useTranslation("task");
@@ -81,9 +82,10 @@ function useWsAction(): WsActionFn {
 }
 
 /**
- * Shared lifecycle actions for a session (set-primary, stop, resume, delete).
- * Handles backend coordination + local store cleanup. Caller can pass
- * `onDeleted` to perform UI-specific teardown (e.g. dockview panel removal).
+ * Binds lifecycle actions to the current task and session identities.
+ * Stop, Resume, and Delete reject activation while Restart owns the target.
+ * Successful deletion updates selection before removing local session data,
+ * then invokes `onDeleted` for caller-owned UI cleanup.
  */
 export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActionsArgs) {
   const wsAction = useWsAction();

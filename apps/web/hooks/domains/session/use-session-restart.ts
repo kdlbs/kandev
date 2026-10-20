@@ -12,6 +12,7 @@ import {
 } from "@/lib/session/session-restart-state";
 import { isSessionStoppable } from "./session-action-state";
 
+/** Subscribes to the target's pending entry in the current application store. */
 export function useSessionRestarting(sessionId: string | null | undefined) {
   const owner = useAppStoreApi();
   return useStore(
@@ -20,6 +21,7 @@ export function useSessionRestarting(sessionId: string | null | undefined) {
   );
 }
 
+/** Restores the target only when no later user navigation supersedes it. */
 function restoreRestartSelection(
   owner: ReturnType<typeof useAppStoreApi>,
   taskId: string,
@@ -36,6 +38,11 @@ function restoreRestartSelection(
   }
 }
 
+/**
+ * Stops and resumes the captured target under one store-owned pending entry.
+ * The entry survives consumer unmounts and is released after either request fails
+ * or both requests settle. Request success does not imply agent readiness.
+ */
 export function useSessionRestart(sessionId: string | null | undefined, taskId: string | null) {
   const owner = useAppStoreApi();
   const pending = getSessionRestartStore(owner);

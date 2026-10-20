@@ -5,6 +5,7 @@ import { SessionPage } from "../../pages/session-page";
 import { watchWs } from "../../helpers/causal-waits";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 
+/** Creates an idle mock session and observes gateway traffic before navigation. */
 export async function createRestartScenario(page: Page, api: ApiClient, seed: SeedData) {
   const wire = watchWs(page);
   const traffic = attachGatewayTrafficCapture(page);
@@ -37,6 +38,7 @@ export async function createRestartScenario(page: Page, api: ApiClient, seed: Se
   return { task, sessionId, session, wire, traffic };
 }
 
+/** Checks editable-draft retention and rejects button and keyboard prompt admission. */
 export async function assertRestartSubmissionBlocked(
   page: Page,
   fixture: Awaited<ReturnType<typeof createRestartScenario>>,
@@ -60,6 +62,7 @@ export async function assertRestartSubmissionBlocked(
   ).toEqual([]);
 }
 
+/** Captures conversation and workspace identities used to detect replacement or data loss. */
 export async function captureRestartBaseline(api: ApiClient, taskId: string, sessionId: string) {
   const sessions = (await api.listTaskSessions(taskId)).sessions;
   const target = sessions.find((s) => s.id === sessionId);
@@ -71,6 +74,7 @@ export async function captureRestartBaseline(api: ApiClient, taskId: string, ses
   return { sessions, target: target!, messages, environment };
 }
 
+/** Waits for the resumed agent to become idle before checking retained data. */
 export async function assertRestartRetained(
   api: ApiClient,
   taskId: string,
@@ -89,6 +93,7 @@ export async function assertRestartRetained(
   await assertRestartDataRetained(api, taskId, sessionId, before);
 }
 
+/** Checks retention without requiring readiness, including after a failed Resume. */
 export async function assertRestartDataRetained(
   api: ApiClient,
   taskId: string,
@@ -117,6 +122,7 @@ export async function assertRestartDataRetained(
   assertSiblingsRetained(before, after, sessionId, promotedSibling?.id);
 }
 
+/** Allows normal primary promotion while preserving sibling state and execution identity. */
 function assertSiblingsRetained(
   before: Awaited<ReturnType<typeof captureRestartBaseline>>,
   after: Awaited<ReturnType<typeof captureRestartBaseline>>,
