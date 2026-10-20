@@ -217,3 +217,42 @@ PATH="/tmp/kandev-merge-tools:$PATH" bash scripts/lint-go-changed apps/backend/i
 ```
 
 Updated-head CI remains pending.
+
+## CI mobile transcript correction
+
+The backend workflow passed at `5ee76233a861cba768ea15ad8315e883fbd0d20d`.
+E2E shard 24 failed the mobile delayed changed-files test after reload, with a
+176 px gap above the transcript bottom. Build and test jobs both used merge
+`a40075cf1ddbed41775ad37ca348baa9afa9a55c`. Its tree matched the local synthetic
+merge `02c1f175e7f168793673610624bdd5240e7f17ca`.
+
+The isolated test and its 30-test CI partition initially passed without retries.
+A disposable test variant with four-times Chromium CPU throttling reproduced
+the same reload failure, with a 175 px gap. Geometry traces showed content growth
+without a scroll event, followed by content shrinkage and native scroll anchoring.
+The follow-intent snapshot missed the intermediate growth and classified the
+anchoring offset as reader navigation.
+
+The fix records geometry on content resize and recognizes matching anchoring
+offsets for both growth and shrinkage. Existing reader-input, explicit-navigation,
+hidden-panel, and disabled-auto-scroll guards remain in force. A pure geometry
+regression failed before the change. An integrated blocked-placement regression
+also failed with expected scroll offset 800, actual 500, before resize tracking.
+
+Validation on the corrected source:
+
+- Five focused scroll test files passed: 147 tests.
+- The mobile reproduction passed three times with four-times CPU throttling,
+  diagnostic traces, and zero retries.
+- The original desktop and mobile delayed changed-files tests passed without
+  diagnostic code or throttling: two tests, zero retries.
+- Scoped ESLint, documentation catalog validation, and specification lint passed.
+- Type checking passed with `NODE_OPTIONS=--max-old-space-size=8192`. The first
+  attempt exhausted Node's default heap before reporting type errors.
+
+All browser runs used disposable data and the exact CI source tree. The native
+Nix host needed cached Chromium library paths and removal of inherited Kandev
+service configuration from the child environment. No live instance changed.
+Temporary browser instrumentation is excluded from the patch. The PR branch
+now includes `main` through `e34761417d28e561ce9bd616cfa78c1b723df9ad`, which owns
+the transcript code exercised by CI.
