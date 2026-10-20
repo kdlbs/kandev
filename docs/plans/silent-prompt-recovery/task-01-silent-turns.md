@@ -81,7 +81,7 @@ Run from the repository root. Add tests first and record their failing result.
 Use fake time for the five-minute threshold.
 
 ```bash
-(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'Stall|Prompt.*Evidence|Cancel|Cancellation|ResumedTurn|ResumeAttempt' -count=1)
+(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'Stall|AcceptedSilentPrompt|Prompt.*Evidence|Cancel|Cancellation|ResumedTurn|ResumeAttempt' -count=1)
 (cd apps/backend && go test -race ./internal/agentctl/server/instance ./internal/agentctl/journal -run 'Cancel|Interrupt|Submission' -count=1)
 (cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message.test.tsx components/task/chat/messages/action-message-actions.test.tsx)
 (cd apps/web && pnpm run typecheck)
@@ -137,3 +137,8 @@ sequential
 ## Results
 
 Pending. No implementation or product verification performed.
+
+Design review correction: the verification filter now includes
+`TestWaitForPromptDone_AcceptedSilentPromptIsAdvisory`. A direct regex check
+confirmed that match; documentation catalog, specification lint, and whitespace
+checks passed. The regression itself remains implementation work.

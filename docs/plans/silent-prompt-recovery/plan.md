@@ -153,7 +153,8 @@ do not attach to the user's main backend.
 
 [Never-started stall teardown](../never-started-stall-teardown/plan.md) and
 [stale stall notices](../stale-stall-notice/plan.md) remain historical records.
-This package supersedes only the inactivity-only terminal classification.
+This package supersedes the inactivity-only terminal classification and forced
+teardown.
 It preserves the progress clock, stop reachability, and notice resolution.
 [Journal shutdown recovery](../agentctl-journal-shutdown-recovery/plan.md)
 retains its recovery and replay boundaries.
@@ -173,6 +174,11 @@ Design checks passed on 20 October 2026:
 Implementation, rendered checks, and product tests have not run for this package.
 Public docs will change with implementation; this turn changes internal design
 records only.
+
+PR review corrections: clarify that forced teardown is superseded and include
+the named accepted-silence regression in Task 01's test filter. A direct regex
+check confirmed coverage. Catalog validation, all 36 linter tests, specification
+lint, and diff whitespace checks passed after these documentation changes.
 
 ## Risks
 
