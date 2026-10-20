@@ -7,6 +7,7 @@ requirements:
 system_design:
   - ../../specs/platform/system-design/durable-restart-reconciliation.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
+  - ../../specs/platform/system-design/session-recovery-convergence.md
 legacy_specs: []
 ---
 

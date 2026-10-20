@@ -30,6 +30,7 @@ export async function verifyAutomaticRestartReconciliation(
   });
   let delayedProfile: string | undefined;
   let createdTask: string | undefined;
+  let siblingTask: string | undefined;
   try {
     if (resumeDelay) delayedProfile = await createDelayedResumeProfile(api, resumeDelay);
     const task = await api.createTaskWithAgent(
@@ -60,6 +61,7 @@ export async function verifyAutomaticRestartReconciliation(
     const bootId = await api.getBackendBootID();
     expect((await api.killLocalAgentRuntimeChild()).killed).toBe(true);
     const sibling = resumeDelay ? await createRecoverySibling(api, seed) : undefined;
+    siblingTask = sibling?.taskId;
     try {
       await expectSilentRestartRestoration(page, api, task.id, snapshot, traffic.frames);
     } catch (error) {
@@ -152,11 +154,15 @@ export async function verifyAutomaticRestartReconciliation(
     ).toHaveLength(1);
     await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(0);
   } finally {
-    if (delayedProfile) {
-      if (createdTask) await api.deleteTask(createdTask);
-      await api.deleteAgentProfile(delayedProfile, true);
+    try {
+      if (siblingTask) await api.deleteTask(siblingTask);
+      if (delayedProfile) {
+        if (createdTask) await api.deleteTask(createdTask);
+        await api.deleteAgentProfile(delayedProfile, true);
+      }
+    } finally {
+      await release();
     }
-    await release();
   }
 }
 

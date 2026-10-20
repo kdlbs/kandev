@@ -18,6 +18,7 @@ acceptance_criteria:
 system_design:
   - ../../specs/platform/system-design/durable-restart-reconciliation.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
+  - ../../specs/platform/system-design/session-recovery-convergence.md
 ---
 
 # Task 01: Restore startup and failed-candidate convergence
@@ -144,3 +145,35 @@ paths in `LD_LIBRARY_PATH`. They set `KANDEV_SERVER_HOST=127.0.0.1` and omit the
 `KANDEV_INTERNAL_AGENTCTL_STARTUP_CONFIG` to avoid binding the disposable backend to the live instance address.
 These are process-local test settings. No repository configuration or live
 instance was changed.
+
+## PR review remediation
+
+The commit-retry regression now injects a real SQLite commit failure, closes
+the candidate's stream, and checks that a later pass reconnects the same native
+candidate and commits generation 2 without stopping or relaunching it. Lifecycle
+coverage checks expired-owner rebinding, exact initialized identity, and replay
+of a complete, unacknowledged setup prefix. Pruned, acknowledged, foreign,
+uninitialized, and submission-bearing evidence stays blocked.
+
+The E2E helper restores scoped backend settings in a nested finalizer, even when
+task or profile deletion fails. Two helper regressions cover these failures.
+It also deletes the healthy sibling explicitly. Cleanup assertions now run on
+the test goroutine after the singleflight worker returns.
+
+The PR documentation evaluator found a missing design reference for requirement
+002. The plan and work order now reference `session-recovery-convergence.md`.
+The same evaluator passes against the corrected local documents.
+
+Validation commands for this remediation:
+
+```bash
+(cd apps/backend && go test -race -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/orchestrator/executor -run 'TestSilentRestore|TestSilentRestart|TestStreamEventProcessor|TestRecoverAgentPromptStream|TestDeliveryRetention|TestFreshStart(ResumeRequest|Replacement|SQLWait)' -count=1)
+(cd apps/web && pnpm exec vitest run e2e/helpers/restart-reconciliation.test.ts)
+```
+
+Final remediation checks passed: the three-package Go race run, changed-package
+Go lint (zero issues), both cleanup unit tests, TypeScript lint and formatting,
+and one slow-restore browser test each on desktop and phone. The documentation
+coverage evaluator, catalog validation, and specification lint also passed.
+Remote checks and review resolution remain pending until the remediation commit
+is pushed.

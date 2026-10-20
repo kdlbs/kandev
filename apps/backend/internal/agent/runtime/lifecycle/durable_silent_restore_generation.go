@@ -20,7 +20,10 @@ func (e *AgentExecution) bindSuccessorGenerationOwner(ctx context.Context, req *
 	if req.CandidateExecutionID != "" && req.CandidateExecutionID != e.ID {
 		return
 	}
-	e.successorGenerationOwner.CompareAndSwap(nil, &successorGenerationOwner{ctx: ctx})
+	previous := e.successorGenerationOwner.Load()
+	if previous == nil || previous.ctx.Err() != nil {
+		e.successorGenerationOwner.CompareAndSwap(previous, &successorGenerationOwner{ctx: ctx})
+	}
 }
 
 // Native restore and fresh start can emit setup events before their successor

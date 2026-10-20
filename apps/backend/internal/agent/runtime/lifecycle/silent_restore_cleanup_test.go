@@ -45,12 +45,19 @@ func TestSilentRestoreCleanupCheckpointsBeforeRemovingInventory(t *testing.T) {
 			cleaner, ok := any(mgr).(restoreCheckpointCleaner)
 			require.True(t, ok, "runtime must persist death proof before removing candidate inventory")
 			checkpoints := 0
+			var checkpointStoppedID, checkpointExecutionID string
+			var checkpointReadErr error
 			checkpoint := func(ctx context.Context) error {
 				checkpoints++
-				require.Equal(t, e.ID, backend.stoppedID)
+				checkpointStoppedID = backend.stoppedID
 				current, readErr := repo.GetExecutorRunningBySessionID(ctx, e.SessionID)
-				require.NoError(t, readErr)
-				require.Equal(t, e.ID, current.AgentExecutionID)
+				checkpointReadErr = readErr
+				if readErr != nil {
+					return readErr
+				}
+				if current != nil {
+					checkpointExecutionID = current.AgentExecutionID
+				}
 				if failure == "checkpoint" {
 					return failed
 				}
@@ -63,6 +70,11 @@ func TestSilentRestoreCleanupCheckpointsBeforeRemovingInventory(t *testing.T) {
 				err = cleanupAfterWorkspacePeer(t, mgr, e.SessionID, runCleanup)
 			} else {
 				err = runCleanup(ctx)
+			}
+			if checkpoints > 0 {
+				require.Equal(t, e.ID, checkpointStoppedID)
+				require.NoError(t, checkpointReadErr)
+				require.Equal(t, e.ID, checkpointExecutionID)
 			}
 			if failure == "" || failure == "joined workspace operation" {
 				require.NoError(t, err)

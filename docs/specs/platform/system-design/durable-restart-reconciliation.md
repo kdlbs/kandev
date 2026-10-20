@@ -104,7 +104,12 @@ On native startup failure, the restore owner also owns cleanup after cancellatio
 It revalidates the pinned checkpoint, workspace owner, and execution identity
 under the session locks. A ready candidate remains available for commit retry.
 Otherwise lifecycle stops the exact failed runtime and calls the durable
-checkpoint writer before removing inventory. A failed stop or checkpoint keeps
+checkpoint writer before removing inventory. A failed SQL commit can disconnect a candidate stream when its launch owner ends.
+A later pass verifies the same execution and initialized native identity, binds
+the new attempt only after the old owner ends, and reconnects before checking
+readiness. A complete, unacknowledged setup prefix without submissions can replay
+from zero while its predecessor generation remains pinned; receipt still waits
+for the successor commit. A failed stop or checkpoint keeps
 the inventory. Confirmed termination advances `candidate_launching` to
 `candidate_dead`, so a later pass can rotate safely even after a crash during
 cleanup. An absent execution row without that proof remains blocked.

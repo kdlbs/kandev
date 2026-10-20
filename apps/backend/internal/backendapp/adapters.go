@@ -1041,6 +1041,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) RecoverSilentRestoreCandidateStream(ctx context.Context, sessionID, executionID, nativeID string) error {
+	return a.mgr.RecoverSilentRestoreCandidateStream(ctx, sessionID, executionID, nativeID)
+}
+
 func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
 	ctx context.Context,
 	identity lifecycle.AgentDeliveryRecoveryIdentity,

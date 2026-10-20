@@ -96,6 +96,35 @@ func TestSilentRestoreStartupDeadlineRemainsBounded(t *testing.T) {
 	})
 }
 
+func TestSilentRestoreStartupCommitRetryUsesNewOwner(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, g := silentRestoreDeliveryOwner()
+		previous, cancel := context.WithCancel(t.Context())
+		req := &LaunchRequest{RequiredNativeConversationID: e.RequiredNativeConversationID, CandidateExecutionID: e.ID}
+		e.bindSuccessorGenerationOwner(previous, req)
+		cancel()
+		e.bindSuccessorGenerationOwner(t.Context(), req)
+		repo := &retentionBootstrapRepository{firstRead: make(chan struct{})}
+		repo.generation.Store(g)
+		result := make(chan error, 1)
+		go func() {
+			_, err := awaitSilentRestoreGeneration(t.Context(), e, repo, e.SessionID, e.DeliveryIncarnationID)
+			result <- err
+		}()
+		<-repo.firstRead
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("commit retry inherited the expired startup owner: %v", err)
+		default:
+		}
+		next := *g
+		next.Generation = 2
+		repo.generation.Store(&next)
+		require.NoError(t, <-result)
+	})
+}
+
 // The owner can commit and finish while the stream's SQL read is in flight.
 func TestSilentRestoreStartupCommitDuringCancelledRead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

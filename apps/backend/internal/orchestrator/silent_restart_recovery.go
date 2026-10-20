@@ -659,12 +659,23 @@ func (s *Service) silentRestoreCandidateReady(
 	default:
 		return nil, false, nil
 	}
-	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
-		return nil, false, nil
-	}
 	nativeID := s.currentACPSessionID(inputs.session.ID)
 	if nativeID == "" || nativeID != checkpoint.SourceGeneration.NativeSessionID {
 		return nil, false, nil
+	}
+	if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+		recoverer, supported := s.agentManager.(silentRestoreStreamRecoverer)
+		if !supported {
+			return nil, false, nil
+		}
+		if err := recoverer.RecoverSilentRestoreCandidateStream(
+			ownerCtx, inputs.session.ID, checkpoint.CandidateExecutionID, nativeID,
+		); err != nil {
+			return nil, false, err
+		}
+		if !s.agentManager.IsAgentReadyForPrompt(ownerCtx, inputs.session.ID) {
+			return nil, false, nil
+		}
 	}
 	return ownerCtx, true, nil
 }
