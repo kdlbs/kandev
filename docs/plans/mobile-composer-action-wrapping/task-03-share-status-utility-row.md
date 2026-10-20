@@ -239,3 +239,30 @@ The screenshot fixture uses a separate capture key for each test so both GitLab
 viewport captures remain in the manifest. Both GitLab browser cases passed again
 after that fixture change, with retries disabled. Publication and current-head CI/review
 verification remain pending until the remediation is pushed.
+
+### PR review: Azure DevOps link targets
+
+Claude's summary and inline review found the same missing slot on the Azure
+DevOps PR link. Its browser regression measured a 28px target before the fix.
+The link now exposes the shared slot through its existing Button wrapper.
+The browser case checks 44px targets and center-point reachability at 320px
+with touch and fine pointers, activates the link against a mocked external
+destination, and verifies compact sizing at 1280px. It restores repository
+metadata after the case.
+
+The fresh frontend build and all five selected browser cases passed with
+retries disabled: the two shared/wrapped composer cases, two GitLab cases, and
+the Azure DevOps case. Targeted ESLint, Prettier, and typecheck with the 6144MiB
+heap passed. The Azure case passed again after waiting for response completion
+and tooltip dismissal before capture. The existing public
+mobile documentation already describes the behavior for all status controls;
+no new user-facing copy or contract is introduced.
+
+```bash
+pnpm --dir apps/web run build:e2e
+. /tmp/mobile-composer-env.sh
+CAPTURE_PR_ASSETS=1 pnpm --dir apps/web e2e:run --no-build --project mobile-chrome e2e/tests/integrations/mobile-azure-devops.spec.ts e2e/tests/gitlab/mobile-mr-status-chip.spec.ts e2e/tests/chat/mobile-chat-status-bar.spec.ts -- --grep 'composer PR links|shares status and transcript controls|wraps status and transcript controls|mobile GitLab MR status chip' --retries=0
+```
+
+Fresh phone and desktop captures cover all three providers. Publication and
+current-head CI/review verification remain pending until the fix is pushed.

@@ -60,8 +60,8 @@ The status wrapper uses a trailing auto margin and hides when its only
 remaining children are empty provider wrappers. The utility wrapper uses a
 leading auto margin. Both groups retain their natural widths when they fit.
 
-`ChangeRequestStatusChip` and the GitLab MR trigger attributes expose the same
-component slot on their triggers.
+`ChangeRequestStatusChip`, the GitLab MR trigger attributes, and the Azure DevOps
+PR link expose the same component slot on their triggers.
 Non-standalone `ComposerCIStatus` uses that slot to apply 44px minimum targets
 for phone widths and coarse pointers. This fixes the measured 40px CI target
 without changing standalone Threads chips or fine-pointer desktop density.
