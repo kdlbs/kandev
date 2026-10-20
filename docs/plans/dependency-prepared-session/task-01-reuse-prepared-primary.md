@@ -72,3 +72,16 @@ the authorized deferred MCP move. Focused `-trimpath -race` checks pass:
 orchestrator 2.430s; MCP handlers 2.049s. The proposed ceiling-replay blocker
 was withdrawn after its assumed automatic admission proved inapplicable.
 No speculative replay plumbing or admission-policy change was made.
+
+## PR documentation coverage remediation
+
+The trusted PR validator rejected the changed historical task-dependencies
+work order's legacy `spec` frontmatter, which local catalog/spec lint does not
+validate. Reproduced the exact 12-file PR set with the unchanged base-controlled
+`validateCoverage`: RED, `frontmatter field spec is unsupported`. Updated only
+the historical task-03 and sibling plan metadata to the current requirements,
+acceptance-criteria and system-design links, retaining their existing content
+and status. No source/test or product behavior change. GREEN: the same validator
+accepts both changed work orders; catalog/spec/whitespace checks also pass.
+Reproduction command from repo root: `node ../4579-validation/check-docs-coverage.cjs`.
+Exact-head CI/review and protected merge remain pending after the fixup push.

@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/tasks/system-design/task-dependencies.md
+requirements:
+  - REQ-TASKS-TASK-DEPENDENCIES-001
+system_design:
+  - ../../specs/tasks/system-design/task-dependencies.md
 created: 2026-08-09
 status: not_started
 ---

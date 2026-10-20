@@ -190,3 +190,16 @@ six-file command above. Final catalog/spec lint and whitespace checks: PASS
 closing PR and no PR for this branch. Final candidate remains uncommitted for
 parent validation. Initial review artifacts are preserved separately under
 `../4579-validation/initial-candidate/`.
+
+## PR documentation coverage remediation
+
+The trusted PR validator rejected the changed historical task-dependencies
+work order's legacy `spec` frontmatter, which local catalog/spec lint does not
+validate. Reproduced the exact 12-file PR set with the unchanged base-controlled
+`validateCoverage`: RED, `frontmatter field spec is unsupported`. Updated only
+the historical task-03 and sibling plan metadata to the current requirements,
+acceptance-criteria and system-design links, retaining their existing content
+and status. No source/test or product behavior change. GREEN: the same validator
+accepts both changed work orders; catalog/spec/whitespace checks also pass.
+Reproduction command from repo root: `node ../4579-validation/check-docs-coverage.cjs`.
+Exact-head CI/review and protected merge remain pending after the fixup push.
