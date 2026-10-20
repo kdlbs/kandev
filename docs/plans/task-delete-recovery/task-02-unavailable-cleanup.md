@@ -115,11 +115,12 @@ for new Go tests so the focused command selects every added regression.
 | .1, .2, .7 | `TestDeleteUnavailablePreflightConsent` in `task/service/task_delete_unavailable_test.go` | Unknown differs from clean. No acknowledgement blocks deletion. Ticket mismatch, expiry, replay, changed actor/scope/mode, and stale response fail safely. |
 | .2, .3 | `TestDeleteUnavailablePreparation` in new `task/service/task_delete_unavailable_test.go` | Empty marker, empty `.git`, broken ref, inaccessible path and provider outage admit only with explicit consent. Persistence/inventory failures preserve uncommitted rows. Cancellation is not success. |
 | .3, .5, .6 | `TestDeleteUnavailableMixedCleanupRestart` in that new file | Mixed healthy/dirty/corrupt selection, cascade and prior unfinished snapshots retain exact obligations. Eligible siblings complete. Reopened database resumes only unfinished effects. |
-| .2, .5 | `TestDeleteUnavailableDamagedCheckoutPath` and `TestDeleteUnavailableIndependentResources` in `task/service/task_delete_unavailable_resources_test.go` | File and symlink checkout paths permit acknowledged task deletion but remain untouched. Attachments, prior containers, and SSH directories progress independently. Failed stops, incomplete inventory, and stale claims preserve their cleanup barriers. |
+| .2, .5 | `TestDeleteUnavailableDamagedCheckoutPath` and `TestDeleteUnavailableIndependentResources` in `task/service/task_delete_unavailable_resources_test.go` | File and symlink checkout paths permit acknowledged task deletion but remain untouched. Attachments, prior containers, and SSH directories progress independently. Failed stops, incomplete inventory, stale claims, and a failed manifest save after inventory capture preserve their cleanup barriers. |
 | .4, .6 | `TestDeleteUnavailableWorktreeIdentity` in new `worktree/manager_cleanup_unavailable_test.go` | Real temporary Git paths, no-follow guards, replaced path/ref, foreign marker, shared references, and unknown pre-deletion identity never authorize removal. Restoring original verified evidence allows retry. |
 | .4, .6, .9 | `TestDeleteUnavailableInventoryProtection` in `backendapp/storage_inventory_test.go`, `task/retention/inventory_test.go`, and lifecycle retention tests | Maintenance, quarantine, container sweeps, stale workers, restart and terminal failure cannot bypass outstanding protection. Owning job can progress only after audits. Retain always wins. |
 | .8 | `TestHTTPUnverifiedDeletePreservesCommittedResult`, `TestHTTPDeleteUnavailablePreflight`, and `TestDeleteUnavailableMCPOutcome` in handler recovery tests | Committed task removal with pending cleanup is success. Completed/no-target shutdown stays false after post-commit errors. Partial outcomes remain exact. |
 | .7, .9 | Existing dialog, hook, API, action and selection unit tests | Unknown acknowledgement replaces ordinary discard option. Flag reaches all wrappers. Mode/scope/reopen resets consent. Older responses and generic 503s cannot enable deletion. |
+| .8 | `tasks-page-client.delete.test.tsx`, `tasks-page-delete-cleanup.spec.ts`, and `mobile-tasks-page-delete-cleanup.spec.ts` | The Tasks page reports pending cleanup after committed deletion on desktop and phone. Real damaged files remain protected. |
 
 Every resource read must succeed before inventory is called complete. At least
 one independently eligible resource must progress in a mixed test; all-resource
@@ -276,5 +277,20 @@ Remediation verification on 2026-10-20:
   the helper extraction by applying error classification in
   `manager_cleanup_identity.go`. Repeated the focused Go command with
   `-trimpath` on the combined tree: passed. Harness tests and lint passed.
+
+A subsequent review identified a failed manifest save that still permitted
+independent cleanup, and a missing cleanup-pending toast on the Tasks page.
+Manifest-save failures now use the fatal result, including a lost worker claim.
+The Tasks page uses the same localized notice as the shared task actions.
+Both cases have failing-before-fix regression evidence. The service
+`TestDeleteUnavailable` tests and 20 focused frontend tests pass.
+
+Additional verification on 2026-10-20:
+
+- `cd apps/backend && GOMAXPROCS=2 go test -trimpath -p 2 -parallel 2 ./internal/task/service -run '^TestDeleteUnavailable' -count=1`: passed.
+- `cd apps/web && pnpm exec vitest run app/tasks/tasks-page-client.delete.test.tsx app/tasks/tasks-page-client.facet-selection.test.tsx hooks/use-task-actions.test.ts`: 20 passed.
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium e2e/tests/task/tasks-page-delete-cleanup.spec.ts`: one passed after reproducing the missing notice.
+- The matching `mobile-chrome` run of `mobile-tasks-page-delete-cleanup.spec.ts`: one passed at 320px. Both browser runs assert the visible notice, removed task row, preserved damaged files, and no horizontal document overflow.
 
 Fresh CI and review evidence for this remediation remain delivery gates.

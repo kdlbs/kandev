@@ -7,6 +7,7 @@ import { expect, test, type SeedData } from "../fixtures/test-base";
 import type { PrAssetCapture } from "./pr-asset-capture";
 import type { ApiClient } from "./api-client";
 import { waitForHttp } from "./causal-waits";
+import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
 export async function createDamagedDeleteTask(api: ApiClient, seed: SeedData, title: string) {
   const task = await api.createTaskWithAgent(seed.workspaceId, title, seed.agentProfileId, {
@@ -132,4 +133,37 @@ export async function deleteDamagedTaskWithPendingCleanup(
     workspace_cleanup_pending: true,
   });
   await expect(dialog).not.toBeVisible();
+}
+
+export async function assertTasksPagePendingCleanup(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  capture: PrAssetCapture,
+) {
+  const title = "Tasks page damaged workspace";
+  const { task, assertRetained } = await createDamagedDeleteTask(api, seed, title);
+  await page.goto("/tasks?group=none");
+  const row = page.getByTestId("tasks-list-row").filter({ hasText: title });
+  const action = row.getByRole("button", { name: "Delete task", exact: true });
+  if ((page.viewportSize()?.width ?? 1024) < 768) {
+    await action.tap();
+  } else {
+    await action.click();
+  }
+  await deleteDamagedTaskWithPendingCleanup(page, page.getByRole("alertdialog"), task.id);
+  await expect(page.getByText("Task deleted. Cleanup pending.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "Files that cannot be safely removed remain protected. Kandev will retry cleanup.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await capture.screenshot("tasks-page-cleanup-pending", {
+    caption: "Tasks page confirms deletion and reports protected files pending cleanup.",
+  });
+  await expect(row).toHaveCount(0);
+  expect((await api.rawRequest("GET", `/api/v1/tasks/${task.id}`)).status).toBe(404);
+  assertRetained();
+  await assertNoDocumentHorizontalOverflow(page, "Tasks page cleanup notice");
 }

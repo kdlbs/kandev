@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/stretchr/testify/require"
 )
@@ -64,13 +66,14 @@ func TestDeleteUnavailableDamagedCheckoutPath(t *testing.T) {
 
 // @covers AC-TASKS-DELETE-RECOVERY-002.5
 func TestDeleteUnavailableIndependentResources(t *testing.T) {
-	for _, scenario := range []string{"stopped", "stop failed", "incomplete inventory", "stale claim"} {
+	for _, scenario := range []string{"stopped", "stop failed", "incomplete inventory", "stale claim", "manifest save failed", "manifest claim lost"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			svc, repo := setupOfficeTest(t)
 			svc.StopTaskResourceCleanupWorker()
 			taskID, env := newReclaimTask(t, svc, "Independent cleanup")
-			svc.SetWorktreeCleanup(&mixedUnavailableCleanup{})
+			cleaner := &mixedUnavailableCleanup{}
+			svc.SetWorktreeCleanup(cleaner)
 			destroyer := &stubDestroyer{}
 			svc.SetEnvironmentDestroyer(destroyer)
 			reclaimer := &fakeSSHTaskDirReclaimer{}
@@ -102,6 +105,15 @@ func TestDeleteUnavailableIndependentResources(t *testing.T) {
 			if scenario == "incomplete inventory" {
 				snapshot.CleanupInventoryCaptured = false
 			}
+			manifestSaveFailure := scenario == "manifest save failed" || scenario == "manifest claim lost"
+			if manifestSaveFailure {
+				cleaner.repaired = true
+				snapshot.Worktrees = append(snapshot.Worktrees, &worktree.Worktree{ID: "healthy", TaskID: taskID})
+				snapshot.WorktreeHeadOIDs = map[string]string{"broken": "head", "healthy": "head"}
+				svc.resourceCleanups = &manifestSaveFailureRepository{
+					TaskResourceCleanupRepository: repo, claimLost: scenario == "manifest claim lost",
+				}
+			}
 			payload, err := json.Marshal(snapshot)
 			require.NoError(t, err)
 			job := &models.TaskResourceCleanupJob{
@@ -115,7 +127,7 @@ func TestDeleteUnavailableIndependentResources(t *testing.T) {
 			}
 			err = svc.executeTaskResourceCleanupJob(ctx, job, &snapshot)
 			require.Error(t, err)
-			if scenario == "incomplete inventory" || scenario == "stale claim" {
+			if scenario == "incomplete inventory" || scenario == "stale claim" || manifestSaveFailure {
 				require.FileExists(t, path)
 			} else {
 				require.ErrorContains(t, err, "original workspace identity is unavailable")
@@ -123,6 +135,19 @@ func TestDeleteUnavailableIndependentResources(t *testing.T) {
 			}
 			if scenario == "stop failed" {
 				require.ErrorContains(t, err, "runtime stop operations failed")
+			}
+			if manifestSaveFailure {
+				require.Empty(t, cleaner.cleanedIDs())
+				saved, readErr := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+				require.NoError(t, readErr)
+				var persisted taskResourceCleanupSnapshot
+				require.NoError(t, json.Unmarshal([]byte(saved.ResourceSnapshot), &persisted))
+				require.Empty(t, persisted.ArchiveSourceManifest)
+				if scenario == "manifest claim lost" {
+					require.ErrorContains(t, err, "claim changed")
+				} else {
+					require.ErrorContains(t, err, "snapshot save failed")
+				}
 			}
 			if scenario == "stopped" {
 				require.Equal(t, []string{"old-container"}, destroyer.containerCalls)
@@ -135,4 +160,21 @@ func TestDeleteUnavailableIndependentResources(t *testing.T) {
 			require.False(t, snapshot.CompletedWorktrees["broken"])
 		})
 	}
+}
+
+type manifestSaveFailureRepository struct {
+	repository.TaskResourceCleanupRepository
+	claimLost bool
+	saves     int
+}
+
+func (r *manifestSaveFailureRepository) UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Context, id string, attempt int, snapshot string) (bool, error) {
+	r.saves++
+	if r.saves == 2 {
+		if r.claimLost {
+			return false, nil
+		}
+		return false, errors.New("snapshot save failed")
+	}
+	return r.TaskResourceCleanupRepository.UpdateClaimedTaskResourceCleanupSnapshot(ctx, id, attempt, snapshot)
 }

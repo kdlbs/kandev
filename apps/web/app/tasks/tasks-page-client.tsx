@@ -214,6 +214,11 @@ function useTaskMutations(fetchTasks: () => void) {
                 : "task:deleteKeptFilesComplete",
             ),
           });
+        } else if (result?.workspace_cleanup_pending) {
+          toast({
+            title: t("task:deleteCleanupPendingTitle"),
+            description: t("task:deleteCleanupPendingDescription"),
+          });
         }
         fetchTasks();
       } catch (err) {
@@ -230,7 +235,7 @@ function useTaskMutations(fetchTasks: () => void) {
         setDeletingTaskId(null);
       }
     },
-    [fetchTasks, toast],
+    [fetchTasks, t, toast],
   );
 
   return { deletingTaskId, handleArchive, handleUnarchive, handleDelete };

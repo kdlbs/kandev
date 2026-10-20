@@ -15,14 +15,7 @@ import (
 // failed resource cannot prevent independent worktrees from making progress.
 // The final error fences all cleanup when inventory or progress cannot be saved.
 func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, stop taskRuntimeStopOutcome) ([]error, error) {
-	if snapshot.CleanupVersion != 1 || !snapshot.CleanupInventoryCaptured || !snapshot.DiscardWorktreeChanges || !taskResourceCleanupDeletesTask(job.Trigger) {
-		return nil, errors.New("unverified cleanup inventory is incomplete")
-	}
-	snapshot.RuntimeStopCompleted = len(stop.failed) == 0
-	if snapshot.CompletedWorktrees == nil {
-		snapshot.CompletedWorktrees = make(map[string]bool)
-	}
-	if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
+	if err := s.prepareUnverifiedCleanupAttempt(ctx, job, snapshot, len(stop.failed) == 0); err != nil {
 		return nil, err
 	}
 	var errs []error
@@ -34,7 +27,11 @@ func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.Ta
 		if wt == nil || snapshot.CompletedWorktrees[wt.ID] {
 			continue
 		}
-		if err := s.cleanupUnverifiedWorktree(ctx, job, snapshot, wt, preserve); err != nil {
+		resourceErrs, err := s.cleanupUnverifiedWorktree(ctx, job, snapshot, wt, preserve)
+		if err != nil {
+			return errs, err
+		}
+		if err := errors.Join(resourceErrs...); err != nil {
 			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
 			continue
 		}
@@ -52,6 +49,17 @@ func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.Ta
 	return errs, nil
 }
 
+func (s *Service) prepareUnverifiedCleanupAttempt(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, runtimeStopped bool) error {
+	if snapshot.CleanupVersion != 1 || !snapshot.CleanupInventoryCaptured || !snapshot.DiscardWorktreeChanges || !taskResourceCleanupDeletesTask(job.Trigger) {
+		return errors.New("unverified cleanup inventory is incomplete")
+	}
+	snapshot.RuntimeStopCompleted = runtimeStopped
+	if snapshot.CompletedWorktrees == nil {
+		snapshot.CompletedWorktrees = make(map[string]bool)
+	}
+	return s.persistTaskDirectorySnapshot(ctx, job, snapshot)
+}
+
 func (s *Service) cleanupPriorTaskEnvironments(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot) error {
 	var errs []error
 	for _, env := range snapshot.PriorTaskEnvironments {
@@ -63,29 +71,29 @@ func (s *Service) cleanupPriorTaskEnvironments(ctx context.Context, job *models.
 	return errors.Join(errs...)
 }
 
-func (s *Service) cleanupUnverifiedWorktree(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, wt *worktree.Worktree, preserve map[string]struct{}) error {
+func (s *Service) cleanupUnverifiedWorktree(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, wt *worktree.Worktree, preserve map[string]struct{}) ([]error, error) {
 	if slices.Contains(snapshot.CleanupInventoryConflicts, wt.ID) {
-		return errors.New("prior workspace inventory has conflicting identities")
+		return []error{errors.New("prior workspace inventory has conflicting identities")}, nil
 	}
 	wt.CleanupHeadOID = snapshot.WorktreeHeadOIDs[wt.ID]
 	wt.CleanupHeadOIDUnavailable = wt.CleanupHeadOID == ""
 	if wt.CleanupHeadOIDUnavailable {
-		return errors.New("original workspace identity is unavailable")
+		return []error{errors.New("original workspace identity is unavailable")}, nil
 	}
 	if !hasWorktreeSourceManifest(snapshot.ArchiveSourceManifest, wt.ID) {
 		manifest, err := s.captureArchiveSourceManifest(ctx, job.ID, job.TaskID, []*worktree.Worktree{wt})
 		if err != nil {
-			return err
+			return []error{err}, nil
 		}
 		snapshot.ArchiveSourceManifest = append(snapshot.ArchiveSourceManifest, manifest...)
 		if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return errors.Join(s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, []*worktree.Worktree{wt}, taskEnvironmentCleanup{
+	return s.cleanupDestructiveTaskResources(ctx, job.TaskID, snapshot.Sessions, []*worktree.Worktree{wt}, taskEnvironmentCleanup{
 		env: snapshot.TaskEnvironment, deferEnvironment: true,
 		discardWorktreeChanges: true, allowUnverifiedWorkspaceChanges: true,
-	}, preserve)...)
+	}, preserve), nil
 }
 
 func hasWorktreeSourceManifest(manifest []ArchiveSourceManifest, id string) bool {
