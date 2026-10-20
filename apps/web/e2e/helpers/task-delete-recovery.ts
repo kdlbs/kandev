@@ -159,6 +159,9 @@ export async function assertTasksPagePendingCleanup(
       { exact: true },
     ),
   ).toBeVisible();
+  await expect(
+    page.getByTestId("toast-message").filter({ hasText: "Task deleted. Cleanup pending." }),
+  ).toBeInViewport({ ratio: 1 });
   await capture.screenshot("tasks-page-cleanup-pending", {
     caption: "Tasks page confirms deletion and reports protected files pending cleanup.",
   });
