@@ -137,6 +137,24 @@ export function PassthroughToolbar({
   return <ActivePassthroughToolbar sessionId={sessionId} taskId={taskId} />;
 }
 
+function renderAgentTerminal(
+  sessionId: string | null | undefined,
+  mobile: boolean,
+  touch: boolean,
+  showControls: boolean,
+) {
+  return (
+    <div className="flex-1 min-h-0">
+      <AgentTerminalInput
+        sessionId={sessionId}
+        mobile={mobile}
+        touch={touch}
+        showControls={showControls}
+      />
+    </div>
+  );
+}
+
 function ActivePassthroughToolbar({
   sessionId,
   taskId,
@@ -203,9 +221,7 @@ function ActivePassthroughToolbar({
 
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
-      <div className="flex-1 min-h-0">
-        <AgentTerminalInput sessionId={sessionId} mobile={isMobile} touch={!finePointer} />
-      </div>
+      {renderAgentTerminal(sessionId, isMobile, !finePointer, !composerOpen && !commentsOpen)}
 
       {commentsOpen && pendingCount > 0 && (
         <CommentsPanel

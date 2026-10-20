@@ -30,6 +30,21 @@ An aborted creation leaves no partially configured provider. If the connection f
 reload the settings to confirm the saved state before retrying, especially when adding a provider.
 Saves for separate providers are independent.
 
+## Use CLI passthrough on a phone
+
+Open a task running in CLI passthrough mode. Its connected terminal shows the
+same navigation keys as a task terminal: **Ctrl**, **Shift**, **^C**, **^D**,
+**Esc**, **Tab**, arrows, and other terminal keys. Swipe the row to reach more keys.
+
+Tap **Ctrl** once to modify the next input, twice to keep it enabled, and again
+to turn it off. **Shift** followed by **Tab** sends reverse Tab. Keys go directly
+to the visible agent terminal and do not create a chat message.
+
+The row reserves space below terminal output and stays above the software
+keyboard. Opening **Chat** or **Comments** hides the row and clears modifiers.
+It returns when those panels close and the terminal is connected. Switching
+away from the terminal also clears modifiers. Desktop input remains unchanged.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
