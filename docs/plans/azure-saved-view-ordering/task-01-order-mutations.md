@@ -1,3 +1,21 @@
+---
+id: "01-order-mutations"
+title: "Order Azure saved-view actions"
+status: done
+wave: 1
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.15
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.16
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.17
+  - AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18
+system_design:
+  - ../../specs/integrations/system-design/azure-devops-integration-02.md
+---
+
 # Order Azure saved-view actions
 
 Status: done
@@ -91,6 +109,12 @@ GREEN after the final production edit:
   typecheck`, including the rich-output contract check. The default 4 GB run
   exited 134 with a JavaScript heap-limit failure. The machine crash's cause
   remains unproven.
+
+Publication preflight: added the existing PR documentation gate's structured
+plan/work-order frontmatter. Ran the trusted base's `validateCoverage` evaluator
+against all eleven changed paths and the linked requirement/design documents:
+`status=covered`, `ok=true`, no errors. Product source and test behavior remain
+at the parent-validated implementation.
 
 Public docs updated: Azure integration how-to in `docs/public/integrations.md`
 now describes saved-query ordering, error feedback, and retry. Internal

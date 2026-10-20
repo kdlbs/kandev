@@ -1,3 +1,13 @@
+---
+created: 2026-10-20
+status: done
+requirements:
+  - REQ-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001
+system_design:
+  - ../../specs/integrations/system-design/azure-devops-integration-02.md
+legacy_specs: []
+---
+
 # Azure saved-view ordering
 
 Status: done
