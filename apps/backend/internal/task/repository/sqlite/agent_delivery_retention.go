@@ -130,6 +130,9 @@ func (r *Repository) RunAgentDeliveryRetentionBatch(
 		return models.AgentDeliveryRetentionBatchResult{}, err
 	}
 	result.DiscoveryAdvanced = agentDeliveryDiscoveryAdvanced(progress, candidates, prompts, wrapped)
+	result.DiscoveryBefore = agentDeliveryDiscoveryVector(progress)
+	next := nextAgentDeliveryRetentionProgress(progress, candidates, prompts, wrapped, promptWrapped)
+	result.DiscoveryAfter = agentDeliveryDiscoveryVector(next)
 	return result, nil
 }
 
@@ -339,13 +342,7 @@ func (r *Repository) writeAgentDeliveryRetentionProgress(
 	promptWrapped bool,
 	nextPhase string,
 ) error {
-	progress := previous
-	advanceAgentDeliveryEventRetentionProgress(&progress, candidates, wrapped)
-	if len(prompts) > 0 {
-		progress.lastSubmissionID = prompts[len(prompts)-1].submissionID
-	} else if promptWrapped {
-		progress.lastSubmissionID = ""
-	}
+	progress := nextAgentDeliveryRetentionProgress(previous, candidates, prompts, wrapped, promptWrapped)
 	if err := r.failAgentDeliveryRetention("before_progress"); err != nil {
 		return err
 	}
