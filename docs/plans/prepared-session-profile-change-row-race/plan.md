@@ -88,6 +88,9 @@ No system-design change: the design already states the intended outcome.
 - Orchestrator integration test on a real SQLite repository through
   `NewService`, with an agent manager whose stop runs the real
   `handleAgentStopped` synchronously.
+- Prepare Office sessions from the task workbench with the execution profile
+  Office routing would select, so the common launch reuses the prepared
+  runtime; profile drift keeps using the replacement path.
 - Office Playwright E2E test with the mock agent covering the issue's flow:
   blocked assignment, prepared session from the task page, blocker completion,
   and a launched run.
@@ -106,6 +109,7 @@ No system-design change: the design already states the intended outcome.
 | -- | ----- | ---------- | ------ |
 | [01](task-01-tolerate-cleared-executor-row.md) | Tolerate a cleared executor row on profile change | none | done |
 | [02](task-02-keep-session-on-profile-replacement.md) | Keep the session alive across a profile-replacement stop | 01 | done |
+| [03](task-03-prepare-with-routed-profile.md) | Prepare Office sessions with the routed execution profile | 02 | done |
 
 ## Verification
 
@@ -113,7 +117,8 @@ No system-design change: the design already states the intended outcome.
 # From apps/backend:
 go test ./internal/orchestrator/executor -run 'TestLaunchPreparedSession_ProfileChange' -count=1 -race
 go test ./internal/orchestrator/executor/... -count=1
-go test -trimpath ./internal/orchestrator -run 'TestLaunchPreparedSession_ProfileReplacement' -count=1 -race
+go test -trimpath ./internal/orchestrator -run 'TestLaunchPreparedSession_ProfileReplacement|TestEnsureSession_OfficeTask' -count=1 -race
+go test -trimpath ./internal/backendapp -run TestOfficeLaunchProfilePreview -count=1
 # From repo root:
 bash scripts/lint-go-changed <changed-go-files>
 # From apps/web:

@@ -986,6 +986,10 @@ type Service struct {
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
+	// officeLaunchProfilePreview returns the execution profile Office would
+	// launch an agent with, without recording any routing decision.
+	officeLaunchProfilePreview OfficeLaunchProfilePreviewFunc
+
 	// stepHistoryRecorder persists the ADR 0015 audit row for orchestrator
 	// step transitions: auto-advance (StepTransitionTriggerAutoComplete) and
 	// the deferred move_task_kandev path (StepTransitionTriggerManual).
