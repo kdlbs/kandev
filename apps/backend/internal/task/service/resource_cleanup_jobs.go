@@ -1338,16 +1338,18 @@ func (s *Service) executeTaskResourceCleanupJob(
 	}
 	cleanupWorktrees := snapshot.Worktrees
 	cleanupEnvironment := snapshot.TaskEnvironment
+	var errs []error
 	if snapshot.AllowUnverifiedWorkspaceChanges {
-		if err := s.cleanupUnverifiedWorktrees(ctx, job, snapshot, stopOutcome); err != nil {
-			return err
+		resourceErrs, err := s.cleanupUnverifiedWorktrees(ctx, job, snapshot, stopOutcome)
+		if err != nil {
+			return errors.Join(append(resourceErrs, err)...)
 		}
+		errs = append(errs, resourceErrs...)
 		cleanupWorktrees = nil
 		cleanupEnvironment = taskEnvironmentWithoutSnapshotWorktrees(snapshot.TaskEnvironment, snapshot.Worktrees)
 	} else if err := s.captureAndPersistTaskSourceManifest(ctx, job, snapshot, len(failedStops)); err != nil {
 		return err
 	}
-	var errs []error
 	if taskResourceCleanupDeletesTask(job.Trigger) && s.attachmentSvc != nil {
 		var attachmentErr error
 		if job.Trigger == models.TaskResourceCleanupTriggerWorkspaceDelete {

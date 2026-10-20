@@ -13,16 +13,17 @@ import (
 
 // Cleanup keeps the original inventory until every resource is removed. A
 // failed resource cannot prevent independent worktrees from making progress.
-func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, stop taskRuntimeStopOutcome) error {
+// The final error fences all cleanup when inventory or progress cannot be saved.
+func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot, stop taskRuntimeStopOutcome) ([]error, error) {
 	if snapshot.CleanupVersion != 1 || !snapshot.CleanupInventoryCaptured || !snapshot.DiscardWorktreeChanges || !taskResourceCleanupDeletesTask(job.Trigger) {
-		return errors.New("unverified cleanup inventory is incomplete")
+		return nil, errors.New("unverified cleanup inventory is incomplete")
 	}
 	snapshot.RuntimeStopCompleted = len(stop.failed) == 0
 	if snapshot.CompletedWorktrees == nil {
 		snapshot.CompletedWorktrees = make(map[string]bool)
 	}
 	if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
-		return err
+		return nil, err
 	}
 	var errs []error
 	if len(stop.failed) > 0 {
@@ -39,16 +40,16 @@ func (s *Service) cleanupUnverifiedWorktrees(ctx context.Context, job *models.Ta
 		}
 		snapshot.CompletedWorktrees[wt.ID] = true
 		if err := s.persistTaskDirectorySnapshot(ctx, job, snapshot); err != nil {
-			return errors.Join(append(errs, err)...)
+			return errs, err
 		}
 	}
 	if len(snapshot.CleanupInventoryConflicts) > 0 {
 		errs = append(errs, errors.New("prior workspace inventory has conflicting identities"))
 	}
-	if len(errs) > 0 {
-		return errors.Join(errs...)
+	if len(stop.failed) == 0 {
+		errs = append(errs, s.cleanupPriorTaskEnvironments(ctx, job, snapshot))
 	}
-	return s.cleanupPriorTaskEnvironments(ctx, job, snapshot)
+	return errs, nil
 }
 
 func (s *Service) cleanupPriorTaskEnvironments(ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot) error {

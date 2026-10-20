@@ -267,7 +267,9 @@ func TestDeleteUnavailableFailedStopPreservesOnlyItsWorkspace(t *testing.T) {
 	job := &models.TaskResourceCleanupJob{ID: "stop-partial", OperationID: "stop-partial", TaskID: "deleted", State: models.TaskResourceCleanupStateRunning, Attempts: 1, Trigger: models.TaskResourceCleanupTriggerDelete, ResourceSnapshot: string(payload)}
 	require.NoError(t, repo.CreateTaskResourceCleanupJob(context.Background(), job))
 	ctx := recoveryclaim.WithTaskCleanupJob(context.Background(), recoveryclaim.TaskCleanupJob{ID: job.ID, TaskID: job.TaskID, Attempts: 1})
-	require.Error(t, svc.cleanupUnverifiedWorktrees(ctx, job, &snapshot, taskRuntimeStopOutcome{failed: map[string]struct{}{"blocked": {}}}))
+	resourceErrs, err := svc.cleanupUnverifiedWorktrees(ctx, job, &snapshot, taskRuntimeStopOutcome{failed: map[string]struct{}{"blocked": {}}})
+	require.NoError(t, err)
+	require.Error(t, errors.Join(resourceErrs...))
 	require.Equal(t, []string{"healthy"}, cleaner.cleanedIDs())
 	require.False(t, snapshot.RuntimeStopCompleted)
 }

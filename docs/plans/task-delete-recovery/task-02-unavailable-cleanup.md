@@ -115,6 +115,7 @@ for new Go tests so the focused command selects every added regression.
 | .1, .2, .7 | `TestDeleteUnavailablePreflightConsent` in `task/service/task_delete_unavailable_test.go` | Unknown differs from clean. No acknowledgement blocks deletion. Ticket mismatch, expiry, replay, changed actor/scope/mode, and stale response fail safely. |
 | .2, .3 | `TestDeleteUnavailablePreparation` in new `task/service/task_delete_unavailable_test.go` | Empty marker, empty `.git`, broken ref, inaccessible path and provider outage admit only with explicit consent. Persistence/inventory failures preserve uncommitted rows. Cancellation is not success. |
 | .3, .5, .6 | `TestDeleteUnavailableMixedCleanupRestart` in that new file | Mixed healthy/dirty/corrupt selection, cascade and prior unfinished snapshots retain exact obligations. Eligible siblings complete. Reopened database resumes only unfinished effects. |
+| .2, .5 | `TestDeleteUnavailableDamagedCheckoutPath` and `TestDeleteUnavailableIndependentResources` in `task/service/task_delete_unavailable_resources_test.go` | File and symlink checkout paths permit acknowledged task deletion but remain untouched. Attachments, prior containers, and SSH directories progress independently. Failed stops, incomplete inventory, and stale claims preserve their cleanup barriers. |
 | .4, .6 | `TestDeleteUnavailableWorktreeIdentity` in new `worktree/manager_cleanup_unavailable_test.go` | Real temporary Git paths, no-follow guards, replaced path/ref, foreign marker, shared references, and unknown pre-deletion identity never authorize removal. Restoring original verified evidence allows retry. |
 | .4, .6, .9 | `TestDeleteUnavailableInventoryProtection` in `backendapp/storage_inventory_test.go`, `task/retention/inventory_test.go`, and lifecycle retention tests | Maintenance, quarantine, container sweeps, stale workers, restart and terminal failure cannot bypass outstanding protection. Owning job can progress only after audits. Retain always wins. |
 | .8 | `TestHTTPUnverifiedDeletePreservesCommittedResult`, `TestHTTPDeleteUnavailablePreflight`, and `TestDeleteUnavailableMCPOutcome` in handler recovery tests | Committed task removal with pending cleanup is success. Completed/no-target shutdown stays false after post-commit errors. Partial outcomes remain exact. |
@@ -257,6 +258,19 @@ Design validation on 2026-10-19:
   coverage preflight using the planned runtime path, not a published CI result.
 - `git diff --check`: passed. This design-only result predates implementation.
 
-PR #4578 still needs a verified push and fresh CI/review evidence. The local fix
-addresses the cancellation failure, the two retention threads, and the MCP and
-empty-container summary suggestions. No final PR completion is claimed yet.
+PR #4578 passed 89 checks before the latest Greptile review. That review found
+two remaining gaps: file/symlink checkout errors blocked task deletion, and a
+blocked worktree prevented independent resource cleanup. The remediation
+classifies physical path errors and separates resource failures from errors
+that must stop the cleanup operation. It preserves the existing ownership,
+runtime-stop, inventory, and progress-persistence checks.
+
+Remediation verification on 2026-10-20:
+
+- The new file/symlink deletion and independent-resource tests failed before
+  the fix, then passed after it. The failed-stop fixture explicitly returns
+  a stop error. Incomplete-inventory and stale-claim cases preserve resources.
+- `cd apps/backend && GOMAXPROCS=2 go test -p 2 -parallel 2 ./internal/task/service ./internal/worktree -run 'Test(DeleteUnavailable|CaptureCleanupHeadOIDs|TaskLifecycleCleanup|Cleanup|ExecuteTaskResourceCleanupJob|PerformTaskCleanup|Retain|TaskResourceCleanup)' -count=1`: passed.
+- Documentation catalog validation and full specification lint: passed.
+
+Fresh CI and review evidence for this remediation remain delivery gates.
