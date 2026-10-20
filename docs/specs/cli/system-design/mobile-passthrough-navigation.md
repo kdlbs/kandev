@@ -82,7 +82,7 @@ Preserve `min-h-0`, `100dvh` application bounds, theme tokens, and font choices.
 ## Lifecycle and failure
 
 Show the bar only with a session identity, ready xterm, and OPEN owned socket,
-and while neither composer nor comments is expanded. Keep callbacks stable
+and while neither composer nor comments is expanded and Quick Chat is closed. Keep callbacks stable
 across readiness changes so the connection effect does not reconnect on render.
 Socket replacement updates the sender. Close handlers clear only the socket
 they observed; stale close events cannot clear a replacement.
@@ -94,6 +94,11 @@ an agent sender in the shell registry. Do not reset an unrelated terminal from
 a consumer that never activated phone controls. Connecting/disconnected
 terminals keep their existing overlay; the navigation strip is omitted.
 Unavailable input is neither buffered nor redirected.
+
+Opening Quick Chat releases the underlying agent's modifier ownership. The
+agent can remain mounted and reconnect in the background, but it must neither
+reset nor consume the overlay terminal's modifiers. Closing the overlay lets
+the connected agent acquire controls with cleared modifier state.
 
 ## Persistence and security
 

@@ -137,7 +137,20 @@ The recovered implementation was integrated into the existing component.
 
 See [recovery evidence](recovery.md) for provenance, historical gaps, environment
 repairs, and local log paths. The user subsequently authorized branch delivery and an isolated test instance.
-No PR was requested.
+The user later authorized PR #4625 and review fixup.
+
+## PR review fixup
+
+Greptile identified shared Ctrl state being cleared by a background agent
+reconnect while Quick Terminal was open. The agent now releases modifier
+ownership while the Quick Chat overlay is open. CodeRabbit identified a ref
+write during render that could change input routing before a React transition
+committed. A layout effect now synchronizes that input state. Unit regressions
+reproduced both findings before their fixes. The browser regression also
+reproduced the Quick Terminal failure against the prior build.
+
+Remote checks and review disposition remain pending until the fix is pushed.
+See the work order for local verification.
 
 ## Risks
 

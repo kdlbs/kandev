@@ -4,6 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { MobileTerminalKeybarPage } from "../../pages/mobile-terminal-keybar-page";
 import { dwell } from "../../helpers/causal-waits";
+import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 
 type InputFrame = { url: string; data: string };
 
@@ -14,7 +15,11 @@ function observeInput(page: Page) {
     socket.on("framesent", ({ payload }) => {
       const url = new URL(socket.url());
       const data = typeof payload === "string" ? payload : payload.toString("utf8");
-      if (url.pathname.startsWith("/terminal/")) frames.push({ url: socket.url(), data });
+      if (
+        url.pathname.startsWith("/terminal/") ||
+        url.pathname.startsWith("/api/v1/agent-login/sessions/")
+      )
+        frames.push({ url: socket.url(), data });
       else if (data.includes('"shell.input"')) shellRequests.push(data);
     });
   });
@@ -283,4 +288,63 @@ test("phone input resumes on a replacement socket after connection loss", async 
   await keybar.ctrlD.tap();
   await expect.poll(() => capture.frames.filter((frame) => frame.data === "\x04").length).toBe(1);
   expect(capture.shellRequests).toHaveLength(0);
+});
+
+// @covers AC-CLI-MOBILE-PASSTHROUGH-NAV-001.3, AC-CLI-MOBILE-PASSTHROUGH-NAV-001.6
+test("Quick Terminal keeps Ctrl when the background agent reconnects", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  let clientSocket: WebSocketRoute | null = null;
+  let connections = 0;
+  await testPage.routeWebSocket(/\/terminal\/session\/.*mode=agent/, (socket) => {
+    clientSocket = socket;
+    const server = socket.connectToServer();
+    socket.onClose(() => server.close());
+    connections += 1;
+  });
+  const capture = observeInput(testPage);
+  const { keybar } = await openPassthrough(
+    testPage,
+    apiClient,
+    seedData,
+    "Quick Terminal modifier ownership",
+  );
+  await expect(keybar.root).toBeVisible();
+  await testPage.getByTestId("app-nav-trigger").tap();
+  await testPage.getByTestId("mobile-quick-terminal-button").tap();
+  const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+  const tabs = dialog.getByTestId("quick-terminal-tab");
+  try {
+    const terminal = dialog.getByTestId("quick-terminal-terminal");
+    await expect
+      .poll(() =>
+        terminal.evaluate(
+          (element) =>
+            (element as HTMLElement & { __xtermReadBuffer?: () => string }).__xtermReadBuffer?.() ??
+            "",
+        ),
+      )
+      .not.toBe("");
+    const ctrl = dialog.getByTestId("keybar-key-ctrl");
+    await ctrl.tap();
+    await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+    const baseline = connections;
+    await clientSocket!.close({ code: 1011, reason: "background connection loss" });
+    await expect.poll(() => connections).toBeGreaterThan(baseline);
+    await expect(ctrl).toHaveAttribute("aria-pressed", "true");
+    capture.frames.length = 0;
+    await testPage.keyboard.press("a");
+    await expect.poll(() => capture.frames.filter((frame) => frame.data === "\x01").length).toBe(1);
+    const frame = capture.frames.find((item) => item.data === "\x01")!;
+    expect(new URL(frame.url).pathname).toMatch(
+      /^\/api\/v1\/agent-login\/sessions\/[^/]+\/stream$/,
+    );
+    await expect(ctrl).toHaveAttribute("aria-pressed", "false");
+  } finally {
+    if (await tabs.count()) await closeQuickTerminalTab(testPage, tabs.last());
+  }
+  await expect(dialog).toBeHidden();
+  await expect(keybar.ctrl).toHaveAttribute("aria-pressed", "false");
 });

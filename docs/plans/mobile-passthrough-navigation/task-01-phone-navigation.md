@@ -139,7 +139,23 @@ changes and passed with the implementation.
 Connected, simulated-keyboard, and composer phone captures were inspected.
 Physical iPhone Safari and Android Chrome keyboard testing was unavailable.
 The initial checkpoint did not publish changes. The user subsequently authorized
-a branch push and isolated test instance. No PR or GitHub message was requested.
+a branch push and isolated test instance, followed by PR #4625 and review fixup.
 
 See [recovery evidence](recovery.md) for source task/session IDs, approval evidence,
 artifact paths, test logs, and the limits of the restored source snapshots.
+
+### PR review fixup
+
+The phone agent releases shared modifiers while Quick Chat is open. Its input
+callback reads only committed control visibility, including during suspended
+React transitions. Unit regressions failed before each fix and passed afterward
+(120 tests across the seven-file command above). The new browser regression
+failed before the overlay ownership fix and verifies Ctrl on the host PTY after
+a background agent reconnect.
+
+The complete mobile command passed all 28 tests with retries disabled.
+Typecheck, changed-file ESLint, formatting, specification catalog/lint, and diff
+whitespace checks passed. The desktop path is unchanged by these fixes; its
+12-test result above remains the prior verification baseline.
+
+Final remote CI and review state will be verified after pushing.

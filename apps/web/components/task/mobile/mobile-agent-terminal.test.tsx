@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
+import { startTransition, Suspense, useState } from "react";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { AgentTerminalInput } from "./mobile-agent-terminal";
 
@@ -13,7 +14,15 @@ type TerminalProps = {
   onXtermReady: (terminal: Terminal) => void;
   onWsReady: (socket: WebSocket) => void;
 };
-const source = vi.hoisted(() => ({ props: null as TerminalProps | null, fallbackSend: vi.fn() }));
+const source = vi.hoisted(() => ({
+  props: null as TerminalProps | null,
+  fallbackSend: vi.fn(),
+  quickChat: { isOpen: false },
+}));
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { quickChat: { isOpen: boolean } }) => unknown) =>
+    selector({ quickChat: source.quickChat }),
+}));
 vi.mock("../passthrough-terminal", () => ({
   PassthroughTerminal: (props: TerminalProps) => {
     source.props = props;
@@ -68,6 +77,7 @@ function connectedTerminal(showControls = true) {
 }
 
 beforeEach(() => {
+  source.quickChat.isOpen = false;
   source.fallbackSend.mockClear();
   vi.stubGlobal("WebSocket", { OPEN: 1, CLOSED: 3 });
   useShellModifiersStore.getState().reset();
@@ -122,6 +132,37 @@ describe("phone passthrough input ownership", () => {
       "\x1b[Z",
     ]);
     expect(view.focus).toHaveBeenCalledTimes(10);
+  });
+
+  it("keeps committed input ownership when a transition suspends", () => {
+    let hideControls: () => void = () => {};
+    const pending = new Promise<void>(() => {});
+    function PendingPanel({ open }: { open: boolean }) {
+      if (open) throw pending;
+      return null;
+    }
+    function Surface() {
+      const [open, setOpen] = useState(false);
+      hideControls = () => startTransition(() => setOpen(true));
+      return (
+        <Suspense fallback={null}>
+          <AgentTerminalInput mobile touch sessionId={AGENT_SESSION_ID} showControls={!open} />
+          <PendingPanel open={open} />
+        </Suspense>
+      );
+    }
+    render(<Surface />);
+    const terminal = terminalSource();
+    const socket = socketSource();
+    act(() => {
+      source.props!.onXtermReady(terminal.terminal);
+      source.props!.onWsReady(socket.socket);
+    });
+    fireEvent.click(screen.getByTestId(CTRL_TEST_ID));
+    act(hideControls);
+    expect(screen.getByTestId(CTRL_TEST_ID).getAttribute("aria-pressed")).toBe("true");
+    terminal.emit("c");
+    expect(socket.bytes()).toEqual(["\x03"]);
   });
 });
 
@@ -220,5 +261,27 @@ describe("phone passthrough lifecycle", () => {
     expect(view.listeners.size).toBe(0);
     expect(view.bytes()).toEqual([]);
     expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
+  });
+
+  it("preserves Quick Terminal modifiers across background reconnect and unmount", () => {
+    const view = connectedTerminal();
+    fireEvent.click(screen.getByTestId(CTRL_TEST_ID));
+    source.quickChat.isOpen = true;
+    view.rerender(<AgentTerminalInput mobile touch sessionId={AGENT_SESSION_ID} />);
+    // Quick Terminal acquires the shared controls after its overlay opens.
+    act(() => {
+      useShellModifiersStore.getState().reset();
+      useShellModifiersStore.getState().toggleCtrl();
+    });
+    view.close();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+    const replacement = socketSource();
+    act(() => source.props!.onWsReady(replacement.socket));
+    view.emit("c");
+    expect(replacement.bytes()).toEqual(["c"]);
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+    expect(screen.queryByTestId(KEYBAR_TEST_ID)).toBeNull();
+    view.unmount();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
   });
 });

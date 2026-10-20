@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
+import { useAppStore } from "@/components/state-provider";
 import { sendPtyInput } from "@/lib/terminal/send-pty-input";
 import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 import { MobileTerminalKeybar } from "./mobile-terminal-keybar";
@@ -10,14 +11,22 @@ import { PassthroughTerminal } from "../passthrough-terminal";
 type Props = { sessionId: string | null | undefined; showControls: boolean; touch: boolean };
 
 function MobileAgentTerminal({ sessionId, showControls, touch }: Props) {
+  const quickChatOpen = useAppStore((state) => state.quickChat.isOpen);
   const [terminal, setTerminal] = useState<Terminal | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const controlsActive = Boolean(
-    showControls && sessionId && terminal && socket && socket.readyState === WebSocket.OPEN,
+    showControls &&
+    !quickChatOpen &&
+    sessionId &&
+    terminal &&
+    socket &&
+    socket.readyState === WebSocket.OPEN,
   );
   const controlsActiveRef = useRef(controlsActive);
-  controlsActiveRef.current = controlsActive;
+  useLayoutEffect(() => {
+    controlsActiveRef.current = controlsActive;
+  }, [controlsActive]);
 
   const onSocketReady = useCallback((next: WebSocket) => {
     socketRef.current = next;
