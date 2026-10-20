@@ -86,3 +86,17 @@ KANDEV_SERVER_HOST=127.0.0.1 pnpm --dir apps/web e2e:run --host --no-build --pro
 The final capture run repeats the recovery scenario on both viewports with
 `CAPTURE_PR_ASSETS=1`. Screenshots show the error summary in chat, one set of
 current recovery actions, and no horizontal overflow.
+
+### Review follow-up
+
+Removed the unused `activeOwner` return field from `resolveRecoveryHistoryState`.
+The helper now returns `true | null`; its ownership and history selection rules
+are unchanged. The existing cleanup-history assertion failed before the change,
+then all 75 tests across cleanup history, action messages, and the recovery card
+passed. This internal return-shape cleanup does not change rendered UI or public
+behavior, so the existing screenshots and public guidance remain accurate.
+
+```bash
+pnpm --dir apps/web exec vitest run components/task/chat/messages/action-message-cleanup-history.test.ts components/task/chat/messages/action-message.test.tsx components/task/chat/session-recovery-card.test.tsx
+NODE_OPTIONS=--max-old-space-size=8192 pnpm --dir apps/web run typecheck
+```

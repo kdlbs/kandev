@@ -36,7 +36,7 @@ export function resolveRecoveryHistoryState(
   metadata: ActionMeta | undefined,
   ownerMessageId: string | undefined,
   sessionMetadata: Record<string, unknown> | null | undefined,
-): { activeOwner: boolean } | null {
+): true | null {
   if (!metadata?.recovery_actions) return null;
   const currentError = readLastAgentError(sessionMetadata);
   const messageStamp = metadata.recovery_stamp ?? metadata.error_stamp;
@@ -52,7 +52,7 @@ export function resolveRecoveryHistoryState(
     isHistorical ||
     cleanupFailure
   ) {
-    return { activeOwner };
+    return true;
   }
   return null;
 }
