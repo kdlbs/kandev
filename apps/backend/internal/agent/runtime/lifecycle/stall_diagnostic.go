@@ -7,6 +7,7 @@ import (
 
 // stallDiagnostic contains only bounded identifiers, enums, and scalar evidence.
 // Provider text and execution metadata are not diagnostic sources.
+// OutputObserved and EffectObserved share conservative turn-content evidence.
 type stallDiagnostic struct {
 	TaskID             string `json:"task_id,omitempty"`
 	SessionID          string `json:"session_id,omitempty"`

@@ -153,6 +153,8 @@ adapter and CLI versions when already known; current delivery state; received
 and projected sequences when cached; the latest normalized retry/transport
 category only if already observed. Unknown fields stay absent or explicitly
 unknown. Do not infer bundled Codex version from the host CLI version.
+Output and effect booleans share conservative turn-content evidence, as in
+`PromptAttemptEvidence`; they do not independently prove persisted effects.
 
 Use fixed enums, typed numbers, and strings capped at 128 UTF-8 bytes, with a
 4 KiB total encoded record limit. Omit malformed UTF-8 input. Truncate valid

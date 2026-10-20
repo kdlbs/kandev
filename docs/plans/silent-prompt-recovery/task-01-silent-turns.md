@@ -164,6 +164,10 @@ Implemented and verified.
 - Browser commands use a temporary environment wrapper to remove inherited
   internal config-file settings and provide installed Nix Chromium libraries.
 - Public quiet-turn recovery instructions are updated.
+- Review follow-up documents the shared output/effect evidence and snapshot
+  lock order. `go test -race ./internal/agent/runtime/lifecycle
+  -run TestStallDiagnosticBoundsAndExcludesPrivatePayloads -count=1` passes,
+  including the explicit effect-evidence assertion.
 
 Design review correction: the verification filter includes
 `TestWaitForPromptDone_AcceptedSilentPromptIsAdvisory`. A direct regex check

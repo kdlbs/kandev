@@ -11,6 +11,7 @@ type promptStallSnapshot struct {
 }
 
 func (sm *SessionManager) capturePromptStall(execution *AgentExecution, generation uint64) (promptStallSnapshot, bool) {
+	// Lock order: promptLifecycleMu, then executionStore.mu; never the reverse.
 	execution.promptLifecycleMu.Lock()
 	defer execution.promptLifecycleMu.Unlock()
 	if sm.executionStore != nil {

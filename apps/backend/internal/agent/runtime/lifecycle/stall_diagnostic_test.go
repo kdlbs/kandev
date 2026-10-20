@@ -56,8 +56,9 @@ func TestStallDiagnosticBoundsAndExcludesPrivatePayloads(t *testing.T) {
 		if err := json.Unmarshal(record["stall"], &snapshot); err != nil {
 			t.Fatalf("missing bounded stall snapshot: %v", err)
 		}
-		if snapshot["prompt_accepted"] != true || snapshot["output_observed"] != false {
-			t.Fatalf("incorrect acceptance/output snapshot: %#v", snapshot)
+		if snapshot["prompt_accepted"] != true || snapshot["output_observed"] != false ||
+			snapshot["effect_observed"] != false {
+			t.Fatalf("incorrect acceptance/output/effect snapshot: %#v", snapshot)
 		}
 		id, _ := snapshot["execution_id"].(string)
 		if id != strings.Repeat("x", 127) || !utf8.ValidString(id) || len(id) > 128 {
