@@ -80,6 +80,7 @@ projection barrier instead of a real 10-second sleep.
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
+python3 scripts/lint-spec-files.test.py
 git diff --check
 ```
 
