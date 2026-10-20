@@ -68,7 +68,7 @@ func pendingDeletionCheckpointLock(t *testing.T, path string) func() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle, err := windows.CreateFile(nativePath, windows.GENERIC_READ|windows.GENERIC_WRITE,
+	handle, err := windows.CreateFile(nativePath, windows.GENERIC_READ|windows.GENERIC_WRITE|windows.DELETE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil,
 		windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
@@ -81,7 +81,9 @@ func pendingDeletionCheckpointLock(t *testing.T, path string) func() {
 		}
 	}
 	t.Cleanup(closeHandle)
-	if err := windows.DeleteFile(nativePath); err != nil {
+	// Keep deletion pending on this handle until the test explicitly closes it.
+	deletePending := byte(1)
+	if err := windows.SetFileInformationByHandle(handle, windows.FileDispositionInfo, &deletePending, 1); err != nil {
 		t.Fatal(err)
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
