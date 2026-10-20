@@ -25,6 +25,9 @@ export type WorkspaceState = {
     default_config_agent_profile_id?: string | null;
     acp_idle_suspension_enabled?: boolean;
     acp_idle_timeout_minutes?: number;
+    /** Opt-in release of WIP slots held by tasks with no live session. */
+    wip_sessionless_release_enabled?: boolean;
+    wip_sessionless_release_grace_minutes?: number;
     office_workflow_id?: string | null;
     created_at: string;
     updated_at: string;

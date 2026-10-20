@@ -291,6 +291,9 @@ export type WorkspacePayload = {
    */
   acp_idle_suspension_enabled?: boolean;
   acp_idle_timeout_minutes?: number;
+  /** Sessionless WIP release policy; absent from older backends like the idle policy. */
+  wip_sessionless_release_enabled?: boolean;
+  wip_sessionless_release_grace_minutes?: number;
   created_at?: string;
   updated_at?: string;
 };

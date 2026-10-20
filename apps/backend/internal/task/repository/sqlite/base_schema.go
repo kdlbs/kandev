@@ -614,6 +614,8 @@ const infraSchemaDDL = `
 		default_config_agent_profile_id TEXT DEFAULT '',
 		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
 		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
+		wip_sessionless_release_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		wip_sessionless_release_grace_minutes INTEGER NOT NULL DEFAULT 10 CHECK (wip_sessionless_release_grace_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);

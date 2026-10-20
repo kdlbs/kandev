@@ -511,6 +511,9 @@ func (r *Repository) countAdmittedInTx(ctx context.Context, tx *sql.Tx, stepID, 
 		query += " AND id != ?"
 		args = append(args, excludeTaskID)
 	}
+	releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, tx, stepID)
+	query += releaseFilter
+	args = append(args, releaseArgs...)
 	var count int
 	err := tx.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&count)
 	return count, err
@@ -523,14 +526,15 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 	if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
 		return err
 	}
+	releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, tx, targetStepID)
 	var occupants int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COUNT(*) FROM tasks
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), targetStepID).Scan(&occupants); err != nil {
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+releaseFilter+`
+	`), append([]interface{}{targetStepID}, releaseArgs...)...).Scan(&occupants); err != nil {
 		return err
 	}
 	if occupants >= limit {
@@ -3435,6 +3439,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 
+	releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, tx, targetStepID)
 	var occupants int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COUNT(*) FROM tasks
@@ -3442,8 +3447,8 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		  AND wip_admitted = 1
 		  AND id != ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), targetStepID, excludeTaskID).Scan(&occupants); err != nil {
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+releaseFilter+`
+	`), append([]interface{}{targetStepID, excludeTaskID}, releaseArgs...)...).Scan(&occupants); err != nil {
 		return err
 	}
 	if occupants >= limit {
@@ -3563,6 +3568,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		return false, err
 	}
 	if limit > 0 {
+		releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, tx, destinationStepID)
 		var occupants int
 		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 			SELECT COUNT(*) FROM tasks
@@ -3570,8 +3576,8 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			  AND wip_admitted = 1
 			  AND id != ?
 			  AND archived_at IS NULL
-			  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-		`), destinationStepID, task.ID).Scan(&occupants); err != nil {
+			  AND is_ephemeral = 0`+andNotAutomationOrigin+releaseFilter+`
+		`), append([]interface{}{destinationStepID, task.ID}, releaseArgs...)...).Scan(&occupants); err != nil {
 			return false, err
 		}
 		if occupants >= limit {
@@ -3907,6 +3913,7 @@ func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string
 // CountTasksByWorkflowStepExcludingTask returns active, admitted WIP occupants
 // in a workflow step, excluding the task currently being moved.
 func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error) {
+	releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, r.ro, stepID)
 	var count int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks
@@ -3914,8 +3921,8 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 		  AND id != ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), stepID, excludeTaskID).Scan(&count)
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+releaseFilter+`
+	`), append([]interface{}{stepID, excludeTaskID}, releaseArgs...)...).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -3925,14 +3932,15 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 // CountAdmittedTasksByWorkflowStep returns the active WIP occupants of a
 // workflow step, excluding visible queued overflow cards.
 func (r *Repository) CountAdmittedTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
+	releaseFilter, releaseArgs := r.admittedOccupancyFilter(ctx, r.ro, stepID)
 	var count int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
-	`), stepID).Scan(&count)
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+releaseFilter+`
+	`), append([]interface{}{stepID}, releaseArgs...)...).Scan(&count)
 	return count, err
 }
 
