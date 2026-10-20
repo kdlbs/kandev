@@ -114,7 +114,8 @@ was received before its canonical projection. Recovery proof could also capture
 a cursor behind the peer's journal high-water mark. Retain the admission fence
 and wait for complete projection before returning proof. Revalidate advancing
 stream evidence under the same owner; reject changed ownership and honor caller
-cancellation. The wait is bounded to five seconds and issues evidence reads
+cancellation. The shared wait is bounded to 10 seconds, polls every 200 ms after
+verified lag, and issues evidence reads
 only, without repeating Resume or sending an old prompt.
 
 The new lifecycle tests reproduced both incomplete snapshots before the change.
@@ -136,3 +137,22 @@ now requires a monotonic sequence-counter advance. Byte usage can decrease durin
 valid pruning, so byte monotonicity is not required. The existing pruning case
 now covers that decrease. Focused proof race tests, changed-package Go lint
 (zero issues), catalog validation, and specification lint passed.
+
+Main introduced the shared projection-wait owner in PR #4623. Conflict resolution
+uses that owner, deadline, and polling cadence. It retains the journal high-water
+check and requires sequence progress rather than byte changes for a retry.
+The acknowledgement regression now starts with verified projection lag, as the
+shared wait requires. The scrolling regression uses main's observer collection
+and keeps the reader-position and disabled-follow shrink cases.
+
+The ported proof-status test rejected unchanged status and byte-only changes
+after the sequence guard was restored. Native proof/projection race tests,
+196 focused frontend tests, TypeScript, changed-package Go lint (zero issues),
+changed-file ESLint, catalog validation, and full specification lint passed.
+Managed Playwright runs passed four desktop and four phone cases with retries
+disabled, covering projection success/timeout, delayed scrolling, and retained
+failure details.
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -C apps/backend -trimpath -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResume(Proof|Projection)' -count=1
+```

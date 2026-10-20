@@ -390,6 +390,9 @@ Passed checks:
 - SSH executor content retention after remote checkout removal: 1 passed.
 - Local capture/export benchmark: six cases completed with ten observations each; see [performance results](performance-results.md).
 - Documentation, public-doc, and specification validation passed during implementation.
+- PR #4623 follow-up: Windows checkpoint lock acquisition tolerates pending
+  deletion within its existing deadline. Local concurrency/cancellation race
+  stress passed 20 repetitions; native Windows CI is pending. See work order 03.
 
 Qualification gaps remain open. Kind-backed Kubernetes, Sprites, and plugin executors have no feature-specific passing E2E evidence. The Kubernetes E2E seed currently creates no Git repository, so its Git capture path needs a repository-capable fixture. The local benchmark excludes executor transport, SQL writes, compression and retention growth, cold/slow storage, size-limit failures, and Stop/Cancel bounds. PostgreSQL-specific tests were not run because `KANDEV_TEST_POSTGRES_DSN` is unset. These are acceptance gaps, not claims of support or performance.
 

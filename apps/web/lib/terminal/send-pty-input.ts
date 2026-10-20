@@ -1,7 +1,7 @@
 import { applyShellModifiers } from "@/lib/terminal/apply-shell-modifiers";
 import { isActive, useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 
-/** Host PTYs own their socket; they never use the task shell-input fallback. */
+/** Direct PTY inputs own their socket; they never use the task shell-input fallback. */
 export function sendPtyInput(
   socket: Pick<WebSocket, "readyState" | "send"> | null,
   data: string,

@@ -41,7 +41,7 @@ export function createGitEnrichmentGate(tmpDir: string) {
 
   return {
     arm() {
-      for (const file of [startedFile, releaseFile]) {
+      for (const file of [`${delayFile}.command`, startedFile, releaseFile]) {
         if (fs.existsSync(file)) fs.unlinkSync(file);
       }
       fs.writeFileSync(
@@ -53,6 +53,7 @@ export function createGitEnrichmentGate(tmpDir: string) {
           releaseFile,
         }),
       );
+      fs.writeFileSync(`${delayFile}.command`, "diff\n");
     },
     async waitUntilStarted() {
       await expect
@@ -67,7 +68,7 @@ export function createGitEnrichmentGate(tmpDir: string) {
     },
     dispose() {
       fs.writeFileSync(releaseFile, "release");
-      for (const file of [delayFile, startedFile, releaseFile]) {
+      for (const file of [`${delayFile}.command`, delayFile, startedFile, releaseFile]) {
         if (fs.existsSync(file)) fs.unlinkSync(file);
       }
     },

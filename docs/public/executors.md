@@ -618,6 +618,8 @@ The runtime preflights the selected agent command and reports an installation hi
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
 
+If a settled session’s remote controller dies while its SSH connection still answers, idle reclaim can release its runtime reservation after confirming the recorded process is absent. An unreachable SSH connection or inconclusive process check leaves the reservation unchanged; idle reclaim does not reconnect to establish absence.
+
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
 Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
 An unavailable connection stays pending for retry; recovery does not start a replacement controller.

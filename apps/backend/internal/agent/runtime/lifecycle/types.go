@@ -736,6 +736,19 @@ func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Unlock()
 }
 
+// armAcceptedPromptActivity starts the silence interval at acceptance only when
+// the current generation has not already produced output.
+func (e *AgentExecution) armAcceptedPromptActivity() {
+	e.lastActivityAtMu.Lock()
+	defer e.lastActivityAtMu.Unlock()
+	if e.agentEventSincePrompt {
+		return
+	}
+	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
+	e.promptActivityEpoch++
+}
+
 // markRecoveredAgentActivity records output and advances the activity epoch
 // using the retained observation time, never the time of replay.
 func (e *AgentExecution) markRecoveredAgentActivity(at *time.Time) {

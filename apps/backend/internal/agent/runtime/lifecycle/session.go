@@ -1441,7 +1441,8 @@ func (sm *SessionManager) waitForPromptDone(
 	execution *AgentExecution,
 	promptGeneration uint64,
 ) (*PromptResult, error) {
-	stallTicker := time.NewTicker(time.Minute)
+	stallInterval, stallThreshold := promptStallTiming()
+	stallTicker := time.NewTicker(stallInterval)
 	defer stallTicker.Stop()
 	stallReported := false
 	startupGeneration := execution.startupAttemptSnapshot()
@@ -1519,16 +1520,18 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			lastActivity, agentEventSeen, activityEpoch := execution.promptActivitySnapshot()
+			snapshot, owned := sm.capturePromptStall(execution, promptGeneration)
+			if !owned {
+				continue
+			}
+			lastActivity, agentEventSeen, activityEpoch := snapshot.lastActivity, snapshot.outputObserved, snapshot.activityEpoch
 			elapsed := time.Since(lastActivity)
 			neverStarted := !agentEventSeen
 
-			if elapsed >= 5*time.Minute && !stallReported {
+			if elapsed >= stallThreshold && !stallReported {
+				snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
 				sm.logger.Warn("agent stall detected: no events received",
-					zap.String("execution_id", execution.ID),
-					zap.Duration("elapsed_since_last_event", elapsed),
-					zap.Time("last_activity", lastActivity),
-					zap.Bool("never_started", neverStarted))
+					zap.Any("stall", snapshot.diagnostic))
 				if sm.eventPublisher != nil {
 					sm.eventPublisher.PublishAgentStalled(
 						ctx,
@@ -1538,6 +1541,7 @@ func (sm *SessionManager) waitForPromptDone(
 						elapsed,
 						activityEpoch,
 						neverStarted,
+						snapshot.accepted,
 					)
 				}
 				stallReported = true
@@ -1717,10 +1721,12 @@ func (sm *SessionManager) markPromptDispatched(execution *AgentExecution, genera
 		sm.executionStore.MarkPromptDispatched(execution.ID, generation)
 		return
 	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
 	if generation != 0 && execution.promptGeneration == generation &&
-		execution.promptCompletionGeneration != generation {
+		execution.promptCompletionGeneration != generation && execution.dispatchedPromptGeneration != generation {
 		execution.dispatchedPromptGeneration = generation
-		execution.armPromptActivity()
+		execution.armAcceptedPromptActivity()
 	}
 }
 

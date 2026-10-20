@@ -146,9 +146,10 @@ matching recovery fences. Any independent active record or projection gap
 refuses resolution. The same proof permits normal loaded-session reconciliation
 and explicit Resume; neither path dispatches an old prompt.
 
-Native recovery proof waits up to five seconds for the captured journal
-high-water mark to reach canonical projection. It rereads proof when projection
-or acknowledgments advance under the same authenticated owner. A byte-count
+Native recovery proof uses the shared 10-second wait with 200 ms polling for the
+captured journal high-water mark to reach canonical projection. It rereads proof
+when projection or acknowledgments advance under the same authenticated owner
+after verified lag. A byte-count
 change alone is not stream progress. Pruning can decrease bytes while retained
 sequence counters advance. Cancellation,
 owner changes, inventory changes, and unresolved work retain the admission

@@ -110,9 +110,8 @@ func TestNativeResumeProofDoesNotRetryChangedOwner(t *testing.T) {
 }
 
 func TestNativeResumeProofRevalidatesAdvancingAcknowledgment(t *testing.T) {
-	repository := &nativeProjectionRepository{adoptionDeliveryRepository: durableAdoptionRepository(), advanceAck: true}
+	repository := &nativeProjectionRepository{adoptionDeliveryRepository: durableAdoptionRepository(), advance: true, advanceAck: true}
 	repository.cursor.ReceivedSequence = 5
-	repository.cursor.ProjectedSequence = 5
 	manager := nativeProjectionManager(t, repository)
 	proof, err := manager.GetNativeResumeDeliveryEvidence(context.Background(), "session-1")
 	require.NoError(t, err)

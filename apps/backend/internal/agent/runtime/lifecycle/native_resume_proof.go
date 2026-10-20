@@ -5,13 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-var errNativeResumeProjectionPending = fmt.Errorf("%w: native resume projection is incomplete", ErrDurableAdoptionBlocked)
 
 // GetNativeResumeDeliveryEvidence revalidates retirement before SQL clears an
 // admission fence. The snapshot cannot authorize dispatch or alter old outcomes.
@@ -20,25 +17,17 @@ func (m *Manager) GetNativeResumeDeliveryEvidence(ctx context.Context, sessionID
 	if !exists || execution == nil {
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	for {
-		proof, err := m.nativeResumeDeliveryEvidence(ctx, execution)
-		if !errors.Is(err, errNativeResumeProjectionPending) {
-			return proof, err
-		}
-		if err := waitForReconciliation(ctx, 25*time.Millisecond); err != nil {
-			return nil, fmt.Errorf("%w: %w", errNativeResumeProjectionPending, err)
-		}
-	}
-}
-
-func (m *Manager) nativeResumeDeliveryEvidence(ctx context.Context, execution *AgentExecution) (*models.NativeResumeDeliveryEvidence, error) {
 	client, release := execution.AcquireAgentCtlClient()
-	defer release()
 	if client == nil {
+		release()
 		return nil, ErrDurableAdoptionEvidenceUnavailable
 	}
+	owner := captureNativeResumeProofOwner(execution, client)
+	release()
+	return m.waitForNativeResumeProjection(ctx, owner)
+}
+
+func (m *Manager) nativeResumeDeliveryProof(ctx context.Context, execution *AgentExecution, client *agentctl.Client) (*models.NativeResumeDeliveryEvidence, error) {
 	status, err := m.nativeResumeDeliveryStatus(ctx, execution, client)
 	if err != nil || status == nil {
 		return nil, err
@@ -74,8 +63,8 @@ func (m *Manager) nativeResumeDeliveryEvidence(ctx context.Context, execution *A
 		return nil, err
 	}
 	if !sameNativeResumeProofStatus(status, after) {
-		if nativeResumeStreamProgressed(status, after) {
-			return nil, errNativeResumeProjectionPending
+		if nativeResumeStreamAdvanced(status, after) {
+			return nil, errNativeResumeStreamProgress
 		}
 		return nil, ErrDeliveryRecordEvidenceStale
 	}
@@ -124,29 +113,9 @@ func nativeResumeProofCursor(ctx context.Context, repository AgentDeliveryReposi
 	}
 	if cursor.ReceivedSequence != cursor.ProjectedSequence ||
 		(status.Stream != nil && uint64(cursor.ProjectedSequence) < status.Stream.HighWater) {
-		return nil, errNativeResumeProjectionPending
+		return nil, errNativeResumeProjectionLag
 	}
 	return cursor, nil
-}
-
-func nativeResumeStreamProgressed(before, after *agentctl.DeliveryStatus) bool {
-	if after == nil || before.Stream == nil || after.Stream == nil ||
-		!sameDeliveryRecordDescriptor(*before, *after) || before.StreamID != after.StreamID ||
-		before.Unresolved != after.Unresolved {
-		return false
-	}
-	previous, current := *before.Stream, *after.Stream
-	if current.HighWater < previous.HighWater || current.Acknowledged < previous.Acknowledged || current.FirstRetained < previous.FirstRetained {
-		return false
-	}
-	sequenceProgressed := current.HighWater > previous.HighWater ||
-		current.Acknowledged > previous.Acknowledged || current.FirstRetained > previous.FirstRetained
-	current.HighWater = previous.HighWater
-	current.Acknowledged = previous.Acknowledged
-	current.FirstRetained = previous.FirstRetained
-	// Byte usage can decrease during pruning, but it cannot prove sequence progress.
-	current.Bytes = previous.Bytes
-	return current == previous && sequenceProgressed
 }
 
 func sameNativeResumeProofStatus(before, after *agentctl.DeliveryStatus) bool {

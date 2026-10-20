@@ -15,7 +15,10 @@ import {
   type CommandPanelScopeMode,
 } from "@/components/command-panel-scope-switcher";
 
-import type { Task } from "@/lib/types/http";
+import type {
+  ConversationSearchState,
+  ConversationTask as Task,
+} from "@/lib/types/conversation-search";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
@@ -66,6 +69,7 @@ function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPan
   const [search, setSearch] = useState("");
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
+  const [conversationState, setConversationState] = useState<ConversationSearchState>("ready");
   const [isSearching, setIsSearching] = useState(false);
   const [fileResults, setFileResults] = useState<FileSearchResult[]>([]);
   const [isSearchingFiles, setIsSearchingFiles] = useState(false);
@@ -79,6 +83,8 @@ function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPan
     setInputCommand,
     taskResults,
     setTaskResults,
+    conversationState,
+    setConversationState,
     isSearching,
     setIsSearching,
     fileResults,
@@ -228,6 +234,7 @@ function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
   }, [open, setMode, setSearch, setInputCommand, setTaskResults, setFileResults, setSelectedValue]);
 
   useInlineTaskSearchEffect({
+    setConversationState: state.setConversationState,
     mode,
     search,
     open,
@@ -606,6 +613,7 @@ export function CommandPanel() {
         handlers.handleSelect(command);
       }}
       isSearching={mode === MODE_COMMAND_CHILDREN ? false : isSearching}
+      conversationState={state.conversationState}
       taskResults={mode === MODE_COMMAND_CHILDREN ? [] : taskResults}
       stepMap={handlers.stepMap}
       repoMap={handlers.repoMap}

@@ -8,7 +8,7 @@ import (
 )
 
 func TestNativeResumeProofRejectsConcurrentStreamProgress(t *testing.T) {
-	before := &agentctl.DeliveryStatus{StreamID: "stream", Stream: &journal.Stream{StreamID: "stream", HighWater: 5, Acknowledged: 5, FirstRetained: 6, Bytes: 100}}
+	before := &agentctl.DeliveryStatus{StreamID: "stream", Stream: &journal.Stream{StreamID: "stream", HighWater: 5, Acknowledged: 4, FirstRetained: 3, Bytes: 100}}
 	for _, condition := range []string{"unchanged", "late terminal", "acknowledged", "pruned", "bytes increased", "bytes decreased", "unresolved", "owner", "stream owner", "sealed", "missing stream"} {
 		t.Run(condition, func(t *testing.T) {
 			after := *before
@@ -39,7 +39,7 @@ func TestNativeResumeProofRejectsConcurrentStreamProgress(t *testing.T) {
 			}
 			require.Equal(t, condition == "unchanged", sameNativeResumeProofStatus(before, &after))
 			retryable := condition == "late terminal" || condition == "acknowledged" || condition == "pruned"
-			require.Equal(t, retryable, nativeResumeStreamProgressed(before, &after))
+			require.Equal(t, retryable, nativeResumeStreamAdvanced(before, &after))
 		})
 	}
 }
