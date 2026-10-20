@@ -2086,8 +2086,9 @@ const agentStartupLivenessGrace = 75 * time.Second
 //   - Passthrough process ID is set but process is not alive
 //   - Agent is in any other state (stopped, failed, etc.)
 //
-// An unavailable agentctl client, interactive runner, or status endpoint is
-// returned as an error rather than as a false result.
+// An unavailable agentctl client or interactive runner is returned as an error.
+// Status failures remain errors unless the owning runtime confirms that its
+// agentctl process is absent.
 func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
@@ -2125,6 +2126,9 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 
 	status, err := client.GetStatus(ctx)
 	if err != nil {
+		if m.confirmAgentctlAbsent(ctx, execution) {
+			return false, nil
+		}
 		m.logger.Debug("failed to get agentctl status",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
