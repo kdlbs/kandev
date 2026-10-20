@@ -58,5 +58,6 @@ Public documentation impact: none. This restores an existing internal metadata
 write under the documented PostgreSQL support contract; no commands or operator
 configuration change. Reviewed the public backend-development and testing guides.
 
-Implementation and task-defined verification are complete. The candidate remains
-uncommitted pending controller validation and explicit delivery authorization.
+Implementation and task-defined verification are complete. Controller validation
+approved the candidate and authorized protected PR delivery. Current CI/review
+and merge evidence remains externally pending until confirmed.
