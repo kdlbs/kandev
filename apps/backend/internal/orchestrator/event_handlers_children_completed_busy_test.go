@@ -122,6 +122,31 @@ func TestAutoStartAgentCallback_QueuesBusyRejectionWhenTurnStarted(t *testing.T)
 	require.Contains(t, entries[0].Content, busyParentStepPrompt)
 }
 
+// TestAutoStartAgentCallback_KeepsHandoffClaimedByRefusedLaunch covers a
+// launch that claims the step handoff and is then refused as busy: the queued
+// prompt that replaces it still carries that handoff.
+func TestAutoStartAgentCallback_KeepsHandoffClaimedByRefusedLaunch(t *testing.T) {
+	ctx := context.Background()
+	const handoff = "notes from the previous step"
+	repo, svc, _ := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+	seedHandoffCarryToken(t, repo, busyParentID, "step_coordinate", handoff, "stamp-busy-retry")
+
+	cb := &autoStartAgentCallback{svc: svc, launch: func(launchCtx context.Context, in engine.ActionInput) error {
+		require.Equal(t, handoff, svc.claimStepHandoffTextForLaunch(launchCtx, in.State.TaskID, in.Step.ID))
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateRunning, ""))
+		return fmt.Errorf("failed to prompt session: %w", ErrAgentPromptInProgress)
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.NoError(t, err)
+
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, busyParentSessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, handoff, stepHandoffFromQueuedMetadata(entries[0].Metadata),
+		"the handoff claimed by the refused launch must ride on the queued prompt")
+}
+
 // TestAutoStartAgentCallback_ReturnsNonBusyLaunchError keeps a launch failure
 // that may follow prompt acceptance from being retried or queued.
 func TestAutoStartAgentCallback_ReturnsNonBusyLaunchError(t *testing.T) {

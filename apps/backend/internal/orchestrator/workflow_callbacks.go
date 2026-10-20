@@ -295,10 +295,13 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 	}
 
 	// A launch refused as busy never reached the agent, so the prompt is still
-	// owed: queue it if the session is mid-turn, otherwise launch again.
+	// owed: queue it if the session is mid-turn, otherwise launch again. Every
+	// attempt shares one handoff claim so a refused attempt cannot consume it.
+	handoffOnce := newStepHandoffOnce()
+	ctx = withStepHandoffOnce(ctx, in.State.TaskID, in.Step.ID, handoffOnce)
 	var err error
 	for attempt := 0; attempt < maxBusyAutoStartAttempts; attempt++ {
-		queued, queueErr := c.queueStepPromptIfBusy(ctx, in)
+		queued, queueErr := c.queueStepPromptIfBusy(ctx, in, handoffOnce)
 		if queueErr != nil {
 			return engine.ActionResult{}, queueErr
 		}
@@ -333,7 +336,9 @@ func (c *autoStartAgentCallback) launchStep(ctx context.Context, in engine.Actio
 // is mid-turn, so the message queue delivers it once the current turn ends.
 // It reports false, without side effects, when the session can take a prompt
 // now and the caller should launch directly.
-func (c *autoStartAgentCallback) queueStepPromptIfBusy(ctx context.Context, in engine.ActionInput) (bool, error) {
+func (c *autoStartAgentCallback) queueStepPromptIfBusy(
+	ctx context.Context, in engine.ActionInput, handoffOnce *stepHandoffOnce,
+) (bool, error) {
 	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
 	if err != nil {
 		return false, fmt.Errorf("load session for queued auto-start: %w", err)
@@ -360,7 +365,7 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(ctx context.Context, in e
 	}
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	if err := c.svc.autoStartStepPromptWithPromptContext(
-		ctx, task.ID, session, step, prompt, planMode, true, newStepHandoffOnce(), promptReferenceContext,
+		ctx, task.ID, session, step, prompt, planMode, true, handoffOnce, promptReferenceContext,
 	); err != nil {
 		return false, fmt.Errorf("queue auto-start prompt: %w", err)
 	}

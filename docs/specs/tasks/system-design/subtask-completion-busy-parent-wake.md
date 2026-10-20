@@ -19,7 +19,7 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
 
 | Acceptance criteria | Design sections |
 | --- | --- |
-| `AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1` (busy parent failure mode and scenario) | Queue when busy, Turn ending while queueing, Operation settlement |
+| `AC-TASKS-SUBTASK-COMPLETION-TRIGGER-001.1` (busy parent failure mode and scenario) | Queue when busy, Step handoff across attempts, Turn ending while queueing, Operation settlement |
 
 ## Queue when busy
 
@@ -44,6 +44,17 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
    after the agent accepted the prompt, such as a stream disconnect or an
    uncertain delivery, is returned unchanged, so a prompt that may already have
    been delivered is never queued or sent again.
+
+## Step handoff across attempts
+
+A step handoff carry token is claimed once per step entry.
+`StartSessionForWorkflowStep` claims it before `promptTask` can refuse the
+prompt as busy. The callback therefore creates one `stepHandoffOnce` per
+action and passes it in the context, scoped to the task and step
+(`withStepHandoffOnce`). `StartSessionForWorkflowStep` claims through it
+(`claimStepHandoffTextForLaunch`), and the queue path receives the same once, so
+text claimed by a refused launch rides on the retry or on the queued prompt.
+Without a scoped once, the launch claims directly as before.
 
 ## Turn ending while queueing
 
@@ -74,5 +85,6 @@ the queue drains. `TestProcessOnChildrenCompleted_DeliversWakeWhenTurnEndsWhileQ
 ends the parent's turn between the session read and the queue insert and checks
 that the prompt is delivered once and leaves the queue. The
 `TestAutoStartAgentCallback_*` tests cover a busy rejection followed by an ended
-turn (launched again), by a started turn (queued), and a non-busy launch error
-(returned, nothing queued).
+turn (launched again), by a started turn (queued), a non-busy launch error
+(returned, nothing queued), and a handoff claimed by a refused launch (carried
+on the queued prompt).

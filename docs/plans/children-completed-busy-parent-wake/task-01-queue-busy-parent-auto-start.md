@@ -25,6 +25,8 @@ accepts the prompt, so the queue delivers it after the turn.
 
 - `autoStartAgentCallback.queueStepPromptIfBusy`, `isPromptRejectedAsBusy`,
   and `drainIfTurnEnded`.
+- `withStepHandoffOnce` / `claimStepHandoffTextForLaunch`, used by
+  `StartSessionForWorkflowStep`.
 
 ## Out of scope
 
@@ -42,6 +44,8 @@ accepts the prompt, so the queue delivers it after the turn.
 4. A launch refused as busy is retried when the turn has ended and queued when
    a turn is running; a failure after prompt acceptance is returned without
    queueing.
+5. A step handoff claimed by a refused launch is carried by the retry or the
+   queued prompt.
 
 ## Verification
 
@@ -51,7 +55,7 @@ accepts the prompt, so the queue delivers it after the turn.
 
 ## Files likely touched
 
-- `apps/backend/internal/orchestrator/{workflow_callbacks,service}.go`
+- `apps/backend/internal/orchestrator/{workflow_callbacks,service,step_handoff_carry,task_operations}.go`
 - `apps/backend/internal/orchestrator/event_handlers_children_completed_busy_test.go`
 
 ## Dependencies

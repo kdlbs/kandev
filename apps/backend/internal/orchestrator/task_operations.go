@@ -4215,7 +4215,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// excludes the handoff text, then appended last. Queue promotion and
 	// manual auto-start dispatch once with no replacement launch, so no
 	// shared stepHandoffOnce is needed here.
-	handoffText, _ := s.claimStepHandoffCarryText(ctx, taskID, workflowStepID)
+	handoffText := s.claimStepHandoffTextForLaunch(ctx, taskID, workflowStepID)
 	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
 	composedLaunchPrompt := appendStepHandoffToPrompt(promptForEmptinessCheck, handoffText)
 
