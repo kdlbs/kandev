@@ -3,6 +3,7 @@ package process
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,6 +64,50 @@ func TestTurnCheckpointCapturesLargeInventory(t *testing.T) {
 			}
 			if runGit(t, repoDir, "rev-parse", "HEAD") != head {
 				t.Fatal("capture changed HEAD")
+			}
+		})
+	}
+}
+
+type checkpointScanContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks int
+}
+
+func (c *checkpointScanContext) Err() error {
+	c.checks++
+	if c.checks == 2 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestTurnCheckpointInventoryScansHonorCancellation(t *testing.T) {
+	root := t.TempDir()
+	for _, scan := range []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{"flags", func(ctx context.Context) error {
+			_, _, err := turnCheckpointFlaggedPaths(ctx, []byte("H tracked\x00H tracked\x00"), root)
+			return err
+		}},
+		{"staged entries", func(ctx context.Context) error {
+			entry := []byte("H 100644 0000000000000000000000000000000000000000 0\ttracked\x00")
+			_, err := preserveMissingTurnCheckpointEntries(ctx, append(bytes.Clone(entry), entry...), root)
+			return err
+		}},
+	} {
+		t.Run(scan.name, func(t *testing.T) {
+			if err := scan.run(context.Background()); err != nil {
+				t.Fatalf("uncancelled scan: %v", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			checked := &checkpointScanContext{Context: ctx, cancel: cancel}
+			if err := scan.run(checked); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled scan returned %v, want context.Canceled", err)
 			}
 		})
 	}

@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-TASKS-TURN-CHANGES-001.1
   - AC-TASKS-TURN-CHANGES-001.2
   - AC-TASKS-TURN-CHANGES-005.7
+  - AC-TASKS-TURN-CHANGES-007.1
   - AC-TASKS-TURN-CHANGES-007.5
 system_design:
   - ../../specs/tasks/system-design/turn-changed-files.md
@@ -96,3 +97,9 @@ flag, or deployment. Existing saved preferences and upgrade backfill remain unch
 Sequential. Existing saved-on users intentionally remain enabled, including old
 upgrade backfills. Browser fixtures now explicitly opt in for capture-dependent
 tests and restore the original preference afterward.
+
+Review remediation: full-index flag and staged-entry scans now check the capture
+context between entries. The deterministic cancellation regression cancels after
+the first entry and verifies both scans stop; normal-context positive controls
+remain successful. Focused checkpoint/change tests passed again. No rendered UI
+changed, so the verified desktop/mobile captures remain applicable.

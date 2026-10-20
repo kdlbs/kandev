@@ -71,3 +71,9 @@ and hiding an unavailable zero-entry card after reload. Desktop/mobile PR assets
 were captured in the isolated runner, inspected, and compressed. Desktop built
 fresh artifacts; mobile reused those unchanged artifacts with --no-build. Live data was not changed. No reset, new migration,
 flag, or deployment. Existing saved preferences and upgrade backfill remain unchanged.
+
+Review remediation: full-index flag and staged-entry scans now check the capture
+context between entries. The deterministic cancellation regression cancels after
+the first entry and verifies both scans stop; normal-context positive controls
+remain successful. Focused checkpoint/change tests passed again. No rendered UI
+changed, so the verified desktop/mobile captures remain applicable.

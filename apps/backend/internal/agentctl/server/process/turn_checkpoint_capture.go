@@ -365,6 +365,10 @@ func (g *GitOperator) missingTurnCheckpointIndexEntries(ctx context.Context, ind
 	if err != nil {
 		return nil, err
 	}
+	return preserveMissingTurnCheckpointEntries(ctx, output, g.workDir)
+}
+
+func preserveMissingTurnCheckpointEntries(ctx context.Context, output []byte, workDir string) ([]byte, error) {
 	if len(output) == 0 {
 		return nil, nil
 	}
@@ -374,7 +378,10 @@ func (g *GitOperator) missingTurnCheckpointIndexEntries(ctx context.Context, ind
 	entries := bytes.Split(output[:len(output)-1], []byte{0})
 	var preserved bytes.Buffer
 	for _, entry := range entries {
-		record, preserve, err := missingTurnCheckpointIndexEntry(entry, g.workDir)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		record, preserve, err := missingTurnCheckpointIndexEntry(entry, workDir)
 		if err != nil {
 			return nil, err
 		}
@@ -466,7 +473,7 @@ func (g *GitOperator) refreshTurnCheckpointIndexFlags(ctx context.Context, index
 	if err != nil {
 		return err
 	}
-	assumePaths, skipPaths, err := turnCheckpointFlaggedPaths(output, g.workDir)
+	assumePaths, skipPaths, err := turnCheckpointFlaggedPaths(ctx, output, g.workDir)
 	if err != nil {
 		return err
 	}
@@ -483,7 +490,7 @@ func (g *GitOperator) refreshTurnCheckpointIndexFlags(ctx context.Context, index
 	return nil
 }
 
-func turnCheckpointFlaggedPaths(output []byte, workDir string) ([]byte, []byte, error) {
+func turnCheckpointFlaggedPaths(ctx context.Context, output []byte, workDir string) ([]byte, []byte, error) {
 	if len(output) == 0 {
 		return nil, nil, nil
 	}
@@ -493,6 +500,9 @@ func turnCheckpointFlaggedPaths(output []byte, workDir string) ([]byte, []byte, 
 	var assumePaths, skipPaths bytes.Buffer
 	entries := bytes.Split(output[:len(output)-1], []byte{0})
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		path, assume, skip, err := turnCheckpointIndexFlagAction(entry, workDir)
 		if err != nil {
 			return nil, nil, err
