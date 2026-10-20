@@ -113,3 +113,15 @@ Final evidence:
 Initial collapse does not read file bytes. Manual preview and enlargement remain
 available with the preference off. Both retained open and retained closed choices
 win over the default. No new implementation limitation remains in this scope.
+
+PR review follow-up: reserve 64px of dialog height so the 48px phone Close
+button remains inside short banner previews. Add the 1600x128 phone case and
+assert that the entire Close button stays inside the dialog. Give discovery
+entries distinct positions matching rich-output motion, chat motion, then image
+defaults. Both new regressions failed before the fix. Focused catalog, search,
+and dialog tests pass (21 cases). TypeScript and focused ESLint pass.
+The managed phone suite passed all seven scenarios, including banner containment
+and attachment layout. The desktop rich-output suite passed all six scenarios.
+Logs: `/tmp/kandev-run.e2e.SfbYQism.log` and
+`/tmp/kandev-run.e2e.gQGywspz.log`. The phone RED run is
+`/tmp/kandev-run.e2e.24jARUXK.log`. No product contract changed in this follow-up.

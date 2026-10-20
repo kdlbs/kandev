@@ -198,6 +198,7 @@ test("replays a historical CSV report without its source file", async ({
 for (const size of [
   { width: 1, height: 1 },
   { width: 80, height: 1600 },
+  { width: 1600, height: 128 },
 ]) {
   test(`mobile image inspection contains a ${size.width}x${size.height} image`, async ({
     testPage,

@@ -14,7 +14,7 @@ type ImagePreviewDialogProps = {
 };
 
 export const IMAGE_PREVIEW_DIALOG_CONTENT_CLASSNAME =
-  "flex w-[min(96vw,1126px)] max-w-[calc(100vw-1rem)] items-center justify-center overflow-hidden p-2 sm:max-w-[calc(100vw-2rem)] sm:p-3";
+  "flex min-h-16 w-[min(96vw,1126px)] max-w-[calc(100vw-1rem)] items-center justify-center overflow-hidden p-2 sm:max-w-[calc(100vw-2rem)] sm:p-3";
 
 const IMAGE_PREVIEW_IMAGE_CLASSNAME =
   "block h-auto max-h-[calc(100dvh-5rem)] w-[min(92vw,1100px)] max-w-full rounded object-contain";

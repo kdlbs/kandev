@@ -44,6 +44,12 @@ export async function expectImageDialogContained(page: Page) {
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
   }
+  const dialogBox = (await dialog.boundingBox())!;
+  const closeBox = (await close.boundingBox())!;
+  expect(closeBox.x).toBeGreaterThanOrEqual(dialogBox.x);
+  expect(closeBox.y).toBeGreaterThanOrEqual(dialogBox.y);
+  expect(closeBox.x + closeBox.width).toBeLessThanOrEqual(dialogBox.x + dialogBox.width);
+  expect(closeBox.y + closeBox.height).toBeLessThanOrEqual(dialogBox.y + dialogBox.height);
   await expectTouchTarget(close);
   expect(
     await page.evaluate(
