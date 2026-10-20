@@ -281,6 +281,9 @@ func (g *GitOperator) prepareTurnCheckpointIndex(ctx context.Context, indexPath 
 		return err
 	}
 	if err := g.refreshTurnCheckpointIndexFlags(ctx, indexPath); err != nil {
+		if errors.Is(err, ErrTurnCheckpointOutputLimit) {
+			return turnCheckpointFailure(turnchanges.ReasonSizeLimit, err)
+		}
 		return turnCheckpointFailure(turnchanges.ReasonUnsafeGitState, err)
 	}
 	return g.stageTurnCheckpointIndex(ctx, indexPath, sparse)
@@ -331,7 +334,7 @@ func (g *GitOperator) stageTurnCheckpointIndex(ctx context.Context, indexPath st
 	preservedEntries, err := g.missingTurnCheckpointIndexEntries(ctx, indexPath)
 	if err != nil {
 		if errors.Is(err, ErrTurnCheckpointOutputLimit) {
-			return turnCheckpointFailure(turnchanges.ReasonEntryLimit, err)
+			return turnCheckpointFailure(turnchanges.ReasonSizeLimit, err)
 		}
 		return turnCheckpointFailure(turnchanges.ReasonUnsafeGitState, err)
 	}
@@ -369,9 +372,6 @@ func (g *GitOperator) missingTurnCheckpointIndexEntries(ctx context.Context, ind
 		return nil, errors.New("git ls-files returned an incomplete staged-entry record")
 	}
 	entries := bytes.Split(output[:len(output)-1], []byte{0})
-	if len(entries) > turnCheckpointEntryLimit {
-		return nil, ErrTurnCheckpointOutputLimit
-	}
 	var preserved bytes.Buffer
 	for _, entry := range entries {
 		record, preserve, err := missingTurnCheckpointIndexEntry(entry, g.workDir)
@@ -492,9 +492,6 @@ func turnCheckpointFlaggedPaths(output []byte, workDir string) ([]byte, []byte, 
 	}
 	var assumePaths, skipPaths bytes.Buffer
 	entries := bytes.Split(output[:len(output)-1], []byte{0})
-	if len(entries) > turnCheckpointEntryLimit {
-		return nil, nil, ErrTurnCheckpointOutputLimit
-	}
 	for _, entry := range entries {
 		path, assume, skip, err := turnCheckpointIndexFlagAction(entry, workDir)
 		if err != nil {

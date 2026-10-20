@@ -755,7 +755,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowTranscriptAutoScrollControl:   false,
 		ShowTodoListPanel:                 false,
 		ShowTodoListPanelOnlyWhenNotEmpty: false,
-		ShowTurnChangedFiles:              true,
+		ShowTurnChangedFiles:              false,
 		ShowReleaseNotification:           true,
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},
