@@ -79,7 +79,9 @@ scrolling and navigation. No ASCII preview is needed for unchanged markup.
   preflight returned `covered`, no errors. Diff whitespace check passed.
 - Public docs updated: `docs/public/developer-tools.md` (how-to guidance).
 - No new UI copy, API, schema, backend change, delegate or new architecture
-  boundary. Parent validation is the next delivery gate; no push or PR yet.
+  boundary. Parent actual-diff validation and an independent six-suite rerun passed.
+  Delivery CI, semantic reviews and merge evidence are tracked in the PR and
+  parent task messages; implementation completion does not waive those gates.
 
 ## Risks
 
