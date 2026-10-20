@@ -13,6 +13,7 @@ import { SettingsRow, type SettingsPresentation } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { Trans, useTranslation } from "react-i18next";
+import { cn } from "@/lib/utils";
 
 /**
  * `value` is the persisted enum the API compares — never translated. The label
@@ -82,11 +83,13 @@ function MCPTaskProfileRadioGroup({
   isDirty,
   onValueChange,
   ariaDescribedBy,
+  className,
 }: {
   value: MCPTaskAgentProfileDefault;
   isDirty: boolean;
   onValueChange: (value: MCPTaskAgentProfileDefault) => void;
   ariaDescribedBy?: string;
+  className?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -96,7 +99,7 @@ function MCPTaskProfileRadioGroup({
       value={value}
       onValueChange={(nextValue) => onValueChange(nextValue as MCPTaskAgentProfileDefault)}
       data-settings-dirty={isDirty}
-      className="gap-3"
+      className={cn("gap-3", className)}
     >
       {OPTIONS.map((option) => {
         const labelId = `mcp-task-profile-${option.value}-label`;
@@ -178,6 +181,8 @@ export function MCPTaskAgentProfileDefaultSettings({
   if (presentation === "row") {
     return (
       <SettingsRow
+        className="md:flex-col md:items-stretch"
+        controlWrapperClassName="w-full md:max-w-none md:justify-start"
         label={t(PROFILE_LABEL_KEY)}
         description={t("settings:agentProfileShort")}
         info={
@@ -190,6 +195,7 @@ export function MCPTaskAgentProfileDefaultSettings({
         isDirty={isDirty}
         control={
           <MCPTaskProfileRadioGroup
+            className="w-full gap-2 md:grid-cols-2"
             value={draft}
             isDirty={isDirty}
             onValueChange={setDraft}
