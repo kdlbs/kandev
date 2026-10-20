@@ -216,3 +216,23 @@ tests in 32.6 seconds (`/tmp/kandev-run.e2e.WcSCFaHQ.log`). The phone command
 reused that build and passed both tests in 41.4 seconds
 (`/tmp/kandev-run.e2e.wP3iNuW5.log`). Both runs completed without retries.
 Remote checks and review resolution require fresh evidence after publication.
+
+### Backend CI remediation
+
+The retry launch fixture signalled provider acceptance before the executor
+persisted the session's RUNNING state. A controlled startup barrier reproduced
+CI's retained-failure assertion: expected `stopped`, actual `accepted`, with
+the session still STARTING. The fixture now signals success from the executor's
+process-started callback and asserts RUNNING before sending terminal events.
+
+With the fixture repair applied to the failing CI run's merge commit, this
+command passed all seven retry launch tests five times with the race detector
+(35 runs):
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 go test -trimpath -p 1 -race ./internal/orchestrator -run '^TestAutomationRetry' -count=5 -timeout=10m)
+```
+
+The run completed in 143.7 seconds. Changed-package Go lint reported zero
+issues, and gofmt and diff checks passed. Remote CI and review evidence must
+be refreshed after the remediation push.
