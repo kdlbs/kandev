@@ -117,3 +117,16 @@ auto-scroll transitions, cancellation, and Quick Chat recovery. These reused the
 unchanged rebuilt artifacts from the passing mobile reload repetitions. No new
 rendered composition was introduced; existing settings and empty-card PR captures
 remain applicable.
+
+Pagination follow-up: the native-restoration correction exposed a stale follow
+flag when an older-page request began without a wheel gesture. Existing desktop
+pagination anchor cases reproduced the CI failures (two failures, no retries).
+Older-page preparation now cancels motion/captures the prepend baseline and then
+resynchronizes bottom ownership from the actual viewport before fetching data.
+The same two desktop cases passed afterward without changing their assertions.
+Full browser verification passed 16 desktop and 16 mobile cases without retries,
+covering all pagination cases, deep/short/tool-only history, manual reading,
+auto-scroll transitions, and delayed changed-file completion/reload together.
+Four frontend suites (151 tests), lint, formatting, and typecheck passed again.
+This preserves AC-TASKS-TURN-CHANGES-005.9; no new public behavior or composition is
+introduced. Fresh remote checks remain pending after the remediation push.

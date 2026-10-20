@@ -2291,6 +2291,10 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       onPositionClaim: claimProgrammaticPosition,
       startAlignedTargetRef,
     });
+  const prepareOlderPage = useCallback(() => {
+    beginOlderLoad();
+    resyncIsNearBottom();
+  }, [beginOlderLoad, resyncIsNearBottom]);
   const scrollToLatest = useScrollToLatestAction({
     scrollRef,
     sessionId,
@@ -2314,7 +2318,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       isRestoringLayout,
       placementLatches,
     },
-    beginOlderLoad,
+    prepareOlderPage,
   );
 
   return {

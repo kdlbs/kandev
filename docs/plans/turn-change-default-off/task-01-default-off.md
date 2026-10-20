@@ -74,6 +74,8 @@ bash scripts/lint-go-changed apps/backend/internal/user/store/sqlite.go apps/bac
 (cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/settings/mobile-turn-changed-files-setting.spec.ts tests/git/mobile-turn-changed-files.spec.ts)
 (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/git/turn-changed-files-scroll.spec.ts)
 (cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/git/mobile-turn-changed-files-scroll.spec.ts)
+(cd apps/web && pnpm e2e:run --docker --shards 1 --project chromium tests/chat/message-pagination.spec.ts tests/chat/auto-scroll-toggle.spec.ts tests/git/turn-changed-files-scroll.spec.ts -- --retries=0)
+(cd apps/web && pnpm e2e:run --docker --no-build --shards 1 --project mobile-chrome tests/chat/mobile-message-pagination.spec.ts tests/chat/mobile-auto-scroll-toggle.spec.ts tests/git/mobile-turn-changed-files-scroll.spec.ts -- --retries=0)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -150,3 +152,16 @@ auto-scroll transitions, cancellation, and Quick Chat recovery. These reused the
 unchanged rebuilt artifacts from the passing mobile reload repetitions. No new
 rendered composition was introduced; existing settings and empty-card PR captures
 remain applicable.
+
+Pagination follow-up: the native-restoration correction exposed a stale follow
+flag when an older-page request began without a wheel gesture. Existing desktop
+pagination anchor cases reproduced the CI failures (two failures, no retries).
+Older-page preparation now cancels motion/captures the prepend baseline and then
+resynchronizes bottom ownership from the actual viewport before fetching data.
+The same two desktop cases passed afterward without changing their assertions.
+Full browser verification passed 16 desktop and 16 mobile cases without retries,
+covering all pagination cases, deep/short/tool-only history, manual reading,
+auto-scroll transitions, and delayed changed-file completion/reload together.
+Four frontend suites (151 tests), lint, formatting, and typecheck passed again.
+This preserves AC-TASKS-TURN-CHANGES-005.9; no new public behavior or composition is
+introduced. Fresh remote checks remain pending after the remediation push.
