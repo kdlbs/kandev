@@ -14,9 +14,9 @@ legacy_specs: []
 ## Overview
 
 Restore the single-session launch contract for issue #4579. Opening a blocked
-task prepares a primary session, but dependency resolution currently issues an
-unbound start that creates another session. MCP moves then inspect the empty
-primary and fail the service's active-sibling guard.
+task prepared a primary session, but dependency resolution issued an unbound
+start that created another session. MCP moves then inspected the empty primary
+and failed the service's active-sibling guard.
 
 The user authorized a bounded regression repair without a separate planning
 handoff. Parent validation of the uncommitted candidate precedes delivery.
@@ -59,10 +59,10 @@ or live developer instance is needed; no rendered UI changes.
 
 The machine crashed during a pre-crash final race run and its `/tmp` evidence
 was lost. Those earlier timings are historical, not final-candidate proof.
-Fresh evidence is stored outside the repository in the owning task directory:
-`../4579-validation/` (relative to this repository's root).
+External validation receipts are retained by the owning task and are not
+versioned in this repository. Commands and results are summarized below.
 
-### Fresh RED on current main
+### Historical RED on the initial integration base
 
 A disposable detached checkout at
 `74427cb50c24e281e5b3fa826c7136ffed5be5db` received only the two regression
@@ -78,9 +78,9 @@ go test -trimpath ./internal/mcp/handlers -run '^TestMoveTaskAfterDependencyPrep
 
 Both exited 1 for the expected behavioral assertions: two sessions instead of
 one (0.658s), and MCP CONFLICT because the task has an active sibling (0.396s).
-Logs: `red-orchestrator.log` and `red-mcp.log` in the evidence directory.
+The external receipts retain both causal failures.
 
-### Fresh GREEN on the preserved candidate
+### Historical GREEN before parent validation
 
 From `apps/backend`, with bounded build parallelism:
 
@@ -89,18 +89,18 @@ GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -p=1 -trimpath -race ./internal/orchestrato
 ```
 
 PASS: orchestrator 6.684s; MCP handlers 5.379s. The prepared-session matrix
-contains 19 cases. Log: `final-race.log` in the evidence directory.
+contained 19 cases at this checkpoint; full-ceiling coverage was added later.
 
 ### Other checks
 
-Scoped Go lint: PASS, zero issues (`lint.log`). Exact command from the repository root:
+Scoped Go lint: PASS, zero issues. Exact command from the repository root:
 
 ```sh
 bash scripts/lint-go-changed apps/backend/internal/orchestrator/dependency_prepared_session.go apps/backend/internal/orchestrator/dependency_prepared_session_test.go apps/backend/internal/orchestrator/event_handlers_workflow.go apps/backend/internal/orchestrator/session_launch.go apps/backend/internal/orchestrator/task_operations.go apps/backend/internal/mcp/handlers/dependency_prepared_move_test.go
 ```
 
 Documentation checks: PASS, 394 decisions and 1681 specifications validated;
-all specification files passed (`docs.log`). Commands from the repository root:
+all specification files passed. Commands from the repository root:
 
 ```sh
 python3 scripts/list-docs.py validate
@@ -114,10 +114,10 @@ The integration uses the real task dependency store, task turn service, event
 watcher, orchestrator, executor, MCP handler, task service and authoritative
 memory queue. It verifies the pending move's session incarnation and an active
 turn while workflow placement remains unchanged. Provider processes are faked.
-No browser, live developer instance, real provider, or PostgreSQL run is claimed.
+These local checks used no browser, live developer instance, real provider, or PostgreSQL.
 No schema or public wire changes. Existing stranded or ineligible conversations
-are not retroactively reassigned or revived. No commit, push, PR or issue reply
-is authorized before the controller validates this candidate.
+are not retroactively reassigned or revived. Before controller validation, commit, push, PR and issue-reply
+actions were not authorized. This is a historical checkpoint.
 
 ## Risks
 
@@ -178,18 +178,16 @@ Final focused command, from `apps/backend`:
 GOMAXPROCS=2 GOMEMLIMIT=3GiB go test -p=1 -trimpath -race ./internal/orchestrator ./internal/mcp/handlers -run '^(TestDependencyResolutionReusesPreparedPrimary|TestMoveTaskAfterDependencyPreparedLaunch)$' -count=1
 ```
 
-PASS: orchestrator 2.430s; MCP handlers 2.049s. Log:
-`../4579-validation/full-ceiling-race.log`. The earlier broader
+PASS: orchestrator 2.430s; MCP handlers 2.049s. The earlier broader
 focused GREEN and parent's independent repeat remain evidence for unchanged
 production logic; this command covers the necessary new consumer test inputs.
 
-Final scoped lint: PASS, zero issues (`lint-full-ceiling.log`), using the exact
-six-file command above. Final catalog/spec lint and whitespace checks: PASS
-(`docs-full-ceiling.log`). Current main remains
-`74427cb50c24e281e5b3fa826c7136ffed5be5db`; issue OPEN with no comments/linked
-closing PR and no PR for this branch. Final candidate remains uncommitted for
-parent validation. Initial review artifacts are preserved separately under
-`../4579-validation/initial-candidate/`.
+Final scoped lint: PASS, zero issues, using the exact six-file command above.
+Catalog/spec lint and whitespace checks: PASS. At the parent validation
+checkpoint, main was `74427cb50c24e281e5b3fa826c7136ffed5be5db`, the issue was
+OPEN without a linked PR, and the candidate was uncommitted. The controller
+subsequently approved delivery, as recorded above. External patch/hash receipts
+are retained by the task and are not repository dependencies.
 
 ## PR documentation coverage remediation
 
@@ -201,5 +199,23 @@ the historical task-03 and sibling plan metadata to the current requirements,
 acceptance-criteria and system-design links, retaining their existing content
 and status. No source/test or product behavior change. GREEN: the same validator
 accepts both changed work orders; catalog/spec/whitespace checks also pass.
-Reproduction command from repo root: `node ../4579-validation/check-docs-coverage.cjs`.
-Exact-head CI/review and protected merge remain pending after the fixup push.
+The deterministic check used `validateCoverage` from
+`.github/scripts/pr-docs.cjs`, with the exact PR changed-file set and referenced
+plan, requirement and design contents. At this remediation checkpoint,
+exact-head CI/review and protected merge were pending after the fixup push.
+
+## Review dispositions and delivery tracking
+
+The subsequent exact-head CI run completed with 82 passed and 13 skipped checks,
+zero failures and zero pending checks. This is historical evidence before the
+documentation review cleanup; final-head CI/review and merge receipts remain
+tracked by the owning task rather than marked complete in this implementation
+plan.
+
+The optional nil-row guard and missing-capability warning suggestions require
+no production change: SQL session scans allocate non-nil rows and the production
+repository implements turn-history reads; unsupported adapters conservatively
+remain ineligible. The requested running-sibling/sender-ID test would establish
+a different move-recipient contract. This repair prevents the eligible duplicate
+session and preserves primary selection, authenticated move authority and the
+explicit exclusion of existing stranded/ineligible sessions.

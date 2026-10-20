@@ -54,7 +54,7 @@ Record exact commands and results below before parent validation.
 
 ## Results
 
-Fresh RED reproduced both failures on unchanged current main. The final
+RED reproduced both failures on the unchanged initial integration base. The final
 candidate passed the bounded targeted race check (orchestrator 6.684s, MCP
 handlers 5.379s), scoped lint (zero issues), catalog/specification validation
 and whitespace checks. Implementation is done; controller validation passed and
@@ -83,5 +83,14 @@ the historical task-03 and sibling plan metadata to the current requirements,
 acceptance-criteria and system-design links, retaining their existing content
 and status. No source/test or product behavior change. GREEN: the same validator
 accepts both changed work orders; catalog/spec/whitespace checks also pass.
-Reproduction command from repo root: `node ../4579-validation/check-docs-coverage.cjs`.
-Exact-head CI/review and protected merge remain pending after the fixup push.
+The check exercised `validateCoverage` from `.github/scripts/pr-docs.cjs`
+against the exact changed-file set and linked document contents. At that
+remediation checkpoint, exact-head CI/review and protected merge were pending.
+
+## Review documentation cleanup
+
+Historical validation and pre-approval statements in the plan are now explicitly
+labelled as checkpoints. External receipt paths were replaced by self-contained
+command/result summaries. Prior-head CI passed 82 checks and skipped 13; final
+head checks, review disposition and protected merge remain tracked externally.
+No source/test changes were needed for the review findings.
