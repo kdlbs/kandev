@@ -106,6 +106,38 @@ One probe error makes aggregate persistence unhealthy. A later successful probe 
 
 Initialization errors remain fatal and cannot recover inside the same process. The process exits through the existing startup error path.
 
+### SQLite schema probe batching
+
+SQLite health checks fetch the existing names for all distinct required tables
+in one catalog query through the shared writer. The required-store catalog
+remains the only source of the requested names. `internal/db` owns the
+context-aware schema helper and its SQL. Bind table names as values and finish
+reading and closing the result before publishing probe outcomes.
+
+The probe still pings the shared writer and reader first. It retains the same
+two-second total deadline, periodic interval, maintenance lease, and startup
+rules. It does not create another pool, use a reader-only health path, or treat
+a timeout as success. Batching removes repeated writer checkout between table
+checks. It does not guarantee service when a single checkout exceeds the
+existing deadline.
+
+A successful inventory produces one result for every descriptor. Missing
+names affect exactly the descriptors that require them, including shared names
+and descriptors with several required tables. Never return early and skip a
+later descriptor. A failed inventory cannot establish any table's presence,
+so every descriptor in that inventory receives the query failure. Preserve the
+existing sanitized diagnostics, `table_probe` stage, and one failure diagnostic
+per sweep. A later successful inventory recovers runtime health normally.
+
+The PostgreSQL probe retains its existing path. Any portable schema helper must
+preserve current-schema selection and parameter rebinding. A dedicated reader,
+a longer timeout, altered maintenance priority, and retention scheduling are
+separate proposals outside this optimization.
+
+The [schema probe batching package](../../../plans/persistence-probe-batching/plan.md)
+records the isolated stress comparison and implementation verification. Performance
+measurements remain experimental evidence rather than CI timing thresholds.
+
 ### SQLite writer transaction admission
 
 The [accepted writer-admission ADR](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md)
