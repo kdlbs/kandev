@@ -1,6 +1,6 @@
 ---
 created: 2026-10-20
-status: in_progress
+status: implemented
 requirements:
   - REQ-PLATFORM-UPGRADE-REGRESSION-001
   - REQ-PLATFORM-UPGRADE-REGRESSION-002
@@ -18,7 +18,7 @@ Add a baseline-first, two-binary upgrade rehearsal alongside existing frozen
 SQL migration tests. First establish trustworthy release acquisition and a
 baseline-only seed, then assert preservation/replay, then exercise task runtime
 and browser flows, and finally wire the CI-only runner and main-only workflow.
-Code is present; final work-order verification is pending CI. The implementation is test/CI infrastructure; product runtime code is unchanged.
+Implementation and CI acceptance are complete. The implementation is test/CI infrastructure; product runtime code is unchanged.
 
 ## Scope
 
@@ -65,7 +65,7 @@ Fail when the manifest or required engine is missing, rather than skip.
 
 ## Tests
 
-Proposed names and evidence, to be implemented in the listed files:
+Implemented tests and evidence:
 
 - `scripts/upgrade/prepare-release.test.mjs`: Stable selection, archive digest,
   path validation, immutable manifest, download failure. Covers 001.1/001.4.
@@ -104,33 +104,27 @@ commands, not local reproduction instructions.
 
 ## Work orders
 
-- [ ] [Task 01: Baseline-first release fixture](task-01-baseline-fixture.md)
-- [ ] [Task 02: Preservation and replay oracles](task-02-preservation-replay.md)
-- [ ] [Task 03: Runtime and browser lifecycle](task-03-task-lifecycle.md)
-- [ ] [Task 04: CI-only runner and workflow](task-04-runner-ci.md)
+- [x] [Task 01: Baseline-first release fixture](task-01-baseline-fixture.md)
+- [x] [Task 02: Preservation and replay oracles](task-02-preservation-replay.md)
+- [x] [Task 03: Runtime and browser lifecycle](task-03-task-lifecycle.md)
+- [x] [Task 04: CI-only runner and workflow](task-04-runner-ci.md)
 
 Execute sequentially; no delegation is requested or authorized.
 
 ## Verification results
 
-Final verification is pending GitHub Actions. On 2026-10-20 the user directed:
-"Always run this on CI, never on local machine". All local workloads were stopped;
-process/container inspection found no remaining rehearsal resources. Subsequent
-CI-only guard and identity/snapshot changes have not been executed locally.
+CI acceptance passed on 2026-10-20 in [run 39510140130](https://github.com/kdlbs/kandev/actions/runs/39510140130).
+Published Stable `v0.97.0` was compared with candidate `43e1a82ceb639d083d31d5af3b586ee05173dc34`:
+SQLite desktop 3/3, PostgreSQL desktop 3/3, and SQLite phone 1/1 scenarios passed,
+with no skipped or retried scenario. The harness contracts (10 Node tests and
+6 fixture/oracle tests), changed-file lint, action pinning tests (9), shell syntax,
+and specification/catalog checks passed. All three evidence uploads succeeded.
 
-Earlier evidence, retained as historical context rather than final acceptance:
-
-- Release v0.97.0 archive acquisition and matching-source mock build succeeded.
-- SQLite managed rehearsal passed all three scenarios before CI-only guards.
-- Eight Node harness contracts and six fixture/oracle unit tests passed.
-- Action pinning tests passed (9); workflow security lint had no findings.
-- PostgreSQL and phone acceptance are unverified; the local PostgreSQL run was
-  interrupted and its process handle is unavailable. No local rerun is permitted.
-- An exploratory E2E typecheck exposed existing duplicate definitions and absent
-  Node SQLite declarations in the shared E2E tree; no standalone typecheck gate
-  was added. Changed-file diagnostics were corrected.
-- The earlier specification lint/catalog and documentation reference preflight
-  passed before the final CI-only specification edits. CI must revalidate them.
+The user authorized this pre-merge branch validation. A temporary exact-branch
+exception enabled it; the final policy-only follow-up restores main-only workflow,
+runner and fixture guards and rejects this branch in the guard contract. That
+follow-up is not claimed as an additional upgrade rehearsal. No upgrade workloads
+ran locally after the user's CI-only instruction. Product runtime code is unchanged.
 
 ## Risks
 

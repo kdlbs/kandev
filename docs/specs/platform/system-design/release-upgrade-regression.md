@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-UPGRADE-REGRESSION-001

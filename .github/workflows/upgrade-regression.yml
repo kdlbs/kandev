@@ -2,7 +2,7 @@ name: Release upgrade regression
 
 on:
   push:
-    branches: [main, feature/test-release-upgrade-7ee]
+    branches: [main]
   schedule:
     - cron: '23 3 * * *'
   workflow_dispatch:
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/test-release-upgrade-7ee'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -57,7 +57,7 @@ jobs:
           retention-days: 7
 
   rehearse:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/test-release-upgrade-7ee'
+    if: github.ref == 'refs/heads/main'
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
