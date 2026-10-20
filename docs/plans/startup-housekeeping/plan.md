@@ -235,3 +235,11 @@ panic-only timeout-cancellation suggestion adds no live-process recovery benefit
 because these workers have no panic recovery boundary; normal returns already
 cancel both contexts. The combined phone capture test is retained to preserve its
 two-asset manifest and existing scrolling assertions.
+
+CI remediation: the existing restart-dialog test still required zero progress
+polls after boot-id completion. Updated that stale assertion to cover final-ready
+polling and explicit no-poll behavior for idle, starting and error phases. The
+original assertion reproduced locally; the updated focused frontend run passed
+129 tests across 12 files. CI's other frontend shard and lint/build job passed.
+This correction changes tests and delivery records only; rendered captures remain
+valid for the unchanged production tree.

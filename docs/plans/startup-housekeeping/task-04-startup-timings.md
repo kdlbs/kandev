@@ -158,3 +158,8 @@ agent message before asserting UI content, avoiding a custom DOM wait budget.
 The launcher payload check now uses the largest registered fields, full active
 progress, maximum numeric widths, and 32 history entries. Latest focused frontend
 verification passed 118 tests across 11 files; typecheck and targeted ESLint passed.
+
+CI exposed a stale restart-dialog assertion prohibiting final progress polling.
+It now expects final-ready detail after completion and preserves no-poll checks
+for idle, starting and error phases. The focused run passed 129 tests across 12
+files; production UI is unchanged from the verified post-commit captures.
