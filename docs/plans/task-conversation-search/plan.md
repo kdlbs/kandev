@@ -138,7 +138,7 @@ Each linked work order contains its exact verification commands.
 
 Implementation checks are recorded in the work orders and performance report.
 The commands below record the earlier design validation. Final implementation
-checks pass: backend correctness/race tests, 45 frontend unit tests, 15 desktop
+checks pass: backend correctness/race tests, 55 frontend unit tests, 15 desktop
 and three phone browser tests, Go lint, ESLint, TypeScript, localization, and
 document validation. The reference-host and operational qualification limits
 in Task 04 remain open; the requirements and system design remain draft until
@@ -190,11 +190,10 @@ preserves integrated-control navigation ownership and the database restore
 preflight guidance. Conversation search remains inside ordinary phone navigation.
 The compact task-row regression and conversation excerpt spacing are retained.
 
-Post-integration local validation is complete: 45 frontend unit tests,
+Post-integration local validation is complete: 55 frontend unit tests,
 TypeScript, SQLite/PostgreSQL repository races, service/HTTP authorization,
 worker fairness, runtime stop/join, 15 desktop browser checks, and three phone
-browser checks pass. Remote CI and review verification remain pending until
-the integration head is pushed and observed.
+browser checks pass. Remote CI and review verification are tracked against the pushed head.
 Greptile remediation adds direct API encoding/cancellation tests, generated
 Traditional Chinese search copy, package-level worker leak checks, and
 rate-limited content-free indexing failure logs.
@@ -209,4 +208,4 @@ failed with SQLSTATE 40P01 before the fix and passes afterward. Historical scale
 samples are retained as timing observations, without retroactively claiming
 that their result-page outcomes were validated. Backend race validation of the follow-up changes passes across the repository,
 worker, runtime wiring, service, and HTTP handler packages. The strengthened message-edit browser regression and phone search check both
-pass. Remote CI and review checks remain pending until the final head is pushed.
+pass. Remote CI remains in progress. Its phone-header fixture failure reproduced locally and is corrected with the real command registry provider. All 55 targeted frontend tests pass after the correction.

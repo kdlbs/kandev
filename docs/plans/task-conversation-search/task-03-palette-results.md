@@ -64,7 +64,7 @@ The commands below use the delivered test names.
 
 ```bash
 pnpm --dir apps install --frozen-lockfile
-(cd apps/web && pnpm exec vitest run hooks/use-command-panel-task-results.test.ts hooks/use-command-panel-task-navigation.test.ts components/command-panel-dialog.test.tsx components/command-panel-confirmation.test.tsx lib/api/domains/conversation-search-api.test.ts components/navigation/mobile-task-search-action.test.tsx components/navigation/app-nav-sheet.test.tsx)
+(cd apps/web && pnpm exec vitest run hooks/use-command-panel-task-results.test.ts hooks/use-command-panel-task-navigation.test.ts components/command-panel-dialog.test.tsx components/command-panel-confirmation.test.tsx lib/api/domains/conversation-search-api.test.ts components/navigation/mobile-task-search-action.test.tsx components/navigation/app-nav-sheet.test.tsx components/kanban/kanban-header-mobile.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/conversation-search.spec.ts tests/command-panel.spec.ts
 pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-conversation-search.spec.ts tests/task/mobile-command-palette-task-actions.spec.ts
@@ -106,4 +106,6 @@ A late result must not change an explicitly selected task. Use Unicode code-poin
 
 ## Results
 
-Implemented and validated. All 45 targeted frontend tests pass. Desktop search and all three phone browser scenarios pass, including existing move/archive and change-workflow actions. TypeScript, ESLint, localization checks, and the production web build pass. The phone drawer regression was reproduced with a failing test before the fix. See [performance results](performance-results.md) for commands and evidence limits.
+Implemented and validated. All 55 targeted frontend tests pass. Desktop search and all three phone browser scenarios pass, including existing move/archive and change-workflow actions. TypeScript, ESLint, localization checks, and the production web build pass. The phone drawer regression was reproduced with a failing test before the fix. See [performance results](performance-results.md) for commands and evidence limits.
+
+PR CI exposed four phone-header test failures because their shared fixture omitted the command registry provider used by the application shell. The failures reproduced locally. The fixture now renders through the real provider, and all 55 search/navigation tests pass with `NODE_ENV=production`. This changes test composition only; no product behavior or public documentation changes.
