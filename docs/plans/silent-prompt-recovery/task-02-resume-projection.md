@@ -1,7 +1,7 @@
 ---
 id: "02-resume-projection"
 title: "Wait for resume projection"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-silent-turns"
@@ -27,12 +27,13 @@ events to finish projection. Rebuild recovery evidence before resolving a block.
 
 ## In scope
 
-- Introduce a typed internal projection-lag result and a bounded,
+- Introduce a distinct internal projection-lag result and a bounded,
   context-aware wait at `GetNativeResumeDeliveryEvidence`.
 - Preserve all current owner, journal, submission, payload, native identity,
   cursor and transactional resolution checks. Do not compare error text.
-- Add lifecycle tests with deterministic timing and real SQL/journal
-  orchestrator integration, then desktop and phone E2E for one-click Resume.
+- Add lifecycle tests with controlled projection and real SQL/journal
+  integration, retain orchestrator transaction coverage, then desktop and phone
+  E2E for one-click Resume.
 - Add `TestNativeResumeProjectionWaitRejectsUnresolvedJournal`: authenticated
   unresolved journal work plus cursor lag returns blocked before any wait or
   scheduled retry.
@@ -94,7 +95,6 @@ Results and run them. A “no tests to run” package is not verification eviden
 - New lifecycle `native_resume_projection_wait_test.go`
 - `apps/backend/internal/orchestrator/session_delivery_recovery.go` only if
   necessary to preserve context/ownership at the proof boundary
-- New orchestrator `native_resume_projection_wait_test.go`
 - Existing `native_resume_proof_test.go`, `native_resume_readiness_test.go`,
   and `session_native_delivery_recovery_test.go`
 - New desktop and phone native-resume-projection E2E files and fixture support
@@ -123,10 +123,45 @@ sequential
 
 ## Results
 
-Pending. No implementation or product verification performed.
+Implemented the bounded proof loop at `GetNativeResumeDeliveryEvidence`.
+Distinct sentinels preserve existing blocked/stale error compatibility. A single
+10-second budget and 200 ms cadence apply after verified lag; the caller can
+shorten the deadline. Every attempt rechecks the execution and authenticated
+client, then rebuilds the full proof. Client leases are released between
+attempts so connection replacement can proceed during the wait.
 
-Design review clarification: unresolved journal work must fail before waiting;
-continuous same-owner progress uses the original deadline and paced retries.
-Both named regressions match this work order's `NativeResume` test filter.
-Catalog validation, specification lint, 36 linter tests, and whitespace checks
-passed. Executable regressions remain implementation work.
+The regression tests cover one-request success, unresolved journal rejection,
+continuous progress, cancellation, deadlines, changed native/execution ownership,
+storage failure, the 10-second cap, and client lease release. A real SQLite and
+bbolt journal test exercises received/projected cursor divergence and the
+transactional recovery resolver. It verifies one resolution, stable native
+identity, preserved unknown history, and no active historical submission.
+This test lives at the lifecycle boundary so it can use the real client without
+adding a production API solely for an orchestrator test. Existing orchestrator
+recovery tests cover the caller and transaction path.
+
+Browser tests use an initialized, blocked native session and hold the Resume
+request to check disabled/busy controls,
+duplicate-click prevention, failure feedback, retry, and real native recovery.
+The backend integration test controls actual SQL lag; browser fault injection
+checks the request contract and does not claim to reproduce SQL timing.
+The fixture uses a 5-second SQLite busy timeout for concurrent backend writes.
+A startup-event race observed during verification was rejected by the final SQL
+snapshot check. This final guard remains unchanged: evidence that changes after
+the proof can still require another explicit Resume.
+
+Verification passed:
+
+- The work-order race filter passed in lifecycle, orchestrator, and SQLite.
+- The final lifecycle `NativeResumeProjectionWait|NativeResumeProof` race run
+  passed after the client-lease and lint corrections.
+- Changed-package Go lint: zero issues.
+- Desktop Resume: 2 passed. Phone Resume and cancellation reload: 3 passed.
+- TypeScript, targeted ESLint, and 21 focused action/recovery UI tests passed.
+- Public docs, catalog validation, specification lint, all 36 specification-linter
+  tests, documentation coverage, and whitespace checks passed.
+
+Browser setup defects found during verification were corrected: the status
+selector now targets the busy message, failure feedback uses the existing
+localized message, and SQLite fixture writes tolerate a bounded lock wait.
+Desktop and phone cancellation screenshots were inspected before publication.

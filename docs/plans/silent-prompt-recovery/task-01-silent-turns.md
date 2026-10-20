@@ -1,7 +1,7 @@
 ---
 id: "01-silent-turns"
 title: "Preserve silent accepted turns"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -137,9 +137,34 @@ sequential
 
 ## Results
 
-Pending. No implementation or product verification performed.
+Implemented and verified.
 
-Design review correction: the verification filter now includes
+- Failing regressions reproduced the terminal no-output action, acceptance
+  erasing early output, inherited predecessor activity, missing bounded
+  diagnostics, lost restored acceptance, and an old completion replacing a
+  restored generation. Each received a focused fix.
+- Lifecycle and orchestrator stall/cancellation tests pass under `-race`.
+  Restored-generation and agentctl cancellation checks also pass under `-race`.
+- The inline Cancel action now uses shared pending state after reload.
+  Both chat action suites pass (57 tests). Targeted eslint and i18n checks pass.
+- Typecheck passes with `NODE_OPTIONS=--max-old-space-size=8192`; the default
+  4 GB Node heap was insufficient for the current repository.
+- Real-watchdog browser coverage passes: four desktop scenarios passed together,
+  then the corrected uncertainty scenario passed separately; all four phone
+  scenarios passed together. The shorter timer requires the E2E runtime profile.
+  Phone screenshots were inspected. Desktop, narrow fine-pointer, and touch
+  geometry retain the intended control sizes.
+- The uncertainty fixture loses the runtime during cancellation and rejects
+  native resume. Delayed provider acknowledgement alone can still produce a
+  confirmed durable cancellation, and runtime replacement can restore native
+  continuity; neither is proof that the session must stay blocked.
+- Changed-package Go lint passes with `GOMAXPROCS=4 GOMEMLIMIT=6GiB`.
+  The default two-worker, 3 GiB run exhausted its five-minute analysis budget.
+- Browser commands use a temporary environment wrapper to remove inherited
+  internal config-file settings and provide installed Nix Chromium libraries.
+- Public quiet-turn recovery instructions are updated.
+
+Design review correction: the verification filter includes
 `TestWaitForPromptDone_AcceptedSilentPromptIsAdvisory`. A direct regex check
 confirmed that match; documentation catalog, specification lint, and whitespace
-checks passed. The regression itself remains implementation work.
+checks passed at that checkpoint. The executable regression now passes.

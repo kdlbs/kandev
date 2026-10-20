@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-AGENT-STALL-RECOVERY-001
@@ -17,8 +17,8 @@ Agents owns prompt inactivity classification, acceptance evidence, and the
 user-visible advisory. Platform owns durable cancellation uncertainty and
 [interrupted-prompt recovery](../../platform/system-design/interrupted-prompt-recovery.md).
 Tasks retains persisted state and [stop reachability](../../tasks/system-design/task-stop-reachability.md).
-This revision is intended design; the [work package](../../../plans/silent-prompt-recovery/plan.md)
-records implementation status.
+The [work package](../../../plans/silent-prompt-recovery/plan.md) records implementation
+and verification.
 
 ## Requirement mapping
 
@@ -28,8 +28,8 @@ records implementation status.
 | REQ-AGENTS-AGENT-STALL-RECOVERY-001, .12-.14 | Acceptance evidence, watchdog and cancellation |
 | REQ-AGENTS-AGENT-STALL-RECOVERY-001, .15 | Diagnostic snapshot |
 
-Criteria .7, .10 and .11 are superseded. Historical forced teardown is not the
-intended behavior for no-output inactivity.
+Criteria .7, .10 and .11 are superseded. No-output inactivity produces an
+advisory notice and preserves controlled cancellation.
 
 ## Components and responsibilities
 

@@ -108,10 +108,10 @@ new endpoint, migration, native conversation replacement, or generation rotation
 ## Bounded projection wait
 
 The [silent prompt work package](../../../plans/silent-prompt-recovery/plan.md)
-tracks this intended extension. `nativeResumeProofCursor` currently returns
-`ErrDurableAdoptionBlocked` when received and projected sequences differ.
-Represent that condition with a distinct internal typed error that retains the
-existing blocked-error compatibility. Never classify it by message text.
+records implementation and verification. `nativeResumeProofCursor` returns the
+distinct `errNativeResumeProjectionLag` sentinel when received and projected
+sequences differ. It wraps `ErrDurableAdoptionBlocked` for compatibility.
+The retry loop classifies it with `errors.Is`, never by message text.
 
 `GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
 proof. Retry only verified projection lag after authentication, cursor coverage,

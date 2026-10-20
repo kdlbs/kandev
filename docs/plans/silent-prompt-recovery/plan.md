@@ -1,6 +1,6 @@
 ---
 created: 2026-10-20
-status: draft
+status: done
 requirements:
   - REQ-AGENTS-AGENT-STALL-RECOVERY-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
@@ -17,7 +17,7 @@ legacy_specs: []
 Keep a silent accepted turn available for controlled cancellation. Let one
 Resume request tolerate a short projection delay without weakening recovery
 proof. Implement Task 01, then Task 02 in the primary session.
-Implementation has not started.
+Both work orders are complete.
 
 Agents owns inactivity classification and its visible notice. Platform owns
 durable uncertainty, projection, and admission. Tasks consumes these contracts;
@@ -149,8 +149,8 @@ and no horizontal overflow.
 
 ## Work orders
 
-- [ ] [Task 01: Preserve silent accepted turns](task-01-silent-turns.md)
-- [ ] [Task 02: Wait for resume projection](task-02-resume-projection.md)
+- [x] [Task 01: Preserve silent accepted turns](task-01-silent-turns.md)
+- [x] [Task 02: Wait for resume projection](task-02-resume-projection.md)
 
 Both work orders use TDD. Before the first pnpm command in this fresh worktree,
 run `(cd apps && pnpm install --frozen-lockfile)`. Use isolated E2E instances;
@@ -178,9 +178,17 @@ Design checks passed on 20 October 2026:
   production path was supplied to exercise coverage for this docs-only diff.
 - `git diff --check`: passed.
 
-Implementation, rendered checks, and product tests have not run for this package.
-Public docs will change with implementation; this turn changes internal design
-records only.
+Both work orders are implemented and verified. The final recovery race suites
+passed for lifecycle, orchestrator, and SQLite. Focused projection tests verify
+cancellation, ownership changes, continuous progress, the fixed deadline,
+client lease release, and real SQL/journal resolution. Changed-package Go lint,
+TypeScript, ESLint, i18n, UI unit tests, and documentation checks passed.
+
+Desktop and phone E2E cover silent turns, cancellation after reload, uncertainty,
+Resume busy controls, success, and timeout/retry. Browser tests use an initialized
+blocked session; backend integration controls actual projection lag. The final
+SQL resolver remains fail-closed if evidence changes after the proof. See each
+work order for the exact scope and verification results.
 
 PR review corrections: clarify that forced teardown is superseded and include
 the named accepted-silence regression in Task 01's test filter. A direct regex

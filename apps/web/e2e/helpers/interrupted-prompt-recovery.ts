@@ -21,6 +21,7 @@ export function withDatabase<T>(tmpDir: string, read: (db: TestDatabase) => T): 
   };
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
   try {
+    db.prepare("PRAGMA busy_timeout = 5000").run();
     return read(db);
   } finally {
     db.close();
