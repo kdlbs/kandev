@@ -39,6 +39,20 @@ export default defineConfig({
 
   projects: [
     {
+      name: "upgrade-desktop",
+      testMatch: /upgrade\/release-upgrade\.spec\.ts/,
+      retries: 0,
+      timeout: 600_000,
+      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
+    },
+    {
+      name: "upgrade-mobile",
+      testMatch: /upgrade\/mobile-release-upgrade\.spec\.ts/,
+      retries: 0,
+      timeout: 600_000,
+      use: { ...devices["Pixel 5"], trace: "retain-on-failure" },
+    },
+    {
       // The office-routing-* specs call `backend.restart()` with
       // KANDEV_MOCK_PROVIDERS, which permanently mutates the backend's
       // env for the lifetime of the worker (and registers extra
@@ -66,6 +80,7 @@ export default defineConfig({
     {
       name: "chromium",
       testIgnore: [
+        /upgrade\/.*\.spec\.ts/,
         /mobile-.*\.spec\.ts/,
         // Container-backed tests (Docker, SSH, and Kubernetes executors) live in the
         // `containers` project and skip when Docker is not available locally.
@@ -84,7 +99,7 @@ export default defineConfig({
     {
       name: "mobile-chrome",
       testMatch: /mobile-.*\.spec\.ts/,
-      testIgnore: /ssh\/.*\.spec\.ts/,
+      testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
       use: { ...devices["Pixel 5"] },
     },
     {
@@ -130,5 +145,9 @@ export default defineConfig({
   // No webServer — each Playwright worker spawns its own frontend
   // via the backend fixture (see fixtures/backend.ts)
 
-  globalSetup: "./global-setup.ts",
+  globalSetup: process.argv.some(
+    (arg) => arg.includes("upgrade-desktop") || arg.includes("upgrade-mobile"),
+  )
+    ? "./upgrade-global-setup.ts"
+    : "./global-setup.ts",
 });
