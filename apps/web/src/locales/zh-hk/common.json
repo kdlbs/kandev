@@ -551,5 +551,7 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "集成設定",
   "pageNavigation": "本頁導航",
-  "viewOptions": "視圖選項"
+  "viewOptions": "視圖選項",
+  "commandGoToArchivedTasks": "前往已歸檔任務",
+  "commandGoToArchivedTasksKeywords": "已歸檔任務, 歸檔, 歷史記錄"
 }

@@ -2,6 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { BootRouteData } from "./boot-payload";
+import type { Task } from "@/lib/types/http";
 import { SpaRoutes } from "./spa-routes";
 
 const consumer = vi.hoisted(() => vi.fn());
@@ -15,6 +16,37 @@ afterEach(() => {
   cleanup();
   consumer.mockClear();
   window.history.replaceState({}, "", "/");
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2
+it("does not present saved active boot rows beneath an explicit archive query", () => {
+  window.history.replaceState(
+    {},
+    "",
+    "/tasks?workspace=ws&archive=archived&workflow=all&repository=all",
+  );
+  render(
+    <StateProvider>
+      <SpaRoutes
+        routeData={
+          {
+            tasksPage: {
+              activeWorkspaceId: "ws",
+              workflows: [],
+              repositories: [],
+              tasks: [{ id: "active", title: "Active boot task" } as Task],
+              total: 1,
+            },
+          } as BootRouteData
+        }
+      />
+    </StateProvider>,
+  );
+  expect(consumer.mock.calls.at(-1)?.[0]).toMatchObject({
+    initialTasks: [],
+    initialTotal: 0,
+    initialDataLoaded: false,
+  });
 });
 
 // @covers AC-UI-LIST-STEP-GROUPING-001.5

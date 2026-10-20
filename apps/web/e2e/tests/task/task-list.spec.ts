@@ -59,7 +59,7 @@ test.describe("Task List", () => {
     await expect(
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
-    await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
+    await expect(testPage.getByTestId("tasks-list-search")).toBeVisible();
     // The bar names the page through the shared title crumb.
     await expect(testPage.locator('[data-slot="breadcrumb-page"]')).toHaveText("Tasks");
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
@@ -116,10 +116,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Hierarchy");
+    await testPage.getByTestId("tasks-list-search").fill("Hierarchy");
 
     const taskList = testPage.getByTestId("tasks-list");
     const parentRow = taskList
@@ -159,10 +156,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_desc&group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("sort task");
+    await testPage.getByTestId("tasks-list-search").fill("sort task");
 
     await expect(testPage.getByTestId("tasks-list-sort")).toContainText("Title Z-A");
     await expect(testPage.getByTestId("tasks-list-group")).toContainText("None");
@@ -214,10 +208,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=workflow");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Duplicate group");
+    await testPage.getByTestId("tasks-list-search").fill("Duplicate group");
 
     const sections = testPage.getByTestId("tasks-list-section");
     await expect(sections).toHaveCount(2);
@@ -353,10 +344,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Paged list task");
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task");
 
     const pagination = testPage.getByTestId("tasks-pagination");
     await expect(pagination).toContainText("Showing 1 to 25 of 26 results");
@@ -374,5 +362,9 @@ test.describe("Task List", () => {
     await testPage.getByRole("listbox").getByRole("option", { name: "10" }).click();
     await expect(pagination).toContainText("Showing 1 to 10 of 26 results");
     await expect(testPage.getByTestId("tasks-pagination-page-size")).toContainText("10");
+
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task 26");
+    await expect(pagination).toContainText("Showing 1 to 1 of 1 result");
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Paged list task 26"]);
   });
 });

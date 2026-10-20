@@ -1,11 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile task list search", () => {
-  test("menu search action reveals, filters, and clears on collapse", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("visible search filters and clears the list", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "List Alpha Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -19,25 +15,18 @@ test.describe("Mobile task list search", () => {
     await testPage.waitForLoadState("networkidle");
 
     const taskList = testPage.getByTestId("tasks-list");
-    const searchBar = testPage.getByTestId("mobile-search-bar");
-    const searchToggle = testPage.getByTestId("mobile-search-toggle");
+    const searchBar = testPage.getByTestId("tasks-list-filters");
 
     await expect(taskList.getByText("List Alpha Task")).toBeVisible();
     await expect(taskList.getByText("List Beta Task")).toBeVisible();
-    await expect(searchBar).not.toBeVisible();
-
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await searchToggle.click();
     await expect(searchBar).toBeVisible();
-    await expect(searchBar.getByPlaceholder("Search tasks...")).toBeFocused();
 
     await searchBar.getByPlaceholder("Search tasks...").fill("Alpha");
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
     await expect(taskList.getByText("List Beta Task")).not.toBeVisible({ timeout: 5000 });
 
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await searchToggle.click();
-    await expect(searchBar).not.toBeVisible();
+    await testPage.getByRole("button", { name: "Clear search", exact: true }).tap();
+    await expect(searchBar).toBeVisible();
     await expect(taskList.getByText("List Alpha Task")).toBeVisible({ timeout: 5000 });
     await expect(taskList.getByText("List Beta Task")).toBeVisible({ timeout: 5000 });
   });
@@ -68,10 +57,8 @@ test.describe("Mobile task list search", () => {
 
     await testPage.goto("/tasks?group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await testPage.getByTestId("mobile-search-toggle").click();
     await testPage
-      .getByTestId("mobile-search-bar")
+      .getByTestId("tasks-list-filters")
       .getByPlaceholder("Search tasks...")
       .fill("mobile sort");
 
@@ -93,7 +80,9 @@ test.describe("Mobile task list search", () => {
     await expect(
       testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
     ).toHaveCount(0);
-    await menu.getByTestId("mobile-tasks-list-show-archived").tap();
+    await testPage.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await testPage.getByTestId("tasks-list-archive-all").tap();
     await expect(
       testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
     ).toBeVisible();

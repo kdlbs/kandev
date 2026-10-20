@@ -694,6 +694,24 @@ In **List** view, compact and detailed task rows show critical, high, and low
 priority indicators after the task title on desktop and phones. Medium priority
 remains unmarked.
 
+Press **Cmd/Ctrl+K** and choose **Go to archived tasks** to open the current
+workspace archive. The shortcut starts with an empty search, all workflows,
+and all repositories. It keeps your saved board filters.
+
+In **List**, choose **Active**, **Archived**, or **All** above the task rows.
+Active includes completed tasks that you did not archive. Search combines with
+the workflow and repository filters. The result count and pages use that same scope.
+
+On desktop, the workflow and repository selectors sit beside **Clear filters**.
+On a phone, search stays visible. Tap **Filters** to select a workflow or
+repository in a bottom drawer. Selections apply immediately. **Done** closes
+the drawer. Sort and grouping remain in **View options**.
+
+Remove a selected filter with its clear button, or choose **Clear filters** to
+clear search, workflow, and repository together. Clearing keeps the archive
+mode, sort, grouping, and row details. Opening an explicit list link keeps its
+scope through reload and browser history without changing your saved filters.
+
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**,
 **Threads**, and **List**. Kanban and Pipeline show the same workflow steps in
 different layouts. Threads shows agent conversations side by side. Kandev
@@ -764,11 +782,14 @@ to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
 - On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
-- The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
+- The display menu groups its controls into collapsible sections. Board **Filters** cover **Workflow**, **Repository**, and **Priority**. List has its own workflow and repository controls above the rows. Registered plugin filters remain in display settings when available. **Sort**, **Preview panel**, and **List rows** appear where applicable. Each section shows its current values while collapsed.
+- In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow. Tick it again to show it.
+- The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing manual choices. Auto-hidden steps return as move destinations while a task is being moved. Manually hidden steps remain unavailable for pointer and bulk moves.
+- On phones, tap the listing-title dropdown to open **View options**. Change display settings or columns for the focused workflow there.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
 - **List** can sort by updated time, created time, or title in either direction.
-- **Show archived** reveals archived tasks in List.
+- **Archived** shows archived tasks only. **All** combines active and archived tasks.
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
 - A subtask's action menu can detach it into a top-level task. Detaching preserves its workflow position and descendants; an inherited workspace remains shared with the former parent.
@@ -996,7 +1017,7 @@ The archive confirmation is on by default in **Settings → Preferences → Task
 
 **Restore**
 
-1. Open **List**, enable **Show archived**, and choose **Unarchive**. You can also unarchive an open task on desktop or phone.
+1. Open **List**, select **Archived**, and choose **Unarchive**. Cmd/Ctrl+K also offers **Go to archived tasks**. You can unarchive an open task on desktop or phone.
 2. If the parent was archived with its children, Kandev restores those children too.
 3. After unarchive, Kandev checks the existing session once and follows the normal start preference. It can resume that session or restore the worktree while keeping the session and environment identity.
 

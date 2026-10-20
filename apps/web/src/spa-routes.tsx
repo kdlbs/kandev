@@ -68,6 +68,7 @@ import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
+import { canUseTasksListBootData } from "@/lib/tasks/tasks-list-query";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -483,7 +484,12 @@ function TasksDataRoute({
     tasksPage,
     userSettings,
   );
-  const initialData = resolveTasksDataRouteInitialData(bootstrapped, tasksPage, initialSort);
+  const initialData = resolveTasksDataRouteInitialData(
+    bootstrapped,
+    tasksPage,
+    initialSort,
+    searchParams,
+  );
   return (
     <TasksPageClient
       workspaces={[]}
@@ -513,13 +519,19 @@ function resolveTasksDataRouteInitialData(
   bootstrapped: RouteDataState,
   tasksPage: BootRouteData["tasksPage"] | undefined,
   initialSort: ReturnType<typeof parseTasksListSort>,
+  searchParams: URLSearchParams,
 ) {
+  const seed = tasksPage ?? bootstrapped;
+  const workspaceId = searchParams.get("workspace") ?? seed.activeWorkspaceId;
+  const eligible =
+    tasksPage !== undefined &&
+    canUseTasksListBootData(searchParams, seed.activeWorkspaceId, workspaceId);
   return {
-    initialWorkspaceId: tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined,
-    initialRepositories: tasksPage?.repositories ?? bootstrapped.repositories,
-    initialTasks: sortTasksForList(tasksPage?.tasks ?? [], initialSort),
-    initialTotal: tasksPage?.total ?? 0,
-    initialDataLoaded: Boolean(tasksPage),
+    initialWorkspaceId: seed.activeWorkspaceId ?? undefined,
+    initialRepositories: seed.repositories ?? bootstrapped.repositories,
+    initialTasks: eligible ? sortTasksForList(tasksPage.tasks ?? [], initialSort) : [],
+    initialTotal: eligible ? (tasksPage.total ?? 0) : 0,
+    initialDataLoaded: eligible,
   };
 }
 

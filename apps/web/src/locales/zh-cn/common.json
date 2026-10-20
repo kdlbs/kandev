@@ -551,5 +551,7 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "集成设置",
   "pageNavigation": "本页导航",
-  "viewOptions": "视图选项"
+  "viewOptions": "视图选项",
+  "commandGoToArchivedTasks": "前往已归档任务",
+  "commandGoToArchivedTasksKeywords": "已归档任务, 归档, 历史记录"
 }

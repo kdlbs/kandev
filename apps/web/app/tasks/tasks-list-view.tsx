@@ -1,5 +1,7 @@
 "use client";
 
+import type { TasksListArchiveMode } from "@/lib/tasks/tasks-list-query";
+
 import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
@@ -15,7 +17,9 @@ import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import { TasksListControls } from "./tasks-list-controls";
+import type { TasksListFilterProps } from "./tasks-list-filters";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
@@ -28,10 +32,19 @@ import {
   type TaskListWorkflow,
 } from "@/lib/tasks/task-list-sections";
 
-export type TasksListViewProps = {
+import {
+  TaskListResultAnnouncement,
+  TaskListResultBoundary,
+  type TasksListReadFeedbackProps,
+} from "./tasks-list-read-feedback";
+
+export type { TasksListReadFeedbackProps } from "./tasks-list-read-feedback";
+
+export type TasksListViewProps = TasksListReadFeedbackProps & {
+  filters?: TasksListFilterProps;
   total: number;
-  showArchived: boolean;
-  setShowArchived: (show: boolean) => void;
+  archiveMode: TasksListArchiveMode;
+  setArchiveMode: (mode: TasksListArchiveMode) => void;
   tasksListSort: string;
   onTasksListSortChange: (sort: string) => void;
   tasksListGroup: string;
@@ -60,8 +73,12 @@ export type TasksListViewProps = {
 
 export function TasksListView({
   total,
-  showArchived,
-  setShowArchived,
+  filters,
+  readError,
+  unavailableFilter,
+  onRetry,
+  archiveMode,
+  setArchiveMode,
   tasksListSort,
   onTasksListSortChange,
   tasksListGroup,
@@ -81,50 +98,82 @@ export function TasksListView({
   handleDelete,
   onRefresh,
   facetOptions,
-  facetValues,
-  workflowStepPreviews,
+  facetValues = {},
+  workflowStepPreviews = {},
 }: TasksListViewProps) {
+  const { t } = useTranslation();
+  const hasFilters = hasListFilters(filters);
+  const issue = readError || unavailableFilter;
   // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
-    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6" data-testid="tasks-list-view">
       <div className="space-y-4">
+        <TaskListResultAnnouncement busy={isLoading} issue={Boolean(issue)} total={total} />
         <TasksListControls
-          showArchived={showArchived}
-          onShowArchivedChange={setShowArchived}
+          filters={filters}
+          total={total}
+          isLoading={isLoading || Boolean(issue)}
+          archiveMode={archiveMode}
+          onArchiveModeChange={setArchiveMode}
           tasksListSort={tasksListSort}
           onTasksListSortChange={onTasksListSortChange}
           tasksListGroup={tasksListGroup}
           onTasksListGroupChange={onTasksListGroupChange}
           facetOptions={facetOptions}
         />
-        <TaskRows
-          tasks={tasks}
-          workflows={workflows}
-          repositories={repositories}
-          showTaskDetails={showTaskDetails}
-          tasksListGroup={tasksListGroup}
-          isLoading={isLoading}
-          deletingTaskId={deletingTaskId}
-          onArchive={handleArchive}
-          onUnarchive={handleUnarchive}
-          onDelete={handleDelete}
-          onRowClick={handleRowClick}
-          facetValues={facetValues}
-          workflowStepPreviews={workflowStepPreviews}
-        />
-        <TasksPagination
-          total={total}
-          pageCount={pageCount}
-          pagination={pagination}
-          onPaginationChange={setPagination}
-        />
+        <TaskListResultBoundary
+          readError={readError}
+          unavailableFilter={unavailableFilter}
+          onRetry={onRetry}
+          onClearFilters={filters?.onClearFilters}
+        >
+          <TaskRows
+            emptyMessage={listEmptyMessage(t, hasFilters, archiveMode)}
+            onClearFilters={hasFilters ? filters?.onClearFilters : undefined}
+            tasks={tasks}
+            workflows={workflows}
+            repositories={repositories}
+            showTaskDetails={showTaskDetails}
+            tasksListGroup={tasksListGroup}
+            isLoading={isLoading}
+            deletingTaskId={deletingTaskId}
+            onArchive={handleArchive}
+            onUnarchive={handleUnarchive}
+            onDelete={handleDelete}
+            onRowClick={handleRowClick}
+            facetValues={facetValues}
+            workflowStepPreviews={workflowStepPreviews}
+          />
+        </TaskListResultBoundary>
+        {!isLoading && !issue && (
+          <TasksPagination
+            total={total}
+            pageCount={pageCount}
+            pagination={pagination}
+            onPaginationChange={setPagination}
+          />
+        )}
       </div>
     </div>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
 }
 
+function hasListFilters(filters?: TasksListFilterProps) {
+  return Boolean(
+    filters &&
+    (filters.searchQuery || filters.workflowId !== null || filters.repositoryId !== null),
+  );
+}
+
+function listEmptyMessage(t: TFunction, filtered: boolean, mode: TasksListArchiveMode) {
+  if (filtered) return t("tasks:noMatchingTasks");
+  return t(mode === "archived" ? "tasks:noArchivedTasks" : "tasks:noTasksFound");
+}
+
 function TaskRows({
+  emptyMessage,
+  onClearFilters,
   tasks,
   workflows,
   repositories,
@@ -139,6 +188,8 @@ function TaskRows({
   facetValues = {},
   workflowStepPreviews = {},
 }: {
+  emptyMessage: string;
+  onClearFilters?: () => void;
   tasks: Task[];
   workflows: TaskListWorkflow[];
   repositories: Repository[];
@@ -156,7 +207,74 @@ function TaskRows({
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
   workflowStepPreviews?: TaskListStepPreviews;
 }) {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
+  const sections = useTaskListSections({
+    tasks,
+    workflows,
+    repositories,
+    tasksListGroup,
+    facetValues,
+    workflowStepPreviews,
+  });
+
+  if (isLoading) {
+    return (
+      <div
+        role="status"
+        className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground"
+      >
+        {t("tasks:loadingTasks")}
+      </div>
+    );
+  }
+  if (tasks.length === 0) {
+    return (
+      <div
+        role="status"
+        className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground"
+      >
+        <p>{emptyMessage}</p>
+        {onClearFilters && (
+          <Button variant="ghost" className="mt-3 cursor-pointer" onClick={onClearFilters}>
+            {t("tasks:clearFilters")}
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5" data-testid="tasks-list">
+      {sections.map((section) => (
+        <TaskListSectionView
+          key={section.key}
+          section={section}
+          deletingTaskId={deletingTaskId}
+          onArchive={onArchive}
+          onUnarchive={onUnarchive}
+          onDelete={onDelete}
+          onRowClick={onRowClick}
+          repositories={repositories}
+          parentTasks={tasks}
+          showTaskDetails={showTaskDetails}
+        />
+      ))}
+    </div>
+  );
+}
+
+function useTaskListSections({
+  tasks,
+  workflows,
+  repositories,
+  tasksListGroup,
+  facetValues = {},
+  workflowStepPreviews = {},
+}: Pick<
+  TasksListViewProps,
+  "tasks" | "workflows" | "repositories" | "tasksListGroup" | "facetValues" | "workflowStepPreviews"
+>) {
+  const { i18n } = useTranslation();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
   // Section headings resolve from the active locale even when the tasks do not change.
@@ -182,39 +300,7 @@ function TaskRows({
     ],
   );
 
-  if (isLoading) {
-    return (
-      <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        {t("tasks:loadingTasks")}
-      </div>
-    );
-  }
-  if (tasks.length === 0) {
-    return (
-      <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        {t("tasks:noTasksFound")}
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-5" data-testid="tasks-list">
-      {sections.map((section) => (
-        <TaskListSectionView
-          key={section.key}
-          section={section}
-          deletingTaskId={deletingTaskId}
-          onArchive={onArchive}
-          onUnarchive={onUnarchive}
-          onDelete={onDelete}
-          onRowClick={onRowClick}
-          repositories={repositories}
-          parentTasks={tasks}
-          showTaskDetails={showTaskDetails}
-        />
-      ))}
-    </div>
-  );
+  return sections;
 }
 
 function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {

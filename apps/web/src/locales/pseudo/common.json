@@ -551,5 +551,7 @@
   "sidebarYearsMax": "99+ŷ",
   "integrationSettings": "Ĩńţēĝŕàţĩōń śēţţĩńĝś",
   "pageNavigation": "Ōń ţĥĩś ƥàĝē",
-  "viewOptions": "Vĩēŵ ōƥţĩōńś"
+  "viewOptions": "Vĩēŵ ōƥţĩōńś",
+  "commandGoToArchivedTasks": "Ĝō ţō àŕćĥĩvēď ţàśķś",
+  "commandGoToArchivedTasksKeywords": "àŕćĥĩvēď ţàśķś, àŕćĥĩvē, ĥĩśţōŕŷ"
 }

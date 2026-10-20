@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import { deleteTask, listTasksByWorkspace, unarchiveTask, updateUserSettings } from "@/lib/api";
+import { deleteTask, unarchiveTask, updateUserSettings } from "@/lib/api";
 import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import type { Task, Workspace, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
@@ -24,14 +24,20 @@ import { useTaskActions } from "@/hooks/use-task-actions";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
-import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
+import { useTasksListQueryState } from "@/hooks/use-tasks-list-query-state";
+import { useTasksListData } from "@/hooks/use-tasks-list-data";
+import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
+import {
+  canUseTasksListBootData,
+  tasksListFilterStatus,
+  type TasksListScope,
+} from "@/lib/tasks/tasks-list-query";
 import { TasksPageContent } from "./tasks-page-content";
 import { type MobileTaskStep } from "./mobile-tasks-create-dialog";
 import { MobileTasksActions } from "./mobile-tasks-actions";
 import {
   parseTasksListGroup,
   parseTasksListSort,
-  sortTasksForList,
   type TasksListGroup,
   type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
@@ -47,111 +53,7 @@ interface TasksPageClientProps {
   initialGroup: TasksListGroup;
 }
 
-type UseTaskOperationsParams = {
-  activeWorkspaceId: string | null;
-  activeWorkflowId: string | null;
-  selectedRepositoryId: string | null;
-  pagination: PaginationState;
-  debouncedQuery: string;
-  showArchived: boolean;
-  tasksListSort: TasksListSort;
-  setTasks: (tasks: Task[]) => void;
-  setTotal: (total: number) => void;
-};
-
 const EMPTY_WORKFLOW_STEPS: MobileTaskStep[] = [];
-
-function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
-  const latestFetchRef = useRef({ seq: 0, workspaceId: activeWorkspaceId });
-
-  useEffect(() => {
-    latestFetchRef.current.workspaceId = activeWorkspaceId;
-  }, [activeWorkspaceId]);
-
-  const beginRequest = useCallback((workspaceId: string) => {
-    const seq = latestFetchRef.current.seq + 1;
-    latestFetchRef.current = { seq, workspaceId };
-    return seq;
-  }, []);
-
-  const isCurrentRequest = useCallback(
-    (seq: number, workspaceId: string) =>
-      latestFetchRef.current.seq === seq && latestFetchRef.current.workspaceId === workspaceId,
-    [],
-  );
-
-  return { beginRequest, isCurrentRequest };
-}
-
-function useTaskOperations({
-  activeWorkspaceId,
-  activeWorkflowId,
-  selectedRepositoryId,
-  pagination,
-  debouncedQuery,
-  showArchived,
-  tasksListSort,
-  setTasks,
-  setTotal,
-}: UseTaskOperationsParams) {
-  const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
-  const { beginRequest, isCurrentRequest } = useLatestWorkspaceRequest(activeWorkspaceId);
-
-  const fetchTasks = useCallback(
-    async (silent = false) => {
-      if (!activeWorkspaceId) return;
-      const requestSeq = beginRequest(activeWorkspaceId);
-      const shouldCommit = () => isCurrentRequest(requestSeq, activeWorkspaceId);
-      setIsLoading(true);
-      try {
-        const result = await listTasksByWorkspace(activeWorkspaceId, {
-          page: pagination.pageIndex + 1,
-          pageSize: pagination.pageSize,
-          query: debouncedQuery,
-          includeArchived: showArchived,
-          workflowId: activeWorkflowId,
-          repositoryId: selectedRepositoryId,
-          sort: tasksListSort,
-        });
-        if (!shouldCommit()) return;
-        setTasks(result.tasks);
-        setTotal(result.total);
-      } catch (err) {
-        if (!shouldCommit()) return;
-        if (!silent) {
-          toast({
-            title: t("tasks:failedToLoadTasks"),
-            description: errorDescription(err),
-            variant: "error",
-          });
-        } else {
-          console.error("[TasksPage] Silent foreground refresh failed:", err);
-        }
-      } finally {
-        if (shouldCommit()) setIsLoading(false);
-      }
-    },
-    [
-      activeWorkspaceId,
-      activeWorkflowId,
-      selectedRepositoryId,
-      pagination.pageIndex,
-      pagination.pageSize,
-      debouncedQuery,
-      showArchived,
-      tasksListSort,
-      beginRequest,
-      isCurrentRequest,
-      toast,
-      setTasks,
-      setTotal,
-    ],
-  );
-
-  const mutations = useTaskMutations(fetchTasks);
-  return { isLoading, fetchTasks, ...mutations };
-}
 
 function errorDescription(err: unknown): string {
   return err instanceof Error ? err.message : t("common:unknownError");
@@ -225,169 +127,117 @@ function useTaskMutations(fetchTasks: () => void) {
   return { deletingTaskId, handleArchive, handleUnarchive, handleDelete };
 }
 
-function useTasksPageViewState({
-  initialRepositories,
-  initialTasks,
-  initialTotal,
-  initialSort,
-  initialGroup,
-  storeRepositories,
-}: {
-  initialRepositories: Repository[];
-  initialTasks: Task[];
-  initialTotal: number;
-  initialSort: TasksListSort;
-  initialGroup: TasksListGroup;
-  storeRepositories: Repository[];
-}) {
-  const repositories = storeRepositories.length > 0 ? storeRepositories : initialRepositories;
-  const [tasks, setTasks] = useState(initialTasks);
-  const [total, setTotal] = useState(initialTotal);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [tasksListSort, setTasksListSort] = useState<TasksListSort>(initialSort);
-  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(initialGroup);
-  const [showArchived, setShowArchived] = useState(false);
-  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 25 });
-
-  return {
-    repositories,
-    tasks,
-    setTasks,
-    total,
-    setTotal,
-    searchQuery,
-    setSearchQuery,
-    tasksListSort,
-    setTasksListSort,
-    tasksListGroup,
-    setTasksListGroup,
-    showArchived,
-    setShowArchived,
-    pagination,
-    setPagination,
-  };
-}
-
-function useTasksPageEffects({
-  debouncedQuery,
-  setPagination,
-  activeWorkspaceId,
-  fetchTasks,
-  pagination,
-  showArchived,
-  activeWorkflowId,
-  selectedRepositoryId,
-  initialDataLoaded = false,
-}: {
-  debouncedQuery: string;
-  setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
-  activeWorkspaceId: string | null;
-  fetchTasks: () => void;
-  pagination: PaginationState;
-  showArchived: boolean;
-  activeWorkflowId: string | null;
-  selectedRepositoryId: string | null;
-  initialDataLoaded?: boolean;
-}) {
-  const skippedInitialFetchRef = useRef(false);
-
-  useEffect(() => {
-    void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
-  }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
-
-  useEffect(() => {
-    if (
-      shouldSkipInitialTasksFetch({
-        hasInitialData: initialDataLoaded,
-        alreadySkipped: skippedInitialFetchRef.current,
-        pageIndex: pagination.pageIndex,
-        debouncedQuery,
-        showArchived,
-      })
-    ) {
-      skippedInitialFetchRef.current = true;
-      return;
-    }
-    if (activeWorkspaceId) fetchTasks();
-  }, [
-    activeWorkspaceId,
-    pagination.pageIndex,
-    pagination.pageSize,
-    debouncedQuery,
-    showArchived,
-    fetchTasks,
-    initialDataLoaded,
-  ]);
-}
-
-function useTasksPageComputed({
-  total,
-  pagination,
-  router,
-}: {
-  total: number;
-  pagination: PaginationState;
-  router: ReturnType<typeof useRouter>;
-}) {
-  const pageCount = useMemo(
-    () => Math.ceil(total / pagination.pageSize),
-    [total, pagination.pageSize],
+function useTasksListMetadata(
+  workspaceId: string | null,
+  initialWorkspaceId: string | undefined,
+  repositories: Repository[],
+  query: TasksListScope,
+) {
+  const workflows = useAppStore((state) => state.workflows.items);
+  const context = useAppStore((state) => state.workspaceContextRead);
+  const repositoriesLoaded = useAppStore((state) =>
+    workspaceId ? state.repositories.loadedByWorkspaceId[workspaceId] : false,
   );
-  const handleRowClick = useCallback(
-    (task: Task) => {
-      router.push(linkToTask(task.id));
-    },
-    [router],
-  );
-
-  return { pageCount, handleRowClick };
+  const bootMetadata = Boolean(workspaceId && initialWorkspaceId === workspaceId);
+  const currentContext = context.workspaceId === workspaceId;
+  return tasksListFilterStatus({
+    query,
+    workflowIds: workflows.filter((w) => w.workspaceId === workspaceId).map((w) => w.id),
+    repositoryIds: repositories.map((r) => r.id),
+    workflowReady:
+      bootMetadata ||
+      Boolean(currentContext && context.requestIds.workflows && !context.pending.workflows),
+    repositoryReady: bootMetadata || Boolean(repositoriesLoaded),
+    workflowFailed: currentContext && Boolean(context.errors.workflows),
+    repositoryFailed: currentContext && Boolean(context.errors.repositories),
+  });
 }
 
 function useTasksPageSetup(props: TasksPageClientProps) {
   const router = useRouter();
-  const {
-    activeWorkspaceId,
-    activeWorkflowId,
-    repositories: storeRepositories,
-    selectedRepositoryId,
-  } = useKanbanDisplaySettings();
-  const viewState = useTasksPageViewState({
-    initialRepositories: props.initialRepositories,
-    initialTasks: props.initialTasks,
-    initialTotal: props.initialTotal,
-    initialSort: props.initialSort,
-    initialGroup: props.initialGroup,
-    storeRepositories,
+  const searchParams = useSearchParams();
+  const display = useKanbanDisplaySettings();
+  const { activeWorkspaceId } = display;
+  const store = useAppStoreApi();
+  const { settings, commitSettings } = useUserDisplaySettings({
+    workspaceId: activeWorkspaceId,
+    workflowId: display.activeWorkflowId,
   });
-  const debouncedQuery = useDebounce(viewState.searchQuery, 300);
-  const ops = useTaskOperations({
+  const persistScope = useCallback(
+    (patch: Partial<TasksListScope>) => {
+      const current = store.getState().userSettings;
+      const workflowId = patch.workflowId === undefined ? current.workflowId : patch.workflowId;
+      let repositoryIds = current.repositoryIds;
+      if (patch.repositoryId !== undefined)
+        repositoryIds = patch.repositoryId ? [patch.repositoryId] : [];
+      commitSettings({ ...current, workspaceId: activeWorkspaceId, workflowId, repositoryIds });
+      if (patch.workflowId !== undefined) store.getState().setActiveWorkflow(workflowId);
+    },
+    [store, commitSettings, activeWorkspaceId],
+  );
+  const query = useTasksListQueryState({
+    workspaceId: activeWorkspaceId,
+    workflowId: settings.workflowId,
+    repositoryId: settings.repositoryIds[0] ?? null,
+    persistScope,
+  });
+  const [tasksListSort, setTasksListSort] = useState<TasksListSort>(props.initialSort);
+  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(props.initialGroup);
+  const fallbackRepositories =
+    props.initialWorkspaceId === activeWorkspaceId ? props.initialRepositories : [];
+  const repositories =
+    display.repositories.length > 0 ? display.repositories : fallbackRepositories;
+  const metadata = useTasksListMetadata(
     activeWorkspaceId,
-    activeWorkflowId,
-    selectedRepositoryId,
-    pagination: viewState.pagination,
+    props.initialWorkspaceId,
+    repositories,
+    query,
+  );
+  const debouncedQuery = useDebounce(query.searchQuery, 300);
+  const requestedWorkspace = searchParams.get("workspace") ?? activeWorkspaceId;
+  const onPageChange = useCallback(
+    (pageIndex: number) => query.setPagination((prev) => ({ ...prev, pageIndex })),
+    [query.setPagination],
+  );
+  const data = useTasksListData({
+    workspaceId: activeWorkspaceId,
+    query,
+    sort: tasksListSort,
+    pagination: query.pagination,
+    enabled: Boolean(
+      activeWorkspaceId &&
+      requestedWorkspace === activeWorkspaceId &&
+      !metadata.unavailableFilter &&
+      !metadata.metadataLoading &&
+      !metadata.metadataError &&
+      debouncedQuery === query.searchQuery,
+    ),
+    onPageChange,
+    initialData:
+      props.initialDataLoaded &&
+      canUseTasksListBootData(searchParams, props.initialWorkspaceId, activeWorkspaceId)
+        ? { tasks: props.initialTasks, total: props.initialTotal }
+        : undefined,
+  });
+  const mutations = useTaskMutations(data.fetchTasks);
+  const pageCount = Math.ceil(data.total / query.pagination.pageSize);
+  const handleRowClick = useCallback((task: Task) => router.push(linkToTask(task.id)), [router]);
+  return {
+    ...query,
+    ...data,
+    ...mutations,
+    activeWorkspaceId,
+    activeWorkflowId: query.workflowId,
+    tasksListSort,
+    setTasksListSort,
+    tasksListGroup,
+    setTasksListGroup,
+    repositories,
+    ...metadata,
     debouncedQuery,
-    showArchived: viewState.showArchived,
-    tasksListSort: viewState.tasksListSort,
-    setTasks: viewState.setTasks,
-    setTotal: viewState.setTotal,
-  });
-  useTasksPageEffects({
-    debouncedQuery,
-    setPagination: viewState.setPagination,
-    activeWorkspaceId,
-    fetchTasks: ops.fetchTasks,
-    pagination: viewState.pagination,
-    showArchived: viewState.showArchived,
-    activeWorkflowId,
-    selectedRepositoryId,
-    initialDataLoaded: props.initialDataLoaded,
-  });
-  const computed = useTasksPageComputed({
-    total: viewState.total,
-    pagination: viewState.pagination,
-    router,
-  });
-  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, debouncedQuery };
+    pageCount,
+    handleRowClick,
+  };
 }
 
 function useTasksListPreferenceSync({
@@ -395,14 +245,12 @@ function useTasksListPreferenceSync({
   setTasksListSort,
   tasksListGroup,
   setTasksListGroup,
-  setTasks,
   setPagination,
 }: {
   tasksListSort: TasksListSort;
   setTasksListSort: (sort: TasksListSort) => void;
   tasksListGroup: TasksListGroup;
   setTasksListGroup: (group: TasksListGroup) => void;
-  setTasks: (tasks: Task[] | ((prev: Task[]) => Task[])) => void;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
 }) {
   const router = useRouter();
@@ -444,7 +292,6 @@ function useTasksListPreferenceSync({
       : tasksListGroup;
     if (nextSort !== tasksListSort) {
       setTasksListSort(nextSort);
-      setTasks((prev) => sortTasksForList(prev, nextSort));
       setPagination((prev) => ({ ...prev, pageIndex: 0 }));
     }
     if (nextGroup !== tasksListGroup) {
@@ -455,7 +302,6 @@ function useTasksListPreferenceSync({
     persistPreferences,
     searchParams,
     setPagination,
-    setTasks,
     setTasksListGroup,
     setTasksListSort,
     tasksListGroup,
@@ -476,12 +322,11 @@ function useTasksListPreferenceSync({
   const handleSortChange = useCallback(
     (sort: TasksListSort) => {
       setTasksListSort(sort);
-      setTasks((prev) => sortTasksForList(prev, sort));
       setPagination((prev) => ({ ...prev, pageIndex: 0 }));
       writeUrl(sort, tasksListGroup);
       persistPreferences(sort, tasksListGroup);
     },
-    [persistPreferences, setPagination, setTasks, setTasksListSort, tasksListGroup, writeUrl],
+    [persistPreferences, setPagination, setTasksListSort, tasksListGroup, writeUrl],
   );
 
   const handleGroupChange = useCallback(
@@ -513,14 +358,7 @@ function useTasksPageClientEffects({
   }, [setView]);
 }
 
-export function TasksPageClient(props: TasksPageClientProps) {
-  const s = useTasksPageSetup(props);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const { setView } = useTaskListingView();
-  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
-  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
-  const { isMobile } = useResponsiveBreakpoint();
-  const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
+function useTasksListPresentation(s: ReturnType<typeof useTasksPageSetup>) {
   const { facets, values: facetValues } = useTaskListFacets(s.tasks, s.activeWorkspaceId);
   const facetOptions = useMemo(
     () => facets.map((facet) => ({ value: facet.key, label: facet.label })),
@@ -530,14 +368,11 @@ export function TasksPageClient(props: TasksPageClientProps) {
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
   useWorkflowSnapshot(s.activeWorkflowId);
-  useWorkspacePRs(s.activeWorkspaceId);
-  useWorkspaceMRs(s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
     tasksListSort: s.tasksListSort,
     setTasksListSort: s.setTasksListSort,
     tasksListGroup: s.tasksListGroup,
     setTasksListGroup: s.setTasksListGroup,
-    setTasks: s.setTasks,
     setPagination: s.setPagination,
   });
   const { displayedTasks, sort, group, selectSort, selectGroup } = useTaskListFacetSelection({
@@ -551,19 +386,67 @@ export function TasksPageClient(props: TasksPageClientProps) {
   });
   const stepMetadata = useTasksListStepRefresh(s, displayedTasks, group);
 
+  return {
+    displayedTasks,
+    facetOptions,
+    facetValues,
+    activeSteps,
+    sort,
+    group,
+    selectSort,
+    selectGroup,
+    stepMetadata,
+  };
+}
+
+export function TasksPageClient(props: TasksPageClientProps) {
+  const s = useTasksPageSetup(props);
+  const store = useAppStoreApi();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const { setView } = useTaskListingView();
+  const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
+  const { isMobile } = useResponsiveBreakpoint();
+  const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
+  const {
+    displayedTasks,
+    facetOptions,
+    facetValues,
+    activeSteps,
+    sort,
+    group,
+    selectSort,
+    selectGroup,
+    stepMetadata,
+  } = useTasksListPresentation(s);
+  useWorkspacePRs(s.activeWorkspaceId);
+  useWorkspaceMRs(s.activeWorkspaceId);
+
   useTasksPageClientEffects({ setMobileSearchOpen, setView });
 
   return (
     <TasksPageContent
+      filters={{
+        searchQuery: s.searchQuery,
+        onSearchChange: s.setSearchQuery,
+        workflowId: s.workflowId,
+        onWorkflowChange: s.setWorkflowId,
+        repositoryId: s.repositoryId,
+        onRepositoryChange: s.setRepositoryId,
+        workflows: stepMetadata.workflows,
+        repositories: s.repositories,
+        onClearFilters: s.clearFilters,
+      }}
+      readError={Boolean(s.error || s.metadataError)}
+      unavailableFilter={s.unavailableFilter}
+      onRetry={() => {
+        if (s.metadataError) store.getState().requestWorkspaceContextRefresh();
+        else void s.fetchTasks();
+      }}
       header={{
         workspaceId: s.activeWorkspaceId ?? undefined,
         currentPage: "tasks",
-        searchQuery: s.searchQuery,
-        onSearchChange: s.setSearchQuery,
-        isSearchLoading: s.isLoading && !!s.debouncedQuery,
         tasksListOptions: {
-          showArchived: s.showArchived,
-          onShowArchivedChange: s.setShowArchived,
           sort,
           onSortChange: selectSort,
           group,
@@ -584,13 +467,13 @@ export function TasksPageClient(props: TasksPageClientProps) {
       pagination={s.pagination}
       setPagination={s.setPagination}
       isLoading={s.isLoading}
-      showArchived={s.showArchived}
+      archiveMode={s.archiveMode}
       showTaskDetails={showTaskDetails}
       sort={sort}
       group={group}
       onSortChange={selectSort}
       onGroupChange={selectGroup}
-      onShowArchivedChange={s.setShowArchived}
+      onArchiveModeChange={s.setArchiveMode}
       onRowClick={s.handleRowClick}
       deletingTaskId={s.deletingTaskId}
       onArchive={s.handleArchive}

@@ -551,5 +551,7 @@
   "sidebarYearsMax": "99+y",
   "integrationSettings": "Integration settings",
   "pageNavigation": "On this page",
-  "viewOptions": "View options"
+  "viewOptions": "View options",
+  "commandGoToArchivedTasks": "Go to archived tasks",
+  "commandGoToArchivedTasksKeywords": "archived tasks, archive, history"
 }
