@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
   "allPRsClosedNotice_other": "全部 {{count}} 个 PR 已关闭但未合并。您可以归档此任务。",
   "turnOffTranscriptAutoScroll": "关闭对话记录自动滚动",
-  "turnOnTranscriptAutoScroll": "开启对话记录自动滚动"
+  "turnOnTranscriptAutoScroll": "开启对话记录自动滚动",
+  "deleteKeepFilesOption": "保留工作区文件",
+  "deleteKeepFilesAction": "删除任务并保留文件",
+  "deleteKeepFilesDescription": "此操作会删除所选任务及其对话。工作区文件和分支将会保留。Kandev 不会自动删除它们。保留的资源可能继续占用磁盘空间或产生服务商费用。",
+  "deleteKeptFilesTitle": "任务已删除，文件已保留。",
+  "deleteKeptFilesPending": "工作区文件已保留。运行环境仍待关闭。",
+  "deleteKeptFilesComplete": "工作区文件和分支已保留。",
+  "deleteUnverifiedWorkspaceOption": "即使无法检查工作区更改也删除",
+  "deleteUnverifiedWorkspaceDescription": "本地更改可能会丢失。无法安全删除的文件将保留，等待清理。",
+  "deleteCleanupPendingTitle": "任务已删除。清理待处理。",
+  "deleteCleanupPendingDescription": "无法安全删除的文件仍受保护。Kandev 将重试清理。"
 }

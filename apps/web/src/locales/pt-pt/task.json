@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "O {{count}} PR foi fechado sem integração. Pode arquivar esta tarefa.",
   "allPRsClosedNotice_other": "Todos os {{count}} PRs foram fechados sem integração. Pode arquivar esta tarefa.",
   "turnOffTranscriptAutoScroll": "Desativar o deslocamento automático da transcrição",
-  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição"
+  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição",
+  "deleteKeepFilesOption": "Manter os ficheiros do espaço de trabalho",
+  "deleteKeepFilesAction": "Eliminar tarefa e manter ficheiros",
+  "deleteKeepFilesDescription": "Esta ação elimina as tarefas selecionadas e as respetivas conversas. Os ficheiros e ramos do espaço de trabalho serão mantidos. O Kandev não os irá remover automaticamente. Os recursos mantidos podem continuar a ocupar espaço em disco ou gerar custos do fornecedor.",
+  "deleteKeptFilesTitle": "Tarefa eliminada. Ficheiros mantidos.",
+  "deleteKeptFilesPending": "Os ficheiros do espaço de trabalho foram mantidos. O encerramento do ambiente de execução ainda está pendente.",
+  "deleteKeptFilesComplete": "Os ficheiros e ramos do espaço de trabalho foram mantidos.",
+  "deleteUnverifiedWorkspaceOption": "Eliminar mesmo que não seja possível verificar as alterações na área de trabalho",
+  "deleteUnverifiedWorkspaceDescription": "As alterações locais podem perder-se. Os ficheiros que não possam ser removidos em segurança ficam a aguardar limpeza.",
+  "deleteCleanupPendingTitle": "Tarefa eliminada. Limpeza pendente.",
+  "deleteCleanupPendingDescription": "Os ficheiros que não possam ser removidos em segurança continuam protegidos. O Kandev tentará a limpeza novamente."
 }

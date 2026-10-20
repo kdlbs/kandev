@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TurnChangeSetSummary, TurnRepositoryChange } from "@/lib/types/turn-changes";
-import { projectTurnChangeSummary, projectTurnRepositoryAvailability } from "./projection";
+import {
+  isTurnChangeCardVisible,
+  projectTurnChangeSummary,
+  projectTurnRepositoryAvailability,
+} from "./projection";
 
 function summary(overrides: Partial<TurnChangeSetSummary> = {}): TurnChangeSetSummary {
   return {
@@ -67,5 +71,27 @@ describe("projectTurnRepositoryAvailability", () => {
       overrides,
     ) as TurnRepositoryChange;
     expect(projectTurnRepositoryAvailability(repository)).toBe(expected);
+  });
+});
+
+describe("turn change transcript eligibility", () => {
+  it.each(["ready", "failed", "unavailable", "expired"] as const)(
+    "hides settled %s captures without recorded files",
+    (availability) => {
+      expect(isTurnChangeCardVisible(summary({ availability, file_count: 0 }))).toBe(false);
+      expect(isTurnChangeCardVisible(summary({ availability, file_count: 1 }))).toBe(true);
+    },
+  );
+
+  it("keeps preparation visible and respects active/disabled exclusions", () => {
+    expect(isTurnChangeCardVisible(summary({ availability: "pending", file_count: 0 }))).toBe(true);
+    expect(isTurnChangeCardVisible(summary({ reason: "capture_disabled" }))).toBe(false);
+    expect(isTurnChangeCardVisible(summary({ terminal_at: undefined }))).toBe(false);
+  });
+
+  it("keeps an unavailable empty turn in history while hiding its chat card", () => {
+    const unavailable = summary({ availability: "unavailable", file_count: 0 });
+    expect(projectTurnChangeSummary(unavailable).visible).toBe(true);
+    expect(isTurnChangeCardVisible(unavailable)).toBe(false);
   });
 });

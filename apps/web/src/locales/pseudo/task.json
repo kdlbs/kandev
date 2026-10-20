@@ -2851,5 +2851,15 @@
   "allPRsClosedNotice_one": "Àĺĺ {{count}} ƤŔ ŵàś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "allPRsClosedNotice_other": "Àĺĺ {{count}} ƤŔś ŵēŕē ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "turnOffTranscriptAutoScroll": "Ţũŕń ōƒƒ ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
-  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ"
+  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
+  "deleteKeepFilesOption": "Ķēēƥ ŵōŕķśƥàćē ƒĩĺēś",
+  "deleteKeepFilesAction": "Ďēĺēţē ţàśķ àńď ķēēƥ ƒĩĺēś",
+  "deleteKeepFilesDescription": "Ţĥĩś ďēĺēţēś ţĥē śēĺēćţēď ţàśķś àńď ţĥēĩŕ ćōńvēŕśàţĩōńś. Ŵōŕķśƥàćē ƒĩĺēś àńď ƀŕàńćĥēś ŵĩĺĺ ŕēḿàĩń. Ķàńďēv ŵĩĺĺ ńōţ ŕēḿōvē ţĥēḿ àũţōḿàţĩćàĺĺŷ. Ŕēţàĩńēď ŕēśōũŕćēś ćàń ćōńţĩńũē ţō ũśē ďĩśķ śƥàćē ōŕ ĩńćũŕ ƥŕōvĩďēŕ ćĥàŕĝēś.",
+  "deleteKeptFilesTitle": "Ţàśķ ďēĺēţēď. Ƒĩĺēś ķēƥţ.",
+  "deleteKeptFilesPending": "Ŵōŕķśƥàćē ƒĩĺēś àŕē ŕēţàĩńēď. Ŕũńţĩḿē śĥũţďōŵń ĩś śţĩĺĺ ƥēńďĩńĝ.",
+  "deleteKeptFilesComplete": "Ŵōŕķśƥàćē ƒĩĺēś àńď ƀŕàńćĥēś àŕē ŕēţàĩńēď.",
+  "deleteUnverifiedWorkspaceOption": "Ďēĺēţē ēvēń ĩƒ ŵōŕķśƥàćē ćĥàńĝēś ćàńńōţ ƀē ćĥēćķēď",
+  "deleteUnverifiedWorkspaceDescription": "Ĺōćàĺ ćĥàńĝēś ḿàŷ ƀē ĺōśţ. Ƒĩĺēś ţĥàţ ćàńńōţ ƀē śàƒēĺŷ ŕēḿōvēď ŵĩĺĺ ŕēḿàĩń ƥēńďĩńĝ ćĺēàńũƥ.",
+  "deleteCleanupPendingTitle": "Ţàśķ ďēĺēţēď. Ćĺēàńũƥ ƥēńďĩńĝ.",
+  "deleteCleanupPendingDescription": "Ƒĩĺēś ţĥàţ ćàńńōţ ƀē śàƒēĺŷ ŕēḿōvēď ŕēḿàĩń ƥŕōţēćţēď. Ķàńďēv ŵĩĺĺ ŕēţŕŷ ćĺēàńũƥ."
 }

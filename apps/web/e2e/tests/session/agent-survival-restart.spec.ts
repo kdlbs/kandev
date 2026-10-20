@@ -1,3 +1,4 @@
+import { verifyAutomaticRestartReconciliation } from "../../helpers/restart-reconciliation";
 import { test, expect } from "../../fixtures/test-base";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -306,4 +307,15 @@ test.describe("Agent survival across backend restart", () => {
       await releaseFeature();
     }
   });
+});
+
+// @covers AC-PLATFORM-DURABLE-RESTART-RECONCILIATION-001.4
+test("slow native restore preserves the conversation and accepts a new instruction", async ({
+  testPage,
+  apiClient,
+  seedData,
+  backend,
+}) => {
+  test.setTimeout(180_000);
+  await verifyAutomaticRestartReconciliation(testPage, apiClient, seedData, backend, "40s");
 });

@@ -31,7 +31,7 @@ Event-bus subscribers alone cannot guarantee those boundaries.
 Completion state authority remains unchanged; checkpoint processing is a separate state.
 
 Resolve and persist the initiating user's settings policy before dispatch.
-Missing settings enable capture; explicit false disables subsequent capture.
+New defaults disable capture; existing saved preferences still control subsequent capture.
 The viewer's setting controls card visibility independently of retained history.
 
 ## Consequences

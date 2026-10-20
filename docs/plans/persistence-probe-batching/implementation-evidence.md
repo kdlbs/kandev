@@ -285,3 +285,30 @@ after delayed loading and reload. Capture preparation closed the disposable
 terminal panel to exclude the local host prompt. A failed capture attempt hit
 the terminal confirmation and a port conflict. The final capture used free
 explicit test ports and passed both viewport assertions.
+
+
+## Latest-main scroll conflict reconciliation
+
+The backend CI failure occurred before test execution when `proxy.golang.org`
+returned an HTTP/2 `INTERNAL_ERROR` while downloading `sprites-go`. The first
+failed-job rerun passed. All 85 checks on that revision then passed.
+
+A new main commit changed the same follow-intent predicate and exposed a merge
+conflict. Its regression requires upward native restoration during content
+growth. This branch also requires upward anchoring during content shrinkage and
+resize tracking when growth emits no scroll event. The resolution preserves all
+three behaviors and main's older-page preparation change.
+
+The incoming growth regression failed with this branch's predicate before the
+resolution. After resolution, six focused scroll and turn-summary test files
+passed all 168 tests. Type checking with an 8 GiB Node heap, scoped ESLint,
+specification lint, and documentation catalog validation passed. Fresh backend,
+web, plugin, and delivery-fixture builds passed. Desktop and mobile delayed-card
+checks and the tablet LSP check passed together: three tests, no retries.
+Database dialect, schema, required-store health, backend health, SSH cleanup,
+and pruned-delivery regressions passed with race detection. SQL guard passed.
+
+Browser setup first found a missing worktree-local delivery fixture, then a
+port used by another process. The final run built the fixture and selected free
+ports before startup. No test assertion was suppressed. Final screenshots and
+remote checks remain pending for the merge commit.

@@ -101,7 +101,7 @@ export function shouldPreserveFollowOnScroll(
   if (Math.abs(scrollTopDelta) <= 2) return true;
   const contentDelta = current.scrollHeight - previous.scrollHeight;
   return (
-    Math.sign(scrollTopDelta) === Math.sign(contentDelta) &&
+    (contentDelta > 0 || (contentDelta < 0 && scrollTopDelta < 0)) &&
     Math.abs(scrollTopDelta) <= Math.abs(contentDelta) + 2
   );
 }
@@ -2302,6 +2302,10 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       onPositionClaim: claimProgrammaticPosition,
       startAlignedTargetRef,
     });
+  const prepareOlderPage = useCallback(() => {
+    beginOlderLoad();
+    resyncIsNearBottom();
+  }, [beginOlderLoad, resyncIsNearBottom]);
   const scrollToLatest = useScrollToLatestAction({
     scrollRef,
     sessionId,
@@ -2325,7 +2329,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       isRestoringLayout,
       placementLatches,
     },
-    beginOlderLoad,
+    prepareOlderPage,
   );
 
   return {

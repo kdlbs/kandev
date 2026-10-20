@@ -2171,6 +2171,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !exists {
 		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
 	}
+	return m.recoverAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) recoverAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if execution.PassthroughProcessID != "" || execution.IsPassthrough {
 		releaseClient()
@@ -2199,14 +2203,13 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
-		if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
-			execution.FailureCode != durableDeliveryReconnectingFailureCode &&
-			execution.isSessionInitialized() && execution.ACPSessionID != "" {
-			return m.restoreRecoveredFailedExecution(ctx, execution)
-		}
-		return nil
+		return m.restoreExecutionAfterStreamRecovery(ctx, execution)
 	}
 	releaseClient()
+	return m.reconnectAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) reconnectAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	if m.streamManager == nil {
 		return fmt.Errorf("stream manager is not configured")
 	}
@@ -2220,7 +2223,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	client, releaseClient = execution.AcquireAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
@@ -2229,6 +2232,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !hasAgentStream {
 		return fmt.Errorf("agent stream not connected")
 	}
+	return m.restoreExecutionAfterStreamRecovery(ctx, execution)
+}
+
+func (m *Manager) restoreExecutionAfterStreamRecovery(ctx context.Context, execution *AgentExecution) error {
 	if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
 		execution.FailureCode != durableDeliveryReconnectingFailureCode &&
 		execution.isSessionInitialized() && execution.ACPSessionID != "" {
@@ -3172,7 +3179,7 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 		}
 		runtimeInstance.Metadata = metadata
 	}
-	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, rt, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
 		// absent. Only surface this at WARN outside shutdown.
 		if m.IsShuttingDown() {

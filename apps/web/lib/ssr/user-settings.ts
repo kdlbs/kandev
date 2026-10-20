@@ -61,7 +61,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
-    showTurnChangedFiles: true,
+    showTurnChangedFiles: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],

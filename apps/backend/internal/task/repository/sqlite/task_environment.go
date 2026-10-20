@@ -1058,10 +1058,10 @@ func (r *Repository) ClaimTaskEnvironmentReset(
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_resource_cleanup_jobs (
 			id, operation_id, task_id, trigger, state, resource_snapshot, attempts,
-			next_attempt_at, last_error, created_at, updated_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			next_attempt_at, last_error, created_at, updated_at, completed_at, workspace_protection
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), jobID, operationID, taskID, models.TaskResourceCleanupTriggerReconcile,
-		models.TaskResourceCleanupStatePrepared, `{}`, 0, nil, "", now, now, nil); err != nil {
+		models.TaskResourceCleanupStatePrepared, `{}`, 0, nil, "", now, now, nil, ""); err != nil {
 		return "", err
 	}
 	query := taskEnvironmentOwnershipQuery

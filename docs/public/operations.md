@@ -31,6 +31,8 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
 
+Provider startup can take longer when network requests time out. Native startup has a two-minute budget for each automatic restore attempt. If startup fails, Kandev verifies that the failed runtime stopped before allowing a replacement. Missing execution evidence keeps recovery blocked.
+
 The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
 
 If an older crash left journal acknowledgments ahead of saved output, Kandev

@@ -813,7 +813,7 @@ func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri
 		m.recoveryGuard.Release(ri.SessionID)
 		return
 	}
-	if err := backend.StopInstance(ctx, ri, true); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, ri, true); err != nil {
 		m.logger.Warn("failed to stop unreconstructable recovered instance",
 			zap.String("instance_id", ri.InstanceID),
 			zap.String("session_id", ri.SessionID),
@@ -1025,6 +1025,12 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 }
 
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {
+	return m.cleanupStaleExecutionWithCheckpoint(ctx, execution, nil)
+}
+
+func (m *Manager) cleanupStaleExecutionWithCheckpoint(
+	ctx context.Context, execution *AgentExecution, checkpoint func(context.Context) error,
+) error {
 	if execution == nil {
 		return nil
 	}
@@ -1047,6 +1053,11 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	if !retired {
 		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
 			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+		}
+	}
+	if checkpoint != nil {
+		if err := checkpoint(ctx); err != nil {
+			return fmt.Errorf("checkpoint stopped runtime %s: %w", execution.ID, err)
 		}
 	}
 

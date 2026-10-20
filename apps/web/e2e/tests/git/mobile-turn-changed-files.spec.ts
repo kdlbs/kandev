@@ -107,14 +107,53 @@ test("keeps renamed file paths readable in the phone diff", async ({
   apiClient,
   seedData,
 }) => {
-  const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
-    await import("./turn-changed-files-qa-helpers");
-  await routeRenamedTurnFile(testPage);
-  const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
-  resetTurnQaFile(seedData.repositoryPath);
-  const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
-  await waitForTurnChangeCount(apiClient, sessionId, 1);
-  await assertCardTouchTargets(testPage);
-  await assertTurnFileDisclosure(testPage, true);
-  await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
+  const restorePreference = await enableTurnChangedFiles(apiClient);
+  try {
+    const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
+      await import("./turn-changed-files-qa-helpers");
+    await routeRenamedTurnFile(testPage);
+    const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+    resetTurnQaFile(seedData.repositoryPath);
+    const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+    await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await assertCardTouchTargets(testPage);
+    await assertTurnFileDisclosure(testPage, true);
+    await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
+  } finally {
+    await restorePreference();
+  }
+});
+
+test("hides an unavailable empty capture after reload", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const restorePreference = await enableTurnChangedFiles(apiClient);
+  try {
+    const { resetTurnQaFile, routeEmptyUnavailableTurn } =
+      await import("./turn-changed-files-qa-helpers");
+    const { waitForHttp } = await import("../../helpers/causal-waits");
+    resetTurnQaFile(seedData.repositoryPath);
+    const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+    await waitForTurnChangeCount(apiClient, sessionId, 1);
+    await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
+    await routeEmptyUnavailableTurn(testPage, sessionId);
+    const historyLoaded = waitForHttp(testPage, "GET", /\/turn-changes$/);
+    await testPage.reload();
+    const response = await historyLoaded;
+    expect((await response.json()).change_sets[0].file_count).toBe(0);
+    await session.waitForLoad();
+    await expect(
+      session.chat.getByText("untracked-file-setup complete", { exact: false }),
+    ).toBeVisible();
+    await session.waitForChatIdle();
+    await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(0);
+    await prCapture.screenshot("empty-capture-mobile", {
+      caption: "Completed reply without an empty unavailable change card",
+    });
+  } finally {
+    await restorePreference();
+  }
 });
