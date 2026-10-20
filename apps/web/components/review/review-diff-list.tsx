@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useEffect, useEffectEvent, useMemo, useRef, useState, useCallback } from "react";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -249,41 +249,41 @@ function useAutoMarkOnScroll({
   suppressAutoMark,
 }: AutoMarkArgs) {
   const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
-  const autoMarkedRef = useRef(false);
-  useEffect(() => {
-    if (!autoMarkOnScroll || isReviewed || isStale) {
-      autoMarkedRef.current = false;
-      return;
+  const markIfEligible = useEffectEvent(() => {
+    if (!isReviewed && !isStale && !suppressAutoMark.current) {
+      onToggleReviewed(fileKey, true);
     }
+  });
+  useEffect(() => {
+    if (!autoMarkOnScroll) return;
     const sentinel = scrollSentinelRef.current;
     const root = scrollContainer.current;
     if (!sentinel || !root) return;
+    let active = true;
+    let previousAbove: boolean | null = null;
+    let previousScrollTop = root.scrollTop;
     const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (
-          !entry.isIntersecting &&
-          entry.boundingClientRect.top < root.getBoundingClientRect().top &&
-          !suppressAutoMark.current &&
-          !autoMarkedRef.current
-        ) {
-          autoMarkedRef.current = true;
-          console.debug("[review] auto-mark reviewed:", fileKey);
-          onToggleReviewed(fileKey, true);
+      (entries) => {
+        if (!active) return;
+        for (const entry of entries) {
+          const above =
+            !entry.isIntersecting &&
+            entry.boundingClientRect.top < root.getBoundingClientRect().top;
+          const crossed = previousAbove === false && above && root.scrollTop > previousScrollTop;
+          // Geometry keeps advancing while reviewed so clearing a checkbox cannot replay a pass.
+          previousAbove = above;
+          previousScrollTop = root.scrollTop;
+          if (crossed) markIfEligible();
         }
       },
       { threshold: 0, root },
     );
     observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [
-    autoMarkOnScroll,
-    fileKey,
-    isReviewed,
-    isStale,
-    onToggleReviewed,
-    scrollContainer,
-    suppressAutoMark,
-  ]);
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
+  }, [autoMarkOnScroll, fileKey, scrollContainer]);
   return scrollSentinelRef;
 }
 
