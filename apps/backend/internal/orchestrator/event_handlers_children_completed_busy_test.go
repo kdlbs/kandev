@@ -2,11 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/workflow/engine"
 
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -70,6 +74,85 @@ func TestProcessOnChildrenCompleted_DeliversWakeWhenTurnEndsWhileQueueing(t *tes
 	entries, _, err := svc.messageQueue.SnapshotSession(ctx, busyParentSessionID)
 	require.NoError(t, err)
 	require.Empty(t, entries, "the delivered wake must leave the queue")
+}
+
+// TestAutoStartAgentCallback_RetriesBusyRejectionAfterTurnEnds covers a
+// launch refused as busy whose turn ends before the callback re-reads the
+// session: the prompt never reached the agent, so the callback launches again
+// instead of reporting the rejection.
+func TestAutoStartAgentCallback_RetriesBusyRejectionAfterTurnEnds(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _ := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	launches := 0
+	cb := &autoStartAgentCallback{svc: svc, launch: func(context.Context, engine.ActionInput) error {
+		launches++
+		if launches == 1 {
+			return fmt.Errorf("failed to prompt session: %w", ErrAgentPromptInProgress)
+		}
+		return nil
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.NoError(t, err)
+	require.Equal(t, 2, launches, "a busy rejection on an idle session must be retried")
+}
+
+// TestAutoStartAgentCallback_QueuesBusyRejectionWhenTurnStarted covers a
+// launch refused as busy because a turn started after the first state read:
+// the retry finds the session mid-turn and queues the prompt.
+func TestAutoStartAgentCallback_QueuesBusyRejectionWhenTurnStarted(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, agentMgr := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	launches := 0
+	cb := &autoStartAgentCallback{svc: svc, launch: func(context.Context, engine.ActionInput) error {
+		launches++
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateRunning, ""))
+		return fmt.Errorf("failed to prompt session: %w", ErrAgentPromptInProgress)
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.NoError(t, err)
+	require.Equal(t, 1, launches)
+	require.Empty(t, agentMgr.capturedPrompts)
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, busyParentSessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Contains(t, entries[0].Content, busyParentStepPrompt)
+}
+
+// TestAutoStartAgentCallback_ReturnsNonBusyLaunchError keeps a launch failure
+// that may follow prompt acceptance from being retried or queued.
+func TestAutoStartAgentCallback_ReturnsNonBusyLaunchError(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _ := setupBusyParentChildrenCompleted(t)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+
+	launches := 0
+	cb := &autoStartAgentCallback{svc: svc, launch: func(context.Context, engine.ActionInput) error {
+		launches++
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateRunning, ""))
+		return errors.New("agent stream disconnected: EOF")
+	}}
+	_, err := cb.Execute(ctx, busyParentAutoStartInput())
+	require.Error(t, err)
+	require.Equal(t, 1, launches)
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, busyParentSessionID)
+	require.NoError(t, err)
+	require.Empty(t, entries, "a possibly delivered prompt must not be queued again")
+}
+
+func busyParentAutoStartInput() engine.ActionInput {
+	return engine.ActionInput{
+		Trigger: engine.TriggerOnChildrenCompleted,
+		State:   engine.MachineState{TaskID: busyParentID, SessionID: busyParentSessionID, CurrentStepID: "step_coordinate"},
+		Step:    engine.StepSpec{ID: "step_coordinate", WorkflowID: "wf1", Name: "Coordinate"},
+		Action: engine.Action{
+			Kind:           engine.ActionAutoStartAgent,
+			AutoStartAgent: &engine.AutoStartAgentAction{QueueIfBusy: true},
+		},
+	}
 }
 
 const (

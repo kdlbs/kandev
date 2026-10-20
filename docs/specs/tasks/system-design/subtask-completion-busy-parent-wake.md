@@ -37,11 +37,13 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
 2. Otherwise the callback launches through `LaunchSession(IntentWorkflowStep)`
    as before. If that launch is refused before the prompt reaches the agent
    because the session is running a turn (`isPromptRejectedAsBusy`: agent
-   already running, prompt in progress, or session not promptable) and the
-   session is now mid-turn, the callback queues the prompt as in step 1. A
-   failure after the agent accepted the prompt, such as a stream disconnect or
-   an uncertain delivery, is returned unchanged, so a prompt that may already
-   have been delivered is never queued again.
+   already running, prompt in progress, or session not promptable), the prompt
+   is still owed, so the callback starts over: it queues the prompt if the
+   session is now mid-turn, or launches again if that turn has already ended.
+   It makes at most `maxBusyAutoStartAttempts` (3) launch attempts. A failure
+   after the agent accepted the prompt, such as a stream disconnect or an
+   uncertain delivery, is returned unchanged, so a prompt that may already have
+   been delivered is never queued or sent again.
 
 ## Turn ending while queueing
 
@@ -70,4 +72,7 @@ running parent receiving two deliveries of the same completion: no direct
 prompt, one queued workflow message, the operation applied, and one prompt after
 the queue drains. `TestProcessOnChildrenCompleted_DeliversWakeWhenTurnEndsWhileQueueing`
 ends the parent's turn between the session read and the queue insert and checks
-that the prompt is delivered once and leaves the queue.
+that the prompt is delivered once and leaves the queue. The
+`TestAutoStartAgentCallback_*` tests cover a busy rejection followed by an ended
+turn (launched again), by a started turn (queued), and a non-busy launch error
+(returned, nothing queued).

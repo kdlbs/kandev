@@ -39,6 +39,9 @@ accepts the prompt, so the queue delivers it after the turn.
    queued.
 3. A turn that ends after the session read and before the queue insert still
    gets the prompt delivered once.
+4. A launch refused as busy is retried when the turn has ended and queued when
+   a turn is running; a failure after prompt acceptance is returned without
+   queueing.
 
 ## Verification
 

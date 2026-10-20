@@ -274,40 +274,59 @@ func (c *resetAgentContextCallback) Execute(ctx context.Context, in engine.Actio
 // autoStartAgentCallback sends the auto-start prompt for a workflow step.
 type autoStartAgentCallback struct {
 	svc *Service
+	// launch overrides the direct step launch in tests; nil uses LaunchSession.
+	launch func(ctx context.Context, in engine.ActionInput) error
 }
+
+// maxBusyAutoStartAttempts bounds how often a QueueIfBusy auto-start retries
+// after the launch is refused as busy and the session is no longer mid-turn.
+const maxBusyAutoStartAttempts = 3
 
 func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
 	if in.State.IsPassthrough {
 		return engine.ActionResult{}, nil
 	}
 
-	queueIfBusy := in.Action.AutoStartAgent != nil && in.Action.AutoStartAgent.QueueIfBusy
-	if queueIfBusy {
-		queued, err := c.queueStepPromptIfBusy(ctx, in)
-		if err != nil {
-			return engine.ActionResult{}, err
+	if in.Action.AutoStartAgent == nil || !in.Action.AutoStartAgent.QueueIfBusy {
+		if err := c.launchStep(ctx, in); err != nil {
+			return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+		}
+		return engine.ActionResult{}, nil
+	}
+
+	// A launch refused as busy never reached the agent, so the prompt is still
+	// owed: queue it if the session is mid-turn, otherwise launch again.
+	var err error
+	for attempt := 0; attempt < maxBusyAutoStartAttempts; attempt++ {
+		queued, queueErr := c.queueStepPromptIfBusy(ctx, in)
+		if queueErr != nil {
+			return engine.ActionResult{}, queueErr
 		}
 		if queued {
 			return engine.ActionResult{}, nil
 		}
+		err = c.launchStep(ctx, in)
+		if err == nil {
+			return engine.ActionResult{}, nil
+		}
+		if !isPromptRejectedAsBusy(err) {
+			break
+		}
 	}
+	return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+}
 
+func (c *autoStartAgentCallback) launchStep(ctx context.Context, in engine.ActionInput) error {
+	if c.launch != nil {
+		return c.launch(ctx, in)
+	}
 	_, err := c.svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:         in.State.TaskID,
 		Intent:         IntentWorkflowStep,
 		SessionID:      in.State.SessionID,
 		WorkflowStepID: in.Step.ID,
 	})
-	if err != nil && queueIfBusy && isPromptRejectedAsBusy(err) {
-		queued, queueErr := c.queueStepPromptIfBusy(ctx, in)
-		if queueErr == nil && queued {
-			return engine.ActionResult{}, nil
-		}
-	}
-	if err != nil {
-		return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
-	}
-	return engine.ActionResult{}, nil
+	return err
 }
 
 // queueStepPromptIfBusy queues the step's auto-start prompt when the session
