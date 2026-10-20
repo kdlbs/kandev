@@ -35,6 +35,7 @@ beforeEach(() => {
   handleSendMessageMock.mockResolvedValue(undefined);
 });
 
+/** Builds the composer fixture with a live target and overridable recovery state. */
 function panelState(overrides = {}) {
   return {
     resolvedSessionId: SESSION_ID,

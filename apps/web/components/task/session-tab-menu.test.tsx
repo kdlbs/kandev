@@ -62,6 +62,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Exercises rename focus through the real context-menu close sequence. */
 function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
   const [renaming, setRenaming] = useState(false);
   return (

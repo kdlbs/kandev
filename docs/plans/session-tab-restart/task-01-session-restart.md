@@ -233,3 +233,29 @@ Local verification on 2026-10-20:
 - Changed-file ESLint, TypeScript checks, specification catalog validation,
   and full specification lint passed. Normal commit hooks and current-head
   remote CI remain delivery checks.
+
+### Delete-mode tab close follow-up
+
+The delete-mode tab close button uses the shared restart state. It remains
+unavailable during both Stop and Resume, including the temporary CANCELLED
+projection. Hide-panel behavior is unchanged because it retains the session.
+
+The browser regression first failed because the delete button remained visible
+while restart was pending. It also checks that the button is available before
+restart and returns after the sequence settles. The test restores the saved
+tab close preference in its cleanup.
+
+The focused desktop command passed both the pending-restart regression and the
+existing hide-panel persistence scenario, with retries disabled:
+
+```bash
+pnpm --dir apps/web e2e:run --host --no-build --project chromium \
+  tests/session/session-tab-close-guard.spec.ts \
+  tests/session/session-tab-management.spec.ts -- \
+  --grep 'blocks delete-mode tab close throughout restart|opt-in tab close hides a panel' \
+  --retries=0
+```
+
+The run reused the fresh production build that contains the close guard.
+The three remaining named test helpers identified by the documentation audit
+now document their fixture and focus contracts.

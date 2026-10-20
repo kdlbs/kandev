@@ -35,6 +35,7 @@ const mockStoreApi = { getState: () => mockState };
 
 let mockState: Record<string, unknown> = {};
 
+/** Resets transport fakes and eligible-session state for each lifecycle scenario. */
 function resetSessionActionMocks() {
   vi.clearAllMocks();
   mockConnected = true;
