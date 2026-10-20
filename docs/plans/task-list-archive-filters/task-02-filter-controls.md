@@ -141,6 +141,11 @@ Update exact commands if an additional existing test file changes.
 - Desktop task-list, filter, and phone search browser specs.
   New `apps/web/e2e/tests/task/mobile-task-list-filters.spec.ts` and the
   existing `e2e/tests/plugins/mobile-plugin-topbar.spec.ts`.
+- Compatibility coverage in `app/tasks/tasks-page-client.facet-selection.test.tsx`,
+  `app/tasks/tasks-page-search-debounce.test.tsx`, `app/tasks/tasks-list-controls.test.tsx`,
+  `components/kanban/mobile-menu-task-list-options.test.tsx`,
+  `e2e/tests/task/task-search-debounce.spec.ts`, and `e2e/tests/plugins/task-list-facet.spec.ts`.
+  These paths are relative to `apps/web/`.
 - `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw,ja,ko,pseudo}/{tasks,kanban,common}.json`
   as needed. Generate Traditional Chinese and pseudo through repository scripts.
 - `docs/public/tasks-and-workflows.md`, sections **Find and organize tasks**
@@ -179,7 +184,7 @@ failed reads, and metadata failures must remain distinct.
 Complete on 2026-10-20.
 
 - Behavioral RED covered retained refresh callbacks and recovery after the final
-  page loses its last row. Final unit validation passed 99 tests in 13 suites,
+  page loses its last row. Initial unit validation passed 99 tests in 13 suites,
   including the display-dropdown and MR-hydration regressions.
 - All 25 unique desktop and 9 unique phone browser cases passed on the final
   production assets. The [plan results](plan.md#verification-results) distinguish
@@ -200,3 +205,11 @@ Complete on 2026-10-20.
 Presentation is covered in Playwright. No markup-only filter unit test was
 added. Existing archive and grouping coverage was retained while selectors
 were migrated. The user approved manual testing and requested publication.
+
+PR integration retained the current plugin facet preference contract and updated
+inherited control/search tests for the visible List filters. A regression proves
+that facet tokens use a built-in API sort. Search tests prove one debounce window,
+immediate clear, retained scope, cancellation, and stale-response rejection.
+Final local validation passed 153 unit tests in 20 suites, typecheck, ESLint for
+40 changed TypeScript files, and all 32 desktop and 11 phone browser cases.
+See [PR integration validation](plan.md#pr-integration-validation) for the evidence.

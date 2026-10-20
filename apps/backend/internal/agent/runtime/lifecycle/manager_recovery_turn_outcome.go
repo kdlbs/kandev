@@ -106,6 +106,10 @@ func (m *Manager) applyRecoveredTurnOutcome(
 	})
 	execution.markRecoveryTurnOutcomeApplied(outcome.TurnID)
 
+	// Retained completion uses its original observation time. Recovery context
+	// never enters the wire payload.
+	outcome.Event.Recovered = true
+	outcome.Event.RecoveredActivityAt = outcome.Event.ActivityAt
 	m.handleAgentEvent(execution, outcome.Event)
 
 	backend, err := m.executorRegistry.GetBackend(ri.RuntimeName)

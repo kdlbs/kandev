@@ -19,6 +19,7 @@ vi.mock("@/hooks/use-task-actions", () => ({
 afterEach(() => {
   cleanup();
   mockRename.mockClear();
+  vi.restoreAllMocks();
 });
 
 function getTitle() {
@@ -47,7 +48,7 @@ describe("TaskTopBarTitle — idle state", () => {
     expect(getTitle()).toBeTruthy();
     expect(queryInput()).toBeNull();
     // Not aria-disabled, so pointer-actionability checks treat it as interactive.
-    expect(getTitle().getAttribute("aria-disabled")).toBe("false");
+    expect(getTitle().getAttribute("aria-disabled")).toBeNull();
     // Keyboard-operable: reachable via Tab.
     expect(getTitle().getAttribute("tabindex")).toBe("0");
     // The crumb wrapper carries the breadcrumb semantics; this element is the
@@ -211,7 +212,7 @@ describe("TaskTopBarTitle — cancelling a rename", () => {
 
     const input = startEditing();
     fireEvent.change(input, { target: { value: "New title" } });
-    fireEvent.blur(input);
+    fireEvent.blur(input, { relatedTarget: document.body });
 
     expect(mockRename).not.toHaveBeenCalled();
     expect(queryInput()).toBeNull();
@@ -224,5 +225,47 @@ describe("TaskTopBarTitle — cancelling a rename", () => {
     fireEvent.keyDown(input, { key: "Escape" });
 
     expect(document.activeElement).toBe(getTitle());
+  });
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.1, AC-UI-EDIT-FOCUS-001.2, AC-UI-EDIT-FOCUS-001.5
+describe("TaskTopBarTitle focus continuity", () => {
+  it("keeps the draft when the document loses focus", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="Original" />);
+    const input = startEditing();
+    fireEvent.change(input, { target: { value: "  Draft title  " } });
+    fireEvent.blur(input);
+    expect(queryInput()).toBe(input);
+    expect(input.value).toBe("  Draft title  ");
+    expect(mockRename).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "  Unfinished title  "])(
+    "preserves the raw draft %j across a same-task refresh",
+    (draft) => {
+      const view = render(<TaskTopBarTitle taskId="task-1" taskTitle="Original" />);
+      const input = startEditing();
+      fireEvent.change(input, { target: { value: draft } });
+      view.rerender(<TaskTopBarTitle taskId="task-1" taskTitle="Server refresh" />);
+      expect(getInput()).toBe(input);
+      expect(input.value).toBe(draft);
+    },
+  );
+
+  it("does not select all again when focus returns", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="Original" />);
+    const input = startEditing();
+    input.setSelectionRange(2, 4);
+    fireEvent.focus(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([2, 4]);
+  });
+
+  it("discards the old edit when the target changes", () => {
+    const view = render(<TaskTopBarTitle taskId="task-1" taskTitle="Original" />);
+    fireEvent.change(startEditing(), { target: { value: "Old draft" } });
+    view.rerender(<TaskTopBarTitle taskId="task-2" taskTitle="Other task" />);
+    expect(queryInput()).toBeNull();
+    expect(mockRename).not.toHaveBeenCalled();
   });
 });

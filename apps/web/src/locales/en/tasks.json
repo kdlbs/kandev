@@ -23,7 +23,6 @@
   "groupByNone": "None",
   "groupByRepository": "Repository",
   "groupByWorkflow": "Workflow",
-  "ungrouped": "Ungrouped",
   "loading": "Loading...",
   "loadingTasks": "Loading tasks...",
   "noRepository": "No repository",

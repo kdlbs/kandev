@@ -85,9 +85,9 @@ export async function createWorkflowSessionFocusScenario(
         const { sessions } = await apiClient.listTaskSessions(task.id);
         return sessions.find((session) => session.id === secondary.session_id)?.state;
       },
-      { timeout: 30_000, message: "secondary focus session never became visible" },
+      { timeout: 30_000, message: "secondary focus session never became idle" },
     )
-    .not.toBe("CREATED");
+    .toBe("WAITING_FOR_INPUT");
   await apiClient.setPrimarySession(sourceSessionId);
 
   return {

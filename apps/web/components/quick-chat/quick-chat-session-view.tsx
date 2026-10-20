@@ -34,6 +34,8 @@ function useIsQuickChatPassthrough(sessionId: string) {
 
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
+  /** Skip proactive settings/capability discovery for an existing-session read surface. */
+  loadSettings?: boolean;
   onInitialPromptAttempted?: () => void;
   /** Default `true`. `false` maps to `useSessionResumption`'s
    *  `skipAutomaticRecovery`, so the check-and-resume and remote-status
@@ -122,6 +124,7 @@ function ActiveQuickChatSessionView({
   session,
   onInitialPromptAttempted,
   automaticRecovery = true,
+  loadSettings,
   hideSessionSelectors,
   taskArchiveState: taskArchiveStateProp,
   initialDraft,
@@ -179,6 +182,7 @@ function ActiveQuickChatSessionView({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
+          loadSettings={loadSettings}
           sessionId={session.sessionId}
           minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
           placeholderOverride={

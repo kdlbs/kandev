@@ -272,18 +272,10 @@ func (m *Manager) auditCleanupBranchDisposition(
 	removeBranch bool,
 	options WorktreeCleanupOptions,
 ) (bool, error) {
-	if pathPresent && options.RequireCleanCheckout {
-		if err := m.verifyCheckoutClean(ctx, wt); err != nil {
-			return false, err
-		}
-	}
 	if !removeBranch || branchRef == "" || branchOID == "" {
 		return false, nil
 	}
 	if pathPresent && !options.DiscardWorktreeChanges {
-		if options.RequireCleanCheckout {
-			return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)
-		}
 		return m.verifyCleanRedundantCheckout(ctx, wt, branchRef)
 	}
 	return m.verifyCleanupBranchRedundant(ctx, wt, branchRef)

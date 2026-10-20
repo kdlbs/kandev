@@ -50,6 +50,10 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if req.Enabled != nil {
 		w.Enabled = *req.Enabled
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -159,6 +163,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		w.RepositoryID = repositoryID
 		w.BaseBranch = baseBranch
 	}
+
+	if _, err := s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -231,6 +239,12 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // whether the search succeeded — a failing search still counts as "we tried"
 // so the UI can show liveness.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTicket, error) {
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	defer s.stampLastPolled(w.ID)
 	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
@@ -287,6 +301,7 @@ func (s *Service) publishNewJiraIssueEvent(ctx context.Context, w *IssueWatch, t
 		return
 	}
 	evt := bus.NewEvent(events.JiraNewIssue, "jira", &NewJiraIssueEvent{
+		CreatedByUserID:   w.CreatedByUserID,
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,

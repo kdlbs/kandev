@@ -374,9 +374,9 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *message
 	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	var reservation *queuedDispatchReservation
 	if claim.Identity.SessionIncarnationID != "" {
-		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(claim.Identity, claim.Dispatch.ID, nil)
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, claim.Identity, claim.Dispatch.ID, nil)
 	} else {
-		reservation = s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, claim.Dispatch.ID, nil)
 	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
@@ -500,9 +500,10 @@ func (s *Service) executeSendNowClaimWithContext(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
+	ctx = s.queuedRecoveryContext(ctx, reservation)
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.drainQueuedDispatchIfPending(sessionID)
+		s.drainQueuedDispatchIfPending(ctx, sessionID)
 	}()
 
 	restore := func() {

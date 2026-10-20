@@ -9,14 +9,10 @@ owners:
 
 ## Overview
 
-A workflow step's task order already decides real behavior: the WIP overflow
-queue promotes the lowest-`position` task when a slot frees. Today a
-user cannot set it. `position` is written only as a side effect of a move, and
-the board sorts each column newest first, so what the user sees is unrelated to
-what the system picks up next. This capability makes that order
-a user-controlled, persisted contract: the user drags a card to a new place in
-its column, every view reconciles to it, and the top card is the one the step
-takes next.
+A workflow step's task order decides which task the WIP overflow queue
+promotes next. Persisted, user-controlled card ordering makes the board and
+WIP pull share that priority: users reorder within a column, every view
+reconciles, and the top task is taken next.
 
 [Design](../system-design/kanban-task-reordering.md). Phone interactions follow
 [mobile scrolling](mobile-kanban-scroll.md); drag criteria apply to wider views.
@@ -118,19 +114,20 @@ of its step, so that it is visibly and actually the next task that step takes.
 - **AC-TASKS-KANBAN-TASK-REORDERING-001.11:** When a card is dropped on the
   other band of the same step, the system shall reject the drop, leave both
   bands unchanged, and issue no request.
-- **AC-TASKS-KANBAN-TASK-REORDERING-001.12:** A user shall be able to reorder a
-  card within its band using the keyboard alone, on the same presentations that
-  accept a pointer reorder. With a card focused, Space or Enter shall pick it
-  up, Up Arrow and Down Arrow shall move it one place among the band members the
-  board is currently showing, Space or
-  Enter shall drop it and commit, and Escape shall cancel it under
-  AC-TASKS-KANBAN-TASK-REORDERING-001.9. While a card is picked up the board
-  shall show the insertion point of AC-TASKS-KANBAN-TASK-REORDERING-001.7 and
-  shall announce the card's place in its band to assistive technology on pick-up
-  and each move. An arrow press that would carry the card out of its band, or
-  past the last member the board is showing, shall be ignored. The committed
-  order shall be derived as in AC-TASKS-KANBAN-TASK-REORDERING-001.34 and shall
-  persist identically to a pointer drag.
+- **AC-TASKS-KANBAN-TASK-REORDERING-001.12:** On presentations accepting pointer
+  reorder, a user shall be able to reorder a focused card within its band by
+  keyboard: Space/Enter picks up, Up/Down Arrow moves one place among the band's
+  currently shown members, Space/Enter commits, and Escape cancels under
+  AC-TASKS-KANBAN-TASK-REORDERING-001.9. Pickup shall show the insertion point
+  of AC-TASKS-KANBAN-TASK-REORDERING-001.7 and announce the card's band position
+  to assistive technology; each move shall update both. Arrows beyond the band
+  or last shown member shall be ignored. The committed order shall follow
+  AC-TASKS-KANBAN-TASK-REORDERING-001.34 and persist identically to pointer drag.
+  If the picked card leaves the board's current task list, the board shall
+  cancel without submitting, clear pickup/insertion state, and allow a remaining
+  eligible card to start and commit a fresh reorder without remounting. A virtual
+  row unmount or list/object refresh retaining the picked card shall not alone
+  cancel its gesture.
 - **AC-TASKS-KANBAN-TASK-REORDERING-001.13:** Dragging a card onto a different
   step shall continue to move the task to that step with its existing
   behavior.

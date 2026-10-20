@@ -121,6 +121,8 @@ type Manager struct {
 	deliveryJournal             *journal.Journal
 	deliveryJournalErr          error
 	deliveryWriter              *deliveryEventWriter
+	shellDeliveryMu             sync.Mutex
+	shellDelivery               map[shellDeliveryKey]shellDeliveryBaseline
 	deliveryJournalMu           sync.RWMutex
 	deliveryJournalClose        sync.Once
 	deliveryJournalCloseErr     error
@@ -161,6 +163,7 @@ type Manager struct {
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+	passthrough      *PassthroughOwner
 	// repoTrackers holds per-repository trackers for multi-repo task roots.
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
@@ -471,6 +474,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
+	m.passthrough = newPassthroughOwner(m)
 	return m
 }
 
@@ -529,12 +533,12 @@ func (m *Manager) deliveryJournalAvailable() bool {
 // peer; a configured journal failure is reported as unavailable instead.
 func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if m == nil || m.cfg == nil || m.cfg.DurableJournalPath == "" {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_not_durable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_not_durable"}
 	}
 	m.deliveryJournalMu.RLock()
 	defer m.deliveryJournalMu.RUnlock()
 	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
 	// Stream records are replayable and can be acknowledged by the connected
 	// backend while a session is starting. Only an unsettled prompt outcome
@@ -542,9 +546,9 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	// unacknowledged stream records through the full descriptor.
 	unresolved, err := m.deliveryJournal.HasUnresolvedSubmissions(context.Background())
 	if err != nil {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
-	return journal.StorageCapability{Version: journal.CurrentVersion, Durable: true, Unresolved: unresolved}
+	return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
 }
 
 // DeliveryRecoveryDescriptor returns the authenticated instance's durable
@@ -1165,9 +1169,14 @@ func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	}
 }
 
-// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+// stopWorkspaceTrackers stops root, per-repo, and lazy trackers idempotently.
 func (m *Manager) stopWorkspaceTrackers() {
 	root, trackers := m.snapshotTrackers()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
 	if root != nil {
 		root.Stop()
 	}
@@ -1752,6 +1761,9 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 	defer release()
+	if m.passthrough.Live() {
+		return 0, fmt.Errorf("passthrough agent is already running")
+	}
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return 0, fmt.Errorf("agent is already running")
@@ -2498,6 +2510,9 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				return
 			}
 			update = persisted
+			if update.Type == "" {
+				continue
+			}
 			m.recordTerminalOutcome(&update)
 			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
 				m.signalDeliveryWakeup()
@@ -2575,7 +2590,7 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	return committed[0], nil
 }
 
-func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
+func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
 	m.deliveryJournalMu.RLock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal
@@ -2764,6 +2779,8 @@ func (m *Manager) Stop(ctx context.Context) error {
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
+	passthroughErr := m.passthrough.StopAll(ctx)
+	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
 		// Close durable storage even when an owner misses the drain deadline.
@@ -2772,7 +2789,7 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
-	return errors.Join(previewErr, stopErr, m.closeDeliveryJournal())
+	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
 }
 
 func (m *Manager) closeDeliveryJournal() error {
@@ -2803,6 +2820,9 @@ func (m *Manager) closeDeliveryJournal() error {
 }
 
 func (m *Manager) stop(ctx context.Context) error {
+	if err := m.passthrough.StopAll(ctx); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

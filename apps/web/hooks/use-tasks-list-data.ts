@@ -3,6 +3,7 @@ import type { PaginationState } from "@tanstack/react-table";
 import type { Task } from "@/lib/types/http";
 import { listTasksByWorkspace } from "@/lib/api";
 import { tasksListArchiveParams, type TasksListQuery } from "@/lib/tasks/tasks-list-query";
+import { resolveTasksListApiSort } from "@/lib/tasks/tasks-list-options";
 import { shouldSkipInitialTasksFetch } from "@/app/tasks/tasks-page-fetch-policy";
 
 type Input = {
@@ -66,7 +67,7 @@ export function useTasksListData(input: Input) {
           query: current.query.searchQuery,
           workflowId: current.query.workflowId,
           repositoryId: current.query.repositoryId,
-          sort: current.sort,
+          sort: resolveTasksListApiSort(current.sort),
           page: current.pagination.pageIndex + 1,
           pageSize: current.pagination.pageSize,
         },

@@ -12,7 +12,7 @@ func TestPhase2_NewTriggerConstantsAreDistinct(t *testing.T) {
 		TriggerOnEnter, TriggerOnTurnStart, TriggerOnTurnComplete, TriggerOnExit,
 		TriggerOnComment, TriggerOnBlockerResolved, TriggerOnChildrenCompleted,
 		TriggerOnApprovalResolved, TriggerOnHeartbeat, TriggerOnBudgetAlert,
-		TriggerOnAgentError,
+		TriggerOnAgentError, TriggerOnPRMerged, TriggerOnPRClosed,
 	}
 	seen := make(map[Trigger]bool, len(triggers))
 	for _, tr := range triggers {

@@ -8,6 +8,15 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 )
 
+// ShellOutputStorageKey identifies canonical chunk storage in persisted metadata.
+const ShellOutputStorageKey = "shell_output_storage"
+
+// HasIncrementalShellOutput reports the supported persisted chunk reference.
+func HasIncrementalShellOutput(metadata map[string]any) bool {
+	version, ok := intFromAny(metadata[ShellOutputStorageKey])
+	return ok && version == 1
+}
+
 // ShellExecOutputSnapshot is the full bounded output stored on a shell message.
 type ShellExecOutputSnapshot struct {
 	ExitCode  *int   `json:"exit_code,omitempty"`
@@ -21,8 +30,15 @@ type ShellExecOutputSnapshot struct {
 func ProjectMessageMetadata(metadata map[string]any) map[string]any {
 	projected := metadata
 	copied := false
-	if rawReferences, exists := metadata["entity_references"]; exists {
+	if _, exists := metadata[ShellOutputStorageKey]; exists {
 		projected = copyMetadata(metadata)
+		delete(projected, ShellOutputStorageKey)
+		copied = true
+	}
+	if rawReferences, exists := metadata["entity_references"]; exists {
+		if !copied {
+			projected = copyMetadata(metadata)
+		}
 		copied = true
 		references := entityrefs.NormalizePersisted(rawReferences)
 		if len(references) == 0 {

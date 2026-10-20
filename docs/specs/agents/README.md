@@ -72,6 +72,7 @@ session-activity authority remain with Tasks and Platform.
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
+- [Probe Failure Diagnostics](requirements/probe-failure-diagnostics.md)
 
 ### System design
 
@@ -105,6 +106,7 @@ session-activity authority remain with Tasks and Platform.
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
+- [Probe Failure Diagnostics](system-design/probe-failure-diagnostics.md)
 
 ## Migration record
 

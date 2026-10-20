@@ -22,6 +22,7 @@ This design extends [workspace status](workspace-git-status.md) and specifies [G
 | 001.21, 001.25, 001.27; AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1 | Display projection and scope |
 | 001.24, 001.29; AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1 | Mounted viewer and freshness |
 | AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.2, 001.3 | Scroll continuity |
+| AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.4 | Session Git read recovery |
 | 001.10, 001.11, 001.33 | Scope and readiness |
 
 ## Source evidence
@@ -96,6 +97,19 @@ Keep path-based whole-file actions under their existing membership and operation
 Do not reset review hashes to an empty pending patch or certify an old displayed patch as newly reviewed.
 On ready replacement, compare review state against the actual new patch.
 Existing comments can remain visible without submitting them against a new unseen patch.
+
+## Session Git read recovery
+
+Session commits and cumulative diffs use the existing shared `SessionRead` coordinator.
+Allow 30 seconds for each repository scan. A domain-specific wrapper maps transport timeouts and server `INTERNAL_ERROR` or `UNAVAILABLE` responses to `retryAfter: 5000`.
+The coordinator owns the retry timer and in-flight request, preserves previous data, and cancels obsolete retries on unmount, session replacement, or connection retirement.
+Permanent errors remain errors; terminal sessions retain their existing stop behavior.
+After success, WebSocket invalidations remain responsible for normal updates rather than continuous polling.
+
+The Changes body uses the commits cache's presence separately from request loading.
+Show the existing localized loading text only before the first commits result when no other content exists.
+A cached empty list is a successful result and remains an empty list during a background refresh.
+Accept an authoritative empty response after reset/branch invalidation, so retention cannot preserve removed commits forever.
 
 ## Scroll continuity
 

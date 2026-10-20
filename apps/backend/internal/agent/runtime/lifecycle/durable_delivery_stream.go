@@ -219,6 +219,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliveryHarnessGeneration = committed.HarnessGeneration
 	event.DeliverySequence = committed.Sequence
 	event.DeliverySubmissionID = committed.SubmissionID
+	event.Recovered = true
+	event.RecoveredActivityAt = &committed.CreatedAt
 	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)
@@ -678,7 +680,7 @@ func durableEventExpectedStreamID(execution *AgentExecution) string {
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
-	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event)
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {

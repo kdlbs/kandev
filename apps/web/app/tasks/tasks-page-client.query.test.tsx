@@ -106,3 +106,10 @@ it("recovers the last available page after its final task disappears", async () 
   await waitFor(() => expect(base.onPageChange).toHaveBeenCalledWith(1));
   expect(result.current.tasks).toEqual([]);
 });
+
+it("uses the built-in API sort while retaining a plugin facet preference", async () => {
+  list.mockResolvedValue(response("task"));
+  const { result } = renderHook(() => useTasksListData({ ...base, sort: "facet:plugin:tags" }));
+  await waitFor(() => expect(result.current.isLoading).toBe(false));
+  expect(list.mock.calls.at(-1)?.[1]).toMatchObject({ sort: "updated_desc" });
+});

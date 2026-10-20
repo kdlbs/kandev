@@ -26,7 +26,6 @@ const (
 	taskResourceCleanupMaxAttempts      = 8
 	archiveReclaimRecheckDelay          = 24 * time.Hour
 	archiveReclaimBackfillBatchSize     = 100
-	taskArchiveReclaimOutcomeDirty      = "dirty"
 	taskArchiveReclaimOutcomeInUse      = "in_use"
 	taskArchiveReclaimOutcomeReclaimed  = "reclaimed"
 	taskArchiveReclaimOutcomeStale      = "stale"
@@ -574,6 +573,9 @@ func (s *Service) resumeTaskResourceCleanupJobs(ctx context.Context, startupPrep
 	if s.resourceCleanups == nil {
 		return nil
 	}
+	if err := s.wakeWaitingArchiveReclaims(ctx, startupPreparedCutoff); err != nil {
+		return err
+	}
 	if err := s.resourceCleanups.ResetRunningTaskResourceCleanupJobs(ctx); err != nil {
 		return fmt.Errorf("reset interrupted task cleanup jobs: %w", err)
 	}
@@ -678,6 +680,7 @@ func (s *Service) persistArchiveReclaimCandidate(
 
 func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	reconcileErr := errors.Join(
+		s.wakeWaitingArchiveReclaims(ctx, time.Now().UTC()),
 		s.reconcilePreparedTaskResourceCleanupJobs(ctx, nil),
 		s.reconcileArchivedWorktreeReclaimCandidates(ctx),
 	)
@@ -954,7 +957,7 @@ func (s *Service) processArchiveReclaimJob(
 			}
 			return s.completeArchiveReclaimJob(ctx, job, outcome)
 		}
-		return s.waitForCleanArchiveReclaim(ctx, job, outcome)
+		return s.deferArchiveReclaim(ctx, job, outcome)
 	}
 	if err := s.captureReclaimTaskDirectory(ctx, job, &snapshot, wt); err != nil {
 		return s.retryTaskResourceCleanupJob(ctx, job, err)
@@ -969,9 +972,6 @@ func (s *Service) processArchiveReclaimJob(
 		if errors.Is(err, worktree.ErrArchivedWorktreeIdentityChanged) {
 			return s.completeArchiveReclaimJob(ctx, job, taskArchiveReclaimOutcomeStale)
 		}
-		if errors.Is(err, worktree.ErrDirtyWorktreeCleanup) {
-			return s.waitForCleanArchiveReclaim(ctx, job, taskArchiveReclaimOutcomeDirty)
-		}
 		return s.retryTaskResourceCleanupJob(ctx, job, fmt.Errorf("remove archived worktree: %w", err))
 	}
 	outcome, err = s.archiveReclaimWorktreeOutcomeAfterRemoval(ctx, job, snapshot)
@@ -979,7 +979,7 @@ func (s *Service) processArchiveReclaimJob(
 		return s.retryTaskResourceCleanupJob(ctx, job, err)
 	}
 	if outcome == taskArchiveReclaimOutcomeInUse {
-		return s.waitForCleanArchiveReclaim(ctx, job, outcome)
+		return s.deferArchiveReclaim(ctx, job, outcome)
 	}
 	if err := s.finishArchiveReclaimDirectory(ctx, job, snapshot); err != nil {
 		return s.retryTaskResourceCleanupJob(ctx, job, err)
@@ -1067,19 +1067,22 @@ func (s *Service) archiveReclaimWorktreeOutcome(
 	ctx context.Context,
 	wt *worktree.Worktree,
 ) (string, error) {
+	if s.executors == nil {
+		return "", errors.New("archived worktree owner runtime inventory is unavailable")
+	}
+	runtimes, err := s.executors.ListExecutorsRunningByTaskID(ctx, wt.TaskID)
+	if err != nil {
+		return "", fmt.Errorf("list archived worktree owner runtimes: %w", err)
+	}
+	if len(runtimes) > 0 {
+		return taskArchiveReclaimOutcomeInUse, nil
+	}
 	inUse, err := s.archiveReclaimWorktreeInUse(ctx, wt.ID)
 	if err != nil {
 		return "", err
 	}
 	if inUse {
 		return taskArchiveReclaimOutcomeInUse, nil
-	}
-	dirty, err := s.archiveReclaimWorktreeIsDirty(ctx, wt)
-	if err != nil {
-		return "", err
-	}
-	if dirty {
-		return taskArchiveReclaimOutcomeDirty, nil
 	}
 	return "", nil
 }
@@ -1096,23 +1099,6 @@ func (s *Service) archiveReclaimWorktreeInUse(ctx context.Context, worktreeID st
 		return false, fmt.Errorf("count archived worktree borrowers: %w", err)
 	}
 	return references > 0, nil
-}
-
-func (s *Service) archiveReclaimWorktreeIsDirty(ctx context.Context, wt *worktree.Worktree) (bool, error) {
-	inspector, ok := s.worktreeCleanup.(WorktreeDirtyInspector)
-	if !ok {
-		return false, errors.New("archived worktree dirty inspector is unavailable")
-	}
-	dirty, err := inspector.InspectDirtyWorktrees(ctx, []*worktree.Worktree{wt})
-	if err != nil {
-		return false, fmt.Errorf("inspect archived worktree cleanliness: %w", err)
-	}
-	for _, item := range dirty {
-		if item.WorktreeID == wt.ID {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (s *Service) archiveReclaimWorktreeOutcomeAfterRemoval(
@@ -1148,7 +1134,7 @@ func findWorktreeByID(worktrees []*worktree.Worktree, id string) *worktree.Workt
 	return nil
 }
 
-func (s *Service) waitForCleanArchiveReclaim(
+func (s *Service) deferArchiveReclaim(
 	ctx context.Context,
 	job *models.TaskResourceCleanupJob,
 	outcome string,

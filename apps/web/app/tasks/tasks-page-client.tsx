@@ -38,8 +38,8 @@ import { MobileTasksActions } from "./mobile-tasks-actions";
 import {
   parseTasksListGroup,
   parseTasksListSort,
-  type TasksListGroup,
-  type TasksListSort,
+  type TasksListGroupPreference,
+  type TasksListSortPreference,
 } from "@/lib/tasks/tasks-list-options";
 
 interface TasksPageClientProps {
@@ -49,8 +49,8 @@ interface TasksPageClientProps {
   initialTasks: Task[];
   initialTotal: number;
   initialDataLoaded?: boolean;
-  initialSort: TasksListSort;
-  initialGroup: TasksListGroup;
+  initialSort: TasksListSortPreference;
+  initialGroup: TasksListGroupPreference;
 }
 
 const EMPTY_WORKFLOW_STEPS: MobileTaskStep[] = [];
@@ -181,8 +181,10 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     repositoryId: settings.repositoryIds[0] ?? null,
     persistScope,
   });
-  const [tasksListSort, setTasksListSort] = useState<TasksListSort>(props.initialSort);
-  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroup>(props.initialGroup);
+  const [tasksListSort, setTasksListSort] = useState<TasksListSortPreference>(props.initialSort);
+  const [tasksListGroup, setTasksListGroup] = useState<TasksListGroupPreference>(
+    props.initialGroup,
+  );
   const fallbackRepositories =
     props.initialWorkspaceId === activeWorkspaceId ? props.initialRepositories : [];
   const repositories =
@@ -210,7 +212,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
       !metadata.unavailableFilter &&
       !metadata.metadataLoading &&
       !metadata.metadataError &&
-      debouncedQuery === query.searchQuery,
+      (query.searchQuery === "" || debouncedQuery === query.searchQuery),
     ),
     onPageChange,
     initialData:
@@ -247,10 +249,10 @@ function useTasksListPreferenceSync({
   setTasksListGroup,
   setPagination,
 }: {
-  tasksListSort: TasksListSort;
-  setTasksListSort: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  setTasksListGroup: (group: TasksListGroup) => void;
+  tasksListSort: TasksListSortPreference;
+  setTasksListSort: (sort: TasksListSortPreference) => void;
+  tasksListGroup: TasksListGroupPreference;
+  setTasksListGroup: (group: TasksListGroupPreference) => void;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
 }) {
   const router = useRouter();
@@ -258,7 +260,7 @@ function useTasksListPreferenceSync({
   const store = useAppStoreApi();
 
   const persistPreferences = useCallback(
-    (sort: TasksListSort, group: TasksListGroup) => {
+    (sort: TasksListSortPreference, group: TasksListGroupPreference) => {
       const current = store.getState().userSettings;
       const setUserSettings = store.getState().setUserSettings;
       if (current.tasksListSort === sort && current.tasksListGroup === group) {
@@ -309,7 +311,7 @@ function useTasksListPreferenceSync({
   ]);
 
   const writeUrl = useCallback(
-    (sort: TasksListSort, group: TasksListGroup) => {
+    (sort: TasksListSortPreference, group: TasksListGroupPreference) => {
       const params = new URLSearchParams(window.location.search);
       params.set("sort", sort);
       params.set("group", group);
@@ -320,7 +322,7 @@ function useTasksListPreferenceSync({
   );
 
   const handleSortChange = useCallback(
-    (sort: TasksListSort) => {
+    (sort: TasksListSortPreference) => {
       setTasksListSort(sort);
       setPagination((prev) => ({ ...prev, pageIndex: 0 }));
       writeUrl(sort, tasksListGroup);
@@ -330,7 +332,7 @@ function useTasksListPreferenceSync({
   );
 
   const handleGroupChange = useCallback(
-    (group: TasksListGroup) => {
+    (group: TasksListGroupPreference) => {
       setTasksListGroup(group);
       writeUrl(tasksListSort, group);
       persistPreferences(tasksListSort, group);
@@ -377,12 +379,12 @@ function useTasksListPresentation(s: ReturnType<typeof useTasksPageSetup>) {
   });
   const { displayedTasks, sort, group, selectSort, selectGroup } = useTaskListFacetSelection({
     facetKeys: facetOptions.map((facet) => facet.value),
-    coreSort: s.tasksListSort,
-    coreGroup: s.tasksListGroup,
+    requestedSort: s.tasksListSort,
+    requestedGroup: s.tasksListGroup,
     tasks: s.tasks,
     facetValues,
-    onCoreSortChange: handleSortChange,
-    onCoreGroupChange: handleGroupChange,
+    onSortChange: handleSortChange,
+    onGroupChange: handleGroupChange,
   });
   const stepMetadata = useTasksListStepRefresh(s, displayedTasks, group);
 

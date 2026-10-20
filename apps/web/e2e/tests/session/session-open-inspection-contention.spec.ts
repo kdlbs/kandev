@@ -1,6 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import { routeSessionOpenInspectionContention } from "../../helpers/session-open-inspection-contention";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForRestorableSessionWorkspace, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("session open inspection contention", () => {
@@ -48,6 +48,8 @@ test.describe("session open inspection contention", () => {
       expectedState: "CANCELLED",
       message: "Waiting for the retained session to stop before recovery",
     });
+
+    await waitForRestorableSessionWorkspace(apiClient, task.id, sessionId);
 
     const proxy = await routeSessionOpenInspectionContention(testPage, {
       taskId: task.id,

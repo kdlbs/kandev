@@ -167,7 +167,8 @@ unused async `app/tasks/page.tsx` as a substitute for SPA wiring.
 Use one transition to change a filter and reset pagination. Do not issue a
 request for the previous page with the new filters before page one settles.
 Archive, workflow, and repository picks use one history entry per selection.
-Search keeps the existing 300ms request debounce and replaces its current URL
+Non-empty search keeps one 300ms request debounce. Clearing search cancels
+queued input and admits the empty query immediately. Search replaces its current URL
 entry. Reconcile Back/Forward without saving restored scope or replacing history.
 Preserve sort, group, and unrelated supported query fields when editing filters.
 

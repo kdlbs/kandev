@@ -99,6 +99,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// starting the new instance's agent. Missing header is allowed for
 	// backward compatibility with curl/tests; mismatch is rejected.
 	s.router.Use(instanceIDGuard(cfg.InstanceID))
+	s.router.Use(s.deliveryProtocolGuard())
 
 	s.setupRoutes()
 	return s
@@ -115,6 +116,7 @@ func (s *Server) setupRoutes() {
 
 	// Agent control
 	api := s.router.Group("/api/v1")
+	s.registerPassthroughRoutes(api)
 	{
 		// Status and info
 		api.GET("/status", s.handleStatus)
@@ -231,6 +233,11 @@ func (s *Server) setupRoutes() {
 		api.POST("/git/contribution/replace", s.handleGitReplaceContribution)
 		api.POST("/git/contribution/use", s.handleGitUseContribution)
 		api.POST("/git/contribution/history-explanation", s.handleGitContributionHistoryExplanation)
+		api.POST("/git/turn-changes/checkpoint", s.handleGitTurnCheckpoint)
+		api.POST("/git/turn-changes/delete", s.handleGitTurnCheckpointDelete)
+		api.POST("/git/turn-changes/compare", s.handleGitTurnCheckpointCompare)
+		api.POST("/git/turn-changes/export", s.handleGitTurnCheckpointExport)
+		api.GET("/git/turn-changes/scopes", s.handleGitTurnCheckpointScopes)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)

@@ -572,6 +572,12 @@ func (sm *StreamManager) prepareAgentEvent(
 	if err != nil {
 		return preparedAgentEvent{}, err
 	}
+	if event.Type == streams.EventTypeShellOutputUpdate && (!durable || delivery == nil || event.ShellOutput == nil) {
+		return preparedAgentEvent{}, ErrDeliveryRecoveryBlocked
+	}
+	if event.ShellOutput != nil && event.Type != streams.EventTypeShellOutputUpdate {
+		return preparedAgentEvent{}, ErrDeliveryRecoveryBlocked
+	}
 	if !durable {
 		if event.DeliverySubmissionID != "" {
 			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
@@ -682,6 +688,9 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 	}
 	projector, ok := delivery.(canonicalAgentDeliveryProjector)
 	if !ok {
+		if event.Type == streams.EventTypeShellOutputUpdate {
+			return event, false, ErrDeliveryRecoveryBlocked
+		}
 		sm.logger.Debug("canonical agent delivery projector is unavailable; using legacy projection",
 			zap.String("instance_id", execution.ID),
 			zap.String("event_type", event.Type))
@@ -697,9 +706,19 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.Error(err))
 		return event, false, err
 	}
-	event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	if event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event) {
+		event, err = committedShellProjectionEvent(ctx, delivery, event, durableEvent.SessionID)
+		if err != nil {
+			return event, false, err
+		}
+		if event.Type == streams.EventTypeToolCall {
+			event.CanonicalMessageAppend = isAppend
+		}
+	} else {
+		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+		event.CanonicalMessageAppend = isAppend
+	}
 	event.CanonicalProjection = true
-	event.CanonicalMessageAppend = isAppend
 	// Projection is the canonical commit boundary. ACK transport is scheduled
 	// independently so a lost ACK cannot hide output that is already durable.
 	if scheduleAcknowledgement {
@@ -721,6 +740,9 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 ) error {
 	if len(prepared) == 0 {
 		return nil
+	}
+	if prepared[0].event.Type == streams.EventTypeShellOutputUpdate || prepared[0].event.Type == streams.EventTypeToolCall {
+		return sm.projectCanonicalAgentEventsIndividually(ctx, execution, prepared, delivery, client, startupGeneration)
 	}
 	projector, ok := delivery.(canonicalAgentDeliveryBatchProjector)
 	if !ok {

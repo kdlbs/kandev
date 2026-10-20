@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
-
 import type { AgentUpdateJob } from "@/lib/api";
 
 const startUpdateMock = vi.fn();

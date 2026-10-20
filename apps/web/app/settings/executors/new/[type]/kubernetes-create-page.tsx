@@ -13,6 +13,7 @@ import { KubernetesDiagnosticsCard } from "@/components/settings/kubernetes-diag
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { KubernetesWorkloadCard } from "@/components/settings/kubernetes-workload-card";
 import { KubernetesWorkspaceCard } from "@/components/settings/kubernetes-workspace-card";
+import { ExecutorOwnerChoice } from "@/components/settings/executor-ownership";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { settingsActionClassName } from "@/components/settings/settings-control";
@@ -50,17 +51,19 @@ export function KubernetesCreatePage() {
   const [profileBaseline] = useState(createDefaultKubernetesProfileConfig);
   const [executor, setExecutor] = useState<KubernetesExecutorForm>(executorBaseline);
   const [profileName, setProfileName] = useState("");
+  const [owner, setOwner] = useState("");
   const [profile, setProfile] = useState<KubernetesProfileConfigForm>(profileBaseline);
   const [error, setError] = useState<unknown>(null);
 
   const payload = useMemo(
     () => ({
       name: executor.name.trim(),
+      ...(owner ? { owner_user_id: owner } : {}),
       config: serializeKubernetesExecutorConfig(executor),
       profileName: profileName.trim(),
       profileConfig: serializeKubernetesProfileConfig(profile),
     }),
-    [executor, profile, profileName],
+    [executor, profile, profileName, owner],
   );
   const invalidReason = createInvalidReason(executor, profileName, profile, canManage, t);
   const contributorState = getKubernetesCreateContributorState(canManage, invalidReason);
@@ -82,6 +85,7 @@ export function KubernetesCreatePage() {
   const discard = useCallback(() => {
     setExecutor({ ...executorBaseline });
     setProfileName("");
+    setOwner("");
     setProfile({ ...profileBaseline, accessModes: [...profileBaseline.accessModes] });
     diagnostics.clear();
     setError(null);
@@ -108,6 +112,7 @@ export function KubernetesCreatePage() {
     <div className="min-w-0 space-y-8 overflow-x-clip">
       <KubernetesCreateHeader />
       {!canManage && <KubernetesReadOnlyNotice />}
+      <ExecutorOwnerChoice value={owner} onChange={setOwner} creating baseline="" />
       <KubernetesConnectionCard
         form={executor}
         baseline={executorBaseline}

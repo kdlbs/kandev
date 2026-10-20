@@ -279,6 +279,8 @@ Design-package checks passed on 2026-10-20:
 Implementation checks passed on 2026-10-20. Both work orders are complete.
 Requirements are `active`; the design is `current`.
 
+### Feature validation before base integration
+
 - Focused Vitest command: 13 suites, 99 tests passed. See the work-order commands.
   Log: `/tmp/kandev-archive-unit-final.log`.
 - Typecheck passed with `NODE_OPTIONS=--max-old-space-size=12288`. The default
@@ -336,6 +338,28 @@ This compatibility refinement is recorded in criterion `004.3` and its hook test
 The user approved manual testing and requested a ready PR. The isolated manual
 test instance was stopped before publication. No backend, package, persistent
 platform task, or delegated-agent change was needed.
+
+## PR integration validation
+
+Main changed plugin facet preferences, SPA routing, and shared search coverage
+before publication. Integration retains the new facet preference types, the
+integrated-control route, archive boot eligibility, and current-query ownership.
+Plugin facet choices remain in URL/preferences and use a built-in API sort.
+List keeps one 300ms request debounce; clearing admits the empty query immediately.
+Inherited search and facet tests now use the visible List controls.
+
+After integration, 153 focused unit tests passed across 20 suites. Typecheck
+and ESLint for all 40 changed TypeScript files passed. Fresh production assets
+passed all 32 desktop and 11 phone browser cases, including plugin preferences,
+queued-search cancellation, stale replies, archive navigation, filters, and history.
+The failed preliminary browser run used a native-select API on a Radix trigger;
+that test now uses the established selection helper.
+
+Evidence is under `/tmp/kandev-archive-pr-delivery-1n02tpi8/`: `merged-unit-final.log`,
+`merged-typecheck-final-2.log`, `merged-eslint-final.log`,
+`kandev-run.e2e.us9VZMmr.log`, and `kandev-run.e2e.BbcpuZI9.log`.
+The manual instance remains stopped. PR publication and remote CI are separate
+from these completed local checks.
 
 ## Risks
 

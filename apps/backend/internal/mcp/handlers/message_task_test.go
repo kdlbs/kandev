@@ -47,6 +47,7 @@ type fakeOrchestrator struct {
 	peerStartFunc           func(context.Context, messagequeue.QueueSessionIdentity, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) (*executor.TaskExecution, error)
 	renameCalls             []renameCall
 	renameErr               error
+	liveClarifications      map[string]bool
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.

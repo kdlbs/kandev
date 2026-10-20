@@ -54,6 +54,25 @@ func TestJournalCommittedRecordsSurviveKill(t *testing.T) {
 	}
 }
 
+func TestReplayAfterCloseReturnsError(t *testing.T) {
+	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Replay panicked after Close: %v", recovered)
+		}
+	}()
+	if _, _, err := j.Replay(context.Background(), "stream", 0, 1); !errors.Is(err, bolt.ErrDatabaseNotOpen) {
+		t.Fatalf("Replay after Close error = %v, want %v", err, bolt.ErrDatabaseNotOpen)
+	}
+}
+
 func TestJournalRecoveryDescriptorIsBoundedAndOmitsPayload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "delivery.bbolt")
 	j, err := Open(Config{Path: path})

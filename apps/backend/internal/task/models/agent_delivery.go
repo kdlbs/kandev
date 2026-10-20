@@ -14,9 +14,23 @@ type AgentDeliveryRetentionBatchOptions struct {
 	ReplayEvents    int
 }
 
+// AgentDeliveryRetentionDiscovery contains private committed scan positions.
+// It is scheduling evidence only, never deletion or recovery authority.
+type AgentDeliveryRetentionDiscovery struct {
+	CompactionAt       time.Time
+	CompactionValid    bool
+	CompactionStreamID string
+	CompactionSequence int64
+	ReceiptStreamID    string
+	ReceiptSequence    int64
+	SubmissionID       string
+}
+
 // AgentDeliveryRetentionBatchResult reports the durable work committed by one
 // bounded retention transaction.
 type AgentDeliveryRetentionBatchResult struct {
+	DiscoveryBefore AgentDeliveryRetentionDiscovery
+	DiscoveryAfter  AgentDeliveryRetentionDiscovery
 	// DiscoveryAdvanced reports committed forward movement, excluding frontier wrap.
 	DiscoveryAdvanced        bool
 	Candidates               int

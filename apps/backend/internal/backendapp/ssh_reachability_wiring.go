@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/startup"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	reachabilitypkg "github.com/kandev/kandev/internal/executors/reachability"
@@ -20,7 +21,7 @@ func startSSHReachabilityPoller(
 ) *reachabilitypkg.Poller {
 	poller := reachabilitypkg.New(repo, intervalSeconds, log)
 	poller.SetPublisher(publisher)
-	poller.Start(ctx)
+	startup.AfterReady(ctx, func() { poller.Start(ctx) })
 	addCleanup(func() error { poller.Stop(); return nil })
 	return poller
 }

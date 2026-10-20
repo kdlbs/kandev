@@ -53,6 +53,19 @@ func TestAgentEventPayloadCarriesRunID(t *testing.T) {
 	}
 }
 
+func TestAgentEventPayloadCarriesCausingRunIDForTaskOwnedExecution(t *testing.T) {
+	payload := newAgentEventPayload(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		CausingRunID: "office-run-1",
+	})
+	if payload.CausingRunID != "office-run-1" {
+		t.Fatalf("causing run ID = %q, want office-run-1", payload.CausingRunID)
+	}
+	if payload.OwnerKind != ExecutionOwnerTask {
+		t.Fatalf("owner kind = %q, want task", payload.OwnerKind)
+	}
+}
+
 func TestAgentEventPayloadCarriesPromptTurnID(t *testing.T) {
 	execution := &AgentExecution{ID: "exec-1", promptTurnID: "turn-1"}
 	payload := newAgentEventPayload(execution)

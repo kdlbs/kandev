@@ -178,7 +178,8 @@ func newMessengerAdapter(t *testing.T, tasks *fakeMessengerTaskSvc, orch *fakeMe
 // cannot validate workflow or claim state transactionally, so its adapter is
 // only used with these isolated task-service fakes.
 type memoryExactMessageAdmissionQueue struct {
-	queue *messagequeue.Service
+	queue          *messagequeue.Service
+	afterAdmission func()
 }
 
 func (q memoryExactMessageAdmissionQueue) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
@@ -202,9 +203,13 @@ func (q memoryExactMessageAdmissionQueue) QueueMessageWithMetadataForSessionWith
 	attachments []messagequeue.MessageAttachment,
 	metadata map[string]interface{},
 ) (*messagequeue.QueuedMessage, bool, error) {
-	return q.queue.QueueMessageWithMetadataForSessionWithClientQueueID(
+	queued, replayed, err := q.queue.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, identity, clientQueueID, content, model, userID, planMode, attachments, metadata, nil,
 	)
+	if err == nil && q.afterAdmission != nil {
+		q.afterAdmission()
+	}
+	return queued, replayed, err
 }
 
 func sessionMapValues(sessions map[string]*taskmodels.TaskSession) []*taskmodels.TaskSession {
@@ -249,9 +254,12 @@ func TestPluginsMessenger_QueueStatusSurvivesCancelledRequest(t *testing.T) {
 	a := newMessengerAdapter(t, tasks, orch)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	defer cancel()
+	a.exactQueue = memoryExactMessageAdmissionQueue{queue: orch.queue, afterAdmission: cancel}
 	_, err := a.SendMessage(ctx, "t1", "", "do the thing", "plugin:p")
 	require.NoError(t, err)
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.Equal(t, 1, orch.queue.GetStatus(context.Background(), "s1").Count)
 	require.NotNil(t, orch.queueStatusCtx)
 	require.NoError(t, orch.queueStatusCtx.Err(), "queue status publication must not inherit a cancelled request")
 }
