@@ -153,3 +153,39 @@ all 39 ChatMessage tests passed again. Evidence:
 `/tmp/pr4619-width-mutation-receipt.json` and
 `/tmp/pr4619-chatmessage-restored-green.log`. CI checked out synthetic merge
 `f78a0dc46c002fd0e83bc6ac88f75007b05a6587` for the failed job.
+
+### CI base refresh on 2026-10-21
+
+The remaining failure was the mobile delayed changed-files reload scroll test
+in E2E shard 28. CI tested merge `ad968c4fef5a0b2eeec5c8c2db3269599a0ee90a`,
+with base `62a0217c93b4a57401ebbef3a2a0df4e9c5d7f2d`. Its final assertion
+reported a 176px bottom gap. The dependent E2E gate failed too.
+
+A detached reproduction matched the exact CI source tree. Its first isolated
+run passed. Four CI-mode repetitions on two CPUs, with retries disabled,
+reproduced the failure once with a 175px gap. Logs:
+`/tmp/kandev-run.e2e.nQNK4Tot.log` and
+`/tmp/kandev-run.e2e.89CfAazo.log`.
+
+Upstream commit `00195da0c28e2811093d1176e9841d4fc790a8c6` already repairs
+native scroll restoration during delayed card growth. A synthetic merge of
+this PR with main `d5387f083850ffd1755854f637feaa428fca90a4` passed 145
+focused unit tests, the mobile case once normally and four times on two CPUs,
+the desktop counterpart, and TypeScript. Every browser run used zero retries.
+The checked HEAD, index, and working tree matched the synthetic commit.
+Evidence: `/tmp/pr4619-oct21-scroll-evidence.json`.
+
+Commands used in that temporary checkout:
+
+```sh
+python3 /tmp/pr4619-two-cpu.py python3 /tmp/image-expansion-env.py scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/git/mobile-turn-changed-files-scroll.spec.ts --retries=0 --repeat-each=4
+python3 /tmp/image-expansion-env.py scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/git/turn-changed-files-scroll.spec.ts --retries=0
+NODE_OPTIONS=--max-old-space-size=8192 pnpm --dir apps/web run typecheck
+```
+
+Main then advanced to `21949f6362e6830b9fb9162d2ca6ba41c5900331` through
+an Azure saved-view change. Its delta does not touch the scroll or image
+preview paths, and the merge remains conflict-free. A new PR revision refreshes
+CI against that corrected base. The implementation and regression coverage
+already live upstream. This commit records validation only, so the existing
+requirements, public guidance, and image-preview captures remain applicable.
