@@ -2091,6 +2091,9 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if running != nil && running.ExecutionProfileID != "" &&
 			running.ExecutionProfileID != agentProfileID {
 			if running.AgentExecutionID != "" {
+				// The replacement launch owns this stop, so its stopped event
+				// must not end the session the launch is about to reuse.
+				e.registerStopOwner(sessionID, running.AgentExecutionID, true)
 				if err := e.agentManager.StopAgentWithReason(
 					ctx, running.AgentExecutionID, "execution profile changed", true,
 				); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {

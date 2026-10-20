@@ -14,8 +14,9 @@ legacy_specs: []
 ## Overview
 
 Let `LaunchPreparedSession` replace a prepared execution whose profile differs
-from the launch profile even when stopping that execution has already removed
-its `executors_running` row. Fixes
+from the launch profile. The replacement stop must not fail the launch when it
+has already removed the session's `executors_running` row, and must not end the
+session the launch is about to reuse. Fixes
 [#4611](https://github.com/kdlbs/kandev/issues/4611).
 
 ## Confirmed root cause
@@ -35,6 +36,22 @@ its `executors_running` row. Fixes
 - The stop call already tolerates `lifecycle.ErrExecutionNotFound`. Peer
   callers (`reconcile_liveness.go`, `event_handlers_workflow.go`) already
   tolerate `ErrExecutorRunningNotFound` on the same delete.
+
+- The same synchronous stop also runs `Service.handleAgentStopped`, which
+  moves a non-terminal session to `CANCELLED`. With the row deletion tolerated,
+  the launch then fails at `verify session before registering execution:
+  session ... is CANCELLED: session is terminal`, with the same
+  `unknown_provider_error` classification and parked run. Confirmed on a dev
+  instance after Task 01.
+- `handleAgentStopped` already treats a stop as an acknowledgement when an
+  explicit teardown owner holds the exact `(session, execution)` pair
+  (`hasExecutionTeardownOwner`). The executor reaches that registry through
+  `registerStopOwner` (`SetOnExecutionStopOwnerRegistration` →
+  `Service.RegisterExecutionStopOwner`), but the profile-change stop does not
+  register before stopping.
+- Task 01's unit test mocked the agent manager, so the stop never ran the real
+  stopped-event handler. That is why it passed while the end-to-end launch still
+  failed.
 
 Reproduction: an Office task whose first run is deferred by a blocker, opened in
 the UI (which prepares an `inherit_parent` session with the parent's profile),
@@ -65,20 +82,30 @@ No system-design change: the design already states the intended outcome.
 - Keep every other delete error fatal, including the environment recovery
   claim refusal from `ensureExecutorRunningAvailableTx`.
 - Backend regression test at the executor boundary.
+- Register explicit stop ownership for the exact prepared execution before the
+  profile-replacement stop, so the stopped event is an acknowledgement and the
+  session keeps its state.
+- Orchestrator integration test on a real SQLite repository through
+  `NewService`, with an agent manager whose stop runs the real
+  `handleAgentStopped` synchronously.
+- Office Playwright E2E test with the mock agent covering the issue's flow:
+  blocked assignment, prepared session from the task page, blocker completion,
+  and a launched run.
 
 ### Out of scope
 
 - Office scheduler error classification of unrelated prestart errors.
 - Changing lifecycle stop semantics or making the stop asynchronous.
 - Changing the shared executor mock repository's default delete behavior.
-- E2E coverage: the defect is a backend race between two internal calls with no
-  distinct UI surface; the recovery is observable only as "the run launches".
+- The separate observations from manual testing: the Office status board's
+  "done" gate, and an Office routine run that stayed claimed after a restart.
 
 ## Work orders
 
 | ID | Title | Depends on | Status |
 | -- | ----- | ---------- | ------ |
 | [01](task-01-tolerate-cleared-executor-row.md) | Tolerate a cleared executor row on profile change | none | done |
+| [02](task-02-keep-session-on-profile-replacement.md) | Keep the session alive across a profile-replacement stop | 01 | done |
 
 ## Verification
 
@@ -86,7 +113,11 @@ No system-design change: the design already states the intended outcome.
 # From apps/backend:
 go test ./internal/orchestrator/executor -run 'TestLaunchPreparedSession_ProfileChange' -count=1 -race
 go test ./internal/orchestrator/executor/... -count=1
-make -C apps/backend lint   # from repo root
+go test -trimpath ./internal/orchestrator -run 'TestLaunchPreparedSession_ProfileReplacement' -count=1 -race
+# From repo root:
+bash scripts/lint-go-changed <changed-go-files>
+# From apps/web:
+pnpm e2e:run --host --shards 1 --project chromium tests/office/prepared-session-profile-replacement.spec.ts
 ```
 
 ## Risks
