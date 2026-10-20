@@ -258,6 +258,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
+	api.GET("/tasks/:id/step-transitions", h.httpListTaskStepTransitions)
 
 	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
 	// AC-18): per-task and per-session usage/cost totals.

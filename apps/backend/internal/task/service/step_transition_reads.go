@@ -18,6 +18,10 @@ type stepTransitionReader interface {
 	ListWorkflowTransitionGroups(context.Context, string, string, string, int) ([]models.TransitionGroup, error)
 }
 
+type stepTransitionRecordReader interface {
+	ListTaskStepTransitionRecords(context.Context, string, int64, int) ([]models.StepTransitionRecord, error)
+}
+
 type transitionCursor struct {
 	Scope string `json:"scope"`
 	ID    int64  `json:"id,omitempty"`
@@ -86,6 +90,45 @@ func (s *Service) ListTaskStepTransitions(ctx context.Context, taskID string, li
 	}
 	items = items[:pageSize]
 	return items, encodeTransitionCursor(transitionCursor{Scope: "task:" + taskID, ID: items[len(items)-1].ID}), nil
+}
+
+// ListTaskStepTransitionRecords returns one oldest-first page of a task's
+// recorded moves with their attribution. Unlike the plugin trail it includes
+// actor kind and actor ID, so it requires the caller's workspace.read on the
+// task rather than a plugin grant.
+func (s *Service) ListTaskStepTransitionRecords(ctx context.Context, taskID string, limit int, encodedCursor string) ([]models.StepTransitionRecord, string, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, "", err
+	}
+	// authorizeTaskID loads the task only for a scoped caller; an unknown task
+	// must still be a not-found for internal and auth-disabled callers.
+	if _, scoped := callerScope(ctx); !scoped {
+		if _, err := s.tasks.GetTask(ctx, taskID); err != nil {
+			return nil, "", err
+		}
+	}
+	reader, ok := s.tasks.(stepTransitionRecordReader)
+	if !ok {
+		return nil, "", fmt.Errorf("task transition reads unavailable")
+	}
+	pageSize, err := transitionReadLimit(limit)
+	if err != nil {
+		return nil, "", err
+	}
+	scope := "task-records:" + taskID
+	cursor, err := decodeTransitionCursor(encodedCursor, scope)
+	if err != nil || (encodedCursor != "" && (cursor.ID <= 0 || cursor.Key != "")) {
+		return nil, "", ErrInvalidTransitionCursor
+	}
+	items, err := reader.ListTaskStepTransitionRecords(ctx, taskID, cursor.ID, pageSize+1)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(items) <= pageSize {
+		return items, "", nil
+	}
+	items = items[:pageSize]
+	return items, encodeTransitionCursor(transitionCursor{Scope: scope, ID: items[len(items)-1].ID}), nil
 }
 
 // ListWorkflowTransitionGroups returns bounded route counts for a workflow.
