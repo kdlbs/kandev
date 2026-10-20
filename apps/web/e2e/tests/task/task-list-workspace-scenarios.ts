@@ -18,49 +18,7 @@ async function activate(control: Locator, touch: boolean) {
 
 export function taskListWorkspaceScenarios(touch: boolean) {
   taskListPartialMetadataScenario();
-  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
-  test("restores each linked workspace and its filters through browser history", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const other = await apiClient.createWorkspace("Portable archive workspace");
-    try {
-      const workflow = await apiClient.createWorkflow(other.id, "Portable workflow", "simple");
-      const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-      const fixtures = [
-        [seedData.workspaceId, seedData.workflowId, seedData.startStepId, "Portable archive A"],
-        [other.id, workflow.id, steps[0].id, "Portable archive B"],
-      ];
-      const links: string[] = [];
-      for (const [workspaceId, workflowId, stepId, title] of fixtures) {
-        const task = await apiClient.createTask(workspaceId, title, {
-          workflow_id: workflowId,
-          workflow_step_id: stepId,
-        });
-        await apiClient.archiveTask(task.id);
-        links.push(
-          `/tasks?workspace=${workspaceId}&archive=archived&q=Portable&workflow=${workflowId}&repository=all&sort=title_asc&group=none`,
-        );
-      }
-      await testPage.goto("/settings");
-      for (let index = 0; index < links.length; index++) {
-        await navigateInSpa(testPage, links[index]);
-        await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[index][3]]);
-        expect(new URL(testPage.url()).search).toBe(new URL(links[index], testPage.url()).search);
-      }
-      await testPage.goBack();
-      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[0][3]]);
-      await testPage.goForward();
-      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[1][3]]);
-      await expect(testPage.getByTestId("tasks-list-search")).toHaveValue("Portable");
-      await assertNoDocumentHorizontalOverflow(testPage);
-    } finally {
-      await testPage.goto("/settings");
-      await apiClient.deleteWorkspace(other.id, other.name);
-    }
-  });
-
+  taskListWorkspaceHistoryScenario();
   // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.5
   test("recovers a failed workspace lookup and offers Home for an unknown workspace", async ({
     testPage,
@@ -97,6 +55,72 @@ export function taskListWorkspaceScenarios(touch: boolean) {
       "on",
     );
     await expect(testPage.getByRole("alert")).toHaveCount(0);
+  });
+}
+
+function taskListWorkspaceHistoryScenario() {
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.2 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
+  test("restores each linked workspace and its filters through browser history", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const other = await apiClient.createWorkspace("Portable archive workspace");
+    let releaseMetadata: (() => void) | undefined;
+    try {
+      const workflow = await apiClient.createWorkflow(other.id, "Portable workflow", "simple");
+      const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+      const fixtures = [
+        [seedData.workspaceId, seedData.workflowId, seedData.startStepId, "Portable archive A"],
+        [other.id, workflow.id, steps[0].id, "Portable archive B"],
+      ];
+      const links: string[] = [];
+      for (const [workspaceId, workflowId, stepId, title] of fixtures) {
+        const task = await apiClient.createTask(workspaceId, title, {
+          workflow_id: workflowId,
+          workflow_step_id: stepId,
+        });
+        await apiClient.archiveTask(task.id);
+        links.push(
+          `/tasks?workspace=${workspaceId}&archive=archived&q=Portable&workflow=${workflowId}&repository=all&sort=title_asc&group=none`,
+        );
+      }
+      await testPage.goto("/settings");
+      const matchesMetadata = (url: URL) =>
+        url.pathname === "/api/v1/workflows" && url.searchParams.get("workspace_id") === other.id;
+      const metadataReady = new Promise<void>((resolve) => {
+        releaseMetadata = resolve;
+      });
+      await testPage.route(matchesMetadata, async (route) => {
+        await metadataReady;
+        await route.continue();
+      });
+      for (let index = 0; index < links.length; index++) {
+        const requested =
+          index === 1
+            ? testPage.waitForRequest((request) => matchesMetadata(new URL(request.url())))
+            : null;
+        await navigateInSpa(testPage, links[index]);
+        if (index === 1) {
+          await requested;
+          await expect(testPage.getByText("Loading Tasks…", { exact: true })).toBeVisible();
+          await expect(testPage.getByTestId("tasks-list-workflow-filter")).toHaveCount(0);
+          releaseMetadata?.();
+        }
+        await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[index][3]]);
+        expect(new URL(testPage.url()).search).toBe(new URL(links[index], testPage.url()).search);
+      }
+      await testPage.goBack();
+      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[0][3]]);
+      await testPage.goForward();
+      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText([fixtures[1][3]]);
+      await expect(testPage.getByTestId("tasks-list-search")).toHaveValue("Portable");
+      await assertNoDocumentHorizontalOverflow(testPage);
+    } finally {
+      releaseMetadata?.();
+      await testPage.goto("/settings");
+      await apiClient.deleteWorkspace(other.id, other.name);
+    }
   });
 }
 

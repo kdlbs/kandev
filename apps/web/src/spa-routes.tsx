@@ -782,8 +782,10 @@ function useRouteData({
       if (workspaceId !== workspaceBeforeHydration) {
         store.getState().setActiveWorkspace(workspaceId);
       }
-      setResolution({ ...nextResolution, status: "ready" });
-      if (!workspaceId) return;
+      if (!workspaceId) {
+        setResolution({ ...nextResolution, status: "ready" });
+        return;
+      }
 
       const generation = store.getState().workspaceContextGeneration;
       for (const collection of ["workflows", "repositories", "steps"] as const) {

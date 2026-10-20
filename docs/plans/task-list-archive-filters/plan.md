@@ -422,3 +422,14 @@ before this refinement. Validation passed 175 tests in 22 unit suites,
 changed-file lint without warnings. The browser logs are
 `kandev-run.e2e.GC5ujdUu.log` and `kandev-run.e2e.ez4PLAOe.log` in the same
 artifact directory.
+
+The SPA route now keeps its loading state until metadata reads settle. It
+mounts List after that point so a valid filter does not briefly receive an
+unavailable label. A deferred-read unit regression and a browser regression
+failed before the guard. The browser test holds the actual workflow API request
+and checks loading, absent filter controls, then restored rows and history.
+
+The final loading-state refinement passed all 175 unit tests, 17 desktop
+scenarios, 14 phone scenarios, typecheck, and changed-file lint without warnings.
+Its logs are `review-loading-all-unit.log`, `kandev-run.e2e.14kwCIII.log`, and
+`kandev-run.e2e.Kos825mR.log` in the same artifact directory.

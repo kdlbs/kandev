@@ -184,3 +184,7 @@ The readiness flags are independent for workflows and repositories. An unused
 filter's failed metadata read cannot hold the current query in loading. Cached
 repository data does not prove that a pending fresh read completed. These
 regressions failed before the refinement in unit tests and a real browser.
+
+List controls mount after the route metadata reads settle. Controlled delayed
+workflow reads prove that desktop and phone workspace navigation show loading
+before the correct filtered rows.

@@ -177,7 +177,9 @@ repository data alone does not complete the current read. A matching workspace
 ID alone does not prove readiness. Invalidate the Tasks boot seed after leaving Tasks or changing its
 workspace. Keep this invalidation in the SPA owner so returning from Settings
 cannot reuse metadata from a previous visit. Pending metadata remains loading;
-failed reads retain the existing metadata recovery path.
+failed reads retain the existing metadata recovery path. While SPA metadata
+reads are pending, show the route loading state. Mount List after those reads
+settle so filter controls do not show unavailable labels for pending metadata.
 
 ## Query transitions
 

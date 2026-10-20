@@ -350,11 +350,9 @@ describe("Tasks URL workspace ownership", () => {
     mocks.listWorkflows.mockReturnValueOnce(workflows.promise);
     window.history.replaceState({}, "", `/tasks?workspace=${DEFAULT_WORKSPACE_ID}&workflow=all`);
     renderTasksWorkspace();
-    await screen.findByTestId(TASKS_PAGE_TEST_ID);
-    expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
-      workflows: false,
-      repositories: false,
-    });
+    await waitFor(() => expect(mocks.listWorkflows).toHaveBeenCalled());
+    expect(screen.getByRole("status").textContent).toContain("Tasks");
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
     await act(async () => workflows.resolve({ workflows: [] }));
     await waitFor(() =>
       expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
