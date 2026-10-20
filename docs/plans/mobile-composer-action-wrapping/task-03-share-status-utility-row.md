@@ -210,3 +210,32 @@ Each command passed one test. Together with the unchanged passing cases, all
 six desktop and ten mobile scenarios are verified. Final lint and formatting
 include the changed helper. Final specification, coverage, and diff checks pass.
 Changes remain unstaged and uncommitted. No delegation or PR publication occurred.
+
+### PR review: GitLab touch targets
+
+PR #4633 review found that the GitLab MR trigger did not expose the shared
+change-request slot. The existing composer rule therefore left its target at
+18px. The MR trigger attributes now expose that slot for both drawer and popover
+variants. Standalone placement and fine-pointer desktop dimensions are unchanged.
+
+The extended mobile MR browser case failed before the fix with an 18px target
+against the 44px minimum. After a fresh managed build, all four selected browser
+cases passed: shared row, wrapped row, GitLab touch disclosure, and GitLab narrow
+fine-pointer/desktop sizing. The GitLab checks cover 320px, 393px, 767px, and
+800px coarse-pointer viewports, center-point reachability, drawer content, focus
+return, and compact desktop sizing. The existing 13 MR component tests passed.
+Targeted ESLint, Prettier, and typecheck with the 6144MiB heap passed.
+
+```bash
+. /tmp/mobile-composer-env.sh
+CAPTURE_PR_ASSETS=1 pnpm --dir apps/web e2e:run --project mobile-chrome e2e/tests/gitlab/mobile-mr-status-chip.spec.ts e2e/tests/chat/mobile-chat-status-bar.spec.ts -- --grep 'shares status and transcript controls|wraps status and transcript controls|mobile GitLab MR status chip' --retries=0
+pnpm --dir apps/web exec vitest run components/gitlab/mr-status-chip.test.tsx
+pnpm --dir apps/web exec eslint components/gitlab/mr-status-chip-trigger.tsx e2e/tests/gitlab/mobile-mr-status-chip.spec.ts
+pnpm --dir apps/web exec prettier --check components/gitlab/mr-status-chip-trigger.tsx e2e/tests/gitlab/mobile-mr-status-chip.spec.ts
+NODE_OPTIONS=--max-old-space-size=6144 pnpm --dir apps/web run typecheck
+```
+
+The screenshot fixture uses a separate capture key for each test so both GitLab
+viewport captures remain in the manifest. Both GitLab browser cases passed again
+after that fixture change, with retries disabled. Publication and current-head CI/review
+verification remain pending until the remediation is pushed.
