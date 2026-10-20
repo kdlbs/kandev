@@ -565,7 +565,7 @@
   "overrideTheWorkspaceTierOrProvider": "이 에이전트의 워크스페이스 티어나 공급자 순서를 재정의합니다.",
   "overrideWakeReasonTiers": "웨이크 이유 티어 재정의",
   "overrideWakeReasonTiersHelp": "드물게 사용합니다. 이 에이전트가 백그라운드 작업에 대해 특별히 다른 동작을 필요로 할 때만 재정의하세요. 예를 들어 일상 점검에도 Frontier를 사용해야 하는 보안 중요 에이전트입니다. 대부분의 에이전트는 워크스페이스 정책을 상속해야 합니다.",
-  "overrideWhichModelTierRunsFor": "특정 종류의 에이전트 작업에 어떤 모델 티어를 실행할지 재정의합니다. 대부분의 사용자는 워크스페이스 기본값을 그대로 둡니다. 백그라운드 작업에는 Economy, 일반 실행에는 Balanced입니다. 하트비트, 예약 루틴, 예산 경고는 백그라운드에서 끊임없이 실행되므로 여기서 더 저렴한 티어를 사용하면 중요한 작업에 영향을 주지 않고 비용을 크게 줄일 수 있습니다.",
+  "overrideWhichModelTierRunsFor": "워크스페이스 기본값을 사용하거나 에이전트 작업 유형별로 모델 등급을 선택하세요. 비용이 낮은 모델은 다른 결과를 낼 수 있습니다.",
   "overrideWorkspacePolicyForThisAgent": "이 에이전트의 워크스페이스 정책 재정의",
   "overrideWorkspaceProviderOrder": "워크스페이스 공급자 순서 재정의",
   "overrideWorkspaceTier": "워크스페이스 티어 재정의",

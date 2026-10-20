@@ -698,7 +698,7 @@ describe("ActionMessage recovery settlement", () => {
 });
 
 describe("ActionMessage active legacy recovery ownership", () => {
-  it("keeps an active legacy recovery row compact when the owner has no stamp", () => {
+  it("keeps the error and details readable when the recovery owner has no mounted card", () => {
     const legacyMessage = recoveryMessage();
     legacyMessage.id = "legacy-recovery-owner";
     legacyMessage.metadata = {
@@ -741,9 +741,11 @@ describe("ActionMessage active legacy recovery ownership", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
-      "This failure is explained in the recovery card above.",
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(RECOVERY_MESSAGE);
+    expect(screen.getByTestId("session-recovery-history-details").textContent).toContain(
+      "The provider request failed.",
     );
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
     expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
   });
 });

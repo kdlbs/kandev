@@ -386,9 +386,7 @@ test.describe("PR CI automation options", () => {
     await session.prTopbarPopover().getByTestId("ci-auto-fix-round-help").hover();
     await expect(
       testPage.getByRole("tooltip").getByTestId("ci-auto-fix-round-explanation"),
-    ).toContainText(
-      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
-    );
+    ).toContainText("If the agent reports no outcome, Kandev may retry the same feedback");
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
     const [firstMessage] = await listAutoFixMessages(apiClient, sessionId);
     expect(firstMessage).toBeDefined();

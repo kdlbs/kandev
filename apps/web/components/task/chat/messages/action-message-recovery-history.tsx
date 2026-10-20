@@ -60,11 +60,9 @@ export function resolveRecoveryHistoryState(
 export function RecoveryHistory({
   comment,
   metadata,
-  activeOwner = false,
 }: {
   comment: Message;
   metadata?: ActionMeta;
-  activeOwner?: boolean;
 }) {
   const { t } = useTranslation();
   const sessionMetadata = useAppStore((state) =>
@@ -76,26 +74,18 @@ export function RecoveryHistory({
   const status = recoveryHistoryStatus(comment, metadata, sessionMetadata, messages);
   const typed = historicalRecoveryPresentation(comment, metadata, t);
   return (
-    <RecoveryHistoryView
-      comment={comment}
-      metadata={metadata}
-      activeOwner={activeOwner}
-      status={status}
-      typed={typed}
-    />
+    <RecoveryHistoryView comment={comment} metadata={metadata} status={status} typed={typed} />
   );
 }
 
 function RecoveryHistoryView({
   comment,
   metadata,
-  activeOwner,
   status,
   typed,
 }: {
   comment: Message;
   metadata?: ActionMeta;
-  activeOwner: boolean;
   status: "resolved" | "dismissed" | null;
   typed: ReturnType<typeof historicalRecoveryPresentation>;
 }) {
@@ -112,20 +102,14 @@ function RecoveryHistoryView({
       data-testid="session-recovery-history"
     >
       {status && <RecoveryStatusBadge status={status} />}
-      {activeOwner ? (
-        <p className="wrap-anywhere">{t("task:sessionRecoveryDetailsAbove")}</p>
-      ) : (
-        <>
-          <p className="wrap-anywhere">{summary}</p>
-          {showDetails && (
-            <SessionErrorDetails
-              testId="session-recovery-history-details"
-              structuredFields={typed?.detailFields}
-            >
-              {legacyDetails}
-            </SessionErrorDetails>
-          )}
-        </>
+      <p className="wrap-anywhere">{summary}</p>
+      {showDetails && (
+        <SessionErrorDetails
+          testId="session-recovery-history-details"
+          structuredFields={typed?.detailFields}
+        >
+          {legacyDetails}
+        </SessionErrorDetails>
       )}
     </div>
   );
