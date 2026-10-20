@@ -312,3 +312,58 @@ Browser setup first found a missing worktree-local delivery fixture, then a
 port used by another process. The final run built the fixture and selected free
 ports before startup. No test assertion was suppressed. Final screenshots and
 remote checks remain pending for the merge commit.
+
+
+## Git refresh fixture overhead under parallel CI load
+
+The latest CI shard failed twice because the real `session.git.refresh` response
+returned `success: false`. Isolated runs, repeated two-CPU runs, and the exact
+partition on one CPU passed. A replay with four isolated test processes on four
+CPUs reproduced `status_timeout` at the existing two-second refresh deadline.
+The CI checkout and the branch had identical source trees.
+
+The held-diff fixture started a Node process for every Git command while any
+delay control existed. This included unrelated status and metadata commands.
+The POSIX launcher now accepts a command hint owned by that gate. An unrelated
+plain subcommand executes Git directly. Matching commands, global options,
+missing or invalid hints, and active push controls retain the Node parser.
+Windows retains its existing launcher path. The gate removes its hint when it
+rearms or disposes. Production deadlines and Git validation do not change.
+
+A new launcher regression failed before the fix because `git status` loaded
+diff instrumentation. The focused launcher and real-Git integration suites
+then passed all 13 tests. Coverage checks argument, input, output, environment,
+and exit-status preservation. A positive control proves the hinted diff still
+blocks until release. Temporary response logging is excluded from the patch.
+
+The baseline parallel replay also exposed a transient session-model title and
+a restored-terminal sentinel failure. These are separate observations. The
+session-resume suite configures one retry, despite the command-line zero-retry
+option. Its retry passed. Neither observation counts as a passing pressure check.
+The candidate parallel replay passed the complete failing 29-test partition.
+Across all four partitions, 126 tests passed and three failed. The terminal
+reader failed again. A workflow preview failed with a browser protocol error
+while reading a response body. MiniMax setup exceeded its existing 90-second
+limit. These last two pressure observations remain unconfirmed.
+
+The terminal screenshot showed successful command output split across two
+visual rows. The buffer reader incorrectly inserted a newline at the wrap.
+It now joins wrapped rows, preserves spaces at wrap boundaries, and retains
+actual line breaks. Two new regression cases failed before this correction.
+
+Final local checks passed:
+
+- Launcher, real-Git integration, and terminal-reader tests: 16 tests.
+- Fresh web E2E build, type checking with an 8 GiB heap, and scoped ESLint.
+- Eleven focused browser tests without retries: desktop and phone Git recovery,
+  both ended-session terminal paths, all workflow-preview cases, and MiniMax
+  setup. The latter two observations did not recur in this isolated run.
+- Documentation catalog validation, specification lint, and whitespace checks.
+
+The pressure baseline and candidate evidence directories are
+`/tmp/kandev-503-parallel23-w8h7jupr` and
+`/tmp/kandev-503-parallel23-d8zls9oh`. The regression logs are
+`/tmp/kandev-503-scoped-shim-red.log` and
+`/tmp/kandev-503-terminal-reader-red.log`. Final local results are in
+`/tmp/kandev-503-fixture-final-unit.log` and
+`/tmp/kandev-run.e2e.OIAq8vuJ.log`. Fresh remote checks remain pending.

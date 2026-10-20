@@ -129,7 +129,11 @@ commands, results, limits, and cleanup.
 
 CI remediation also covers a delayed SIGKILL delivery failure in the existing
 SSH orphan-stop contract. The implementation evidence records its deterministic
-regression and validation separately. Final remote checks remain pending.
+regression and validation separately. Later CI remediation limits held-diff
+instrumentation to its controlled Git command and preserves logical terminal
+lines in the browser-test reader. The evidence records the reproduced timeout,
+16 focused unit tests, 11 browser checks, and separate pressure observations.
+Final remote checks remain pending.
 
 ## Risks
 
