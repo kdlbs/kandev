@@ -152,7 +152,68 @@ PATH="/tmp/kandev-merge-tools:$PATH" bash scripts/lint-go-changed apps/backend/i
 The complete dialect package, all new and changed health/schema regressions,
 existing fault/recovery controls, and SQL guard passed after the correction.
 Changed-package lint also passed, including `internal/db/dialect`, with zero
-issues. Fresh CI evidence remains pending until the correction is pushed and
-the new-head checks finish.
+issues. The correction was pushed. Subsequent CI exposed the SSH cleanup
+failure described below. Final CI evidence remains pending.
 
 Corrected schema-helper SHA-256: `10eae37d25e553371ab3b9a7a5fddb94b76c31c4d8b5fbe4ccbba03829d4c75d`.
+
+## CI SSH cleanup correction
+
+Backend job `118580188441` in run `39405794933` failed
+`TestSSHOrphanStopCommandKillsProcessAndDirectChildProcessGroup`. Its log reported
+that the target remained running immediately after SIGKILL. The same existing
+test passed 20 local runs with race detection, so those passes did not establish
+that signal delivery had completed before the final state read.
+
+The generated stop script checked liveness once after sending SIGKILL. The new
+`TestSSHOrphanStopCommandWaitsForKillDelivery` controls the shell's OS boundary:
+the process remains live until the script yields after SIGKILL, then either exits,
+becomes a zombie, or remains live. The exit and zombie cases failed before the
+fix with the same error as CI. The live case verifies that cleanup remains
+blocked when termination does not complete.
+
+The script now polls for completed signal delivery within a second bounded
+five-second window. It retains the existing identity checks, child-group
+signals, zombie handling, and session-directory ownership checks. This is CI
+remediation of the existing SSH stop contract, separate from the SQLite query
+optimization. It changes none of the measured health-probe sources.
+
+Validation commands from `apps/backend`:
+
+```bash
+go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestSSHOrphanStopCommandKillsProcessAndDirectChildProcessGroup$' -count=20
+go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestSSHOrphanStopCommandWaitsForKillDelivery$' -count=1
+go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestSSHOrphanStopCommand' -count=3
+go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -count=3
+```
+
+The first command passed before the correction. The second produced the expected
+RED result. After the correction, the third passed, including the new regression.
+The full package run did not pass locally. This Nix host has no `/bin/sleep`,
+which two existing process-fixture tests require. The checkout also contains
+`bin/agentctl-darwin-amd64`, which invalidates an existing binary-absence test.
+A separate pruned-delivery test exhausted its three-second context during
+repository setup. The repeated suite then exceeded Go's ten-minute test limit.
+These results are retained in the task-local log and are not a passing package
+result. The pruned-delivery setup failure also reproduced in a focused three-run
+command. Its three-second context now starts after repository creation, so the
+existing budget applies to database operations and delivery diagnosis instead
+of schema setup. This test-only correction changes no runtime behavior or
+timeout value.
+
+Final scoped validation passed three times after both corrections:
+
+```bash
+go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^(TestSSHOrphanStopCommand|TestPrunedDeliveryStartupReportsAuthenticatedGapBeforeWebSocketAndACP)' -count=3
+```
+
+The command completed in 39.079 seconds. It covered the real-process stop tests,
+the deterministic delivery regression, and both pruned-delivery modes. The local
+shell coverage used `sh` and `bash`; `zsh` was unavailable and its cases skipped.
+Scoped lint passed with zero issues:
+
+```bash
+PATH="/tmp/kandev-merge-tools:$PATH" bash scripts/lint-go-changed apps/backend/internal/agent/runtime/lifecycle/executor_ssh_orphan_stop_wait_test.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_orphan_sweep.go apps/backend/internal/agent/runtime/lifecycle/executor_ssh_orphan_sweep_scheduler.go apps/backend/internal/agent/runtime/lifecycle/pruned_delivery_startup_test.go
+```
+
+Updated-head CI remains pending.

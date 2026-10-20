@@ -18,9 +18,9 @@ import (
 func TestPrunedDeliveryStartupReportsAuthenticatedGapBeforeWebSocketAndACP(t *testing.T) {
 	for _, mode := range []DurableDeliveryMode{DurableDeliveryV1, DurableDeliveryLegacy} {
 		t.Run(string(mode), func(t *testing.T) {
+			repo, connection := runOwnerTestRepository(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			repo, connection := runOwnerTestRepository(t)
 			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Gap diagnosis"}))
 			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session", TaskID: "task", QueueIncarnationID: "session"}))
 			_, err := repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{SessionID: "session", IncarnationID: "session", HarnessGeneration: 1,

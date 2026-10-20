@@ -127,6 +127,10 @@ zero across three paired runs. PostgreSQL integration cases were skipped without
 a test DSN. See [implementation-evidence.md](implementation-evidence.md) for
 commands, results, limits, and cleanup.
 
+CI remediation also covers a delayed SIGKILL delivery failure in the existing
+SSH orphan-stop contract. The implementation evidence records its deterministic
+regression and validation separately. Final remote checks remain pending.
+
 ## Risks
 
 - One batched-query failure affects all descriptors because no complete inventory

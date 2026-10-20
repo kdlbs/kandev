@@ -152,6 +152,10 @@ CI also exposed a test-package import cycle through `internal/db/dialect`.
 The helper now compares the SQLite driver name directly, as other shared schema
 helpers do. The complete dialect package is included in required verification.
 
+Subsequent CI exposed a timing failure in SSH orphan termination. Its separate
+CI remediation and exact validation commands are recorded in the implementation
+evidence. Final remote validation remains pending.
+
 See [implementation-evidence.md](implementation-evidence.md) and
 [implementation-measurements.json](implementation-measurements.json) for exact
 commands, source hashes, results, and measurement limits.
