@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	CurrentVersion                     uint32 = 1
+	CurrentVersion                     uint32 = 2
 	DefaultMaxEventBytes                      = 1 << 20
 	DefaultReserveBytes                       = 1 << 20
 	DefaultDiskReserveBytes                   = 32 << 20
@@ -266,7 +266,7 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 	switch got := binary.BigEndian.Uint32(version); {
 	case got > CurrentVersion:
 		return ErrJournalNewerVersion
-	case got != CurrentVersion:
+	case got < 1:
 		return ErrJournalCorrupt
 	}
 	if err := validateJournalBuckets(tx); err != nil {
@@ -275,7 +275,12 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 	if _, err := decodeInt64(meta.Get(keyJournalBytes)); err != nil {
 		return err
 	}
-	return reconcileJournalBytes(tx, meta)
+	if err := reconcileJournalBytes(tx, meta); err != nil {
+		return err
+	}
+	var encoded [4]byte
+	binary.BigEndian.PutUint32(encoded[:], CurrentVersion)
+	return meta.Put(keyVersion, encoded[:])
 }
 
 // reconcileJournalBytes repairs the logical counter used by admission before
@@ -296,7 +301,7 @@ func validateExistingJournalReadOnly(tx *bolt.Tx, meta *bolt.Bucket, version []b
 	switch got := binary.BigEndian.Uint32(version); {
 	case got > CurrentVersion:
 		return ErrJournalNewerVersion
-	case got != CurrentVersion:
+	case got < 1:
 		return ErrJournalCorrupt
 	}
 	if err := validateJournalBuckets(tx); err != nil {

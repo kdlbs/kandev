@@ -512,5 +512,12 @@
   "user": "用户",
   "usesTheLocalDockerDaemonOn": "使用本机上的本地 Docker 守护进程。",
   "value": "值",
-  "verifyingConnection": "正在验证连接…"
+  "verifyingConnection": "正在验证连接…",
+  "ownershipProfile": "配置访问权限",
+  "ownershipExecutor": "执行器访问权限",
+  "ownershipShared": "共享",
+  "ownershipMe": "仅自己",
+  "ownershipDescription": "只有所有者和管理员可以查看或使用私有计算资源。共享访问保留现有权限。",
+  "ownershipInherited": "执行器为私有。即使此配置设为共享，仍只有执行器所有者和管理员可以访问。",
+  "ownershipUnavailable": "此执行器配置不可用。请先选择可访问的配置再启动。"
 }

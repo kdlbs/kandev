@@ -1,7 +1,9 @@
 "use client";
 
+/* eslint-disable max-lines -- the state module owns the task creation form lifecycle and projections. */
+
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository, TaskPriority } from "@/lib/types/http";
+import type { InitialWorkspaceLayout, LocalRepository, TaskPriority } from "@/lib/types/http";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useFormResetEffects } from "./task-create-dialog-reset-effects";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
@@ -156,6 +158,8 @@ function useFormStateValues(workflowId: string | null) {
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [initialWorkspaceLayout, setInitialWorkspaceLayout] =
+    useState<InitialWorkspaceLayout>("repository");
   return {
     taskName,
     setTaskName,
@@ -199,6 +203,8 @@ function useFormStateValues(workflowId: string | null) {
     setAutopilot,
     priority,
     setPriority,
+    initialWorkspaceLayout,
+    setInitialWorkspaceLayout,
   };
 }
 
@@ -274,6 +280,7 @@ export function useDialogFormState(
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
       setPriority: form.setPriority,
+      setInitialWorkspaceLayout: form.setInitialWorkspaceLayout,
     },
   });
 

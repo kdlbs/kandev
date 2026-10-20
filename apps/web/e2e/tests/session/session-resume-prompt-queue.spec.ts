@@ -8,7 +8,12 @@ import {
 } from "../../helpers/session-resume-prompt-queue";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
-import { openQuickChatSetup, startQuickChatFromSetup } from "../chat/quick-chat-helpers";
+import {
+  openQuickChatSetup,
+  startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
+} from "../chat/quick-chat-helpers";
 
 test.describe("Send during session resume", () => {
   test.describe.configure({ retries: 0 });
@@ -76,6 +81,8 @@ test.describe("Send during session resume", () => {
     );
 
     const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await waitForSessionSettledBaseline(apiClient, taskId, sessionId);
+    await waitForQuickChatDirectInput(dialog);
     await expect(apiClient.setQueueAutoRun(identity, false)).resolves.toMatchObject({
       auto_run: false,
     });

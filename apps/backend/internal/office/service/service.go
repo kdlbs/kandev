@@ -132,9 +132,12 @@ type SessionRecoveryBlockLookup interface {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID           string
-	ExecutorProfileID    string
-	Priority             string
+	ExecutorID        string
+	ExecutorProfileID string
+	Priority          string
+	// CausingRunID is the immutable Office run that initiated this task-owned
+	// execution. It is carried through lifecycle events for transition records.
+	CausingRunID         string
 	Prompt               string
 	WorkflowStepID       string
 	PlanMode             bool

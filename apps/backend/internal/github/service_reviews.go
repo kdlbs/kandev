@@ -192,6 +192,10 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		}
 		rw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
+
+	if _, err := s.executorActorContext(ctx, rw.CreatedByUserID, rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.UpdateReviewWatch(ctx, rw)
 }
 
@@ -270,6 +274,12 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	connection, err := s.store.GetWorkspaceConnection(ctx, watch.WorkspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("load review watch workspace connection: %w", err)
@@ -974,6 +984,7 @@ func (s *Service) publishNewReviewPREvent(ctx context.Context, watch *ReviewWatc
 		return
 	}
 	event := bus.NewEvent(events.GitHubNewReviewPR, "github", &NewReviewPREvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		ReviewWatchID:     watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,

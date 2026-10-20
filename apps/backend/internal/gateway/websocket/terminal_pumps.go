@@ -48,11 +48,11 @@ func (w *wsWriter) Close() error {
 // bridgeBinaryWebSockets forwards binary WebSocket frames bidirectionally between
 // a client connection and an agentctl connection until either side disconnects.
 func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *gorillaws.Conn, terminalID string) {
-	done := make(chan struct{})
+	done := make(chan struct{}, 2)
 
 	// agentctl → client (shell output)
 	go func() {
-		defer close(done)
+		defer func() { done <- struct{}{} }()
 		for {
 			msgType, data, err := agentctlConn.ReadMessage()
 			if err != nil {
@@ -74,6 +74,7 @@ func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *goril
 
 	// client → agentctl (input + resize)
 	go func() {
+		defer func() { done <- struct{}{} }()
 		for {
 			msgType, data, err := clientConn.ReadMessage()
 			if err != nil {
@@ -94,6 +95,9 @@ func (h *TerminalHandler) bridgeBinaryWebSockets(clientConn, agentctlConn *goril
 		}
 	}()
 
+	<-done
+	_ = agentctlConn.Close()
+	_ = clientConn.Close()
 	<-done
 }
 

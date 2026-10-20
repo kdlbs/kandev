@@ -870,3 +870,7 @@ func (s *HandoffService) toRelatedByIDs(ctx context.Context, ids []string) []*Re
 	}
 	return out
 }
+
+type taskResourceRetentionCoordinator interface {
+	PrepareTaskResourceCleanupWithDeleteOptions(context.Context, string, models.TaskResourceCleanupTrigger, string, bool, DeleteTaskOptions) error
+}

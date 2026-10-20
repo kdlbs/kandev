@@ -80,6 +80,7 @@ type repoInfo struct {
 	PRBase                     *models.PRBase
 	QualifiedPRBase            *models.PRBase
 	Position                   int
+	WorkspaceRelativePath      string
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
 	PullBeforeWorktree         bool
@@ -186,6 +187,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		CheckoutBranch:          tr.CheckoutBranch,
 		PRNumber:                prNumberFromMetadata(tr.Metadata),
 		Position:                tr.Position,
+		WorkspaceRelativePath:   tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -1270,6 +1272,13 @@ func (e *Executor) ResumeSessionWithOptions(
 	startAgent bool,
 	options ResumeOptions,
 ) (*TaskExecution, error) {
+	if session != nil && e.executorAdmission != nil {
+		var err error
+		ctx, err = e.executorAdmission(ctx, session.ID, session.ExecutorID, session.ExecutorProfileID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if session != nil {
 		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
 	}
@@ -2103,6 +2112,8 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		WorkspaceLayout:              task.InitialWorkspaceLayout,
+		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
@@ -2126,6 +2137,7 @@ func newResumeLaunchRequest(
 		OriginalWorkspacePath:        session.WorkspacePath,
 		AllowBranchReplacement:       options.AllowBranchReplacement,
 		ForceContextContinuation:     options.ForceContextContinuation,
+		ReplaceNativeConversation:    options.RecoveryAction == RecoveryActionFreshStart,
 		RecoveryAction:               options.RecoveryAction,
 		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}
@@ -2341,7 +2353,9 @@ func (e *Executor) applyResumeWorkspaceFolders(
 	for _, folder := range folders {
 		if folder != nil {
 			req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
-				Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				Name:                  folder.DisplayName,
+				LocalPath:             folder.LocalPath,
+				WorkspaceRelativePath: folder.WorkspaceRelativePath,
 			})
 		}
 	}
@@ -2667,6 +2681,8 @@ func (e *Executor) applyResumeRepoConfig(
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
 		if info != nil && info.RepositoryID == repositoryID {
+			req.TaskRepositoryID = info.TaskRepositoryID
+			req.WorkspaceRelativePath = info.WorkspaceRelativePath
 			req.ContributionDestination = info.ContributionDestination
 			break
 		}
@@ -2836,6 +2852,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
 		req.TaskRepositoryID = primaryTaskRepo.ID
+		req.WorkspaceRelativePath = primaryTaskRepo.WorkspaceRelativePath
 	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch

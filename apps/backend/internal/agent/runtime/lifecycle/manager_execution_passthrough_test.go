@@ -12,6 +12,16 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestSSHPassthroughAttachWaitsForLifecycleLaunch(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session": {SessionID: "session", TaskID: "task", WorkspacePath: "/remote/task", ExecutorType: "ssh"},
+	}}
+	_, err := mgr.EnsurePassthroughExecution(context.Background(), "session")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.Empty(t, mgr.executionStore.List())
+}
+
 func TestResolveSessionRuntimeFallbackOrder(t *testing.T) {
 	ctx := context.Background()
 

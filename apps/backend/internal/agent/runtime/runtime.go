@@ -44,6 +44,12 @@ type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
 type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
+type TurnChangeCheckout = lifecycle.TurnChangeCheckout
+type TurnChangeAdmission = lifecycle.TurnChangeAdmission
+type TurnChangeTerminal = lifecycle.TurnChangeTerminal
+type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
+type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
+type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
@@ -247,4 +253,16 @@ var _ Backend = (*lifecycle.Manager)(nil)
 // Implemented by the shared lifecycle backend; uncertain liveness is an error.
 type RunOwnerRecovery interface {
 	StopRunOwnerForRecovery(context.Context, ExecutionOwner) error
+}
+
+// TurnChangeCaptureHandlerBinder installs the task-owned turn-change adapter
+// without exposing lifecycle implementation types to higher-level packages.
+type TurnChangeCaptureHandlerBinder interface {
+	SetTurnChangeCaptureHandler(TurnChangeCaptureHandler)
+}
+
+// InstallTurnChangeCaptureHandler binds turn-change capture through the public
+// runtime seam.
+func InstallTurnChangeCaptureHandler(binder TurnChangeCaptureHandlerBinder, handler TurnChangeCaptureHandler) {
+	binder.SetTurnChangeCaptureHandler(handler)
 }

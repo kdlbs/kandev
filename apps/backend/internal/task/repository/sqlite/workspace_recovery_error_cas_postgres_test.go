@@ -136,7 +136,7 @@ func TestPostgresCommitWorkspaceRecoveryErrorRejectsChangedSelectedInventory(t *
 			}))
 			slot := &models.TaskEnvironmentRepo{
 				ID: slotID, TaskEnvironmentID: environmentID, RepositoryID: repositoryID,
-				BranchSlug: "feature", WorktreeID: "worktree-before", WorktreePath: "/tasks/before",
+				BranchSlug: "feature", WorktreeID: "worktree-before-" + suffix, WorktreePath: "/tasks/before",
 				WorktreeBranch: "feature/before", WorktreeSourceClonePath: "/managed/old-widget",
 				WorktreeSourceCommonDir: "/managed/old-widget/.git", Status: "active",
 			}
@@ -165,7 +165,7 @@ func TestPostgresCommitWorkspaceRecoveryErrorRejectsChangedSelectedInventory(t *
 			}
 			switch test.change {
 			case "worktree":
-				slot.WorktreeID = "worktree-after"
+				slot.WorktreeID = "worktree-after-" + suffix
 				slot.WorktreePath = "/tasks/after"
 				slot.WorktreeBranch = "feature/after"
 				require.NoError(t, repo.UpdateTaskEnvironmentRepo(ctx, slot))

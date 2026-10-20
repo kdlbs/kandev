@@ -133,5 +133,5 @@
   "selectTasks": "選擇任務",
   "cancelTaskSelection": "取消選擇",
   "bulkSelected_one": "已選擇 {{count}} 個",
-  "groupTasksIntoSectionsByWorkflowStep": "按工作流程步驟、工作流程、儲存庫分組，或不分組。"
+  "groupTasksIntoSectionsByWorkflowStep": "按工作流程步驟、工作流程、儲存庫、外掛程式提供的值分組，或不分組。"
 }

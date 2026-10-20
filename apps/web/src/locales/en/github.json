@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "Repair requested for this removal.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Repair requested. Waiting for a new commit before requeue.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Waiting for a new commit before requeue.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks."
+  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks.",
+  "mergeAccessLoading": "Checking merge permissions.",
+  "mergeAccessUnavailable": "Merge permissions are unavailable.",
+  "mergeAccessDeniedByActor": "{{actor}} cannot merge into {{repository}}.",
+  "mergeAccessDenied": "This account cannot merge into {{repository}}.",
+  "checkMergeAccess": "Check again",
+  "mergeAsActor": "as {{actor}}"
 }

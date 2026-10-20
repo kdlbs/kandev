@@ -154,14 +154,14 @@ func (s *Service) deliveryCapabilityForExecution(
 		}, false
 	}
 	peerVersion := capability.Version
-	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
+	if journal.SupportsDeliveryVersion(peerVersion) && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
 		// Supported peers without retained storage use legacy delivery;
 		// unresolved work still blocks that negotiation.
 		peerVersion = 0
 	}
 	return agentruntime.NegotiateDurableDelivery(
 		journal.StorageCapability{
-			Version: journal.CurrentVersion,
+			Version: journal.CurrentProtocolVersion,
 			Durable: true,
 		},
 		peerVersion,

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import {
   listWorkspaceAzureDevOpsTaskPullRequests,
   syncAzureDevOpsTaskPullRequest,
@@ -142,4 +144,77 @@ export function useAzureDevOpsTaskPullRequests(workspaceId: string | null, taskI
   }, [generation, pullRequests, setOne, taskId, workspaceId]);
 
   return pullRequests;
+}
+
+async function readEmbeddedPullRequests(
+  workspaceId: string,
+  taskId: string,
+  signal: AbortSignal,
+  isCurrent: () => boolean,
+) {
+  const result = await listWorkspaceAzureDevOpsTaskPullRequests(workspaceId, {
+    cache: "no-store",
+    init: { signal },
+  });
+  if (!isCurrent()) return EMPTY_TASK_PULL_REQUESTS;
+  const rows = (result.taskPrs?.[taskId] ?? EMPTY_TASK_PULL_REQUESTS).filter(
+    (row) => row.taskId === taskId,
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+      if (!shouldRefresh(row) || !isCurrent()) return row;
+      try {
+        const refreshed = await syncAzureDevOpsTaskPullRequest(
+          workspaceId,
+          taskId,
+          {
+            repositoryId: row.repositoryId,
+            pullRequestId: row.pullRequestId,
+          },
+          { init: { signal } },
+        );
+        return refreshed.taskId === taskId && refreshed.id === row.id ? refreshed : row;
+      } catch {
+        return row;
+      }
+    }),
+  );
+}
+
+/** Embedded conversations own their reads without changing the regular workspace cache. */
+export function useEmbeddedAzureDevOpsTaskPullRequests(workspaceId: string, taskId: string) {
+  const store = useAppStoreApi();
+  const identity = useAppStore(stateReadScopeIdentity);
+  const key = JSON.stringify([identity, workspaceId, taskId]);
+  const [snapshot, setSnapshot] = useState<{ key: string; rows: AzureDevOpsTaskPullRequest[] }>();
+  const owner = useRef<string | null>(null);
+  const request = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    owner.current = key;
+    return () => {
+      owner.current = null;
+      request.current?.abort();
+    };
+  }, [key]);
+  const refresh = useCallback(async () => {
+    if (owner.current !== key || stateReadScopeIdentity(store.getState()) !== identity) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const current = () =>
+      !controller.signal.aborted &&
+      owner.current === key &&
+      stateReadScopeIdentity(store.getState()) === identity;
+    try {
+      const rows = await readEmbeddedPullRequests(workspaceId, taskId, controller.signal, current);
+      if (current()) setSnapshot({ key, rows });
+    } catch {
+      if (current()) setSnapshot(undefined);
+    }
+  }, [identity, key, store, taskId, workspaceId]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  useForegroundRefresh(refresh, true, key);
+  return snapshot?.key === key ? snapshot.rows : EMPTY_TASK_PULL_REQUESTS;
 }

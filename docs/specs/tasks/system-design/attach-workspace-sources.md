@@ -20,6 +20,14 @@ This design record preserves the technical source for the capability mapped to R
 | --- | --- |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Migrated legacy design detail below; [Legacy add-branch effective environment](#legacy-add-branch-effective-environment) |
 
+## Placement extension
+
+The [repository placement design](workspace-repository-placement.md) owns the new creation-time layout and explicit repository-placement controls.
+It supersedes the blanket nesting exclusion only for the user-selected Worktree repository batch flow.
+Legacy add-branch retains sibling placement and never restarts its caller.
+The extension also requires explicit recorded-history continuation after an incompatible native resume.
+Initial layout, nested materialization, preview, and available placement UI are implemented in the linked work orders. Explicit root expansion remains blocked by PR #3598 and must retain its explicit continuation boundary.
+
 ## Migrated design source
 
 ## Why
@@ -30,7 +38,7 @@ manually moving files into the task workspace.
 
 ## What
 
-- A repository-backed task exposes one **Workspace actions** menu in the Files panel on desktop and
+- The original delivery exposes one **Workspace actions** menu in the Files panel on desktop and
   mobile. The menu contains **Add Repositories to workspace** and **Open workspace folder** rather
   than separate toolbar controls.
 - **Add sources** uses the same repository-selection language as task creation without adding a
@@ -46,8 +54,8 @@ manually moving files into the task workspace.
   so one submission can mix workspace, local, remote, and folder sources.
 - Repository rows choose a base branch with the shared task-creation controls. The add-sources UI
   does not expose a second checkout-branch field.
-- A successful submission makes every added source visible as a named top-level entry in the Files
-  panel. Repository sources also appear in repository-aware Changes, branch, editor, and pull
+- A successful submission makes every added source visible in the Files panel at its recorded placement.
+  Default sibling sources remain named top-level entries. Repository sources also appear in repository-aware Changes, branch, editor, and pull
   request surfaces; folder sources remain file-only.
 - Contradictory repository/branch pairs, contradictory canonical folder paths, cross-workspace repository
   IDs, invalid remote URLs, and inaccessible local paths are rejected before the task changes.
@@ -68,8 +76,8 @@ manually moving files into the task workspace.
   the agent working directory, provider session context, terminal and workspace processes, existing
   files and Git changes, and atomic rollback. They state that **Cancel** leaves the task unchanged.
 - Providers that honor a changed `session/load` working directory keep their native ACP session
-  after the re-root. Providers that do not are started in a fresh ACP session at the promoted task
-  root, and Kandev rehydrates the recorded conversation context with the next prompt.
+  after the re-root. Incompatible providers require explicit context continuation at the promoted task
+  root. Kandev must not create a replacement native session without that action.
 - Worktree and Local/Local PC rebinds stop terminal shells, the task editor server, dev servers, and
   other agentctl-managed workspace processes; users must reopen or restart them. Docker, SSH, and
   Sprites attach repository siblings through the live workspace and rescan without restarting the
@@ -291,7 +299,7 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 - **GIVEN** an idle single-repository task whose agent started in the repository directory, **WHEN**
   another source promotes the workspace to the task root, **THEN** the next agent prompt runs from
   the task root without a previous-agent-error banner; compatible providers retain their native
-  session and incompatible providers receive a fresh session with recorded conversation context.
+  session and incompatible providers receive an explicit context-continuation choice.
 - **GIVEN** an idle Worktree or Local task, **WHEN** the user opens **Add sources**, **THEN** a
   visible consequence summary explains that the CWD moves to the task root, the agent and
   agentctl-managed workspace processes restart or stop, recorded task context remains, and
@@ -389,12 +397,12 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 ## Out of scope
 
 - Removing or detaching sources after they have been attached.
-- Promoting a repository-less task into a repository-backed task.
+- Repositoryless attachment was excluded from the original delivery. The [current-workspace extension](current-workspace-sources.md) now owns this behavior.
 - Copying, mounting, or synchronizing arbitrary host folders into container or remote executors.
 - Running batch workspace-source attachment while an agent turn or tool call is active; the legacy
   worktree-only `add_branch_to_task_kandev` compatibility path is the explicit exception.
 - Changing the running agent or terminal CWD during a legacy add-branch call.
-- Nesting a new Git repository or worktree inside the current repository.
+- Implicit nesting through legacy add-branch. Explicit Worktree batch placement follows the linked placement design.
 - Expanding or bypassing a provider-owned filesystem sandbox when it excludes the returned sibling
   path.
 - Reordering sources after attachment.
@@ -410,3 +418,9 @@ See [Attach Workspace Sources plan](../../../plans/attach-workspace-sources/plan
 [inherited live add-branch repair plan](../../../plans/inherited-live-add-branch/plan.md), the
 [multi-repository chat file-link repair plan](../../../plans/multi-repo-chat-file-links/plan.md) and the
 [owned link target mismatch repair plan](../../../plans/owned-link-target-mismatch-repair/plan.md).
+
+See also the [repository placement implementation package](../../../plans/workspace-repository-placement/plan.md).
+
+## Current-workspace extension
+
+The [current-workspace design](current-workspace-sources.md) supersedes the original toolbar location and repositoryless exclusion. It adds root-preserving Local/scratch attachment while retaining remote host-folder restrictions. [New plan](../../../plans/current-workspace-sources/plan.md).

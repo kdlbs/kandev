@@ -20,6 +20,10 @@ Platform owns shared session subscription readiness and recovery. This design ex
 ## Registration ordering and ownership
 
 The gateway registers membership before acknowledging `session.subscribe` in `apps/backend/internal/gateway/websocket/client.go`.
+The read pump applies legacy `session.subscribe` and `session.unsubscribe` membership changes in socket order.
+Authorization and membership registration complete before the next membership change begins.
+Initial snapshot loading runs asynchronously after registration; slow Git reads must not block unsubscribe or independent requests.
+Other request handlers retain concurrent dispatch.
 The frontend `WebSocketClient` owns reference counts and a shared readiness promise per session and connection generation.
 `fetchAndStoreMessages` in `use-session-messages.ts` waits for readiness before requesting history.
 This ordering remains mandatory. Recovery must not fetch history ahead of registration.

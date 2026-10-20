@@ -64,6 +64,7 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
+	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -74,6 +75,8 @@ type SessionManager struct {
 	historyManager           *SessionHistoryManager
 	attachmentReader         AttachmentReader
 	stopCh                   <-chan struct{} // For graceful shutdown coordination
+	turnChangeAdmitted       func(context.Context, *AgentExecution, uint64) error
+	turnChangeFailed         func(context.Context, *AgentExecution, uint64, error)
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -133,6 +136,14 @@ func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uin
 
 func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(failure InitialPromptFailure)) {
 	sm.initialPromptFailure = handler
+}
+
+func (sm *SessionManager) SetTurnChangeCaptureCallbacks(
+	admitted func(context.Context, *AgentExecution, uint64) error,
+	failed func(context.Context, *AgentExecution, uint64, error),
+) {
+	sm.turnChangeAdmitted = admitted
+	sm.turnChangeFailed = failed
 }
 
 // InitializeResult contains the result of session initialization
@@ -231,7 +242,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		}
 	}
 	deliveryDecision := NegotiateDurableDelivery(
-		journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+		journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true},
 		peerVersion,
 		peerDurable,
 		peerUnresolved,
@@ -770,7 +781,7 @@ func (sm *SessionManager) initializeACPConnection(
 			err = retireInterruptedDeliverySubmission(ctx, client, execution)
 		}
 	}
-	if err == nil && execution.ForceContextContinuation {
+	if err == nil && execution.replacesPredecessorGeneration() {
 		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
 			err = retireErr
 		}
@@ -817,6 +828,12 @@ func retireUnresolvedDeliverySubmissions(
 		}
 	}
 	return nil
+}
+
+// replacesPredecessorGeneration reports whether this execution starts a new
+// native conversation that supersedes the committed harness generation.
+func (e *AgentExecution) replacesPredecessorGeneration() bool {
+	return e.ForceContextContinuation || e.ReplacesNativeConversation
 }
 
 func submissionNeedsRecoveryRetirement(submission journal.Submission) bool {
@@ -1881,6 +1898,7 @@ func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt 
 	}
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.lastLiveActivityAt = execution.lastActivityAt
 	execution.lastActivityAtMu.Unlock()
 }
 
@@ -1894,6 +1912,11 @@ func (sm *SessionManager) sendPrompt(
 	callbacks sendPromptCallbacks,
 	steer bool,
 ) (*PromptResult, error) {
+	var admissionErr error
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -1914,6 +1937,9 @@ func (sm *SessionManager) sendPrompt(
 	if err := waitForPendingDispatchedPrompt(ctx, execution); err != nil {
 		return nil, err
 	}
+	if err := sm.waitForTurnChangeCapture(ctx, execution); err != nil {
+		return nil, err
+	}
 
 	// Drain any stale signal left in the channel by a prior dispatch-only prompt
 	// whose completion arrived after SendPrompt returned. Without this, the next
@@ -1932,6 +1958,10 @@ func (sm *SessionManager) sendPrompt(
 		defer beginPromptBarrier(execution)()
 	}
 
+	ctx, admissionErr = sm.admitExecutorPrompt(ctx, execution)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	preparedCtx, effectivePrompt, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
 	if err != nil {
 		sm.reportPromptFailure(execution, 0, err, callbacks.onFailure)
@@ -1970,6 +2000,12 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
+	if sm.turnChangeAdmitted != nil {
+		if err := sm.turnChangeAdmitted(preparedCtx, execution, promptGeneration); err != nil {
+			sm.logger.Warn("failed to capture turn-change start checkpoint",
+				zap.String("execution_id", execution.ID), zap.Uint64("prompt_generation", promptGeneration), zap.Error(err))
+		}
+	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
@@ -1977,6 +2013,9 @@ func (sm *SessionManager) sendPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,
 	); err != nil {
+		if sm.turnChangeFailed != nil {
+			sm.turnChangeFailed(preparedCtx, execution, promptGeneration, err)
+		}
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -2138,6 +2177,10 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 	default:
 		execution.promptLifecycleMu.Lock()
 		if execution.promptSettlementGeneration != 0 {
+			execution.promptLifecycleMu.Unlock()
+			return 0, ErrPromptSettlementPending
+		}
+		if execution.turnChangeCaptureGeneration != 0 {
 			execution.promptLifecycleMu.Unlock()
 			return 0, ErrPromptSettlementPending
 		}

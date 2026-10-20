@@ -71,8 +71,12 @@ This is explicit maintenance of selected records. It does not extend automatic
   the current state; new observations shall not be presented as historical ones.
 - **AC-TASKS-WORKTREE-INVENTORY-REPAIR-002.3:** After repair, cleanup shall still
   require current archive identity, no active borrowers, proven path ownership,
-  a clean checkout, and the normal source-capture and branch-preservation rules.
-  A genuine change to an audited branch or checkout shall still block removal.
+  stopped owned runtimes, and the normal source-capture and branch-preservation
+  rules. Checkout dirtiness shall follow the current
+  [archive policy](dirty-worktree-archive.md), including immediate removal under
+  REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-004. An unaudited change to branch or checkout
+  identity shall still block removal. Repair itself shall preserve local files
+  until an authorized cleanup removes the checkout.
 
 ### REQ-TASKS-WORKTREE-INVENTORY-REPAIR-003: Accurate recovery diagnostics
 
@@ -87,13 +91,63 @@ This is explicit maintenance of selected records. It does not extend automatic
   liveness, or other stop failure shall remain a visible failure and continue to
   prevent destructive cleanup where required by the runtime cleanup contract.
 
+### REQ-TASKS-WORKTREE-INVENTORY-REPAIR-004: Legacy duplicate ownership reconciliation
+
+**Intent:** Let operators repair older task inventories that give one physical
+checkout multiple saved owners or paths, without losing task conversations or work.
+
+This extension is delivered by the
+[legacy duplicate repair package](../../../plans/legacy-worktree-alias-repair/plan.md).
+Existing repair guarantees remain applicable.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.1:** Read-only discovery shall identify
+  duplicate active checkout identities across an installation, including every
+  claiming environment and repository slot. Results shall be bounded and
+  resumable. Discovery shall not change task state or inspect arbitrary folders.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.2:** Repair shall require an explicit
+  canonical selection and the complete set of competing records. Exactly one
+  selected checkout shall satisfy repository, branch, registration, root-owner,
+  and shared-workspace evidence. A newer timestamp, empty branch label, task
+  title, or parent relationship alone shall not establish ownership.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.3:** Reconciliation shall remove only
+  explicitly selected redundant metadata. It shall preserve the canonical
+  checkout, repository slots for other branches, source files, index, refs,
+  ownership markers, task identities, hierarchy, conversations, and resume tokens.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.4:** An inherited child with a redundant
+  environment shall keep its sessions bound to the proven canonical shared
+  environment after repair. Every repository owned by the redundant environment
+  shall have an identical canonical counterpart. An independent repository,
+  foreign member, conflicting owner, or unsupported dependent record shall
+  refuse the complete selected repair without mutation.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.5:** Application shall require an offline
+  installation and confirmed absence of every affected process. Idle session
+  state alone shall neither authorize nor prohibit repair. Repair shall retain
+  session state and use a private backup and recoverable journal. A stale preview
+  or interruption shall never publish a partially reconciled ownership graph.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.6:** Existing cleanup snapshots,
+  manifests, and receipts shall remain unchanged. A pending cleanup, recovery
+  operation, or immutable reference that cannot survive the selected changes
+  shall block this repair. A mixed selection shall not repair its safe subset
+  while concealing a blocked member.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.7:** After repair and restart, ordinary
+  archive and delete shall inspect the canonical checkouts. A child operation
+  shall preserve the parent's workspace while another member retains it. Dirty
+  files, uncertain ownership, and changed commits shall retain their normal
+  refusal behavior. Metadata verification shall not imply task removal succeeded.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-004.8:** Ordinary identity reads and writes
+  shall reject competing active ownership instead of selecting or changing an
+  arbitrary claimant. Session joins and historical records shall not be mistaken
+  for additional active owners. A rejected operation shall preserve all claimants.
+
 ## Exclusions
 
 - General automatic worktree adoption, remote filesystem repair, or PostgreSQL
   maintenance tooling in this package.
 - Weakening [source evidence](archive-source-manifest.md),
   [runtime cleanup](runtime-cleanup.md), or
-  [archive preservation](dirty-worktree-archive.md) requirements.
+  [archive cleanup](dirty-worktree-archive.md) requirements.
 - New browser controls, provider conversation resets, branch deletion, force
   cleanup, or automatic restart of the user's active backend.
 
@@ -101,3 +155,4 @@ This is explicit maintenance of selected records. It does not extend automatic
 
 - [System design](../system-design/worktree-inventory-repair.md)
 - [Implementation plan](../../../plans/worktree-inventory-repair/plan.md)
+- [Legacy duplicate repair package](../../../plans/legacy-worktree-alias-repair/plan.md)

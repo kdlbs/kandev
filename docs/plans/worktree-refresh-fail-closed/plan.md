@@ -91,16 +91,19 @@ No database or WebSocket schema change is planned.
 - [completed] [Task 03: Project Refresh Launch Failures](task-03-project-refresh-launch-failures.md)
 - [completed] [Task 04: Document Required Repository Refresh](task-04-document-required-refresh.md)
 - [completed] [Task 05: Support Stacked PR Base Retargeting](task-05-support-stacked-pr-base-retargeting.md)
+- [completed] [Task 06: Preserve the Required Refresh Verification Cause](task-06-preserve-required-refresh-cause.md)
 
 ## Dependency order
 
 ```text
 Task 01 -> Task 02 -> Task 03 -> Task 04 -> Task 05
+Task 06 (independent)
 ```
 
 The package is sequential. Task 02 consumes the refresh-route contract from
 Task 01. Task 03 verifies the combined launch boundary. Task 04 documents the
-verified behavior.
+verified behavior. Task 06 is an independent follow-up that preserves the
+refresh verification cause on the required path.
 
 ## Verification strategy
 

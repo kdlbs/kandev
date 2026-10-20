@@ -110,6 +110,9 @@ func (s *Service) applyManagedScheduleUpdate(ctx context.Context, installationID
 	if err != nil {
 		return pluginsdk.ManagedConversationSchedule{}, false, err
 	}
+	if _, err := s.executorActorContext(ctx, current.CreatedByUserID, request.ExecutorProfileID, current.WorkspaceID); err != nil {
+		return pluginsdk.ManagedConversationSchedule{}, false, err
+	}
 	replayed, revision, err := s.store.UpdateManagedSchedule(ctx, installationID, workspaceID, automationID,
 		expectedRevision, request, triggers, operationID, payloadDigest)
 	if err != nil {

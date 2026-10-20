@@ -223,6 +223,9 @@ func (s *Service) settleOrphanedBackgroundWorkOnStartup(ctx context.Context) {
 		return
 	}
 	for _, sessionID := range sessionIDs {
+		if row, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); err == nil && row != nil && s.hasPendingRemoteRecovery(sessionID, row.AgentExecutionID) {
+			continue
+		}
 		if s.agentManager != nil {
 			running, err := s.probeAgentRunning(ctx, sessionID)
 			if err != nil || running {

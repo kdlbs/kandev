@@ -201,6 +201,7 @@ type ManagedConversationAutomationDelivery interface {
 
 // Service coordinates automation operations.
 type Service struct {
+	executorContext  func(context.Context, string, string) (context.Context, error)
 	pluginAutomation PluginAutomationProvider
 	store            *Store
 	eventBus         bus.EventBus
@@ -636,6 +637,10 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
+		return nil, err
+	}
+	a.CreatedByUserID = executorCreatorUserID(ctx)
 	if ownerInstallationID != "" {
 		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
 			return nil, fmt.Errorf("create managed schedule: %w", err)
@@ -706,6 +711,13 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	}
 	if existing == nil {
 		return nil, ErrAutomationNotFound
+	}
+	profileID := existing.ExecutorProfileID
+	if req.ExecutorProfileID != nil {
+		profileID = *req.ExecutorProfileID
+	}
+	if _, err := s.executorActorContext(ctx, existing.CreatedByUserID, profileID, existing.WorkspaceID); err != nil {
+		return nil, err
 	}
 	taskMode := existing.TaskMode
 	if taskMode == "" {
@@ -2073,6 +2085,11 @@ func (s *Service) fireTriggerWithMatchedTriggers(
 	// never could — and last_triggered_at moves for a run that never ran.
 	if !a.Enabled {
 		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
+	}
+	var executorErr error
+	ctx, executorErr = s.executorActorContext(ctx, a.CreatedByUserID, a.ExecutorProfileID, a.WorkspaceID)
+	if executorErr != nil {
+		return FireResult{}, executorErr
 	}
 	now := time.Now().UTC()
 	// Serialize deduplication, the concurrency admission check, and the run

@@ -25,7 +25,7 @@ desktop and mobile behavior.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001` | [Components](#components-and-responsibilities), [Data](#data-and-contracts), [Control flow](#control-flow), [Failure](#failure-and-recovery), [Presentation](#presentation-and-responsive-behavior) |
+| `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001` | [Components](#components-and-responsibilities), [Data](#data-and-contracts), [Manual access](#manual-merge-access), [Control flow](#control-flow), [Failure](#failure-and-recovery), [Presentation](#presentation-and-responsive-behavior) |
 | `REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002` | [Data](#data-and-contracts), [Automatic merge](#automatic-merge), [Explicit retry](#explicit-retry), [Task-row projection](#task-row-automation-projection), [Failure](#failure-and-recovery), [Persistence](#persistence), [Presentation](#presentation-and-responsive-behavior) |
 
 ## Components and responsibilities
@@ -165,9 +165,88 @@ This response does not claim that GitHub accepted or completed the merge.
 
 ## Control flow
 
+### Manual merge access
+
+The manual action combines PR readiness with an actor-specific repository
+access result. `canAttemptPRMerge` remains a PR-state predicate. It does not
+authorize an actor, and permission results do not change shared PR status colors.
+
+The read-only endpoint is:
+
+```http
+GET /api/v1/github/repos/:owner/:repo/merge-access?workspace_id=:workspaceId
+```
+
+Its `RepoMergeAccess` response contains `state` and nullable `actor`.
+The state is `allowed`, `denied`, or `unknown`. The actor uses the existing
+credential-free `AuthPrincipal` contract. `allowed` confirms repository write
+access only. GitHub still evaluates token restrictions and current branch rules
+when it receives the merge request.
+
+`Service.GetRepoMergeAccessForWorkspace` uses `resolvePersonalWriteClient` with
+the current user and target repository. It retains workspace authorization,
+repository scope, and the automation-visibility boundary. It does not use
+`GetRepoMergeMethodsForWorkspace`, which selects a personal-read credential.
+Read-purpose fallback can select a different actor from the manual write route.
+
+Reuse `repositoryDetailsReader.GetRepository`, implemented by `GHClient`,
+`PATClient`, `MockClient`, and `NoopClient`. Do not create another provider
+transport or copy repository parsing into a merge-specific client.
+
+- For a human principal, inspect `permissions.push` on the target repository.
+  `GitHubRepository.PushAccessKnown` records whether this field was supplied.
+  `repository_api.go` decodes the provider field as nullable and preserves the
+  existing `PushAccess` and `AdminAccess` values for contribution consumers.
+  Explicit `true` allows the action, explicit `false` denies it, and an absent
+  or null field leaves access unknown.
+- For an installation principal, use the resolved installation's repository
+  access and explicit capabilities. Require `CapabilityGitWrite` and the
+  existing `CapabilityPullRequestWrite`. A successful repository read proves
+  target visibility. Do not require a human `permissions.push` field from an
+  installation response. Missing required capabilities deny the action.
+- A missing client interface, nil repository, or incomplete permission result
+  never produces `allowed`. Workspace authorization failures retain their
+  existing HTTP errors. Provider failures retain meaningful HTTP status where
+  available and become unavailable access in the frontend.
+
+Do not infer access from the PR author, source fork, green checks, merge method
+settings, connection health, or `viewerCanMergeAsAdmin`. None is a substitute
+for this target-repository access check. Human PAT/CLI capability defaults are
+not provider evidence of repository write permission.
+
+Keep the result request-scoped and non-persistent. The endpoint sends
+`Cache-Control: no-store`. Do not store it in `TaskPR`, boot payloads, task
+summaries, or a repository-only cache. This follows the existing identity
+boundary in [ADR 0047](../../../decisions/0047-github-authentication-ownership.md).
+
+The `useRepoMergeAccess` hook owns lookup state and explicit refresh.
+It requests access only for a mounted, PR-state-eligible action. It clears its
+result before a context change and ignores late responses using a request
+generation. Its context includes workspace, current Kandev user, target
+repository, effective mutation principal, and connection generations. Reuse
+the existing GitHub status and integration-availability notifications for
+connection changes. Do not share completed permission results across mounts.
+
+Update the request ownership key only when a render commits. A suspended or
+abandoned render must not invalidate the visible lookup or its refresh callback.
+Clear the result when the lookup effect ends, including a readiness disable/enable
+cycle. Re-enabling starts with loading in its first committed render.
+
+Refresh access on a new mount, return to the active browser window, explicit
+permission refresh, and a rejected merge. Keep merge unavailable during refresh.
+Refresh is a GET only. It never repeats a failed mutation automatically.
+External permission revocation may occur between reads. The merge request
+still uses the server-resolved write credential, and GitHub enforces access.
+The browser result is an affordance check, never authorization for the server.
+
+`PRMergeButton` uses the access response actor for its permitted action label.
+It renders the existing merge shell only when access is `allowed` and current
+PR-state gates pass. Its handler also checks the current access state before
+submitting. Merge-method discovery remains independent and best-effort.
+
 ### Merge request
 
-1. The frontend derives eligibility from the current pull-request state.
+1. The frontend combines current PR readiness with confirmed manual repository access.
 2. The user activates the existing merge action.
 3. The service selects workspace-scoped personal-write credentials.
 4. The provider starts or resumes GitHub's asynchronous merge request.
@@ -282,6 +361,11 @@ A failed GraphQL queue read preserves the last complete observation. The next
 successful authoritative sync updates or clears it. This behavior also protects
 queue state during restart recovery and mixed GraphQL, REST, and CLI refreshes.
 
+Manual access lookup failure does not imply denied permission. The frontend
+shows an unavailable explanation and a permission-refresh action. Explicit
+denial shows a permission explanation. Both states suppress every merge method.
+After a rejected merge, refresh access before presenting another manual attempt.
+
 An automatic provider failure records `failed`, stores an `auto_merge` error,
 and blocks automatic repetition for the unchanged readiness signature. A changed
 signature or an explicit retry can rearm the attempt.
@@ -316,6 +400,11 @@ The merge action uses the active workspace's personal-write GitHub route. It
 requires the same pull-request permissions as GitHub's merge API. Kandev does
 not bypass repository rules or elevate the user.
 
+The access endpoint uses that same route and never substitutes an automation
+principal after a personal actor lacks access. Existing resolver policy still
+permits an explicitly attributed App when no personal mutation actor is available.
+Provider enforcement on the mutation remains mandatory.
+
 The retry endpoint uses the same task and workspace authorization. It accepts
 only the exact pull request that is linked to the task.
 
@@ -333,6 +422,21 @@ of inventing a value. Unknown provider states use generic queue copy.
 Desktop and mobile share state derivation and actions. Mobile uses the existing
 Review surface and status drawer. The action has a touch-sized target, does not
 depend on hover, and does not create document-level horizontal overflow.
+
+Manual access messages replace only the existing merge-action region. Denial
+shows localized text such as `{{actor}} cannot merge into {{repository}}.`
+Loading shows `Checking merge permissions.` Unknown access shows
+`Merge permissions are unavailable.` with `Check again`. The templates are
+illustrative and must use translations in every supported locale.
+
+The desktop detail header and compact status popover retain their current
+grouping. Phone status uses the existing inset drawer through `useTouchDrawer`.
+Phone Review retains its existing full-height review surface. The existing
+surface owns scrolling, safe-area clearance, focus return, and dismissal.
+The inline explanation wraps long actor and repository names. It does not
+depend on a disabled-button tooltip. A new refresh action uses the shared
+control-sizing helper: 28px on desktop and at least 44px on phones or coarse
+pointers. No new overlay or motion is required.
 
 The task-row pull-request icon is the nearest shipped status-summary exemplar.
 It overlays a small yellow dot at the top-left for active auto-fix and a small
@@ -371,6 +475,7 @@ priority. Playwright coverage exists in:
 
 ## Related delivery records
 
+- [Manual merge permissions plan](../../../plans/github-pr-merge-permissions/plan.md)
 - [Bind automatic merge attempts to the reviewed head](../../../decisions/2026-08-28-bind-github-auto-merge-attempts-to-reviewed-head.md)
 - [Separate task summary and session stream traffic](../../../decisions/2026-08-01-separate-task-summary-session-stream-traffic.md)
 - [Automatic merge reliability plan](../../../plans/github-auto-merge-reliability/plan.md)

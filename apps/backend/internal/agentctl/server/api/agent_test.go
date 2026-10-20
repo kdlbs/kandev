@@ -146,7 +146,7 @@ func TestHandleAgentConfigure_UsesLegacyOnlyWhenArgsAbsent(t *testing.T) {
 func dialTestWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/agent/stream"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"X-Kandev-Delivery-Version": []string{"2"}})
 	if err != nil {
 		t.Fatalf("failed to dial WebSocket: %v", err)
 	}

@@ -27,10 +27,11 @@ import (
 // itself would.
 func TestWorkflowAccessCheckersAreWired(t *testing.T) {
 	want := map[string]string{
-		"SetWorkflowAccessChecker":  "AuthorizeWorkflowAccess",
-		"SetWorkspaceAccessChecker": "AuthorizeWorkspaceAccess",
-		"SetTaskAccessChecker":      "AuthorizeTaskAccess",
-		"SetSessionAccessChecker":   "AuthorizeSessionAccess",
+		"SetWorkflowAccessChecker":   "AuthorizeWorkflowAccess",
+		"SetExecutorMutationChecker": "AuthorizeWorkflowExecutorMutation",
+		"SetWorkspaceAccessChecker":  "AuthorizeWorkspaceAccess",
+		"SetTaskAccessChecker":       "AuthorizeTaskAccess",
+		"SetSessionAccessChecker":    "AuthorizeSessionAccess",
 	}
 
 	wireFn := findFuncDecl(t, "services.go", "wireTaskWorkflowCrossReferences")

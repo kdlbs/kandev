@@ -627,7 +627,7 @@ func opaqueMCPConnectionID(connectionID string) string {
 func (s *Server) RegisterRoutes(router gin.IRouter) {
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -638,7 +638,7 @@ func (s *Server) RegisterRoutes(router gin.IRouter) {
 func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
 	router.GET("/mcp/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/mcp/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP backend routes",
 		zap.String("sse", "/mcp/sse"),
@@ -1428,6 +1428,9 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithIdempotentHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
+			mcp.WithBoolean("discard_worktree_changes", mcp.Description("Allow removal of local workspace changes.")),
+			mcp.WithBoolean("allow_unverified_workspace_changes", mcp.Description("Acknowledge that workspace changes cannot be checked. Requires discard_worktree_changes=true and workspace_cleanup=delete. Task removal succeeds independently of pending physical cleanup.")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
 	)

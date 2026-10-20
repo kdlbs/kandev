@@ -3,6 +3,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { SessionCommit } from "@/lib/state/slices/session-runtime/types";
 import { useSessionRead } from "./use-session-read";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { SESSION_GIT_READ_TIMEOUT_MS, withSessionGitReadRetry } from "./session-git-read";
 
 export function useSessionCommits(sessionId: string | null) {
   const store = useAppStoreApi();
@@ -23,12 +24,12 @@ export function useSessionCommits(sessionId: string | null) {
           environmentId: envKey,
           sessionId,
           onLoading: (loading) => store.getState().setSessionCommitsLoading(sessionId, loading),
-          fetch: async (isCurrent) => {
+          fetch: withSessionGitReadRetry(async (isCurrent) => {
             const response = await getWebSocketClient()!.request<{
               commits?: SessionCommit[];
               ready?: boolean;
               reason?: string;
-            }>("session.git.commits", { session_id: sessionId });
+            }>("session.git.commits", { session_id: sessionId }, SESSION_GIT_READ_TIMEOUT_MS);
             if (!isCurrent()) return {};
             if (response?.ready === false) {
               return response.reason === "session_terminal" ? {} : { retryAfter: 2000 };
@@ -44,7 +45,7 @@ export function useSessionCommits(sessionId: string | null) {
                 );
             }
             return { data: response?.commits };
-          },
+          }),
         }
       : null,
   );

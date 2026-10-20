@@ -43,7 +43,10 @@ func TestSSHAgentctlIdentitySurvivesRepeatedRecovery(t *testing.T) {
 					AuthToken:           "token",
 					Metadata:            metadata,
 				}
-				client, reusing := executor.newResumedAgentctlClient(context.Background(), port, req)
+				client, reusing, probeErr := executor.newResumedAgentctlClient(context.Background(), port, req)
+				if probeErr != nil {
+					t.Fatalf("resume inspection: %v", probeErr)
+				}
 				require.True(t, reusing, "recovery %d must reach the original remote controller", generation)
 				state := &sshSessionState{
 					target:    &SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},

@@ -430,7 +430,18 @@ func waitForReady(ctx context.Context, baseURL string, proc childState) error {
 // (AC-PLATFORM-STARTUP-PROGRESS-004.6).
 func formatStartupLine(snapshot startup.Snapshot) string {
 	line := fmt.Sprintf("%s (elapsed %.1fs; phase %.1fs)", snapshot.Phase.Label(), float64(snapshot.ElapsedMS)/1000, float64(snapshot.PhaseElapsedMS)/1000)
+	if count := len(snapshot.CompletedSteps); count > 0 {
+		completed := snapshot.CompletedSteps[count-1]
+		state := "interrupted"
+		if completed.Completed {
+			state = "completed"
+		}
+		line += fmt.Sprintf("; %s %s in %.3fs", i18n.T(i18n.DefaultLocale, completed.LabelKey), state, float64(completed.ElapsedMS)/1000)
+	}
 	step := snapshot.Step
+	if step != nil && len(snapshot.CompletedSteps) > 0 {
+		line += fmt.Sprintf("; step %.3fs", float64(step.ElapsedMS)/1000)
+	}
 	if step == nil {
 		return line
 	}
@@ -501,11 +512,11 @@ func probeReadyStatus(ctx context.Context, readyURL string) (bool, startup.Snaps
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		if err := json.NewDecoder(io.LimitReader(resp.Body, 8192)).Decode(&body); err != nil || body.Startup.Phase.Label() == "" || body.Startup.ElapsedMS < 0 || body.Startup.PhaseElapsedMS < 0 {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 32768)).Decode(&body); err != nil || body.Startup.Phase.Label() == "" || body.Startup.ElapsedMS < 0 || body.Startup.PhaseElapsedMS < 0 {
 			body.Startup = startup.Snapshot{}
 		}
 	} else {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8192))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 32768))
 	}
 	return resp.StatusCode >= 200 && resp.StatusCode < 300, body.Startup
 }

@@ -57,10 +57,32 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
+				s.runTurnChangeRetentionSweep(ctx, now)
 			}
 		}
 	}()
 	s.logger.Info("session reconciliation loop started (every 1 minute)")
+}
+
+func (s *Service) runTurnChangeRetentionSweep(ctx context.Context, now time.Time) {
+	if s.turnChanges == nil {
+		return
+	}
+	result, err := s.turnChanges.ApplyTurnChangeRetention(ctx, models.TurnChangeRetentionPolicy{
+		RetainFor:         30 * 24 * time.Hour,
+		TaskBytes:         128 << 20,
+		InstallationBytes: 1 << 30,
+	}, now.UTC())
+	if err != nil {
+		s.logger.Warn("turn-change retention sweep failed", zap.Error(err))
+		return
+	}
+	if result.ExpiredChangeSets > 0 || result.DeletedContents > 0 {
+		s.logger.Info("turn-change retention sweep expired historical content",
+			zap.Int64("change_sets", result.ExpiredChangeSets),
+			zap.Int64("content_objects", result.DeletedContents),
+			zap.Int64("freed_payload_bytes", result.FreedPayloadBytes))
+	}
 }
 
 // StartArchivedSessionReconciliationLoop keeps the pre-stall-sweep entry

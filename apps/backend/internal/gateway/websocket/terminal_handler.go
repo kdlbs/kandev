@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -132,17 +133,11 @@ func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID str
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sessionId is required"})
 		return
 	}
-	interactiveRunner := h.lifecycleMgr.GetInteractiveRunner()
-	if interactiveRunner == nil {
-		h.logger.Error("interactive runner not available")
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
-		return
-	}
 	h.logger.Info("terminal WebSocket connection request",
 		zap.String("session_id", sessionID),
 		zap.String("mode", "agent"),
 		zap.String("remote_addr", c.Request.RemoteAddr))
-	h.handleAgentPassthroughWS(c, sessionID, interactiveRunner)
+	h.handleAgentPassthroughWS(c, sessionID, h.lifecycleMgr.GetInteractiveRunner())
 }
 
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
@@ -318,6 +313,14 @@ func (h *TerminalHandler) handleAgentPassthroughWS(
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if execution.RuntimeName == agentruntime.RuntimeSSH {
+		h.handleRemoteAgentTerminal(c, execution)
+		return
+	}
+	if interactiveRunner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "interactive runner not available"})
 		return
 	}
 

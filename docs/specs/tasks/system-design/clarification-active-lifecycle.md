@@ -104,6 +104,24 @@ about an earlier question. See [late-answer delivery](clarification-response-rel
 for transcript actions and inactive-response fallback. That path does not claim
 the historical bundle or revive its operational authority.
 
+## Peer messages during a live question
+
+`message_task_kandev` in queued mode checks `SessionHasLiveClarification` before
+prompting a session that is not running. It repeats the check on the selected
+session after workflow preparation, which can choose a different primary
+session, and releases any start admission before queueing. While an `active_live` bundle owns the
+turn, the message goes to the session queue rather than through `PromptTask`;
+the queue drain already refuses to dispatch behind a live clarification and
+delivers the message after the answer, or after the bundle detaches. Without
+this check the peer prompt would become the newer turn that moves the bundle to
+`superseded_history` before the user answers. Interrupt-mode messages from a
+parent are unchanged. Launchers that do not implement the check keep the direct
+prompt. A repository error during the live-clarification lookup fails closed:
+the peer message is queued instead of risking a superseding prompt while the
+question's ownership cannot be read. After a live answer, the agent finishes
+its existing turn and the ready event drains the peer message; the answer alone
+does not inject the peer message into a running turn.
+
 ## State machine
 
 One clarification bundle has five operational states:

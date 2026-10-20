@@ -17,6 +17,9 @@ must show whether GitHub merged the pull request or added it to a merge queue.
 The same provider contract owns automatic merge attempts from linked tasks.
 Kandev must bind each attempt to the pull-request state that passed its readiness gates.
 
+Manual merge eligibility also depends on the effective GitHub actor's access to
+the target repository. Passing checks and write access to a fork are insufficient.
+
 ## Terminology
 
 - **Readiness signature:** A stable identity for one pull-request head and its
@@ -48,8 +51,14 @@ state from the existing pull-request surfaces.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.10:** When GitHub supplies an unknown non-empty state, Kandev shall show generic localized copy instead of the raw value.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.11:** When a refresh cannot observe queue membership, Kandev shall preserve the last confirmed entry. An authoritative empty or terminal state shall clear it.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.12:** When a pull request is a draft, conflicted, failing checks, awaiting checks, missing reviews, or has requested changes, Kandev shall hide the merge action.
-- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.13:** When GitHub rejects a merge request, Kandev shall show the error, preserve state, and leave the action available for retry.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.13:** When GitHub rejects a merge request, Kandev shall show the error and preserve state. A retry shall require current merge eligibility.
 - **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.14:** When users view queue state on desktop or mobile, Kandev shall provide the same outcome without hover-dependent controls or horizontal page overflow.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.15:** Kandev shall enable a manual merge only after confirming the effective mutation actor's write access to the target repository. Write access to the source fork shall not satisfy this condition.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.16:** When the effective actor lacks that access, Kandev shall replace the otherwise eligible merge action with a localized explanation. The explanation shall identify the actor and target repository when known. No alternative merge method shall remain actionable.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.17:** While access is loading or unknown, Kandev shall keep manual merge unavailable. A failed lookup shall show a localized explanation and a permission-refresh action that does not submit a merge.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.18:** When the active workspace, target repository, effective actor, or connection generation changes, Kandev shall discard the previous access result. A delayed response from the previous context shall not enable a merge in the new context.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.19:** Desktop PR details, desktop status disclosures, phone PR status drawers, and phone Review shall apply the same manual merge permission rules. Phone explanations and refresh actions shall work without hover.
+- **AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-001.20:** Confirmed repository write access shall not bypass PR readiness, workspace scope, or GitHub policy. An unavailable merge-method lookup alone shall not suppress an otherwise eligible manual action.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002: Reliable automatic merge attempts
 
@@ -105,6 +114,8 @@ repeating an unchanged side effect or leaving obsolete errors after GitHub accep
 - Changing the stored value or default of Kandev's independent CI auto-merge setting.
 - Changing automation settings from the task-row pull-request indicator.
 - Adding merge-queue behavior for GitLab merge requests.
+- Changing the identity, permissions, or configuration of automatic merge from a manual access lookup.
+- Granting access, switching accounts after permission denial, or bypassing branch rules.
 
 ## System design
 
@@ -112,6 +123,7 @@ repeating an unchanged side effect or leaving obsolete errors after GitHub accep
 
 ## Implementation plans
 
+- [Manual merge permissions plan](../../../plans/github-pr-merge-permissions/plan.md)
 - [Automatic merge reliability plan](../../../plans/github-auto-merge-reliability/plan.md)
 - [Sidebar automation indicators plan](../../../plans/github-sidebar-automation-indicators/plan.md)
 - [Queue-status visibility plan](../../../plans/github-pr-merge-queue-status/plan.md)

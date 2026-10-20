@@ -71,6 +71,7 @@ When a turn, startup, or resume fails:
 - For a supported ACP provider's classified temporary capacity, overload, or rate-limit error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
 - When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
 - If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
+- When **Start fresh session** replaces an existing conversation, it opens a new native conversation and delivery stream. Unresolved work from the previous conversation stays in history and is not sent to the provider again.
 - **Restore read-only workspace** does not send the pending prompt or dismiss its startup warning. The warning is resolved only after the provider confirms readiness for the matching recovery attempt.
 - For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
@@ -439,9 +440,19 @@ Structured shell-command activity keeps the command, working directory, status, 
 For foreground ACP commands, consecutive output-only updates are grouped into
 periodic snapshots, normally no more frequently than once every 250 ms while
 delivery is available. Ordered boundaries can flush sooner.
-The first output and final result remain immediate. This avoids repeatedly saving
-the accumulated transcript for every small output chunk; command state changes,
-conversation text and committed replay records keep their normal ordering.
+The first output and final result remain immediate. With delivery protocol v2,
+Kandev saves incremental changes and bounded checkpoints instead of repeatedly
+saving the accumulated tail. This also bounds repeated output writes for slow,
+hours-long commands after the retained tail fills. Each supported output field
+keeps up to 256 KiB of UTF-8 text; truncation and authoritative final results keep
+their existing meaning. Command state changes, conversation text and committed
+replay records keep their normal ordering.
+
+An already-running v1 runtime remains supported and continues saving full
+snapshots until it is safely replaced through normal session handling. Its
+storage cost does not gain the v2 bound merely because the backend was upgraded.
+See [incremental shell delivery](operations.md#incremental-shell-delivery) for
+upgrade and recovery limits.
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total

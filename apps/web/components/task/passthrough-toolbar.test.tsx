@@ -12,6 +12,7 @@ const SRC_FILE = "src/foo.ts";
 
 // data-testid constants to avoid sonarjs/no-duplicate-string warnings
 const TID_TOOLBAR = "passthrough-toolbar";
+const TID_RECOVERY_CHAT = "passthrough-recovery-chat";
 const TID_COMPOSER = "passthrough-composer";
 const TID_TEXTAREA = "passthrough-composer-textarea";
 const TID_PROCEED = "passthrough-proceed-next-step";
@@ -64,6 +65,12 @@ const passthroughTerminalMock = vi.hoisted(() => ({
 }));
 
 // --- Module mocks (hoisted by Vitest) ---
+
+vi.mock("./task-chat-panel", () => ({
+  TaskChatPanel: ({ sessionId, taskId }: { sessionId: string; taskId: string }) => (
+    <div data-testid="passthrough-recovery-chat" data-session={sessionId} data-task={taskId} />
+  ),
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -610,12 +617,11 @@ describe("PassthroughToolbar – composer toggle", () => {
 // ---------------------------------------------------------------------------
 
 describe("PassthroughToolbar – completed session", () => {
-  it("passes completed session state to the passthrough composer", async () => {
+  it("shows the existing completed conversation actions", () => {
     mockSessionState = "COMPLETED";
     renderToolbar();
-    await openComposer();
-
-    expect(latestChatInputProps().isCompleted).toBe(true);
+    expect(screen.getByTestId(TID_RECOVERY_CHAT).getAttribute("data-session")).toBe(SESSION_ID);
+    expect(screen.queryByTestId(TID_TOGGLE)).toBeNull();
   });
 });
 
@@ -848,3 +854,15 @@ it("opens whole-file feedback in its named repository", () => {
   fireEvent.click(screen.getByTestId(TID_COMMENT_FILE_REF));
   expect(mockOpenFile).toHaveBeenCalledWith(SRC_FILE, "api");
 });
+
+it.each(["CANCELLED", "FAILED"])(
+  "shows the existing recovery surface for an ended %s session",
+  (state) => {
+    mockSessionState = state;
+    renderToolbar();
+    const recovery = screen.getByTestId(TID_RECOVERY_CHAT);
+    expect(recovery.getAttribute("data-session")).toBe(SESSION_ID);
+    expect(recovery.getAttribute("data-task")).toBe(TASK_ID);
+    expect(screen.queryByTestId(TID_TOOLBAR)).toBeNull();
+  },
+);

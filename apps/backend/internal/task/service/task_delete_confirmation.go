@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
@@ -33,13 +34,15 @@ func taskDeletePreviewUserID(ctx context.Context) (string, bool) {
 }
 
 type taskDeletePreview struct {
-	ownerUserID            string
-	rootIDs                map[string]struct{}
-	rootDigests            map[string]string
-	cascade                bool
-	discardWorktreeChanges bool
-	expiresAt              time.Time
-	consumedRoots          map[string]struct{}
+	allowUnverifiedWorkspaceChanges bool
+	workspaceCleanup                models.WorkspaceCleanupMode
+	ownerUserID                     string
+	rootIDs                         map[string]struct{}
+	rootDigests                     map[string]string
+	cascade                         bool
+	discardWorktreeChanges          bool
+	expiresAt                       time.Time
+	consumedRoots                   map[string]struct{}
 }
 
 type taskDeletePreviewRow struct {
@@ -58,14 +61,21 @@ type taskDeletePreviewRow struct {
 // WithTaskDeleteConfirmation consumes a native preview for one root, then
 // runs the existing delete lifecycle once. The ticket is bound to its Human,
 // options, selected roots, current affected-task set, and row versions.
-//
-//nolint:cyclop // The cleanup receipt is verified immediately before the task deletion effect.
 func (s *Service) WithTaskDeleteConfirmation(
 	ctx context.Context,
 	confirmationID, rootID string,
 	cascade, discardWorktreeChanges bool,
 	deleteFn func() error,
+	workspaceCleanup ...models.WorkspaceCleanupMode,
 ) error {
+	return s.WithTaskDeleteConfirmationOptions(ctx, confirmationID, rootID, cascade,
+		DeleteTaskOptions{WorkspaceCleanup: deletePreviewMode(workspaceCleanup), DiscardWorktreeChanges: discardWorktreeChanges}, deleteFn)
+}
+
+func (s *Service) WithTaskDeleteConfirmationOptions(ctx context.Context, confirmationID, rootID string, cascade bool, options DeleteTaskOptions, deleteFn func() error) error {
+	if err := options.validate(); err != nil {
+		return err
+	}
 	if err := s.authorizeTaskScope(ctx, rootID, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
@@ -88,7 +98,7 @@ func (s *Service) WithTaskDeleteConfirmation(
 		s.taskDeletePreviewMu.Unlock()
 		return ErrTaskDeleteConfirmationExpired
 	}
-	if preview.ownerUserID != userID || preview.cascade != cascade || preview.discardWorktreeChanges != discardWorktreeChanges {
+	if !preview.matches(userID, cascade, options) {
 		s.taskDeletePreviewMu.Unlock()
 		return ErrTaskDeleteConfirmationMismatch
 	}
@@ -115,7 +125,11 @@ func (s *Service) WithTaskDeleteConfirmation(
 	return deleteFn()
 }
 
-func (s *Service) issueTaskDeletePreview(ctx context.Context, roots []string, cascade, discardWorktreeChanges bool) (string, error) {
+func (s *Service) issueTaskDeletePreview(ctx context.Context, roots []string, cascade, discardWorktreeChanges bool, workspaceCleanup ...models.WorkspaceCleanupMode) (string, error) {
+	return s.issueTaskDeletePreviewWithOptions(ctx, roots, cascade, DeleteTaskOptions{WorkspaceCleanup: deletePreviewMode(workspaceCleanup), DiscardWorktreeChanges: discardWorktreeChanges})
+}
+
+func (s *Service) issueTaskDeletePreviewWithOptions(ctx context.Context, roots []string, cascade bool, options DeleteTaskOptions) (string, error) {
 	userID, ok := taskDeletePreviewUserID(ctx)
 	if !ok {
 		return "", ErrTaskDeleteConfirmationIdentity
@@ -132,8 +146,10 @@ func (s *Service) issueTaskDeletePreview(ctx context.Context, roots []string, ca
 	}
 	confirmationID := uuid.NewString()
 	preview := taskDeletePreview{
-		ownerUserID: userID, rootIDs: rootIDs, rootDigests: rootDigests,
-		cascade: cascade, discardWorktreeChanges: discardWorktreeChanges,
+		workspaceCleanup:                options.WorkspaceCleanup.Normalized(),
+		allowUnverifiedWorkspaceChanges: options.AllowUnverifiedWorkspaceChanges,
+		ownerUserID:                     userID, rootIDs: rootIDs, rootDigests: rootDigests,
+		cascade: cascade, discardWorktreeChanges: options.DiscardWorktreeChanges,
 		expiresAt: time.Now().UTC().Add(taskDeleteConfirmationTTL), consumedRoots: make(map[string]struct{}),
 	}
 	s.taskDeletePreviewMu.Lock()
@@ -203,4 +219,15 @@ func (s *Service) pruneTaskDeletePreviewsLocked(now time.Time) {
 			delete(s.taskDeletePreviews, id)
 		}
 	}
+}
+
+func deletePreviewMode(modes []models.WorkspaceCleanupMode) models.WorkspaceCleanupMode {
+	if len(modes) == 0 {
+		return models.WorkspaceCleanupDelete
+	}
+	return modes[0].Normalized()
+}
+
+func (p *taskDeletePreview) matches(userID string, cascade bool, options DeleteTaskOptions) bool {
+	return p.allowUnverifiedWorkspaceChanges == options.AllowUnverifiedWorkspaceChanges && p.workspaceCleanup.Normalized() == options.WorkspaceCleanup.Normalized() && p.ownerUserID == userID && p.cascade == cascade && p.discardWorktreeChanges == options.DiscardWorktreeChanges
 }

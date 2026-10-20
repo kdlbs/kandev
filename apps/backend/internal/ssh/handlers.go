@@ -202,6 +202,11 @@ func (h *Handler) httpListSessions(c *gin.Context) {
 	}
 	rows, err := h.listSessions(c.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, models.ErrExecutorNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{errorJSONKey: "executor not found"})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, gin.H{errorJSONKey: err.Error()})
 		return
 	}
@@ -468,6 +473,10 @@ func (h *Handler) wsListSessions(ctx context.Context, msg *ws.Message) (*ws.Mess
 	}
 	rows, err := h.listSessions(ctx, payload.ExecutorID)
 	if err != nil {
+		if errors.Is(err, models.ErrExecutorNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "executor not found", nil)
+		}
+
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, rows)
@@ -659,6 +668,13 @@ func (h *Handler) testAgentctlCache(
 // If that count ever grows materially we should add a batch List by
 // session-ID method to the repo and resolve in one query.
 func (h *Handler) listSessions(ctx context.Context, executorID string) ([]SessionRow, error) {
+	if checker, ok := h.executorFetcher.(interface {
+		AuthorizeExecutorConfiguration(context.Context, string, string) error
+	}); ok {
+		if err := checker.AuthorizeExecutorConfiguration(ctx, executorID, ""); err != nil {
+			return nil, models.ErrExecutorNotFound
+		}
+	}
 	rows, err := h.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list ssh sessions: %w", err)
@@ -671,6 +687,17 @@ func (h *Handler) listSessions(ctx context.Context, executorID string) ([]Sessio
 		}
 		if run.Runtime != agentruntime.RuntimeSSH {
 			continue
+		}
+		if checker, ok := h.executorFetcher.(interface {
+			AuthorizeExecutorConfiguration(context.Context, string, string) error
+		}); ok {
+			session, err := h.repo.GetTaskSession(ctx, run.SessionID)
+			if err != nil || session == nil {
+				continue
+			}
+			if err := checker.AuthorizeExecutorConfiguration(ctx, session.ExecutorID, session.ExecutorProfileID); err != nil {
+				continue
+			}
 		}
 		if !h.sessionBelongsToExecutor(ctx, run, executorID) {
 			continue
