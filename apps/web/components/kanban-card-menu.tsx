@@ -47,7 +47,13 @@ export interface TaskCardMenuParams {
   onEdit?: (task: Task) => void;
   onDelete?: (
     task: Task,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
+    opts?: {
+      cascade?: boolean;
+      discardWorktreeChanges?: boolean;
+      workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
+      confirmationId?: string;
+    },
   ) => void;
   onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
   onMove?: (task: Task, targetStepId: string) => void;

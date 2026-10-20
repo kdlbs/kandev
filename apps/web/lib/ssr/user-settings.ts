@@ -61,6 +61,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showTranscriptAutoScrollControl: false,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
+    showTurnChangedFiles: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -320,6 +321,7 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
     showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
     showTodoListPanelOnlyWhenNotEmpty:
       s.show_todo_list_panel_only_when_not_empty ?? current.showTodoListPanelOnlyWhenNotEmpty,
+    showTurnChangedFiles: s.show_turn_changed_files ?? current.showTurnChangedFiles,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,

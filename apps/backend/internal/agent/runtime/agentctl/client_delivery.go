@@ -226,6 +226,7 @@ func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, inp
 	if err != nil {
 		return err
 	}
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

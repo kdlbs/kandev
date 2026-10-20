@@ -117,10 +117,14 @@ test("keeps history and recovery available after restarting an interrupted turn"
   await expect(
     fixture.session.chat.getByText("simple mock response", { exact: false }),
   ).toBeVisible();
+  // Focus signals are independent from the explicit Stop/Resume sequence.
   const requests = fixture.traffic.frames
     .slice(wireStart)
     .filter(
-      (f) => f.direction === "sent" && ["session.stop", "session.launch"].includes(f.action ?? ""),
+      (f) =>
+        f.direction === "sent" &&
+        f.activationSource !== "session_focus" &&
+        ["session.stop", "session.launch"].includes(f.action ?? ""),
     );
   expect(requests.map((f) => [f.action, f.sessionId])).toEqual([
     ["session.stop", fixture.sessionId],

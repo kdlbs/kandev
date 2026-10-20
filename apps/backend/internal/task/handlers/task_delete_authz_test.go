@@ -291,3 +291,18 @@ func TestHTTPDeleteTaskSurvivesClientDisconnect(t *testing.T) {
 		t.Fatal("the delete was handed a cancelled context; a client disconnect can abort it half-done")
 	}
 }
+
+func TestHTTPDeleteTaskRejectsConfirmationForDifferentCleanupMode(t *testing.T) {
+	repo := &authzDeleteRepo{}
+	h := newAuthzTaskHandlers(t, repo)
+	c, rec := authzDeleteRequest(t, "user-b", "task-b")
+	authorizeTaskDeletePreview(t, h, c, "task-b")
+	c.Request.URL.RawQuery = "workspace_cleanup=retain"
+	h.httpDeleteTask(c)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("mode mismatch status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.deletes()) != 0 {
+		t.Fatal("mode mismatch deleted the task")
+	}
+}

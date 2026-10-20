@@ -153,6 +153,13 @@ the real receipt.
 Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
 Subsequent replay projects retained events through the normal idempotent pipeline.
 
+An initialized silent-restore successor can reconnect before its generation
+commit after a failed SQL write. Preflight permits replay from zero only when
+the authenticated stream retains the complete prefix from sequence one, has
+no acknowledgments or submissions, and SQL still identifies the pinned native
+predecessor. This path creates no checkpoint or receipt. Normal event admission
+continues to wait for the successor commit under the new bounded restore owner.
+
 ## Explicit fresh start
 
 An explicit Start fresh launch is a replacement native conversation. When the

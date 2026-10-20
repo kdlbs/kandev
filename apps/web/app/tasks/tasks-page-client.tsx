@@ -204,7 +204,22 @@ function useTaskMutations(fetchTasks: () => void) {
     async (taskId: string, opts?: DeleteTaskParams) => {
       setDeletingTaskId(taskId);
       try {
-        await deleteTask(taskId, opts);
+        const result = await deleteTask(taskId, opts);
+        if (result?.workspace_cleanup === "retain") {
+          toast({
+            title: t("task:deleteKeptFilesTitle"),
+            description: t(
+              result.runtime_stop_pending
+                ? "task:deleteKeptFilesPending"
+                : "task:deleteKeptFilesComplete",
+            ),
+          });
+        } else if (result?.workspace_cleanup_pending) {
+          toast({
+            title: t("task:deleteCleanupPendingTitle"),
+            description: t("task:deleteCleanupPendingDescription"),
+          });
+        }
         fetchTasks();
       } catch (err) {
         toast({
@@ -220,7 +235,7 @@ function useTaskMutations(fetchTasks: () => void) {
         setDeletingTaskId(null);
       }
     },
-    [fetchTasks, toast],
+    [fetchTasks, t, toast],
   );
 
   return { deletingTaskId, handleArchive, handleUnarchive, handleDelete };

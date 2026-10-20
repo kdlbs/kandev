@@ -7,6 +7,25 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+type successorGenerationOwner struct {
+	ctx context.Context
+}
+
+// The launch owner remains active through the SQL commit. The shorter process
+// startup context ends when native initialization returns, before that commit.
+func (e *AgentExecution) bindSuccessorGenerationOwner(ctx context.Context, req *LaunchRequest) {
+	if req.RequiredNativeConversationID == "" && !req.startsSuccessorGeneration() {
+		return
+	}
+	if req.CandidateExecutionID != "" && req.CandidateExecutionID != e.ID {
+		return
+	}
+	previous := e.successorGenerationOwner.Load()
+	if previous == nil || previous.ctx.Err() != nil {
+		e.successorGenerationOwner.CompareAndSwap(previous, &successorGenerationOwner{ctx: ctx})
+	}
+}
+
 // Native restore and fresh start can emit setup events before their successor
 // generation is committed in SQL. Only an explicit interrupted-conversation
 // successor or fresh-start replacement may wait for that commit; receipt and
@@ -18,17 +37,33 @@ func awaitSilentRestoreGeneration(
 	if err != nil || !successorGenerationPending(execution, current) {
 		return current, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	streamCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	if owner := execution.successorGenerationOwner.Load(); owner != nil {
+		stop := context.AfterFunc(owner.ctx, cancel)
+		defer stop()
+	}
 	for {
 		timer := time.NewTimer(25 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			// The owner can finish immediately after committing. Read once more
+			// under stream ownership before treating its cancellation as failure.
+			readCtx, cancelRead := context.WithTimeout(streamCtx, 5*time.Second)
+			current, err = reader.GetCurrentHarnessSessionGeneration(readCtx, sessionID, incarnationID)
+			cancelRead()
+			if err == nil && !successorGenerationPending(execution, current) {
+				return current, nil
+			}
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
 		current, err = reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
+		if ctx.Err() != nil {
+			continue
+		}
 		if err != nil || !successorGenerationPending(execution, current) {
 			return current, err
 		}

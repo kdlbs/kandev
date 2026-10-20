@@ -30,6 +30,25 @@ Startup sources are read once and later sources override earlier ones. Web setti
 
 Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
 
+## Startup progress and restored conversations
+
+Kandev finishes database initialization and local housekeeping before activating
+background schedulers, integrations, and conversation restoration. While startup
+is in progress, the browser startup page and restart dialog show the current
+operation, its elapsed time, and recent startup timings. Incomplete timing records
+are marked explicitly. The total startup time stops at readiness.
+
+Remote executors that cannot be reached remain pending for that session while
+Kandev becomes ready. Restoring independent conversations uses up to two slots;
+the visible selected conversation gets priority for the next available slot.
+Restoration keeps the original conversation and does not send an instruction or
+release queued messages. An interrupted instruction can retain an unknown outcome.
+
+The launcher also reports startup progress. `/ready` includes an optional bounded
+`startup.completed_steps` history for the current backend process. It contains
+step identifiers, labels, elapsed milliseconds, activation sequence numbers, and
+completion flags. History resets on the next backend start.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -101,7 +120,7 @@ When `server.host` is unset, `server.hosts` may provide a YAML list of bind addr
 
 SQLite is the supported default and enables WAL mode. PostgreSQL deployments must provision the database, network policy, TLS trust, backups, and credentials before starting Kandev. Passing the password in an environment variable avoids putting it in YAML but still exposes it to processes/administrators allowed to inspect the environment; use your platform's secret injection controls.
 
-`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new`, quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
+`database.path` is an advanced SQLite file-path override. The **Settings → System → Database** and **Backups** pages use that exact file, its WAL files, and the sibling `backups/` directory. Restore stages `<configured-database-path>.new` and verifies its SQLite integrity. An invalid snapshot fails without replacing current data, interrupting database-backed work, or requiring a restart. After verification succeeds, restore quiesces scheduling and active workers, validates the checkpoint result, closes the SQLite pool, and uses rollback-capable quarantine replacement for the configured file and WAL sidecars. Restart Kandev immediately after a successful restore. When the override is empty, the default path remains `<home>/data/kandev.db` and the backup directory remains `<home>/data/backups/`. Kandev does not move snapshots from another directory automatically. The System restore endpoint is SQLite-only; use PostgreSQL recovery tools for PostgreSQL.
 
 ### Default SQLite continuity
 

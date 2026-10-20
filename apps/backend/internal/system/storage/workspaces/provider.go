@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -196,6 +197,15 @@ func (p *Provider) eligibleCandidates(
 }
 
 func (p *Provider) quarantine(ctx context.Context, item candidate) (storage.QuarantineEntry, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return storage.QuarantineEntry{}, retentionErr
+	}
+	defer releaseRetention()
+
+	if err := p.protectActiveWorktree(ctx, storage.QuarantineEntry{OriginalPath: item.path}); err != nil {
+		return storage.QuarantineEntry{}, err
+	}
 	if p.config.Store == nil {
 		return storage.QuarantineEntry{}, errors.New("workspace quarantine store is required")
 	}
@@ -378,6 +388,12 @@ func (p *Provider) permanentDelete(
 	confirmation string,
 	force bool,
 ) (storage.QuarantineEntry, error) {
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return storage.QuarantineEntry{}, retentionErr
+	}
+	defer releaseRetention()
+
 	if force {
 		if confirmation != storage.QuarantineConfirmationForce {
 			return storage.QuarantineEntry{}, storage.ErrForceDeleteConfirmation

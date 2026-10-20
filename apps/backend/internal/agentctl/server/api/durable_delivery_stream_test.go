@@ -478,6 +478,7 @@ func TestDeliveryAPIRejectsForeignStreamIdentity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.target, bytes.NewBufferString(tc.body))
+			req.Header.Set(journal.DeliveryProtocolHeader, "2")
 			req.Header.Set("Content-Type", "application/json")
 			resp := httptest.NewRecorder()
 
@@ -527,6 +528,8 @@ func TestDeliveryAPIStatusReturnsBoundedRecoveryDescriptor(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/delivery", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 
@@ -562,6 +565,7 @@ func TestDeliveryAPIRejectsForeignSubmissionIdentity(t *testing.T) {
 
 	requestBody := `{"id":"submission-1","session_id":"other-session","incarnation_id":"other-incarnation","harness_generation":1,"hash":"hash-1","payload":"cHJvbXB0"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions", bytes.NewBufferString(requestBody))
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 
@@ -596,6 +600,8 @@ func TestDeliveryAPIRejectsForeignStoredSubmission(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/submissions/foreign-submission", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 
@@ -629,6 +635,8 @@ func TestDeliveryAPICancelsCurrentSubmission(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions/submission-cancel-api/cancel", nil)
+
+	req.Header.Set(journal.DeliveryProtocolHeader, "2")
 	resp := httptest.NewRecorder()
 	server.Router().ServeHTTP(resp, req)
 

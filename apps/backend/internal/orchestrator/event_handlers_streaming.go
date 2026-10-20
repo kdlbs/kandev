@@ -657,7 +657,9 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	}
 
 	if s.messageCreator != nil {
-		if err := s.messageCreator.CreateToolCallMessage(
+		if payload.Data.CanonicalProjection {
+			s.publishCanonicalMessageEvent(ctx, payload)
+		} else if err := s.messageCreator.CreateToolCallMessage(
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,
@@ -941,7 +943,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// call; missing parent metadata on an incremental update cannot promote a
 	// child or unknown tool to foreground.
 	if isTerminalToolStatus(payload.Data.ToolStatus) &&
-		len(payload.Data.ToolCallContents) > 0 &&
+		(len(payload.Data.ToolCallContents) > 0 || (payload.Data.CanonicalProjection && payload.Data.ShellOutputHasContent)) &&
 		ownership == toolOwnershipForeground &&
 		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
@@ -1003,7 +1005,9 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 			// create a message (and implicitly a turn) after the turn settled.
 			fallbackMsgType = ""
 		}
-		if err := s.messageCreator.UpdateToolCallMessage(
+		if payload.Data.CanonicalProjection {
+			s.publishCanonicalMessageEvent(ctx, payload)
+		} else if err := s.messageCreator.UpdateToolCallMessage(
 			ctx,
 			payload.TaskID,
 			payload.Data.ToolCallID,

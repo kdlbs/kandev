@@ -21,6 +21,7 @@ function isFetchTransportError(error: unknown): boolean {
 test.describe.configure({ retries: 0 });
 
 // @covers AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.1 through .4
+// @covers AC-PLATFORM-STARTUP-HOUSEKEEPING-002.3
 for (const restart of [false, true]) {
   const title = restart
     ? "preserves Kubernetes workspace after recoverable agent error and backend restart"
@@ -91,27 +92,25 @@ for (const restart of [false, true]) {
         claim.metadata.uid,
       );
       if (restart) {
-        const restartLogOffset = fs.readFileSync(backend.logPath, "utf8").length;
+        const userMessageIds = (await apiClient.listSessionMessages(sessionId)).messages
+          .filter((message) => message.author_type === "user")
+          .map((message) => message.id);
         await backend.restart();
-        await expect
-          .poll(
-            () =>
-              fs
-                .readFileSync(backend.logPath, "utf8")
-                .slice(restartLogOffset)
-                .split("\n")
-                .some(
-                  (line) =>
-                    line.includes(task.id) &&
-                    line.includes(sessionId) &&
-                    line.includes("session reconciled for lazy recovery"),
-                ),
-            {
-              timeout: 30_000,
-              message: "Waiting for startup session reconciliation after backend restart",
-            },
-          )
-          .toBe(true);
+        await backend.ensureReady();
+        const restored = (await apiClient.getTaskSession(sessionId)).session;
+        expect(restored.id).toBe(sessionId);
+        expect(restored.state).toBe("WAITING_FOR_INPUT");
+        expect(
+          (await apiClient.listSessionMessages(sessionId)).messages
+            .filter((message) => message.author_type === "user")
+            .map((message) => message.id),
+        ).toEqual(userMessageIds);
+        expect((await waitForKubernetesPod(cluster, task.id, sessionId)).metadata.uid).toBe(
+          pod.metadata.uid,
+        );
+        expect((await waitForKubernetesPVC(cluster, task.id, sessionId)).metadata.uid).toBe(
+          claim.metadata.uid,
+        );
         await expect
           .poll(
             async () => {

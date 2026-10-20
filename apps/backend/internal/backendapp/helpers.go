@@ -2594,7 +2594,11 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetReviewService(reviewParts.service)
 	mcpHandlers.SetReviewRunner(reviewParts.runner)
 	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
-	reviewParts.runner.Start(context.Background())
+	reviewCtx := p.ctx
+	if reviewCtx == nil {
+		reviewCtx = context.Background()
+	}
+	startup.AfterReady(reviewCtx, func() { reviewParts.runner.Start(reviewCtx) })
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			reviewParts.runner.Stop()

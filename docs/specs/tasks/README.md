@@ -11,17 +11,19 @@ owners:
 
 ## Purpose
 
-The task and workflow system owns durable work items, task relationships,
-execution lifecycle, workflow steps, queued launches, and the contracts that
-move a task through its configured process.
+Owns durable work items, task relationships, execution lifecycle, workflow
+steps, queued launches, and task process contracts.
 
 ## Ownership
 
-This system owns task identity and metadata, workspace-scoped task discovery
-through the [workspace search contract](requirements/workspace-search.md), task documents and attachments,
-parent and dependency relationships, task creation and launch behavior, task
+Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, parent and dependency relationships, creation, launch,
 runtime state publication, workflow definitions and transitions, completion
-signals, and task-scoped scheduling contracts.
+signals, and task scheduling.
+
+Turn change sets bind immutable repository intervals to capture policy,
+historical content availability, and transcript anchors. Workspaces supply
+checkout identity; runtime supplies ordered executor access.
 
 ## Exclusions
 

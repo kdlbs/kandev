@@ -1,5 +1,7 @@
 "use client";
 
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+
 import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
@@ -148,10 +150,7 @@ function TaskRows({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (
-    taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
-  ) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
   workflowStepPreviews?: TaskListStepPreviews;
@@ -241,10 +240,7 @@ function TaskListRow({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (
-    taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
-  ) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -314,10 +310,7 @@ function TaskListSectionView({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (
-    taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
-  ) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const rows = flattenTaskTree(section.nodes);
@@ -421,10 +414,7 @@ function TaskRowActions({
   onArchiveOpenChange: (open: boolean) => void;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (
-    taskId: string,
-    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean; confirmationId?: string },
-  ) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const workspaceMode = workspaceModeFromMetadata(task.metadata);
@@ -483,9 +473,7 @@ function TaskRowActions({
         executorType={task.primary_executor_type}
         sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges, confirmationId }) =>
-          onDelete(task.id, { cascade, discardWorktreeChanges, confirmationId })
-        }
+        onConfirm={(options) => onDelete(task.id, options)}
       />
       <TaskArchiveConfirmation
         open={showArchiveConfirm}

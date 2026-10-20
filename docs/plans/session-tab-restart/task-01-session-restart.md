@@ -259,3 +259,25 @@ pnpm --dir apps/web e2e:run --host --no-build --project chromium \
 The run reused the fresh production build that contains the close guard.
 The three remaining named test helpers identified by the documentation audit
 now document their fixture and focus contracts.
+
+### CI regression follow-up
+
+The interrupted-turn scenario reproduced an extra `session.launch` frame from
+the existing `session_focus` recovery signal. Gateway traffic now retains
+`activation_source`, so the regression checks one explicit Stop/Resume pair
+separately from focus signals. A new traffic-capture unit test failed before
+that metadata was retained and passed afterward.
+
+The same CI shard exposed a workflow-preview race during a primary-session
+change. The focused scenario reproduced the protocol error with retries disabled.
+Its helper now waits for the new primary projection, matches the destination
+step, and reads the response body before checking the rendered preview.
+
+The merge with main preserves both sides of the eight task translation catalogs.
+Affected unit suites passed: 864 tests in 82 files. Translation, documentation
+catalog, and specification checks also passed.
+
+The seven desktop session restart and tab-close cases passed. All three
+workflow-preview cases passed three repetitions each (nine runs), with retries
+disabled.
+Both phone restart cases also passed with retries disabled.

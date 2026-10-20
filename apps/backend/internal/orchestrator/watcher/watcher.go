@@ -70,6 +70,8 @@ type AgentEventData struct {
 	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
 	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
 	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
+	RunID                     string                                `json:"run_id,omitempty"`
+	CausingRunID              string                                `json:"causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.

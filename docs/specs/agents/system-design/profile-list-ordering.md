@@ -269,7 +269,10 @@ selector-specific recency and default-selection logic remains unchanged.
   `hooks/domains/settings/use-agent-creation-store-sync.ts` place newly created
   profiles first in their own Settings group. The creation publisher retains
   current-main revision checks, accepted-creation metadata, and missing-owner
-  protection. Non-creation saves use `agent-save-store-sync.ts`, preserve current
+  protection for existing owners. Newly accepted agent creation is explicitly
+  marked and appends its owner to the current catalogue, including accepted
+  profiles with a pending MCP draft, even after an independent event advances
+  the snapshot epoch. Non-creation saves use `agent-save-store-sync.ts`, preserve current
   membership when the request epoch is stale, and update only the saved group's
   known global selector options. Workspace-scoped and unrepresented Office
   options survive. Selector projections restore the creation baseline and do

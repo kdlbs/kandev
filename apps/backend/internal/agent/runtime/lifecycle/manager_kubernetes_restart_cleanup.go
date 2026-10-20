@@ -146,7 +146,7 @@ func (m *Manager) stopPersistedKubernetesBackend(
 	if err != nil {
 		return fmt.Errorf("get Kubernetes runtime: %w", err)
 	}
-	return backend.StopInstance(ctx, instance, force)
+	return m.stopWorkspaceRuntime(ctx, backend, instance, force)
 }
 
 func uniquePersistedKubernetesExecution(

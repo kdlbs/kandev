@@ -153,7 +153,7 @@ func (m *Manager) restoreRecoveredDelivery(
 }
 
 func validateRecoveredDeliveryStatus(execution *AgentExecution, status *agentctl.DeliveryStatus) error {
-	if status == nil || !status.Durable || status.Version != journal.CurrentVersion {
+	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) {
 		return fmt.Errorf("%w: peer did not advertise compatible retained storage", ErrDurableAdoptionBlocked)
 	}
 	if status.SessionID == "" || status.IncarnationID == "" || status.HarnessGeneration == 0 || status.StreamID == "" {

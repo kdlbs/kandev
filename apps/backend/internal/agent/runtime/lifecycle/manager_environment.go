@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/retention"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
@@ -28,6 +29,15 @@ func (m *Manager) DestroyContainer(ctx context.Context, containerID string) erro
 	if containerID == "" {
 		return nil
 	}
+	ctx, releaseRetention, retentionErr := retention.AcquireMutation(ctx)
+	if retentionErr != nil {
+		return retentionErr
+	}
+	defer releaseRetention()
+	if err := m.checkRetainedWorkspaceResource(ctx, "", containerID); err != nil {
+		return err
+	}
+
 	backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
 	if err != nil {
 		return fmt.Errorf("docker backend unavailable: %w", err)
@@ -120,5 +130,5 @@ func (m *Manager) DestroySandbox(ctx context.Context, sandboxID, executionID str
 		Metadata:   map[string]interface{}{MetadataKeySpriteName: sandboxID},
 		StopReason: StopReasonTaskDeleted,
 	}
-	return spritesExec.StopInstance(ctx, instance, true)
+	return m.stopWorkspaceRuntime(ctx, spritesExec, instance, true)
 }

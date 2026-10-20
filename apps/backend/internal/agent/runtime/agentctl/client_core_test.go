@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
 )
@@ -108,11 +110,10 @@ func TestWsAuthHeaders(t *testing.T) {
 		name        string
 		token       string
 		executionID string
-		wantNil     bool
 		wantAuth    string
 		wantID      string
 	}{
-		{name: "neither set", wantNil: true},
+		{name: "neither set"},
 		{name: "token only", token: "t", wantAuth: "Bearer t"},
 		{name: "execution only", executionID: "e", wantID: "e"},
 		{name: "both", token: "t", executionID: "e", wantAuth: "Bearer t", wantID: "e"},
@@ -121,14 +122,11 @@ func TestWsAuthHeaders(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &Client{authToken: tc.token, executionID: tc.executionID}
 			headers := c.wsAuthHeaders()
-			if tc.wantNil {
-				if headers != nil {
-					t.Fatalf("headers = %v, want nil when unauthenticated", headers)
-				}
-				return
-			}
 			if headers == nil {
 				t.Fatal("headers = nil, want a populated header set")
+			}
+			if got := headers.Get(journal.DeliveryProtocolHeader); got != strconv.FormatUint(uint64(journal.CurrentProtocolVersion), 10) {
+				t.Errorf("delivery version = %q, want the supported reader version", got)
 			}
 			if got := headers.Get("Authorization"); got != tc.wantAuth {
 				t.Errorf("Authorization = %q, want %q", got, tc.wantAuth)

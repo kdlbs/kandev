@@ -127,6 +127,7 @@ export type KanbanState = {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      workspace_relative_path?: string;
       branch_policy_id?: string;
       branch_policy_name?: string;
       branch_policy_base_branch?: string;
@@ -140,6 +141,7 @@ export type KanbanState = {
       display_name: string;
       position: number;
     }>;
+    initialWorkspaceLayout?: "repository" | "task_root";
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;
