@@ -357,6 +357,8 @@ func TestAgentEventHandling(t *testing.T) {
 			"delivery_harness_generation": uint64(7),
 			"delivery_sequence":           uint64(11),
 			"delivery_submission_id":      "submission-123",
+			"owner_kind":                  string(lifecycle.ExecutionOwnerTask),
+			"causing_run_id":              "run-cause-123",
 		})
 
 		_ = eventBus.Publish(context.Background(), events.AgentCompleted, event)
@@ -374,6 +376,12 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
+		if receivedData.OwnerKind != string(lifecycle.ExecutionOwnerTask) {
+			t.Errorf("owner_kind = %q, want %q", receivedData.OwnerKind, lifecycle.ExecutionOwnerTask)
+		}
+		if receivedData.CausingRunID != "run-cause-123" {
+			t.Errorf("causing_run_id = %q, want run-cause-123", receivedData.CausingRunID)
 		}
 		if receivedData.TurnID != "turn-123" || receivedData.DeliveryStreamID != "stream-123" ||
 			receivedData.DeliveryIncarnationID != "incarnation-123" || receivedData.DeliveryHarnessGeneration != 7 ||

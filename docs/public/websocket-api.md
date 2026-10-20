@@ -863,6 +863,14 @@ for defaults, bounds, and examples.
 
 ## Emitted notifications and recipients
 
+Executor and executor-profile configuration notifications are sent only to
+eligible recipients. Ownership changes also emit the payload-free
+`executor.catalogue.invalidated` notification so clients discard cached
+configuration and refetch their permitted catalogue, including when access was
+revoked. Failed eligibility resolution does not broadcast private executor
+configuration.
+
+
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
 ### Shared broadcaster notifications

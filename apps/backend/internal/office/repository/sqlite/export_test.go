@@ -24,3 +24,13 @@ func SetClaimWindowHook(fn func(ctx context.Context, tx *sqlx.Tx, seatID string)
 func ChunkTaskIDsCount(ids []string) int {
 	return len(chunkTaskIDs(ids))
 }
+
+// TaskWorkflowContext exposes taskWorkflowContext to external tests. It
+// resolves a task's workflow_id and workflow_step_id in a single read;
+// external tests use it to assert directly that listWorkflowScopedSeats'
+// (workflow, step) pair always comes from one coherent snapshot rather than
+// two independently-timed reads a concurrent move could straddle
+// (ISSUE-6 review round 1, finding R1-1).
+func (r *Repository) TaskWorkflowContext(ctx context.Context, taskID string) (workflowID, stepID string, err error) {
+	return r.taskWorkflowContext(ctx, taskID)
+}

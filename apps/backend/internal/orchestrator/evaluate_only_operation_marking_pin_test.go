@@ -37,6 +37,11 @@ var registeredEvaluateOnlyOperationMarkingSites = []string{
 	// commit-then-mark discipline this spec requires, on the newer
 	// caller-owned mechanism.
 	"internal/orchestrator/Service.evaluateChildrenCompleted",
+	// processTaskPRWorkflowEvent (on_pr_merged / on_pr_closed) uses the same
+	// DeferOperationMark discipline: it marks the operation via
+	// markOperationApplied only after applyEngineTransitionWithMode commits,
+	// or immediately when the evaluation does not transition.
+	"internal/orchestrator/Service.processTaskPRWorkflowEvent",
 }
 
 func TestEvaluateOnlyOperationMarkingCallSitesArePinned(t *testing.T) {

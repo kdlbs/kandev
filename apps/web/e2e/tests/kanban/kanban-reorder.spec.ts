@@ -1,8 +1,8 @@
-import { type Locator, type Page } from "@playwright/test";
+import { type Locator, type Page, type Request } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { settledBoundingBox } from "../../helpers/settled-box";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 
 const REORDER_PATH = /\/workflow-steps\/.+\/tasks\/reorder$/;
 
@@ -155,5 +155,80 @@ test.describe("Kanban card reordering", () => {
         return { d: d.position, e: e.position };
       })
       .toEqual({ e: 0, d: 1 });
+  });
+
+  // @covers AC-TASKS-KANBAN-TASK-REORDERING-001.9, AC-TASKS-KANBAN-TASK-REORDERING-001.12
+  test("keyboard reorder recovers after the picked card is removed", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const placement = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    };
+    const taskA = await apiClient.createTask(seedData.workspaceId, "Removal keys A", placement);
+    const taskB = await apiClient.createTask(seedData.workspaceId, "Removal keys B", placement);
+    const taskC = await apiClient.createTask(seedData.workspaceId, "Removal keys C", placement);
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const cardA = kanban.taskCard(taskA.id);
+    await expect(cardA).toBeVisible();
+    await cardA.focus();
+    await testPage.keyboard.press("Space");
+    await expect(cardA).toHaveAttribute("aria-grabbed", "true");
+    const announcement = testPage.getByTestId("kanban-reorder-announcement");
+    await announcement.evaluate((element) => {
+      element.setAttribute("data-mount-proof", "picked-a");
+    });
+    const reorderRequests: Request[] = [];
+    testPage.on("request", (request) => {
+      if (request.method() === "PUT" && REORDER_PATH.test(request.url()))
+        reorderRequests.push(request);
+    });
+
+    await apiClient.deleteTask(taskA.id);
+    await expect(cardA).toHaveCount(0);
+    await expect(announcement).toHaveAttribute("data-mount-proof", "picked-a");
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "Removing a picked card must not submit its draft",
+    );
+    expect(reorderRequests).toHaveLength(0);
+
+    const cardB = kanban.taskCard(taskB.id);
+    await cardB.focus();
+    await testPage.keyboard.press("Escape");
+    await testPage.keyboard.press("Space");
+    await expect(cardB).toHaveAttribute("aria-grabbed", "true");
+    await testPage.keyboard.press("ArrowDown");
+    const committed = waitForHttp(testPage, "PUT", REORDER_PATH);
+    await testPage.keyboard.press("Enter");
+    await committed;
+    await expect(cardB).not.toHaveAttribute("aria-grabbed", "true");
+    await expect(announcement).toHaveAttribute("data-mount-proof", "picked-a");
+    expect(reorderRequests).toHaveLength(1);
+    expect(reorderRequests[0].postDataJSON()).toMatchObject({
+      band: "admitted",
+      ordered_task_ids: [taskC.id, taskB.id],
+    });
+    await expect
+      .poll(() => columnOrder(kanban, seedData.startStepId))
+      .toEqual(["Removal keys C", "Removal keys B"]);
+    await expect
+      .poll(async () => {
+        const [b, c] = await Promise.all([
+          apiClient.getTask(taskB.id),
+          apiClient.getTask(taskC.id),
+        ]);
+        return { b: b.position, c: c.position };
+      })
+      .toEqual({ c: 0, b: 1 });
+    await prCapture.screenshot("keyboard-removal-recovery", {
+      caption: "After removing the picked card, a remaining card reorders on the same board.",
+    });
   });
 });

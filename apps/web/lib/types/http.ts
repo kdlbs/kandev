@@ -66,6 +66,9 @@ export type {
   TaskRepository,
   WorkspaceFolder,
   WorkspaceFolderSourceRequest,
+  WorkspaceRepositoryPlacement,
+  WorkspaceRepositoryPlacementOption,
+  WorkspaceRepositoryPlacementPreview,
   WorkspaceRepositorySourceRequest,
   WorkspaceSourceRequest,
 } from "./http-workspace-sources";
@@ -100,6 +103,8 @@ export type TaskState =
   | "CANCELLED";
 
 export type TaskPriority = "critical" | "high" | "medium" | "low";
+
+export type InitialWorkspaceLayout = "repository" | "task_root";
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
@@ -453,6 +458,8 @@ export type Task = ActiveSubagentCountFields & {
   queued_for_step_id?: string;
   queued_at?: string | null;
   repositories?: TaskRepository[];
+  /** Initial working-directory layout for task creation. */
+  initial_workspace_layout?: InitialWorkspaceLayout;
   workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
@@ -529,6 +536,7 @@ export type Task = ActiveSubagentCountFields & {
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
 export type TaskOrigin =
+  | "coordinator"
   | "manual"
   | "agent_created"
   | "routine"
@@ -1025,6 +1033,7 @@ export type ListWorkspacesResponse = {
 };
 
 export type Executor = {
+  owner_user_id?: string | null;
   id: string;
   name: string;
   type: ExecutorType;
@@ -1044,6 +1053,7 @@ export type ProfileEnvVar = {
 };
 
 export type ExecutorProfile = {
+  owner_user_id?: string | null;
   id: string;
   executor_id: string;
   executor_type?: ExecutorType;

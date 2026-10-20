@@ -418,9 +418,9 @@ func TestBuildJournalArgs(t *testing.T) {
 	}
 }
 
-func TestQuoteForUnitEscapesSystemdSpecials(t *testing.T) {
+func TestServiceEnvLinePreservesDollarsAndEscapesSpecifiers(t *testing.T) {
 	got := serviceEnvLine("KANDEV_HOME_DIR", `/tmp/$USER/kandev%data`)
-	want := `Environment="KANDEV_HOME_DIR=/tmp/$$USER/kandev%%data"`
+	want := `Environment="KANDEV_HOME_DIR=/tmp/$USER/kandev%%data"`
 	if got != want {
 		t.Fatalf("serviceEnvLine() = %q, want %q", got, want)
 	}
@@ -428,7 +428,7 @@ func TestQuoteForUnitEscapesSystemdSpecials(t *testing.T) {
 
 func TestServiceEnvLineAllowSpecifiersPreservesSystemdSpecifiers(t *testing.T) {
 	got := serviceEnvLineAllowSpecifiers("PATH", `%h/.local/bin:$PATH`)
-	want := `Environment="PATH=%h/.local/bin:$$PATH"`
+	want := `Environment="PATH=%h/.local/bin:$PATH"`
 	if got != want {
 		t.Fatalf("serviceEnvLineAllowSpecifiers() = %q, want %q", got, want)
 	}
@@ -557,4 +557,38 @@ func canonicalTempDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return resolved
+}
+
+// @covers AC-EXECUTORS-SURVIVAL-001.11
+func TestRenderSystemdUnitPreservesApplicationAgentLifetime(t *testing.T) {
+	for _, system := range []bool{false, true} {
+		name, mode, target, user := "user", "user", "default.target", ""
+		if system {
+			name, mode, target, user = "system", "system", "multi-user.target", "User=alice\n"
+		}
+		t.Run(name, func(t *testing.T) {
+			unit := renderSystemdUnit(nativeServiceUnitInput{
+				Executable: "/opt/kandev/bin/kandev", HomeDir: "/srv/kandev",
+				System: system, SystemUser: "alice", Port: 1234,
+			})
+			for _, line := range []string{
+				"Type=simple", "ExecStart=/opt/kandev/bin/kandev --headless",
+				"Environment=KANDEV_HOME_DIR=/srv/kandev",
+				"Environment=KANDEV_SERVICE_MODE=" + mode,
+				"Environment=KANDEV_SERVER_PORT=1234",
+				"Restart=on-failure", "RestartSec=5s",
+				"KillMode=process", "TimeoutStopSec=30s", "WantedBy=" + target,
+			} {
+				if !slices.Contains(strings.Split(unit, "\n"), line) {
+					t.Errorf("service missing exact line %q:\n%s", line, unit)
+				}
+			}
+			if strings.Count(unit, "KillMode=") != 1 {
+				t.Fatal("service must have exactly one termination policy")
+			}
+			if system && !strings.Contains(unit, user) || !system && strings.Contains(unit, "\nUser=") {
+				t.Fatalf("unexpected service user:\n%s", unit)
+			}
+		})
+	}
 }

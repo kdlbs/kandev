@@ -13,6 +13,10 @@ import (
 // UpdateExecutorProfileWithScriptIntent writes explicit scripts and captures
 // this commit's script pair without a later profile read.
 func (r *Repository) UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error {
+	return r.updateExecutorProfile(ctx, profile, intent, nil)
+}
+
+func (r *Repository) updateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent, expected *time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -32,18 +36,11 @@ func (r *Repository) UpdateExecutorProfileWithScriptIntent(ctx context.Context, 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	query := `UPDATE executor_profiles SET name = ?, mcp_policy = ?, config = ?, env_vars = ?, updated_at = ?`
-	args := []any{profile.Name, profile.McpPolicy, string(configJSON), string(envJSON), time.Now().UTC()}
-	if intent.PrepareScript != nil {
-		query += ", prepare_script = ?"
-		args = append(args, *intent.PrepareScript)
+	owner, err := r.profileOwnershipForUpdateTx(ctx, tx, profile)
+	if err != nil {
+		return err
 	}
-	if intent.CleanupScript != nil {
-		query += ", cleanup_script = ?"
-		args = append(args, *intent.CleanupScript)
-	}
-	query += " WHERE id = ? RETURNING prepare_script, cleanup_script, updated_at"
-	args = append(args, profile.ID)
+	query, args := profileUpdateQuery(profile, intent, owner, string(configJSON), string(envJSON), expected)
 	rows, err := tx.QueryContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
@@ -58,6 +55,8 @@ func (r *Repository) UpdateExecutorProfileWithScriptIntent(ctx context.Context, 
 	profile.PrepareScript = committed.PrepareScript
 	profile.CleanupScript = committed.CleanupScript
 	profile.UpdatedAt = committed.UpdatedAt
+	profile.OwnerUserID = committed.OwnerUserID
+	profile.OwnershipIntent = nil
 	return nil
 }
 
@@ -70,7 +69,7 @@ func scanCommittedProfileScripts(rows *sql.Rows, id string) (*models.ExecutorPro
 		return nil, fmt.Errorf("executor profile not found: %s", id)
 	}
 	var committed models.ExecutorProfile
-	if err := rows.Scan(&committed.PrepareScript, &committed.CleanupScript, &committed.UpdatedAt); err != nil {
+	if err := rows.Scan(&committed.PrepareScript, &committed.CleanupScript, &committed.UpdatedAt, &committed.OwnerUserID); err != nil {
 		return nil, err
 	}
 	if rows.Next() {
@@ -83,4 +82,25 @@ func scanCommittedProfileScripts(rows *sql.Rows, id string) (*models.ExecutorPro
 		return nil, err
 	}
 	return &committed, nil
+}
+
+func profileUpdateQuery(profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent, owner, configJSON, envJSON string, expected *time.Time) (string, []any) {
+	query := `UPDATE executor_profiles SET name = ?, mcp_policy = ?, config = ?, env_vars = ?, updated_at = ?, owner_user_id = NULLIF(?, '')`
+	args := []any{profile.Name, profile.McpPolicy, configJSON, envJSON, time.Now().UTC(), owner}
+	if intent.PrepareScript != nil {
+		query += ", prepare_script = ?"
+		args = append(args, *intent.PrepareScript)
+	}
+	if intent.CleanupScript != nil {
+		query += ", cleanup_script = ?"
+		args = append(args, *intent.CleanupScript)
+	}
+	query += " WHERE id = ?"
+	args = append(args, profile.ID)
+	if expected != nil {
+		query += " AND updated_at = ?"
+		args = append(args, *expected)
+	}
+	query += " RETURNING prepare_script, cleanup_script, updated_at, COALESCE(owner_user_id, '')"
+	return query, args
 }

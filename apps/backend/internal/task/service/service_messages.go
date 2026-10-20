@@ -1065,7 +1065,7 @@ func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID stri
 // HasUserPromptHistory reports whether a session has accepted or reserved a
 // user prompt. The prompt sequence survives message deletion and restart.
 func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
-	if err := s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt); err != nil {
+	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return false, err
 	}
 	return s.messages.HasUserPromptHistory(ctx, sessionID)

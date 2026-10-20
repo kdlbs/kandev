@@ -272,5 +272,9 @@ Remediation verification on 2026-10-20:
   a stop error. Incomplete-inventory and stale-claim cases preserve resources.
 - `cd apps/backend && GOMAXPROCS=2 go test -p 2 -parallel 2 ./internal/task/service ./internal/worktree -run 'Test(DeleteUnavailable|CaptureCleanupHeadOIDs|TaskLifecycleCleanup|Cleanup|ExecuteTaskResourceCleanupJob|PerformTaskCleanup|Retain|TaskResourceCleanup)' -count=1`: passed.
 - Documentation catalog validation and full specification lint: passed.
+- Merged `main` at `e29a5b36448892d12b9eac9cb75d837007fb55f4`. Resolved
+  the helper extraction by applying error classification in
+  `manager_cleanup_identity.go`. Repeated the focused Go command with
+  `-trimpath` on the combined tree: passed. Harness tests and lint passed.
 
 Fresh CI and review evidence for this remediation remain delivery gates.

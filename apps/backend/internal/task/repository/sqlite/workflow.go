@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
@@ -120,21 +121,23 @@ func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflo
 // CreateWorkflow creates a new workflow
 func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	r.prepareWorkflow(workflow)
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	return r.insertWorkflow(ctx, r.db, workflow)
 }
 
 func (r *Repository) CreateWorkflowIfWorkspaceUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
 	r.prepareWorkflow(workflow)
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (
-			id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
+			created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id,
 			sort_order, hidden, style, source, source_path, created_at, updated_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?,
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?,
 			(SELECT COALESCE(MAX(sort_order), -1) + 1 FROM workflows WHERE workspace_id = ?),
 			?, ?, ?, ?, ?, ?
 		WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ? AND updated_at = ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
+	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt,
 		workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.WorkspaceID,
 		dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source),
 		workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt, workflow.WorkspaceID, expected)
@@ -161,6 +164,7 @@ func (r *Repository) prepareWorkflow(workflow *models.Workflow) {
 }
 
 func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, workflow *models.Workflow) error {
+	workflow.CreatedByUserID = workflowCreator(ctx)
 	// Auto-assign sort_order as max+1 within the workspace.
 	// The caller's transaction keeps the read and insert coherent.
 	var maxOrder int
@@ -173,9 +177,9 @@ func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, w
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -202,7 +206,7 @@ func normalizeWorkflowStyle(style string) string {
 }
 
 const workflowSelectColumns = `
-	id, workspace_id, name, description, prompt, agent_profile_id,
+	created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id,
 	workflow_template_id, sort_order, hidden, style, source, source_path,
 	created_at, updated_at
 `
@@ -216,6 +220,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	var workflowTemplateID, agentProfileID, style, source, sourcePath sql.NullString
 	var hidden int
 	if err := scanner.Scan(
+		&workflow.CreatedByUserID,
 		&workflow.ID,
 		&workflow.WorkspaceID,
 		&workflow.Name,
@@ -497,4 +502,14 @@ func (r *Repository) ReorderWorkflowsIfUnchanged(
 		}
 	}
 	return tx.Commit()
+}
+
+func workflowCreator(ctx context.Context) string {
+	if actor, bound := models.ExecutorActorFromContext(ctx); bound {
+		return actor
+	}
+	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
+		return identity.UserID
+	}
+	return ""
 }

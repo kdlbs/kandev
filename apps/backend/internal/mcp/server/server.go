@@ -627,7 +627,7 @@ func opaqueMCPConnectionID(connectionID string) string {
 func (s *Server) RegisterRoutes(router gin.IRouter) {
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -638,7 +638,7 @@ func (s *Server) RegisterRoutes(router gin.IRouter) {
 func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
 	router.GET("/mcp/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/mcp/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP backend routes",
 		zap.String("sse", "/mcp/sse"),

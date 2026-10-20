@@ -538,10 +538,8 @@ func (t *instanceIDTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 // wsAuthHeaders returns HTTP headers for WebSocket dial calls.
 func (c *Client) wsAuthHeaders() http.Header {
-	if c.authToken == "" && c.executionID == "" {
-		return nil
-	}
 	h := http.Header{}
+	h.Set("X-Kandev-Delivery-Version", "2")
 	if c.authToken != "" {
 		h.Set("Authorization", "Bearer "+c.authToken)
 	}

@@ -1163,6 +1163,10 @@ func clearGenericStepReferences(events models.StepEvents, stepID string) (models
 	modified = modified || changed
 	events.OnAgentError, changed = removeStepReferences(events.OnAgentError, shouldRemove)
 	modified = modified || changed
+	events.OnPRMerged, changed = removeStepReferences(events.OnPRMerged, shouldRemove)
+	modified = modified || changed
+	events.OnPRClosed, changed = removeStepReferences(events.OnPRClosed, shouldRemove)
+	modified = modified || changed
 	return events, modified
 }
 

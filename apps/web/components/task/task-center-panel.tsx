@@ -43,6 +43,7 @@ import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
 
 import type { SelectedDiff } from "./task-layout";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 
 type TaskCenterPanelProps = {
@@ -412,6 +413,13 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     tabs,
     separatorAfterIndex,
   } = state;
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      setSelectedDiff({ path: target.path ?? "", historical: target });
+      handleTabChange("changes");
+    },
+    [handleTabChange, setSelectedDiff],
+  );
   const {
     handleOpenFileFromChat,
     handleFileChange,
@@ -449,6 +457,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
           showRequestChangesTooltip={showRequestChangesTooltip}
           onDismissTooltip={() => setShowRequestChangesTooltip(false)}
           onOpenFile={handleOpenFileFromChat}
+          onOpenHistoricalDiff={handleOpenHistoricalDiff}
         />
         {reviews.length > 0 && activeSessionId && (
           <TaskCenterReviewContent
@@ -532,6 +541,7 @@ function ChatTabContent({
   showRequestChangesTooltip,
   onDismissTooltip,
   onOpenFile,
+  onOpenHistoricalDiff,
 }: {
   activeTaskId: string | null;
   isPassthroughMode: boolean;
@@ -540,6 +550,7 @@ function ChatTabContent({
   showRequestChangesTooltip: boolean;
   onDismissTooltip: () => void;
   onOpenFile: (filePath: string, repositoryName?: string) => void;
+  onOpenHistoricalDiff: (target: HistoricalTurnDiffTarget) => void;
 }) {
   const { t } = useTranslation();
   if (!activeTaskId) {
@@ -578,6 +589,7 @@ function ChatTabContent({
         sessionId={sessionId}
         taskId={taskId}
         onOpenFile={onOpenFile}
+        onOpenHistoricalDiff={onOpenHistoricalDiff}
         showRequestChangesTooltip={showRequestChangesTooltip}
         onRequestChangesTooltipDismiss={onDismissTooltip}
         onOpenFileAtLine={onOpenFile}

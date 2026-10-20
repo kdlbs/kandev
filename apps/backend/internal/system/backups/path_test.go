@@ -1,10 +1,12 @@
 package backups
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -26,9 +28,7 @@ func TestConfiguredDatabasePath_RestoreReplacesConfiguredFilename(t *testing.T) 
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("mkdir backup dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(backupDir, "manual-1.db"), []byte("restored"), 0o644); err != nil {
-		t.Fatalf("write snapshot: %v", err)
-	}
+	snapshotBytes := writeValidRestoreTestSnapshot(t, filepath.Join(backupDir, "manual-1.db"))
 
 	tracker := jobs.NewTracker(nil, newTestLogger(t))
 	svc := NewService(databasePath, nil, tracker, newTestLogger(t))
@@ -45,9 +45,10 @@ func TestConfiguredDatabasePath_RestoreReplacesConfiguredFilename(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read restored database: %v", err)
 	}
-	if string(got) != "restored" {
-		t.Fatalf("database bytes = %q, want restored", got)
+	if !bytes.Equal(got, snapshotBytes) {
+		t.Fatal("configured database does not contain the valid snapshot")
 	}
+	assertRestoredTestFileValue(t, databasePath, "hello")
 	if _, err := os.Stat(databasePath + ".new"); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("staged restore remains, stat error = %v", err)
 	}
@@ -84,9 +85,7 @@ func TestConfiguredDatabasePath_RestoreQuiescesPoolAndReplacesWALSidecars(t *tes
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("mkdir backup dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(backupDir, "manual-1.db"), []byte("restored"), 0o644); err != nil {
-		t.Fatalf("write snapshot: %v", err)
-	}
+	writeValidRestoreTestSnapshot(t, filepath.Join(backupDir, "manual-1.db"))
 
 	shutdownCalls := 0
 	tracker := jobs.NewTracker(nil, newTestLogger(t))
@@ -112,6 +111,7 @@ func TestConfiguredDatabasePath_RestoreQuiescesPoolAndReplacesWALSidecars(t *tes
 	if err := pool.Writer().Ping(); err == nil {
 		t.Error("database writer remains open after restore")
 	}
+	assertRestoredTestFileValue(t, databasePath, "hello")
 }
 
 func TestRestoreRejectsPostgresWithoutClosingPool(t *testing.T) {
@@ -207,9 +207,7 @@ func TestRestoreCheckpointBusyLeavesDatabaseAndSidecarsUntouched(t *testing.T) {
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("mkdir backup dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(backupDir, "manual-1.db"), []byte("restored"), 0o644); err != nil {
-		t.Fatalf("write snapshot: %v", err)
-	}
+	writeValidRestoreTestSnapshot(t, filepath.Join(backupDir, "manual-1.db"))
 
 	tracker := jobs.NewTracker(nil, newTestLogger(t))
 	svc := NewService(databasePath, pool, tracker, newTestLogger(t))
@@ -220,6 +218,10 @@ func TestRestoreCheckpointBusyLeavesDatabaseAndSidecarsUntouched(t *testing.T) {
 	job := waitForJob(t, tracker, jobID, jobs.StateFailed)
 	if job.State != jobs.StateFailed {
 		t.Fatalf("state = %s, want failed; message = %s", job.State, job.Message)
+	}
+
+	if !strings.Contains(job.Message, "checkpoint sqlite WAL: busy") {
+		t.Fatalf("expected checkpoint-busy failure, got %q", job.Message)
 	}
 
 	if got, err := os.ReadFile(walPath); err != nil {

@@ -369,6 +369,9 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if current.promptSettlementGeneration != 0 {
 		return 0, ErrPromptSettlementPending
 	}
+	if current.turnChangeCaptureGeneration != 0 {
+		return 0, ErrPromptSettlementPending
+	}
 	return beginExecutionPromptLocked(current), nil
 }
 

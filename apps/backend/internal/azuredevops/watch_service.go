@@ -57,6 +57,11 @@ func (s *Service) TriggerWorkItemWatch(ctx context.Context, workspaceID, id stri
 	if err != nil {
 		return nil, err
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
 	client, err := s.clientForWorkspace(ctx, workspaceID)
 	if err != nil {
 		_ = s.store.SetWorkItemWatchError(ctx, id, err.Error(), time.Now().UTC())
@@ -100,6 +105,11 @@ func (s *Service) TriggerPullRequestWatch(ctx context.Context, workspaceID, id s
 	watch, err := s.authorizedPullRequestWatch(ctx, workspaceID, id)
 	if err != nil {
 		return nil, err
+	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
 	}
 	client, err := s.clientForWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -149,7 +159,8 @@ func (s *Service) publishWorkItemWatchEvent(ctx context.Context, watch *WorkItem
 		return nil
 	}
 	event := &WorkItemWatchEvent{
-		WatchID: watch.ID, WatchGeneration: watch.Generation, WorkspaceID: watch.WorkspaceID,
+		CreatedByUserID: watch.CreatedByUserID,
+		WatchID:         watch.ID, WatchGeneration: watch.Generation, WorkspaceID: watch.WorkspaceID,
 		WorkflowID: watch.WorkflowID, WorkflowStepID: watch.WorkflowStepID,
 		RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch,
 		AgentProfileID: watch.AgentProfileID, ExecutorProfileID: watch.ExecutorProfileID,
@@ -169,7 +180,8 @@ func (s *Service) publishPullRequestWatchEvent(ctx context.Context, watch *PullR
 		return nil
 	}
 	event := &PullRequestWatchEvent{
-		WatchID: watch.ID, WatchGeneration: watch.Generation, WorkspaceID: watch.WorkspaceID,
+		CreatedByUserID: watch.CreatedByUserID,
+		WatchID:         watch.ID, WatchGeneration: watch.Generation, WorkspaceID: watch.WorkspaceID,
 		WorkflowID: watch.WorkflowID, WorkflowStepID: watch.WorkflowStepID,
 		RepositoryID: watch.RepositoryID, BaseBranch: watch.BaseBranch,
 		AgentProfileID: watch.AgentProfileID, ExecutorProfileID: watch.ExecutorProfileID,
@@ -210,6 +222,10 @@ func (s *Service) CreateWorkItemWatch(ctx context.Context, req *CreateWorkItemWa
 		PollIntervalSeconds: req.PollIntervalSeconds, CleanupPolicy: req.CleanupPolicy,
 		MaxInflightTasks: req.MaxInflightTasks,
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreateWorkItemWatch(ctx, watch); err != nil {
 		return nil, err
 	}
@@ -240,6 +256,10 @@ func (s *Service) UpdateWorkItemWatch(ctx context.Context, workspaceID, id strin
 	}
 	watch.RepositoryID, watch.BaseBranch, err = s.resolveWatchRepository(ctx, watch.WorkspaceID, watch.RepositoryID, watch.BaseBranch)
 	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.UpdateWorkItemWatch(ctx, watch); err != nil {
@@ -307,6 +327,10 @@ func (s *Service) CreatePullRequestWatch(ctx context.Context, req *CreatePullReq
 		PollIntervalSeconds: req.PollIntervalSeconds, CleanupPolicy: req.CleanupPolicy,
 		MaxInflightTasks: req.MaxInflightTasks,
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreatePullRequestWatch(ctx, watch); err != nil {
 		return nil, err
 	}
@@ -359,6 +383,10 @@ func (s *Service) UpdatePullRequestWatch(ctx context.Context, workspaceID, id st
 	}
 	watch.RepositoryID, watch.BaseBranch, err = s.resolveWatchRepository(ctx, watch.WorkspaceID, watch.RepositoryID, watch.BaseBranch)
 	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.UpdatePullRequestWatch(ctx, watch); err != nil {

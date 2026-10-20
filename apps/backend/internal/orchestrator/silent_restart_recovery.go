@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/startup"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +38,13 @@ func silentRestoreAttemptID(sessionID, incarnationID string, generation int64) s
 }
 
 func (s *Service) startSilentRestoreRecovery(parent context.Context) {
+	if parent == nil {
+		return
+	}
+	startup.AfterReady(parent, func() { s.startSilentRestoreRecoveryReady(parent) })
+}
+
+func (s *Service) startSilentRestoreRecoveryReady(parent context.Context) {
 	store, ok := s.repo.(taskrepo.SilentRestoreRepository)
 	if !ok || s.silentRestoreOwnerContext == nil || parent == nil {
 		return
@@ -81,7 +89,11 @@ func (s *Service) stopSilentRestoreRecovery() {
 	cancel := s.silentRestoreCancel
 	s.silentRestoreCancel = nil
 	s.silentRestoreWake = nil
+	queue := s.silentRestoreQueue
 	s.silentRestoreMu.Unlock()
+	if queue != nil {
+		queue.stop()
+	}
 	if cancel != nil {
 		cancel()
 		s.silentRestoreWorkers.Wait()
@@ -91,32 +103,40 @@ func (s *Service) stopSilentRestoreRecovery() {
 func (s *Service) resetSilentRestoreRecovery() {
 	s.silentRestoreMu.Lock()
 	s.silentRestoreStopped = false
+	s.silentRestoreQueue = nil
 	s.silentRestoreMu.Unlock()
 }
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
+	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
 		candidates, err := store.ListSilentRestoreCandidates(ctx, after, silentRestoreCandidateLimit)
 		if err != nil {
 			s.logger.Warn("could not list silent restart recovery candidates", zap.Error(err))
-			return
+			break
 		}
+		jobs := make([]*restartRestoreJob, 0, len(candidates))
 		for _, candidate := range candidates {
-			if ctx.Err() != nil {
-				return
-			}
-			opCtx, cancel := context.WithTimeout(ctx, silentRestoreOperationLimit)
-			err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
-			cancel()
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				s.logger.Debug("silent restart recovery candidate remains pending",
-					zap.String("session_id", candidate.SessionID), zap.Error(err))
-			}
+			jobs = append(jobs, queue.submit(candidate, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
+				err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					s.logger.Debug("silent restart recovery candidate remains pending", zap.String("session_id", candidate.SessionID), zap.Error(err))
+				}
+				return err
+			}))
 			after = candidate.SessionID
 		}
+		// Drain this bounded metadata page before retaining another backlog page.
+		for _, job := range jobs {
+			select {
+			case <-job.done:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if len(candidates) < silentRestoreCandidateLimit {
-			return
+			break
 		}
 	}
 }

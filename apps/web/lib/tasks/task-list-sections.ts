@@ -52,30 +52,10 @@ export function buildTaskSections(
     workflowStepPreviews?: TaskListStepPreviews;
   },
 ): TaskListSection[] {
-  const roots = buildTaskTree(tasks);
   if (groupBy.startsWith("facet:")) {
-    const grouped = new Map<string, { title: string; color?: string; tasks: Task[] }>();
-    for (const task of tasks) {
-      const values = facetValues[`${groupBy}:${task.id}`] ?? [];
-      const entries = values.length ? values : [{ value: "untagged", label: t("tasks:ungrouped") }];
-      for (const value of entries) {
-        const key = values.length ? facetValueSectionKey(value.value) : UNGROUPED_FACET_SECTION_KEY;
-        const section = grouped.get(key) ?? { title: value.label, color: value.color, tasks: [] };
-        section.tasks.push(task);
-        grouped.set(key, section);
-      }
-    }
-    return Array.from(grouped.entries())
-      .map(([key, section]) => ({
-        key,
-        title: section.title,
-        color: section.color,
-        nodes: buildTaskTree(section.tasks),
-      }))
-      .sort((a, b) =>
-        (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
-      );
+    return buildFacetSections(tasks, groupBy, facetValues);
   }
+  const roots = buildTaskTree(tasks);
   if (groupBy === "none") {
     return [{ key: "all", title: null, nodes: roots }];
   }
@@ -95,6 +75,45 @@ export function buildTaskSections(
   return Array.from(sections.values()).sort((a, b) =>
     (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
   );
+}
+
+function buildFacetSections(
+  tasks: Task[],
+  groupBy: string,
+  facetValues: Record<string, readonly TaskListFacetValue[]>,
+): TaskListSection[] {
+  const grouped = new Map<string, { title: string; color?: string; tasks: Task[] }>();
+  const unassigned: Task[] = [];
+  for (const task of tasks) {
+    const values = facetValues[`${groupBy}:${task.id}`] ?? [];
+    let assigned = false;
+    for (const value of values) {
+      if (!value.label) continue;
+      assigned = true;
+      const key = facetValueSectionKey(value.value);
+      const section = grouped.get(key) ?? { title: value.label, color: value.color, tasks: [] };
+      section.tasks.push(task);
+      grouped.set(key, section);
+    }
+    if (!assigned) unassigned.push(task);
+  }
+  const sections: TaskListSection[] = Array.from(grouped.entries()).map(([key, section]) => ({
+    key,
+    title: section.title,
+    color: section.color,
+    nodes: buildTaskTree(section.tasks),
+  }));
+  sections.sort((a, b) =>
+    (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
+  );
+  if (unassigned.length) {
+    sections.push({
+      key: UNGROUPED_FACET_SECTION_KEY,
+      title: t("sidebar:groupUnassigned"),
+      nodes: buildTaskTree(unassigned),
+    });
+  }
+  return sections;
 }
 
 function buildTaskTree(tasks: Task[]): TaskTreeNode[] {

@@ -40,6 +40,7 @@ func TestPeerMessageInitialLaunch_Delivery(t *testing.T) {
 		session,
 		"follow up during initial launch",
 		metadata,
+		false,
 	)
 
 	require.NoError(t, err)
@@ -509,6 +510,7 @@ func TestPeerMessageInitialLaunch_PreservesOlderFIFOEntry(t *testing.T) {
 
 	result, err := h.dispatchPreparedTaskMessage(
 		ctx, target.ID, session, "follow-up", map[string]interface{}{"sender_task_id": sender.ID},
+		false,
 	)
 
 	require.NoError(t, err)

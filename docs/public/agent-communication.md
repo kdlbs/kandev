@@ -54,7 +54,8 @@ Delivery behaviour depends on the target session's state at the moment of the ca
 |---|---|---|
 | Running or starting | Message is queued; delivered when the current turn ends | `"queued"` |
 | Running or starting, direct parent uses `delivery_mode="interrupt"` | Kandev queues the message, then tries to interrupt the current turn and deliver it immediately | `"sent"` if interrupted and delivered immediately; otherwise `"queued"` |
-| Idle (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
+| Waiting on a live clarification, default or queued delivery | Message waits behind the question and is delivered after its turn finishes or the question detaches | `"queued"` |
+| Idle with no live clarification (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
 | Created (agent not yet started) | Agent is started with this message as its first prompt | `"started"` |
 | Failed or cancelled | Error is returned | N/A |
 

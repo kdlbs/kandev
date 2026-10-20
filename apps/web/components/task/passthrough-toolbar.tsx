@@ -39,7 +39,9 @@ import { getShortcut, isUnboundShortcut } from "@/lib/keyboard/shortcut-override
 import { formatShortcut } from "@/lib/keyboard/utils";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { ReviewComment } from "@/lib/state/slices/comments";
-import { PassthroughTerminal } from "./passthrough-terminal";
+import { AgentTerminalInput } from "./mobile/mobile-agent-terminal";
+import { TaskChatPanel } from "./task-chat-panel";
+import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
 import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
@@ -116,6 +118,32 @@ export function PassthroughToolbar({
   sessionId: string | null | undefined;
   taskId: string | null;
 }) {
+  const ended = useAppStore((state) =>
+    isTerminalSessionState(sessionId ? state.taskSessions.items[sessionId]?.state : undefined),
+  );
+  const { openFile } = useFileEditors();
+  if (ended) {
+    return (
+      <TaskChatPanel
+        sessionId={sessionId ?? null}
+        taskId={taskId}
+        statusTaskId={taskId}
+        onOpenFile={openFile}
+        onOpenFileAtLine={openFile}
+        hideSessionsDropdown
+      />
+    );
+  }
+  return <ActivePassthroughToolbar sessionId={sessionId} taskId={taskId} />;
+}
+
+function ActivePassthroughToolbar({
+  sessionId,
+  taskId,
+}: {
+  sessionId: string | null | undefined;
+  taskId: string | null;
+}) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
   const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
@@ -176,7 +204,7 @@ export function PassthroughToolbar({
   return (
     <div className="flex h-full flex-col bg-card" data-testid="passthrough-toolbar">
       <div className="flex-1 min-h-0">
-        <PassthroughTerminal sessionId={sessionId} mode="agent" enableTouchScroll={!finePointer} />
+        <AgentTerminalInput sessionId={sessionId} mobile={isMobile} touch={!finePointer} />
       </div>
 
       {commentsOpen && pendingCount > 0 && (

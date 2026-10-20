@@ -277,10 +277,19 @@ func TestBootstrapRestoreKeepsProcessAliveUntilResultAndShutdown(t *testing.T) {
 	if err := os.MkdirAll(backupsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(databasePath, []byte("before"), 0o600); err != nil {
+	writer, err := sqlx.Open("sqlite3", databasePath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(backupsDir, "manual-restore.db"), []byte("after"), 0o600); err != nil {
+	t.Cleanup(func() { _ = writer.Close() })
+	if _, err := writer.Exec("CREATE TABLE restore_fixture (value TEXT); INSERT INTO restore_fixture VALUES ('saved')"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := persistence.CopySQLiteSnapshotContext(context.Background(), writer,
+		filepath.Join(backupsDir, "manual-restore.db")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
 

@@ -139,7 +139,10 @@ func TestSSHResumedAgentctlClientChecksExistingProcess(t *testing.T) {
 					MetadataKeySSHRemoteTaskDir:      "/remote/task",
 				},
 			}
-			client, reusingProcess := executor.newResumedAgentctlClient(context.Background(), port, req)
+			client, reusingProcess, probeErr := executor.newResumedAgentctlClient(context.Background(), port, req)
+			if probeErr != nil {
+				t.Fatalf("resume inspection: %v", probeErr)
+			}
 			if client == nil {
 				t.Fatal("expected agentctl client")
 			}

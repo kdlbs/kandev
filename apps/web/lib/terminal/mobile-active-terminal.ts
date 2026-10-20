@@ -8,14 +8,23 @@
  * reads from this registry and falls back to the default shell otherwise.
  */
 
-type Sender = (data: string) => void;
+type Sender = (data: string) => boolean | void;
 
 let activeSender: Sender | null = null;
+let activeSessionId: string | undefined;
 
-export function setActiveTerminalSender(sender: Sender | null): void {
+export function setActiveTerminalSender(sender: Sender | null, sessionId?: string): () => void {
   activeSender = sender;
+  activeSessionId = sessionId;
+  return () => {
+    if (activeSender === sender) {
+      activeSender = null;
+      activeSessionId = undefined;
+    }
+  };
 }
 
-export function getActiveTerminalSender(): Sender | null {
+export function getActiveTerminalSender(sessionId?: string): Sender | null {
+  if (sessionId && activeSessionId && sessionId !== activeSessionId) return null;
   return activeSender;
 }

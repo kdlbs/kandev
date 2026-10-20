@@ -454,10 +454,16 @@ func (c *CloudClient) AddComment(ctx context.Context, ticketKey, text string) (s
 	return response.ID, nil
 }
 
-// ListProjects returns up to 200 projects (the Jira max per page for this
-// endpoint). Fine for the settings dropdown; pagination can be added later if
-// it ever becomes a problem.
+// ListProjects lists Server/DC projects from the project array endpoint.
+// Cloud uses the project search endpoint and requests one page of 200 projects.
 func (c *CloudClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
+	if c.instanceType == InstanceTypeServer {
+		projects := make([]JiraProject, 0)
+		if err := c.do(ctx, http.MethodGet, c.apiBase+"/project", nil, &projects); err != nil {
+			return nil, err
+		}
+		return projects, nil
+	}
 	var body struct {
 		Values []struct {
 			ID   string `json:"id"`
@@ -465,10 +471,6 @@ func (c *CloudClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
 			Name string `json:"name"`
 		} `json:"values"`
 	}
-	// Server/DC exposes /project/search starting with Jira 8.0 (2019). For
-	// older instances the call returns 404, which surfaces as an API error the
-	// user can read. The legacy GET /project endpoint isn't paginated and we
-	// don't need to keep two code paths just for ancient deployments.
 	if err := c.do(ctx, http.MethodGet, c.apiBase+"/project/search?maxResults=200", nil, &body); err != nil {
 		return nil, err
 	}

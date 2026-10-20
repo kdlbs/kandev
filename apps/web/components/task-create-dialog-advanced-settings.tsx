@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { TaskCreateParentWorkspaceSetting } from "@/components/task-create-dialog-parent-workspace-setting";
 import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { AgentLogo } from "@/components/agent-logo";
@@ -16,8 +17,9 @@ import type {
 } from "@/components/task-create-dialog-workflow-agent-overrides";
 import { cn } from "@/lib/utils";
 import type { TaskPriority } from "@/lib/types/http";
+import type { TaskCreateParentWorkspaceSettingProps } from "@/components/task-create-dialog-parent-workspace-setting";
 
-type TaskCreateAdvancedSettingsProps = {
+type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   isCreateMode: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
@@ -229,7 +231,7 @@ function TaskCreateWorkflowAgentOverridesSection({
 
 type AdvancedSettingsContentProps = Omit<
   TaskCreateAdvancedSettingsProps,
-  "isCreateMode" | "isTaskStarted"
+  "isCreateMode" | "isTaskStarted" | keyof TaskCreateParentWorkspaceSettingProps
 >;
 
 function TaskCreateAdvancedSettingsContent({
@@ -324,6 +326,9 @@ export function TaskCreateAdvancedSettings({
   onBlockedByChange,
   priority,
   onPriorityChange,
+  initialWorkspaceLayout,
+  onInitialWorkspaceLayoutChange,
+  initialWorkspaceLayoutMode,
   dependenciesDisabled,
   workflowAgentOverrideRows = [],
   workflowAgentOverrideOptions = [],
@@ -378,6 +383,11 @@ export function TaskCreateAdvancedSettings({
           onWorkflowAgentOverrideChange={onWorkflowAgentOverrideChange}
           onResetWorkflowAgentOverrides={onResetWorkflowAgentOverrides}
           onRetryWorkflowAgentOverrides={onRetryWorkflowAgentOverrides}
+        />
+        <TaskCreateParentWorkspaceSetting
+          initialWorkspaceLayout={initialWorkspaceLayout}
+          onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}
+          initialWorkspaceLayoutMode={initialWorkspaceLayoutMode}
         />
       </CollapsibleContent>
     </Collapsible>

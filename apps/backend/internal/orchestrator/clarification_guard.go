@@ -55,6 +55,13 @@ func (s *Service) sessionHasLiveClarification(ctx context.Context, sessionID str
 	return false
 }
 
+// SessionHasLiveClarification reports whether a current-turn clarification
+// still owns the session's agent turn. Callers outside the queue use it to hold
+// a prompt behind the question instead of superseding it.
+func (s *Service) SessionHasLiveClarification(ctx context.Context, sessionID string) bool {
+	return s.sessionHasLiveClarification(ctx, sessionID)
+}
+
 // turnCompleteBlockedByUserInput reports and applies the workflow barrier for
 // durable user-input waits. A pending clarification is a platform pause, not a
 // step-completion signal, so all turn-complete transition entrypoints fail
