@@ -92,3 +92,28 @@ skipped on Windows. A sparse fixture was investigated and discarded because it
 also timed out. The focused checkpoint/change suite passed locally again (7.3s).
 No production timeout, capture budget, or UI behavior changed in this follow-up.
 Remote CI and merge remain pending.
+
+Further CI remediation: the mobile delayed-card reload case reproduced against
+GitHub's exact merge commit. Native restoration moved the viewport upward by
+88px while the delayed card grew by 88px; the follow predicate incorrectly
+released bottom ownership without reader input. A regression using the captured
+geometry failed before the bounded absolute-delta correction and passed after it.
+Existing explicit-position and reader-input guards remain covered. Four focused
+frontend suites passed (151 tests), and the exact mobile browser regression
+passed three repetitions after rebuilding the CI merge checkout. Eleven desktop
+browser cases passed without retries, including manual reading, disabled/enabled
+auto-scroll, cancellation, Quick Chat recovery, and delayed-card reload.
+
+The interrupted-prompt test fixture now uses the existing 5-second SQLite busy
+wait convention. A controlled concurrent writer reproduced the CI lock error
+before the change and passed afterward. This changes only test setup. Frontend
+lint, formatting, and typechecking passed. No public/spec contract changed:
+AC-TASKS-TURN-CHANGES-005.9 already requires delayed cards to follow while preserving
+manual reading. Temporary geometry tracing and retry overrides were removed.
+Fresh remote checks and merge remain pending after the follow-up push.
+
+Nine further mobile browser cases passed without retries, covering manual reading,
+auto-scroll transitions, cancellation, and Quick Chat recovery. These reused the
+unchanged rebuilt artifacts from the passing mobile reload repetitions. No new
+rendered composition was introduced; existing settings and empty-card PR captures
+remain applicable.
