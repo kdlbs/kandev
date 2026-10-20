@@ -3,7 +3,8 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
-import { dwell } from "../../helpers/causal-waits";
+import type { GitStatusData } from "../../../lib/types/git-events";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 
 const TARGET = "a-review-viewed.ts";
 const TRAILING = "z-review-viewed.ts";
@@ -76,6 +77,7 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const gateway = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -84,6 +86,16 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
     );
+    const filesPublished = gateway.waitForEvent("session.git.event", {
+      where: (payload) => {
+        const status = payload.status as GitStatusData | undefined;
+        return (
+          payload.session_id === task.session_id &&
+          payload.type === "status_update" &&
+          Boolean(status?.files?.[TARGET] && status.files[TRAILING])
+        );
+      },
+    });
     git.createFile(
       TARGET,
       Array.from({ length: 100 }, (_, index) => `export const line${index} = ${index};\n`).join(""),
@@ -91,19 +103,18 @@ export function reviewViewedTogglingScenario(mobile: boolean) {
     git.createFile(TRAILING, "export const trailing = true;\n".repeat(80));
     git.stageFile(TARGET);
     git.stageFile(TRAILING);
+    await filesPublished;
     if (mobile) {
       await testPage
         .getByRole("navigation")
         .getByRole("button", { name: /Changes$/ })
         .tap();
       const changes = testPage.getByTestId("mobile-changes-panel");
-      await expect(changes.getByTestId(`file-row-${TARGET}`)).toBeVisible({ timeout: 20_000 });
+      await expect(changes.getByTestId(`file-row-${TARGET}`)).toBeVisible();
       await changes.getByRole("button", { name: "Review", exact: true }).tap();
     } else {
       await session.clickTab("Changes");
-      await expect(session.changes.getByTestId(`file-row-${TARGET}`)).toBeVisible({
-        timeout: 20_000,
-      });
+      await expect(session.changes.getByTestId(`file-row-${TARGET}`)).toBeVisible();
       await session.openChangesDiff();
       await testPage.getByRole("button", { name: "Expand review" }).click();
     }

@@ -116,7 +116,7 @@ changes. Geometry movement without a user reading pass must remain suppressed.
 ## Results
 
 Implemented. Five regressions failed before the fix; the final focused run passed
-28 tests. Desktop and Pixel 5 browser scenarios passed, including disabled
+29 tests. Desktop and Pixel 5 browser scenarios passed, including disabled
 auto-marking and real touch scrolling. ESLint, typecheck (8 GiB heap), public
 documentation checks and specification checks passed. Fresh desktop/phone
 captures match UI-01/UI-02. Full command results are in [the plan](plan.md#verification-results).

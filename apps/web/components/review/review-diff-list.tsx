@@ -261,26 +261,30 @@ function useAutoMarkOnScroll({
     if (!sentinel || !root) return;
     let active = true;
     let previousAbove: boolean | null = null;
+    let previousOffset: number | null = null;
     let previousScrollTop = root.scrollTop;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!active) return;
-        for (const entry of entries) {
-          const above =
-            !entry.isIntersecting &&
-            entry.boundingClientRect.top < root.getBoundingClientRect().top;
-          const crossed = previousAbove === false && above && root.scrollTop > previousScrollTop;
-          // Geometry keeps advancing while reviewed so clearing a checkbox cannot replay a pass.
-          previousAbove = above;
-          previousScrollTop = root.scrollTop;
-          if (crossed) markIfEligible();
-        }
-      },
-      { threshold: 0, root },
-    );
+    const updatePosition = (allowMark: boolean) => {
+      if (!active) return;
+      const offset = sentinel.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      const above = offset < 0;
+      const scrollDelta = root.scrollTop - previousScrollTop;
+      // A scroll pass moves the marker by the scroll delta; layout shifts change that offset.
+      const movedWithScroll =
+        previousOffset !== null && Math.abs(previousOffset - offset - scrollDelta) < 1;
+      const crossed = previousAbove === false && above && scrollDelta > 0 && movedWithScroll;
+      previousAbove = above;
+      previousOffset = offset;
+      previousScrollTop = root.scrollTop;
+      if (allowMark && crossed) markIfEligible();
+    };
+    const handleScroll = () => updatePosition(true);
+    // Layout observations refresh the baseline without certifying a reading pass.
+    const observer = new IntersectionObserver(() => updatePosition(false), { threshold: 0, root });
     observer.observe(sentinel);
+    root.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       active = false;
+      root.removeEventListener("scroll", handleScroll);
       observer.disconnect();
     };
   }, [autoMarkOnScroll, fileKey, scrollContainer]);

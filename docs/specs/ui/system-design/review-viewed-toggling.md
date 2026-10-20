@@ -49,11 +49,15 @@ permanent manual veto or a timing debounce.
 
 Use the existing root and start sentinel, preserving the shipped marking
 threshold. `useEffectEvent` supplies current eligibility and the handler without
-observer reconnection. In addition to a geometry transition, require root
-`scrollTop` to have increased since the previous observation; layout-only
-movement at an unchanged position cannot certify a pass. Preserve
-`useReviewDiffScrollInteraction` and `useReviewScrollAnchor` input/navigation
-suppression. No interaction-hook change is needed.
+observer reconnection. A passive root scroll listener reads the marker and root
+geometry together with current `scrollTop`. Only that listener can certify a
+crossing. The marker displacement must agree with the root scroll delta within
+one CSS pixel of rounding; layout changes cannot borrow earlier input.
+Intersection observations refresh the current geometry baseline without marking.
+This avoids comparing an older observer snapshot against a later touch-scroll
+position. Remove the listener and disconnect the observer together on cleanup.
+Preserve `useReviewDiffScrollInteraction` and `useReviewScrollAnchor` input and
+navigation suppression. No interaction-hook change is needed.
 
 ## Shared state, identity, and persistence
 

@@ -99,17 +99,24 @@ function installIntersectionObserver() {
 
 function firePosition(record: ObserverRecord, above: boolean, scrollTop: number) {
   const root = record.options?.root as HTMLElement;
+  const changedScroll = root.scrollTop !== scrollTop;
+  const top = above ? Math.min(50, 150 - scrollTop) : 150;
+  Object.defineProperty(record.targets[0], "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ top }),
+  });
   root.scrollTop = scrollTop;
   Object.defineProperty(root, "getBoundingClientRect", {
     configurable: true,
     value: () => ({ top: 100 }),
   });
+  if (changedScroll) fireEvent.scroll(root);
   act(() => {
     record.callback(
       [
         {
           isIntersecting: !above,
-          boundingClientRect: { top: above ? 50 : 150 },
+          boundingClientRect: { top },
           target: record.targets[0],
         } as IntersectionObserverEntry,
       ],
@@ -306,8 +313,11 @@ describe("ReviewDiffList manual clearing", () => {
     fireEvent.wheel(view.root);
     firePosition(activeAutoMarkObserver(), true, 200);
     expect(view.onToggleReviewed).not.toHaveBeenCalled();
+    view.update({ reviewedFiles: new Set() });
+    firePosition(activeAutoMarkObserver(), true, 200);
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
     const latest = vi.fn();
-    view.update({ reviewedFiles: new Set(), onToggleReviewed: latest });
+    view.update({ onToggleReviewed: latest });
     firePosition(activeAutoMarkObserver(), true, 200);
     expect(latest).not.toHaveBeenCalled();
     firePosition(activeAutoMarkObserver(), false, 0);
@@ -345,6 +355,29 @@ describe("ReviewDiffList manual clearing", () => {
     view.unmount();
     firePosition(observer, true, 200);
     expect(view.onToggleReviewed).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReviewDiffList layout movement", () => {
+  // @covers AC-UI-REVIEW-VIEWED-001.3
+  it("does not attribute a later layout crossing to an unobserved earlier scroll", () => {
+    const view = renderAutoMarkList();
+    const observer = activeAutoMarkObserver();
+    firePosition(observer, false, 0);
+    fireEvent.wheel(view.root);
+    // The marker stays visible, so scrolling need not deliver an observer entry.
+    view.root.scrollTop = 20;
+    Object.defineProperty(observer.targets[0], "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ top: 130 }),
+    });
+    fireEvent.scroll(view.root);
+    // Collapsing preceding content now moves the marker above the root.
+    firePosition(observer, true, 20);
+    expect(view.onToggleReviewed).not.toHaveBeenCalled();
+    firePosition(observer, false, 0);
+    firePosition(observer, true, 200);
+    expect(view.onToggleReviewed).toHaveBeenCalledExactlyOnceWith("a.ts", true);
   });
 });
 

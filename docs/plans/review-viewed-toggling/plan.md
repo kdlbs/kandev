@@ -89,7 +89,7 @@ Compare the rendered structure with UI-01/UI-02 and capture both views.
 ## Verification results
 
 - `(cd apps && pnpm install --frozen-lockfile)`: passed.
-- `(cd apps/web && pnpm exec vitest run components/review/review-diff-list-auto-mark.test.tsx hooks/use-session-file-reviews.test.tsx)`: passed, 28 tests in two files. Before the correction, five new regressions failed.
+- `(cd apps/web && pnpm exec vitest run components/review/review-diff-list-auto-mark.test.tsx hooks/use-session-file-reviews.test.tsx)`: passed, 29 tests in two files. Before the correction, five new regressions failed.
 - `(cd apps/web && pnpm exec eslint components/review/review-diff-list.tsx components/review/review-diff-list-auto-mark.test.tsx)`: passed without warnings.
 - `(cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)`: passed. The first attempt exhausted Node's default 4 GiB heap.
 - `(cd apps/web && CAPTURE_PR_ASSETS=true pnpm e2e:run --host --no-build --project chromium tests/review/review-viewed-toggling.spec.ts)`: passed, one test. An earlier managed run built the backend, fixture plugin and fresh production web assets; subsequent runs reused those unchanged assets. Initial browser attempts exposed an incorrect test-helper argument, which was corrected before the final passing run.
@@ -111,3 +111,18 @@ Observer initial delivery, callback churn, stale eligibility, layout-only
 movement, programmatic navigation, and source changes must not simulate a
 reading pass. Preserve the current input suppression behavior. Node/pnpm are supplied by the local mise installation; typechecking requires
 a larger heap than Node's default for this repository.
+
+## PR review remediation
+
+A new regression proved that a scroll without an observer callback could be
+mistaken for a later layout crossing. Crossing detection now requires the
+marker displacement to agree with the root scroll delta on actual root scroll
+events. Intersection observations only update the baseline; this also avoids
+comparing delayed observer snapshots against newer touch-scroll positions. The new regression
+failed before the correction and passed afterward; all 29 focused tests pass.
+Review tests now independently exercise unchecking and handler replacement.
+The browser flow waits for the matching session Git-status notification
+containing both fixture files before asserting row visibility with the default
+timeout. Typecheck, ESLint and both final browser scenarios passed again. Fresh
+desktop and phone captures were inspected after the production correction;
+the live PR screenshot section is refreshed during publication.
