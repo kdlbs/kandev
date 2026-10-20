@@ -24,8 +24,9 @@ type rateSample struct {
 // fresh one is created on every BeginStep, so nothing here survives past the
 // next activation of the same step.
 type stepActivation struct {
-	spec      StepSpec
-	startedAt time.Time
+	spec          StepSpec
+	startedAt     time.Time
+	activationSeq uint64
 
 	measure          Measure
 	promotionBlocked bool
@@ -49,6 +50,9 @@ type stepActivation struct {
 func (r *Reporter) BeginStep(id StepID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.phase == Ready {
+		return
+	}
 	spec, ok := lookupStep(id)
 	if !ok {
 		r.warnUnregisteredLocked(id)
@@ -57,7 +61,7 @@ func (r *Reporter) BeginStep(id StepID) {
 	if r.active != nil && r.active.spec.ID == id {
 		return
 	}
-	r.endActiveLocked()
+	r.endActiveLocked(false)
 
 	a := &stepActivation{spec: spec, startedAt: time.Now(), measure: MeasureOpaque, warned: map[string]bool{}}
 	if spec.Measure == MeasureCounting {
@@ -65,6 +69,7 @@ func (r *Reporter) BeginStep(id StepID) {
 	}
 	r.active = a
 	r.seq++
+	a.activationSeq = r.seq
 	if spec.Phase != r.phase {
 		r.warnActivationLocked(a, "phase_mismatch")
 	}
@@ -81,17 +86,22 @@ func (r *Reporter) EndStep(id StepID) {
 	if r.active == nil || r.active.spec.ID != id {
 		return
 	}
-	r.endActiveLocked()
+	r.endActiveLocked(true)
 	r.seq++
 }
 
-func (r *Reporter) endActiveLocked() {
+func (r *Reporter) endActiveLocked(completed bool) {
 	a := r.active
 	if a == nil {
 		return
 	}
+	elapsed := time.Since(a.startedAt).Milliseconds()
+	r.completedSteps = append(r.completedSteps, CompletedStepSnapshot{ID: a.spec.ID, LabelKey: a.spec.LabelKey, ActivationSeq: a.activationSeq, Phase: a.spec.Phase, ElapsedMS: elapsed, Completed: completed})
+	if len(r.completedSteps) > 32 {
+		r.completedSteps = append([]CompletedStepSnapshot(nil), r.completedSteps[len(r.completedSteps)-32:]...)
+	}
 	if r.log != nil {
-		r.log.Info("Startup step completed",
+		r.log.Info("Startup step completed", zap.Int64("elapsed_ms", elapsed), zap.Bool("completed", completed),
 			zap.String("step", string(a.spec.ID)), zap.String("measure", string(a.measure)),
 			zap.Int64("done", a.done), zap.Int64("total", a.total))
 		if a.measure == MeasureCounted && a.hasTotal && a.done < a.total {

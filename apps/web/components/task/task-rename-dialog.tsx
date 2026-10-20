@@ -1,11 +1,12 @@
 "use client";
 
 import type React from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
+import { useExternalFocusSelection } from "@/hooks/use-external-focus-selection";
 import { useTranslation } from "react-i18next";
 
 type TaskRenameDialogProps = {
@@ -27,6 +28,11 @@ function TaskRenameForm({
   const { t } = useTranslation();
   const [value, setValue] = useState(currentTitle);
   const { inputRef, clampChange } = useTaskTitleSelectionRestore(value);
+  useExternalFocusSelection(inputRef);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, [inputRef]);
 
   const trimmed = value.trim();
   const canSubmit = trimmed.length > 0 && trimmed !== currentTitle;
@@ -47,7 +53,6 @@ function TaskRenameForm({
         autoFocus
         value={value}
         onChange={(e) => setValue(clampChange(e))}
-        onFocus={(e) => e.target.select()}
         placeholder={t("task:taskTitle")}
       />
       <DialogFooter>

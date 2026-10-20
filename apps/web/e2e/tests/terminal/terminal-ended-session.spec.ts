@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForRestorableSessionWorkspace } from "../../helpers/session";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
@@ -103,6 +104,8 @@ test.describe("terminal on an ended session", () => {
             .poll(state, { timeout: 30_000, message: "Waiting for the cancel to land" })
             .toMatch(new RegExp(TERMINAL_STATES.join("|")));
         }
+
+        if (restore) await waitForRestorableSessionWorkspace(apiClient, task.id, sessionId!);
 
         const endedState = await state();
         const statusReceived = restore ? null : await preventWorkspaceRestore(testPage, sessionId!);

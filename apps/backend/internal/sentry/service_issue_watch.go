@@ -61,6 +61,10 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if req.Enabled != nil {
 		w.Enabled = *req.Enabled
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -168,6 +172,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		w.RepositoryID = repositoryID
 		w.BaseBranch = baseBranch
 	}
+
+	if _, err := s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
 	}
@@ -231,6 +239,12 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // second reserver loses the INSERT OR IGNORE race in the orchestrator and
 // bails. Same pattern as the Linear / Jira watchers.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, []*SentryIssue, error) {
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, w.CreatedByUserID, w.ExecutorProfileID, w.WorkspaceID)
+	if admissionErr != nil {
+		return "", nil, admissionErr
+	}
+
 	defer s.stampWatchLastPolled(w.ID)
 	if len(w.Filter.ProjectSlugs) == 0 {
 		// A watch with no configured project is invalid, not "browse the whole
@@ -412,6 +426,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 		return
 	}
 	evt := bus.NewEvent(events.SentryNewIssue, "sentry", &NewSentryIssueEvent{
+		CreatedByUserID:   w.CreatedByUserID,
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
 		SentryInstanceID:  instanceID,

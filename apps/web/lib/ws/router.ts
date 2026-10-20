@@ -34,6 +34,7 @@ import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerReviewHandlers } from "@/lib/ws/handlers/review";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
+import { registerTurnChangesHandlers } from "@/lib/ws/handlers/turn-changes";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
 import { registerPromptsHandlers } from "@/lib/ws/handlers/prompts";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
@@ -91,6 +92,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
     ...registerTurnsHandlers(store, messages.scheduler),
+    ...registerTurnChangesHandlers(store),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),

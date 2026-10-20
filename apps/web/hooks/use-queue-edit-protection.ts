@@ -1,3 +1,4 @@
+import { queueMutationErrorKey } from "@/lib/queue-mutation-error";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast/sonner";
@@ -123,7 +124,7 @@ export function useQueueEditProtection({ sessionId, entries }: QueueEditProtecti
         return editToken;
       } catch (err) {
         console.error("Failed to acquire queued message edit lease:", err);
-        toast.error(t("chat:queueEditSaveFailed"));
+        toast.error(t(queueMutationErrorKey(err, "chat:queueEditSaveFailed")));
         return false;
       } finally {
         if (acquiringEditRef.current === acquisition) acquiringEditRef.current = null;
@@ -197,7 +198,7 @@ export function useQueueEditProtection({ sessionId, entries }: QueueEditProtecti
         }
         console.error("Queued message edit lease renewal failed:", err);
         await completeEdit(activeEdit.entryId);
-        toast.error(t("chat:queueEditSaveFailed"));
+        toast.error(t(queueMutationErrorKey(err, "chat:queueEditSaveFailed")));
       }
     };
     const timer = window.setInterval(() => void renew(), EDIT_RENEW_INTERVAL_MS);

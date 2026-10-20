@@ -320,6 +320,7 @@ func (s *Server) registerConfigExecutorTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_executor_profile_kandev",
+			mcp.WithString("owner_user_id", mcp.Description("Optional owner user ID; use an empty string to share the profile")),
 			mcp.WithDescription("Create a new executor profile."),
 			mcp.WithString("executor_id", mcp.Required(), mcp.Description("The executor ID")),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Profile name")),
@@ -332,6 +333,7 @@ func (s *Server) registerConfigExecutorTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_executor_profile_kandev",
+			mcp.WithString("owner_user_id", mcp.Description("Optional owner user ID; use an empty string to share the profile")),
 			mcp.WithDescription("Update an existing executor profile."),
 			mcp.WithString("profile_id", mcp.Required(), mcp.Description("The executor profile ID")),
 			mcp.WithString("name", mcp.Description("New profile name")),
@@ -855,6 +857,9 @@ func (s *Server) createExecutorProfileHandler() server.ToolHandlerFunc {
 			payload["cleanup_script"] = cleanupScript
 		}
 		args := req.GetArguments()
+		if owner, present := args["owner_user_id"]; present {
+			payload["owner_user_id"] = owner
+		}
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}
@@ -882,6 +887,9 @@ func (s *Server) updateExecutorProfileHandler() server.ToolHandlerFunc {
 			payload["cleanup_script"] = cleanupScript
 		}
 		args := req.GetArguments()
+		if owner, present := args["owner_user_id"]; present {
+			payload["owner_user_id"] = owner
+		}
 		if args["config"] != nil {
 			payload["config"] = args["config"]
 		}

@@ -4,8 +4,15 @@ import { IconBrandAzure, IconExternalLink } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
-import { useAzureDevOpsTaskPullRequests } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
+import {
+  useEmbeddedTaskWorkspace,
+  useTaskWorkspaceId,
+} from "@/components/task/task-workspace-context";
+import {
+  useAzureDevOpsTaskPullRequests,
+  useEmbeddedAzureDevOpsTaskPullRequests,
+} from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
+import type { AzureDevOpsTaskPullRequest } from "@/lib/types/azure-devops";
 import { getAzureDevOpsPullRequestPresentation } from "./azure-devops-status";
 
 const TONE_CLASS = {
@@ -17,9 +24,33 @@ const TONE_CLASS = {
 };
 
 export function AzureDevOpsTaskPullRequestChip({ taskId }: { taskId: string | null }) {
-  const { t } = useTranslation();
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskId);
+  const embedded = useEmbeddedTaskWorkspace();
+  if (embedded)
+    return embedded.taskId === taskId ? (
+      <EmbeddedPullRequestChip workspaceId={embedded.workspaceId} taskId={embedded.taskId} />
+    ) : null;
+  return <WorkspacePullRequestChip workspaceId={workspaceId} taskId={taskId} />;
+}
+
+function EmbeddedPullRequestChip({ workspaceId, taskId }: { workspaceId: string; taskId: string }) {
+  const pullRequests = useEmbeddedAzureDevOpsTaskPullRequests(workspaceId, taskId);
+  return <PullRequestChip pullRequests={pullRequests} />;
+}
+
+function WorkspacePullRequestChip({
+  workspaceId,
+  taskId,
+}: {
+  workspaceId: string | null;
+  taskId: string | null;
+}) {
   const pullRequests = useAzureDevOpsTaskPullRequests(workspaceId, taskId);
+  return <PullRequestChip pullRequests={pullRequests} />;
+}
+
+function PullRequestChip({ pullRequests }: { pullRequests: AzureDevOpsTaskPullRequest[] }) {
+  const { t } = useTranslation();
   const first = pullRequests[0];
   if (!first) return null;
   const presentation = getAzureDevOpsPullRequestPresentation(first);

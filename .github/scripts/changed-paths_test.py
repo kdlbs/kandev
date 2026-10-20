@@ -41,7 +41,15 @@ ALWAYS_RUN_WORKFLOWS = (
 
 GATED_WORKFLOWS = {
     "backend-tests.yml": (
-        ["apps/backend/internal/orchestrator/orchestrator.go"],
+        [
+            "apps/backend/internal/orchestrator/orchestrator.go",
+            "scripts/dev-isolated.ps1",
+            "scripts/isolated-instance.psm1",
+            "scripts/kandev-kill.ps1",
+            "scripts/tests/isolated-launch.Tests.ps1",
+            "scripts/tests/isolated-launch-fixture.cs",
+            ".gitattributes",
+        ],
         ["apps/web/components/App.tsx", "apps/backend/AGENTS.md"],
     ),
     "frontend-tests.yml": (

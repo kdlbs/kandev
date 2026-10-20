@@ -1,3 +1,4 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { type Page } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs";
@@ -6,6 +7,8 @@ import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
+
+test.use({ channel: "chromium" });
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
@@ -107,6 +110,11 @@ test.describe("File tree inline rename", () => {
     // doing it explicitly is robust against focus-timing edge cases).
     await input.press("ControlOrMeta+A");
     await input.fill("renamed.ts");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("renamed.ts");
+      expect(fs.existsSync(path.join(repoDir, "renamed.ts"))).toBe(false);
+    });
     await input.press("Enter");
 
     // Old node disappears from the tree, new node appears.

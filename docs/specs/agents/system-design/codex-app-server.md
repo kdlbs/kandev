@@ -187,6 +187,26 @@ Hydrate inherited messages with original provider identity and a history-only ma
 Initialize usage at the fork baseline so copied history produces no ledger events.
 Use existing session concurrency and workspace ownership rules when the user later starts either session.
 
+### Browser request identity
+
+`ForkConversationAction` in `apps/web/components/task/chat/messages/message-actions.tsx`
+uses `generateUUID()` from `apps/web/lib/uuid.ts` for the client request identity.
+Browser availability of `crypto.randomUUID` is not an additional native-fork
+capability gate. The existing helper covers its absence on the documented
+[single-user encrypted-VPN HTTP access path](../../../public/mobile-remote-access.md).
+This identity is a non-security deduplication key, not an authentication token.
+
+Retain the component's request ID across failed requests and explicit retries;
+clear it only after accepted success and destination selection. Keep the
+`session.fork` envelope (`task_id`, `session_id`, `turn_id`, `request_id`) and
+backend/adapter idempotency unchanged. The real desktop dialog and touch drawer
+share this handler, including pending state, localized failure feedback, and
+selection through `setActiveSession(response.task_id, response.session_id)`.
+
+The [browser-capability repair plan](../../../plans/native-fork-browser-capability/plan.md)
+maps this constraint to AC-AGENTS-CODEX-NATIVE-004.1 and
+AC-AGENTS-CODEX-NATIVE-006.1. It does not alter native opt-in or provider support.
+
 ## Inspection CLI and skill
 
 Proposed binary: `apps/backend/bin/codexdbg`, built by `make -C apps/backend build-codexdbg`.

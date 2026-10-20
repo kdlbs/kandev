@@ -63,6 +63,7 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 		return err
 	}
 	watch.Enabled = true
+	watch.CreatedByUserID = executorCreatorUserID(ctx)
 	now := time.Now().UTC()
 	if watch.CreatedAt.IsZero() {
 		watch.CreatedAt = now
@@ -70,11 +71,11 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 	watch.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO azure_devops_work_item_watches
-		(id, workspace_id, workflow_id, workflow_step_id, project_id, wiql,
+		(created_by_user_id, id, workspace_id, workflow_id, workflow_step_id, project_id, wiql,
 		repository_id, base_branch, agent_profile_id, executor_profile_id, prompt,
 		enabled, poll_interval_seconds, cleanup_policy, max_inflight_tasks,
 		generation, deleting, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), watch.CreatedByUserID,
 		watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID,
 		watch.ProjectID, watch.WIQL, watch.RepositoryID, watch.BaseBranch,
 		watch.AgentProfileID, watch.ExecutorProfileID, watch.Prompt, watch.Enabled,
@@ -85,7 +86,7 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 
 func (s *Store) GetWorkItemWatch(ctx context.Context, id string) (*WorkItemWatch, error) {
 	var watch WorkItemWatch
-	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
@@ -102,7 +103,7 @@ func (s *Store) GetWorkItemWatch(ctx context.Context, id string) (*WorkItemWatch
 
 func (s *Store) ListWorkItemWatches(ctx context.Context, workspaceID string) ([]*WorkItemWatch, error) {
 	var watches []*WorkItemWatch
-	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
@@ -114,7 +115,7 @@ func (s *Store) ListWorkItemWatches(ctx context.Context, workspaceID string) ([]
 
 func (s *Store) ListEnabledWorkItemWatches(ctx context.Context) ([]*WorkItemWatch, error) {
 	var watches []*WorkItemWatch
-	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
@@ -157,6 +158,7 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 		return err
 	}
 	watch.Enabled = true
+	watch.CreatedByUserID = executorCreatorUserID(ctx)
 	now := time.Now().UTC()
 	if watch.CreatedAt.IsZero() {
 		watch.CreatedAt = now
@@ -164,12 +166,12 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 	watch.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO azure_devops_pull_request_watches
-		(id, workspace_id, workflow_id, workflow_step_id, project_id,
+		(created_by_user_id, id, workspace_id, workflow_id, workflow_step_id, project_id,
 		azure_repository_id, status, creator_id, reviewer_id, repository_id,
 		base_branch, agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
 		deleting, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), watch.CreatedByUserID,
 		watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID,
 		watch.ProjectID, watch.AzureRepositoryID, watch.Status, watch.CreatorID,
 		watch.ReviewerID, watch.RepositoryID, watch.BaseBranch, watch.AgentProfileID,
@@ -181,7 +183,7 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 
 func (s *Store) GetPullRequestWatch(ctx context.Context, id string) (*PullRequestWatch, error) {
 	var watch PullRequestWatch
-	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,
@@ -199,7 +201,7 @@ func (s *Store) GetPullRequestWatch(ctx context.Context, id string) (*PullReques
 
 func (s *Store) ListPullRequestWatches(ctx context.Context, workspaceID string) ([]*PullRequestWatch, error) {
 	var watches []*PullRequestWatch
-	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,
@@ -212,7 +214,7 @@ func (s *Store) ListPullRequestWatches(ctx context.Context, workspaceID string) 
 
 func (s *Store) ListEnabledPullRequestWatches(ctx context.Context) ([]*PullRequestWatch, error) {
 	var watches []*PullRequestWatch
-	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT created_by_user_id, id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,

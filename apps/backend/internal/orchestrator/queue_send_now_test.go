@@ -274,7 +274,7 @@ func TestExecuteSendNowClaimRejectsRecreatedSessionBeforePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim old prompt: %v", err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, claim.Dispatch.ID, nil)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, claim.Dispatch.ID, nil)
 
 	if _, err := repo.DB().ExecContext(
 		ctx,

@@ -36,10 +36,13 @@ func ptyDimension(v, fallback int) uint16 {
 
 // interactiveProcess represents a running interactive PTY process.
 type interactiveProcess struct {
-	info   InteractiveProcessInfo
-	cmd    *exec.Cmd
-	ptmx   ptyexec.PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
-	buffer *ringBuffer
+	outputMu          sync.Mutex
+	outputSubscribers map[string]chan []byte
+	outputDone        chan struct{}
+	info              InteractiveProcessInfo
+	cmd               *exec.Cmd
+	ptmx              ptyexec.PtyHandle // PTY handle (Unix: creack/pty, Windows: ConPTY)
+	buffer            *ringBuffer
 
 	// Turn detection
 	promptPattern *regexp.Regexp
@@ -103,6 +106,9 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 	}
 
 	id := uuid.New().String()
+	if req.ProcessID != "" {
+		id = req.ProcessID
+	}
 	now := time.Now().UTC()
 
 	bufferMaxBytes := req.BufferMaxBytes
@@ -135,6 +141,8 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 	// Create process struct WITHOUT spawning PTY yet
 	// PTY will be created on first resize when we know the exact dimensions
 	proc := &interactiveProcess{
+		outputSubscribers: make(map[string]chan []byte),
+		outputDone:        make(chan struct{}),
 		info: InteractiveProcessInfo{
 			ID:         id,
 			SessionID:  req.SessionID,
@@ -299,7 +307,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 		zap.String("terminal_id", req.TerminalID),
 		zap.String("label", req.Label),
 		zap.Bool("is_user_shell", proc.isUserShell),
-		zap.Strings("command", proc.startCmd),
+		zap.Strings("command", proc.startReq.commandForLog()),
 		zap.String("working_dir", proc.startDir),
 		zap.Int("parent_pid", os.Getpid()),
 		zap.Int("cols", cols),
@@ -368,9 +376,12 @@ func (r *InteractiveRunner) WriteStdin(processID string, data string) error {
 		return fmt.Errorf("process stdin not available")
 	}
 
-	_, err := ptyInstance.Write([]byte(data))
+	n, err := ptyInstance.Write([]byte(data))
 	if err != nil {
 		return fmt.Errorf("failed to write to stdin: %w", err)
+	}
+	if n != len(data) {
+		return fmt.Errorf("incomplete PTY input write")
 	}
 
 	// Reset idle timer when user sends input
@@ -393,7 +404,7 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		zap.Bool("is_user_shell", proc.isUserShell),
 		zap.String("scope_id", proc.startReq.ScopeID),
 		zap.String("terminal_id", proc.startReq.TerminalID),
-		zap.Strings("command", proc.info.Command),
+		zap.Strings("command", proc.startReq.commandForLog()),
 		zap.String("working_dir", proc.info.WorkingDir),
 		zap.Int("os_pid", pid),
 		zap.Bool("started", proc.started))
@@ -416,6 +427,9 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 	proc.idleTimerMu.Unlock()
 
 	// Close PTY (this will cause the process to receive SIGHUP)
+	if proc.startReq.OwnProcessGroup && pid > 0 {
+		_ = terminateProcessGroup(pid)
+	}
 	proc.mu.Lock()
 	if proc.ptmx != nil {
 		_ = proc.ptmx.Close()
@@ -456,6 +470,16 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		}
 	}
 
+	if proc.startReq.OwnProcessGroup && pid > 0 {
+		if err := killProcessGroup(pid); err != nil && !isProcessGroupMissing(err) {
+			return err
+		}
+		select {
+		case <-proc.outputDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return nil
 }
 
@@ -576,6 +600,9 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	defer proc.firstIdleOnce.Do(func() { close(proc.firstIdleCh) })
 
 	exitCode, signalName, err := waitPtyProcess(proc.cmd)
+	if proc.startReq.OwnProcessGroup && proc.osPID() > 0 {
+		_ = killProcessGroup(proc.osPID())
+	}
 	status := types.ProcessStatusExited
 	if err != nil {
 		status = types.ProcessStatusFailed
@@ -587,7 +614,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 		zap.String("scope_id", proc.startReq.ScopeID),
 		zap.String("terminal_id", proc.startReq.TerminalID),
 		zap.Bool("is_user_shell", proc.isUserShell),
-		zap.Strings("command", proc.info.Command),
+		zap.Strings("command", proc.startReq.commandForLog()),
 		zap.String("working_dir", proc.info.WorkingDir),
 		zap.Int("os_pid", proc.osPID()),
 		zap.String("status", string(status)),
@@ -596,36 +623,7 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 		zap.Error(err),
 	)
 
-	// Log buffer contents if process exited with error (helps debug startup failures)
-	// Bump to Error for early-exit failures (process died within 5s of start) — those
-	// are almost always real problems (bad CLI flag, missing binary, auth failure)
-	// rather than the expected user-closes-terminal case. Keep Debug for late exits.
-	if status == types.ProcessStatusFailed && proc.buffer != nil {
-		chunks := proc.buffer.snapshot()
-		if len(chunks) > 0 {
-			var combinedOutput string
-			for _, chunk := range chunks {
-				combinedOutput += chunk.Data
-			}
-			// Truncate for logging (max 2000 chars)
-			if len(combinedOutput) > 2000 {
-				combinedOutput = combinedOutput[:2000] + "...(truncated)"
-			}
-			lifetime := time.Since(proc.info.StartedAt)
-			fields := []zap.Field{
-				zap.String("process_id", proc.info.ID),
-				zap.String("session_id", proc.info.SessionID),
-				zap.Int("exit_code", exitCode),
-				zap.Duration("lifetime", lifetime),
-				zap.String("output", combinedOutput),
-			}
-			if lifetime < 5*time.Second {
-				r.logger.Error("interactive process exited early — likely startup failure", fields...)
-			} else {
-				r.logger.Debug("interactive process output before exit", fields...)
-			}
-		}
-	}
+	r.logInteractiveExitOutput(status, proc, exitCode)
 
 	// Stop idle timer
 	proc.idleTimerMu.Lock()
@@ -677,6 +675,33 @@ func (r *InteractiveRunner) publishOutput(proc *interactiveProcess, chunk Proces
 		r.workspaceTracker.notifyWorkspaceStreamProcessOutput(output)
 	} else if r.outputCallback != nil {
 		r.outputCallback(output)
+	}
+}
+
+func (r *InteractiveRunner) logInteractiveExitOutput(status types.ProcessStatus, proc *interactiveProcess, exitCode int) {
+	if status != types.ProcessStatusFailed || proc.buffer == nil || proc.startReq.OwnProcessGroup {
+		return
+	}
+	chunks := proc.buffer.snapshot()
+	if len(chunks) == 0 {
+		return
+	}
+	var combinedOutput string
+	for _, chunk := range chunks {
+		combinedOutput += chunk.Data
+	}
+	if len(combinedOutput) > 2000 {
+		combinedOutput = combinedOutput[:2000] + "...(truncated)"
+	}
+	lifetime := time.Since(proc.info.StartedAt)
+	fields := []zap.Field{
+		zap.String("process_id", proc.info.ID), zap.String("session_id", proc.info.SessionID),
+		zap.Int("exit_code", exitCode), zap.Duration("lifetime", lifetime), zap.String("output", combinedOutput),
+	}
+	if lifetime < 5*time.Second {
+		r.logger.Error("interactive process exited early — likely startup failure", fields...)
+	} else {
+		r.logger.Debug("interactive process output before exit", fields...)
 	}
 }
 

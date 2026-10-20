@@ -98,6 +98,11 @@ type Repository interface {
 	ListTaskBlockers(ctx context.Context, taskID string) ([]*models.TaskBlocker, error)
 	ListTaskParticipants(ctx context.Context, taskID, role string) ([]sqlite.Participant, error)
 	ListAllTaskParticipants(ctx context.Context, taskID string) ([]sqlite.Participant, error)
+	// ListTaskParticipantsAtCurrentStep is the step-scoped seat read
+	// AC-OFFICE-SESSION-TERM-002.3 requires for session-termination
+	// capacity — distinct from the workflow-scoped ListAllTaskParticipants
+	// used everywhere else (see sqlite.Repository's doc comments on both).
+	ListTaskParticipantsAtCurrentStep(ctx context.Context, taskID string) ([]sqlite.Participant, error)
 	AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (sqlite.ParticipantWriteResult, error)
 	RemoveTaskParticipant(ctx context.Context, taskID, agentID, role string) error
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)

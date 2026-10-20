@@ -197,7 +197,7 @@ func matchDeliveryRecordInstance(instances []*agentctl.InstanceInfo, request Del
 }
 
 func validateDeliveryRecordDescriptor(descriptor journal.RecoveryDescriptor, request DeliveryRecordEvidenceRequest) error {
-	if !descriptor.Durable || descriptor.Version != journal.CurrentVersion {
+	if !descriptor.Durable || !journal.SupportsDeliveryVersion(descriptor.Version) {
 		return ErrDeliveryRecoveryBlocked
 	}
 	if descriptor.SessionID != request.SessionID || descriptor.IncarnationID != request.IncarnationID ||

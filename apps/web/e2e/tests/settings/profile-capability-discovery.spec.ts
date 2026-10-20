@@ -40,6 +40,7 @@ test.describe("Profile capability discovery", () => {
       );
       await expect(testPage.getByTestId("profile-runtime-info")).toHaveCount(0);
 
+      await expect(selector).toHaveText("Mock Fast");
       const selectedBefore = await selector.textContent();
       await testPage.getByTestId("env-var-row-0").locator("input").nth(1).fill("runtime-draft");
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
@@ -113,6 +114,7 @@ test.describe("Profile capability discovery", () => {
         "ready",
         { timeout: 20_000 },
       );
+      await expect(selector).toHaveText("Mock Fast");
       const selectedBefore = await selector.textContent();
       await selector.click();
       await expect(

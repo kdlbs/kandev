@@ -218,6 +218,10 @@ func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[stri
 		_ = os.Remove(stagedPath)
 		return nil, err
 	}
+	if _, err := verifySnapshot(ctx, stagedPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("verify staged restore: %w", err)
+	}
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
 	}
@@ -376,9 +380,14 @@ func (s *Service) writeStagedRestore(snapshotPath, stagedPath string) error {
 	if err != nil {
 		return fmt.Errorf("create staged db: %w", err)
 	}
-	if _, err := io.Copy(dst, src); err != nil {
+	written, err := io.Copy(dst, src)
+	if err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("copy snapshot: %w", err)
+	}
+	if written == 0 {
+		_ = dst.Close()
+		return errors.New("restore snapshot is empty")
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()

@@ -40,7 +40,7 @@ func assertSidebarPresentationUpgradeAndReopen(t *testing.T, conn *sqlx.DB) {
 	if err = json.Unmarshal([]byte(initial), &values); err != nil {
 		t.Fatal(err)
 	}
-	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "simple" {
+	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "simple" || values["show_turn_changed_files"] != true {
 		t.Fatalf("new user insert: %s", initial)
 	}
 	if _, err = conn.Exec(`UPDATE users SET settings = '{"unknown_key":17,"sidebar_fast_actions_enabled":false}', settings_revision=8`); err != nil {
@@ -58,7 +58,7 @@ func assertSidebarPresentationUpgradeAndReopen(t *testing.T, conn *sqlx.DB) {
 	if err = json.Unmarshal([]byte(raw), &values); err != nil {
 		t.Fatal(err)
 	}
-	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "compact" || values["unknown_key"] != float64(17) || revision != 9 {
+	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "compact" || values["show_turn_changed_files"] != true || values["unknown_key"] != float64(17) || revision != 10 {
 		t.Fatalf("backfill: %s revision %d", raw, revision)
 	}
 	if _, err = newSQLiteRepositoryWithDB(conn, conn); err != nil {
@@ -81,7 +81,7 @@ func assertSidebarPresentationUpgradeAndReopen(t *testing.T, conn *sqlx.DB) {
 	}
 	values = nil
 	_ = json.Unmarshal([]byte(raw), &values)
-	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "simple" {
+	if values["sidebar_fast_actions_enabled"] != false || values["sidebar_new_task_style"] != "simple" || values["show_turn_changed_files"] != true {
 		t.Fatalf("new account after reopen: %s", raw)
 	}
 }

@@ -20,6 +20,9 @@ import (
 
 // InteractiveStartRequest contains parameters for starting an interactive passthrough process.
 type InteractiveStartRequest struct {
+	InitialPromptChunks  int               `json:"-"`
+	ProcessID            string            `json:"-"`
+	OwnProcessGroup      bool              `json:"-"`
 	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
 	Command              []string          `json:"command"`                          // Required: Command and args to execute
 	LogCommand           []string          `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset

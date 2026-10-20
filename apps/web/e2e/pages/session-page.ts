@@ -37,7 +37,7 @@ export class SessionPage {
     this.changes = page.getByTestId("changes-panel");
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
-    this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.passthroughTerminal = page.locator('[data-testid="passthrough-terminal"]:visible');
     this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
     this.newSessionDialogPage = new NewSessionDialogPage(page);
   }

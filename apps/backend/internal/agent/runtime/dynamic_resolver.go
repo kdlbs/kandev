@@ -202,9 +202,10 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 		return ProfileExecution{}, err
 	}
 	decision, err := r.engine.ApplyFailureContext(ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, failure)
-	if err != nil {
+	if err != nil && !errors.Is(err, dynamic.ErrRecoveryPending) {
 		return ProfileExecution{}, err
 	}
+	routeErr := err
 	concrete, err := r.profiles.GetAgentProfile(ctx, decision.ExecutionProfileID)
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve execution profile %s: %w", decision.ExecutionProfileID, err)
@@ -218,7 +219,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 		AgentName:      concreteAgentName,
 		RouteSessionID: sessionID, Generation: decision.Generation,
 		ProfileVersion: decision.ProfileVersion, Profile: concrete, Decision: decision,
-	}, nil
+	}, routeErr
 }
 
 // HoldAccountBlock keeps the concrete execution profile whose provider account

@@ -46,6 +46,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   responsiveMock.isFinePointer = true;
 });
 
@@ -210,7 +211,7 @@ describe("QuickChatTabItem rename actions", () => {
 
     const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Saved once" } });
-    fireEvent.blur(input);
+    fireEvent.blur(input, { relatedTarget: document.body });
 
     expect(onRename).toHaveBeenCalledTimes(1);
     expect(onRename).toHaveBeenCalledWith("Saved once");
@@ -279,4 +280,18 @@ describe("QuickChatTabItem activity", () => {
 
     expect(queryByRole("status", { name: "Loading" })).toBeNull();
   });
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.1
+it("keeps a Quick Chat rename open when the document loses focus", () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  const props = makeProps();
+  const { getByRole, getByLabelText } = render(<QuickChatTabItem {...props} />);
+  startEditing(getByRole("button", { name: "Original" }));
+  const input = getByLabelText(RENAME_LABEL) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "Unfinished chat" } });
+  fireEvent.blur(input);
+  expect(props.onRename).not.toHaveBeenCalled();
+  expect(input.isConnected).toBe(true);
+  expect(input.value).toBe("Unfinished chat");
 });

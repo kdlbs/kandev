@@ -72,6 +72,10 @@ func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		PollIntervalSeconds: req.PollIntervalSeconds,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
+
+	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
 	}
@@ -191,6 +195,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		}
 		iw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
+
+	if _, err := s.executorActorContext(ctx, iw.CreatedByUserID, iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.UpdateIssueWatch(ctx, iw)
 }
 
@@ -237,6 +245,12 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
 	if err != nil {
 		return nil, err
@@ -430,6 +444,7 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 		return
 	}
 	event := bus.NewEvent(events.GitHubNewIssue, "github", &NewIssueEvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		IssueWatchID:      watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,

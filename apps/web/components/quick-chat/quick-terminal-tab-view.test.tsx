@@ -109,6 +109,27 @@ describe("QuickTerminalTabView", () => {
     expect(deleteQuickTerminalTab).not.toHaveBeenCalled();
   });
 
+  it("continues a local start when a concurrent resync marked its descriptor unavailable", async () => {
+    const onDescriptorReady = vi.fn();
+    createQuickTerminalTab.mockResolvedValueOnce({
+      ...tab,
+      status: "exited",
+      error: "terminal session unavailable",
+    });
+
+    const view = render(
+      <QuickTerminalTabView
+        tab={tab}
+        onStateChange={vi.fn()}
+        onDescriptorReady={onDescriptorReady}
+      />,
+    );
+
+    await waitFor(() => expect(onDescriptorReady).toHaveBeenCalledWith({ ...tab }));
+    expect(screen.getByTestId("pty-view-probe")).toBeTruthy();
+    view.unmount();
+  });
+
   it("renders accessible lifecycle status for the selected terminal", () => {
     const { rerender } = render(<QuickTerminalTabView tab={tab} onStateChange={vi.fn()} />);
 

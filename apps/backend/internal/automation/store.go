@@ -33,6 +33,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("automation schema init: %w", err)
 	}
+	if err := s.migrateExecutorCreators(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -347,7 +350,7 @@ const migrateRunDedupUniqueIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_aut
 // closes once. Projecting the mode itself would hand every future caller a
 // mode to branch on, and the whole point of withdrawing it is that no firing
 // path has one. See docs/specs/office/requirements/automations-settings.md § Migration.
-const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
+const automationColumns = `created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 	agent_profile_id, executor_profile_id, task_mode, managed_owner_installation_id,
 	managed_destination_installation_id, managed_destination_conversation_id,
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
@@ -594,6 +597,7 @@ func (s *Store) backfillRepositoryModes() error {
 
 // CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
+	a.CreatedByUserID = executorCreatorUserID(ctx)
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}
@@ -655,7 +659,7 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// never stop being true. Empty means "no mode was ever chosen", which is
 	// the honest record for a row created after the choice was withdrawn.
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
+		INSERT INTO automations (created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
 			task_mode, managed_owner_installation_id, managed_destination_installation_id,
 			managed_destination_conversation_id, managed_destination_plugin_id,
@@ -663,7 +667,7 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 			repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
 			retry_policy, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,

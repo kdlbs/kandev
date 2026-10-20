@@ -82,8 +82,10 @@ trusted package and version checks continue to reject arbitrary commands.
 `ProbeResponse` can carry a stable managed-runtime npm-resolution failure code.
 Agentctl sets it only when bounded stderr contains npm `ETARGET` and a missing
 top-level package specification that exactly matches the trusted probe command.
-Raw stderr, npm log paths, cache paths, and registry URLs remain in agentctl
-diagnostic logs and do not cross the probe API.
+The raw bounded stderr drives classification and does not cross the probe API.
+Diagnostic logs retain a sanitized tail: likely credentials, private URL
+details, local paths, and any truncated first line are removed according to
+[Probe Failure Diagnostics](probe-failure-diagnostics.md).
 
 The host utility manager accepts this code only for an agent that implements
 `ManagedNPMRuntimeAgent`. It derives the package specification and

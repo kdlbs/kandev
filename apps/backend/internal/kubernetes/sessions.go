@@ -51,7 +51,7 @@ func (h *Handler) sessionImpact(ctx context.Context, executorID string) (Session
 	if h.repo == nil {
 		return SessionImpact{}, errSessionStatusNotWired
 	}
-	executor, err := h.repo.GetExecutor(ctx, executorID)
+	executor, err := h.executorForRead(ctx, executorID)
 	if err != nil {
 		return SessionImpact{}, err
 	}
@@ -135,7 +135,7 @@ func (h *Handler) sessionStatusSource(
 	if h.repo == nil || h.access == nil || h.clients == nil {
 		return agentkubernetes.ExecutorConfig{}, nil, nil, errSessionStatusNotWired
 	}
-	executor, err := h.repo.GetExecutor(ctx, executorID)
+	executor, err := h.executorForRead(ctx, executorID)
 	if err != nil {
 		return agentkubernetes.ExecutorConfig{}, nil, nil, err
 	}
@@ -181,6 +181,11 @@ func (h *Handler) sessionRow(
 	}
 	if session == nil || session.ID != run.SessionID || session.TaskID != run.TaskID {
 		return SessionRow{}, false, nil
+	}
+	if checker, ok := h.access.(executorConfigurationAccess); ok {
+		if err := checker.AuthorizeExecutorConfiguration(ctx, session.ExecutorID, session.ExecutorProfileID); err != nil {
+			return SessionRow{}, false, nil
+		}
 	}
 	if err := h.access.AuthorizeTaskAccess(ctx, run.TaskID); err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {

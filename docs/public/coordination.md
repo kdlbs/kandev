@@ -151,6 +151,8 @@ The default delivery mode is queued. Each session accepts 10 queued messages by 
 
 In the task workbench, expand the queue chip to manage pending messages. The compact header places the **Auto-run** and **Auto-merge** pills beside the queue count; these control queued-message delivery and folding, not pull-request Auto-merge. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
 
+If another operation holds the session queue, queue changes wait up to 30 seconds to acquire it, respecting an earlier request deadline. This includes **Remove**, **Clear all**, **Merge with above**, reordering, editing, **Auto-run**, and **Auto-merge**. When the internal wait expires, the controls show retryable unavailable feedback and preserve pending messages. Retry after the competing operation finishes; this limit does not cancel work that already acquired the queue. Desktop and phone use the same retry behavior.
+
 Use the queue controls according to the outcome you want:
 
 - **Auto-run** is ON by default. ON runs eligible messages one at a time in FIFO order. OFF lets the current response finish, then holds every later message. The per-session setting survives an empty queue, reload, and backend restart. Turning it ON starts the head immediately when the session is promptable; clarification, workflow transitions, cancellation, and other lifecycle guards can defer delivery without changing the displayed ON state.
@@ -238,15 +240,22 @@ unavailable instead of using a same-named local or `origin` branch.
 <details>
 <summary>Adding sources details</summary>
 
-For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
+For an idle, non-archived task with a prepared workspace, use **Files → + → Add repositories or folders**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears for Worktree and Local/Local PC tasks. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
-Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
+Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. They use the current workspace root. Local/Local PC links host repositories and folders into that root without switching the current checkout; Docker, Kubernetes, SSH, and Sprites clone repositories inside the executor workspace and require a cloneable origin for local Git rows. Folder sources are live host links and work only on **Worktree** and **Local/Local PC**. They are unavailable to remote executors, where **Upload folder** remains a separate copy flow when supported. Remote Docker remains unimplemented.
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
-Read the consequence summary in the dialog or drawer before submitting. It describes whether the
-current executor will restart the agent or update the live remote workspace. **Cancel** or closing
-the surface sends no attachment request and leaves the workspace unchanged.
+Choose sources first, then review their locations. Additions within the current workspace show a brief
+continuity note. A prominent restart warning appears only when workspace-root expansion is selected.
+**Cancel** or closing the surface sends no attachment request and leaves the workspace unchanged.
+
+On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose
+`kandev/` to group new repositories below the current root, or choose the current root to place each
+one beside the existing repository files. The preview shows the exact relative paths. These nested
+choices keep the agent CWD and workspace processes unchanged, and Kandev protects the outer Git
+worktree from staging the nested checkouts. Parent-rooted tasks add repository siblings directly.
+Workspace-root expansion stays disabled until explicit idle session recovery is available.
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
@@ -313,6 +322,8 @@ A human-led flow uses the same primitives but keeps **Do nothing** transitions a
 Regular Kanban does not currently expose a dependency editor or blocker filter. Stored blocker data can appear through related-task MCP, but it is not a regular-board planning surface. For supported ordering, use parent/child structure, **When Child Tasks Complete**, explicit messages, workflow gates, and pull-request review.
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
+
+The [Office task guide](office-tasks.md) covers its projects, assignments, deeper task trees, dependencies, and review/approval flow. Start with [Office setup](office-getting-started.md) to enable that experimental surface.
 
 </details>
 

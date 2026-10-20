@@ -4,6 +4,13 @@
 **Date:** 2026-10-13
 **Area:** backend
 
+## Policy replacement
+
+[Immediate archive removal](2026-10-17-immediate-archive-worktree-removal.md)
+replaces this decision's dirty-checkout retention policy. Lifecycle ownership,
+borrower protection, and filesystem identity boundaries remain applicable. The text below records the original
+choice and its rationale.
+
 ## Context
 
 Archive removes managed Git worktrees but only attempts to remove their parent
