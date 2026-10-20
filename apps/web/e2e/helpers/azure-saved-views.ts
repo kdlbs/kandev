@@ -148,3 +148,52 @@ export async function proveSaveAfterFailedDelete(context: Context) {
     await page.unroute("**/api/v1/azure-devops/views?*");
   }
 }
+
+// @covers AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.17
+export async function proveSaveAfterFailedLoad(context: Context) {
+  const { page, mobile } = context;
+  const release = deferred();
+  const started = deferred();
+  let reads = 0;
+  const writes: AzureDevOpsSavedView[][] = [];
+  await page.route("**/api/v1/azure-devops/views?*", async (route) => {
+    if (route.request().method() === "PUT") {
+      writes.push(route.request().postDataJSON().views);
+      return route.continue();
+    }
+    if (route.request().method() !== "GET" || reads++ > 0) return route.continue();
+    started.resolve();
+    await release.promise;
+    await route.fulfill({ status: 500, json: { error: "Saved views could not be loaded" } });
+  });
+  try {
+    const url = await seedViews(context);
+    await started.promise;
+    await activate(page.getByTestId("azure-devops-work-items-mode"), mobile);
+    await activate(page.getByTestId("azure-devops-saved-views-menu"), mobile);
+    const save = page.getByRole("menuitem", { name: "Save current query", exact: true });
+    await expect(save).toBeEnabled();
+    await activate(save, mobile);
+    const dialog = page.getByRole("dialog", { name: "Save Azure DevOps view" });
+    await dialog.getByLabel("Name", { exact: true }).fill("New queue");
+    await activate(dialog.getByRole("button", { name: "Save", exact: true }), mobile);
+    await expect(dialog.getByRole("button", { name: "Saving...", exact: true })).toBeDisabled();
+    expect(writes).toEqual([]);
+    release.resolve();
+    await expect(dialog.getByRole("alert")).toHaveText("Could not save this view. Try again.");
+    expect(writes).toEqual([]);
+    const original = (await (await page.request.get(url)).json()).views as AzureDevOpsSavedView[];
+    expect(original.map((view) => view.label)).toEqual(["One", "Two"]);
+    await activate(dialog.getByRole("button", { name: "Save", exact: true }), mobile);
+    await expect(dialog).toBeHidden();
+    expect(reads).toBe(2);
+    expect(writes.map((views) => views.map((view) => view.label))).toEqual([
+      ["One", "Two", "New queue"],
+    ]);
+    const persisted = (await (await page.request.get(url)).json()).views as AzureDevOpsSavedView[];
+    expect(persisted.map((view) => view.label)).toEqual(["One", "Two", "New queue"]);
+  } finally {
+    release.resolve();
+    await page.unroute("**/api/v1/azure-devops/views?*");
+  }
+}

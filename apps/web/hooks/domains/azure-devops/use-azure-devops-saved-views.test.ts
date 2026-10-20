@@ -364,23 +364,99 @@ describe("saved-view page lifetime", () => {
     expect(setAzureDevOpsSavedViews).toHaveBeenCalledWith(WORKSPACE_ID, []);
     expect(nextPage.result.current.views).toEqual([other]);
   });
+});
 
-  it("continues an admitted save after initial loading fails", async () => {
+describe("failed saved-view baselines", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it.each(["save", "delete"])(
+    "rejects %s after a failed initial read and reloads the baseline on retry",
+    async (action) => {
+      const read = deferred<{ views: AzureDevOpsSavedView[] }>();
+      const retryRead = deferred<{ views: AzureDevOpsSavedView[] }>();
+      let persisted = [other];
+      vi.mocked(getAzureDevOpsSavedViews)
+        .mockReturnValueOnce(read.promise)
+        .mockReturnValueOnce(retryRead.promise);
+      vi.mocked(setAzureDevOpsSavedViews).mockImplementation(async (_workspace, next) => {
+        persisted = next;
+        return { views: next };
+      });
+      const { result } = renderHook(() => useAzureDevOpsSavedViews(WORKSPACE_ID));
+      const submit = () =>
+        action === "save"
+          ? result.current.replace((current) => [...current, view])
+          : result.current.remove(other.id);
+      let failed!: Promise<unknown>;
+      act(() => {
+        failed = submit().catch((error: unknown) => error);
+      });
+      const error = new Error("load failed");
+      await act(async () => {
+        read.reject(error);
+        expect(await failed).toBe(error);
+      });
+      expect(setAzureDevOpsSavedViews).not.toHaveBeenCalled();
+      expect(persisted).toEqual([other]);
+      expect(result.current.views).toEqual([]);
+      expect(result.current.loading).toBe(false);
+      let retry!: Promise<void>;
+      act(() => {
+        retry = submit();
+      });
+      expect(getAzureDevOpsSavedViews).toHaveBeenCalledTimes(2);
+      expect(setAzureDevOpsSavedViews).not.toHaveBeenCalled();
+      await act(async () => {
+        retryRead.resolve({ views: [other] });
+        await retry;
+      });
+      const expected = action === "save" ? [other, view] : [];
+      expect(setAzureDevOpsSavedViews).toHaveBeenCalledWith(WORKSPACE_ID, expected);
+      expect(persisted).toEqual(expected);
+      expect(result.current.views).toEqual(expected);
+    },
+  );
+
+  it("rejects all actions admitted against a failed read even when a retry starts between settlements", async () => {
     const read = deferred<{ views: AzureDevOpsSavedView[] }>();
-    vi.mocked(getAzureDevOpsSavedViews).mockReturnValue(read.promise);
+    const retryRead = deferred<{ views: AzureDevOpsSavedView[] }>();
+    vi.mocked(getAzureDevOpsSavedViews)
+      .mockReturnValueOnce(read.promise)
+      .mockReturnValueOnce(retryRead.promise);
     vi.mocked(setAzureDevOpsSavedViews).mockImplementation(async (_workspace, next) => ({
       views: next,
     }));
     const { result } = renderHook(() => useAzureDevOpsSavedViews(WORKSPACE_ID));
-    let saved!: Promise<void>;
+    const retryView = { ...view, id: "retry" };
+    let first!: Promise<unknown>;
+    let second!: Promise<unknown>;
+    let retry!: Promise<void>;
     act(() => {
-      saved = result.current.replace((current) => [...current, view]);
+      first = result.current
+        .replace((current) => [...current, view])
+        .catch((error: unknown) => {
+          retry = result.current.replace((current) => [...current, retryView]);
+          return error;
+        });
+      second = result.current.remove(other.id).catch((error: unknown) => error);
     });
+    const error = new Error("initial load failed");
     await act(async () => {
-      read.reject(new Error("load failed"));
-      await saved;
+      read.reject(error);
+      expect(await first).toBe(error);
+      expect(await second).toBe(error);
     });
-    expect(result.current.views).toEqual([view]);
-    expect(result.current.loading).toBe(false);
+    expect(setAzureDevOpsSavedViews).not.toHaveBeenCalled();
+    expect(getAzureDevOpsSavedViews).toHaveBeenCalledTimes(2);
+    expect(result.current.views).toEqual([retryView]);
+    await act(async () => {
+      retryRead.resolve({ views: [other] });
+      await retry;
+    });
+    expect(setAzureDevOpsSavedViews).toHaveBeenCalledExactlyOnceWith(WORKSPACE_ID, [
+      other,
+      retryView,
+    ]);
+    expect(result.current.views).toEqual([other, retryView]);
   });
 });

@@ -74,7 +74,7 @@ GOMAXPROCS=2 GOFLAGS=-p=2 ../../scripts/run-quiet e2e --summary -- pnpm e2e:run 
 Public-doc impact: check Azure integration guidance. Preserve its how-to focus;
 add only user-visible save/delete error and retry behavior if needed.
 
-## Results
+## Initial results (historical)
 
 RED: existing controls passed (5), new ordering/read tests failed (7). Overlap
 sent two writes while the first was pending; same-tick deletes restored one
@@ -86,7 +86,7 @@ Additional browser RED against the built original page consumer:
   `[One, Two, New queue]`, received `[Two, New queue]`. This proves the page's
   snapshot append carried a failed deletion into a later successful write.
 
-GREEN after the final production edit:
+Historical GREEN before review remediation:
 - Focused Vitest: 19 passed, including every first/second success/failure
   combination for saves and deletes, normalized responses, same-tick deletes,
   pending GET publication while PUT is deferred, retry, initial read failure,
@@ -113,8 +113,9 @@ GREEN after the final production edit:
 Publication preflight: added the existing PR documentation gate's structured
 plan/work-order frontmatter. Ran the trusted base's `validateCoverage` evaluator
 against all eleven changed paths and the linked requirement/design documents:
-`status=covered`, `ok=true`, no errors. Product source and test behavior remain
-at the parent-validated implementation.
+`status=covered`, `ok=true`, no errors. At that metadata-only publication, product source and test behavior remained
+at the parent-validated implementation; review remediation below supersedes
+that historical source state.
 
 Public docs updated: Azure integration how-to in `docs/public/integrations.md`
 now describes saved-query ordering, error feedback, and retry. Internal
@@ -145,3 +146,43 @@ The phone exemplar is the shipped Azure saved-view confirmation in
 `mobile-azure-devops.spec.ts`, using shared phone menus/confirmation drawers.
 Copy is illustrative English backed by the existing localization key. Browser
 proof covers UI-01 and AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18.
+
+## Review remediation
+
+The first published head completed CI with 64 passed, 25 skipped, 1 neutral,
+and no failed or pending checks. Review found that a failed initial GET did
+not establish a confirmed baseline, yet a queued PUT could use the fallback
+empty list and overwrite existing server views.
+
+RED: three deterministic cases failed because saves/deletes resolved after a
+failed GET instead of rejecting. The corrected cases cover save/delete retry
+against the recovered baseline and rejection of every operation bound to the
+failed read even when a new retry begins between queue settlements.
+
+The hook now owns mutable queue state in a ref, retains each admitted read's
+rejection, and starts a shared fresh read when a later action retries. Failed
+baseline reads produce no PUT and discard the affected optimistic operations.
+The desktop and phone browser flows additionally admit a save while GET is
+held, reject GET, assert localized save feedback and unchanged backend data,
+then retry successfully while retaining existing queries.
+
+Post-remediation results (same exact commands as the work order):
+- Focused Vitest: 21 passed after the final source edit and test grouping.
+- Scoped ESLint passed without warnings. Typecheck with the 6 GB Node heap,
+  i18n check, and the i18n ratchet passed.
+- Desktop production build: three passed (10.3s),
+  `/tmp/kandev-run.e2e.HmVe9ctP.log`.
+- Phone: three permanent flows plus one disposable screenshot capture passed
+  together (18.0s), `/tmp/kandev-run.e2e.krR5zCxL.log`, same product build.
+- The new browser case failed against the prior build because the dialog
+  closed rather than reporting the rejected read; historical RED log:
+  `/tmp/kandev-run.e2e.hKH4Rali.log`.
+- Spec catalog and full spec lint passed. Public-doc validator tests: 63
+  passed; 54 published pages validated. PR documentation coverage is rechecked
+  against the final changed paths before publication.
+
+The PR body is reconciled with 21 hook cases and three permanent browser flows
+per viewport. Existing rendered primitives and copy remain unchanged;
+publication captures are refreshed from the rebuilt product. No new API or
+backend contract is added. Current-head remote verification and merge are
+tracked in [PR #4639](https://github.com/kdlbs/kandev/pull/4639).

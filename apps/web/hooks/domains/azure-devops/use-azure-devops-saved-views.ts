@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getAzureDevOpsSavedViews,
   setAzureDevOpsSavedViews,
@@ -14,20 +14,43 @@ function applyUpdate(current: Views, update: Update): Views {
   return typeof update === "function" ? update(current) : update;
 }
 
+function createScope(workspaceId?: string) {
+  return {
+    workspaceId,
+    confirmed: [] as Views,
+    pending: [] as Update[],
+    read: undefined as Promise<void> | undefined,
+    readFailed: false,
+    tail: Promise.resolve(),
+    active: false,
+  };
+}
+
+function ensureRead(scope: ReturnType<typeof createScope>): Promise<void> {
+  if (!scope.read || scope.readFailed) {
+    scope.readFailed = false;
+    scope.read = scope.workspaceId
+      ? getAzureDevOpsSavedViews(scope.workspaceId, { cache: "no-store" })
+          .then((response) => {
+            scope.confirmed = response.views ?? [];
+          })
+          .catch((error: unknown) => {
+            scope.readFailed = true;
+            throw error;
+          })
+      : Promise.resolve();
+  }
+  return scope.read;
+}
+
 export function useAzureDevOpsSavedViews(workspaceId?: string) {
   const [views, setViews] = useState<Views>([]);
   const [loading, setLoading] = useState(true);
-  const scope = useMemo(
-    () => ({
-      workspaceId,
-      confirmed: [] as Views,
-      pending: [] as Update[],
-      read: undefined as Promise<void> | undefined,
-      tail: Promise.resolve(),
-      active: false,
-    }),
-    [workspaceId],
-  );
+  const scopeRef = useRef<ReturnType<typeof createScope> | null>(null);
+  if (!scopeRef.current || scopeRef.current.workspaceId !== workspaceId) {
+    scopeRef.current = createScope(workspaceId);
+  }
+  const scope = scopeRef.current;
   const publish = useCallback(() => {
     if (scope.active) setViews(scope.pending.reduce(applyUpdate, scope.confirmed));
   }, [scope]);
@@ -35,20 +58,12 @@ export function useAzureDevOpsSavedViews(workspaceId?: string) {
   useEffect(() => {
     scope.active = true;
     setLoading(true);
-    // The initial read supplies the baseline beneath any admitted updates.
-    scope.read ??= scope.workspaceId
-      ? getAzureDevOpsSavedViews(scope.workspaceId, { cache: "no-store" })
-          .then((response) => {
-            scope.confirmed = response.views ?? [];
-          })
-          .catch(() => {
-            scope.confirmed = [];
-          })
-      : Promise.resolve();
-    void scope.read.then(() => {
+    // Failed loads remain empty on screen but cannot supply a write baseline.
+    const finishLoad = () => {
       publish();
       if (scope.active) setLoading(false);
-    });
+    };
+    void ensureRead(scope).then(finishLoad, finishLoad);
     return () => {
       scope.active = false;
     };
@@ -58,11 +73,13 @@ export function useAzureDevOpsSavedViews(workspaceId?: string) {
     (update: Update): Promise<void> => {
       if (!scope.workspaceId) return Promise.resolve();
       const capturedWorkspaceId = scope.workspaceId;
+      const read = ensureRead(scope);
       scope.pending.push(update);
       publish();
       const result = scope.tail.then(async () => {
-        await scope.read;
         try {
+          await read;
+          publish();
           const response = await setAzureDevOpsSavedViews(
             capturedWorkspaceId,
             applyUpdate(scope.confirmed, update),

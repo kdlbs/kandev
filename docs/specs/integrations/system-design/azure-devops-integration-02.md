@@ -409,7 +409,9 @@ same-page ordering fix; changing hook props alone does not demonstrate a
 cross-workspace page defect.
 
 The existing GET and whole-list PUT `/api/v1/azure-devops/views` API is unchanged.
-The hook retains the last confirmed server list plus ordered pending updates.
+The hook retains the last confirmed server list plus ordered pending updates
+in a ref-owned scope that survives renders and is replaced only when workspace
+identity changes.
 It publishes the confirmed list with pending updates applied, synchronously
 admitting updates before another callback can run. The page appends a saved
 view with a functional update; delete filters by ID. These operations can be
@@ -422,8 +424,13 @@ normalized server response; failure leaves the confirmed baseline unchanged.
 Either outcome removes the settled update and republishes the remaining
 optimistic updates. Rejection remains visible to the initiating caller and
 does not poison the queue. An initial GET contributes the baseline beneath
-pending updates rather than replacing their visible intent. The existing
-empty-list behavior on initial read failure is retained.
+pending updates rather than replacing their visible intent. A failed read can
+leave the display empty, but never confirms an empty server list. Every action
+captures the read promise at admission; if that read fails, each bound action
+rejects without a PUT and loses only its optimistic effect. A later retry
+starts one shared fresh GET before writing against the recovered baseline.
+Binding rejection to the admitted read prevents a retry from making an older
+failed action eligible to write.
 
 The page handles delete rejection through the shared reporting toast with
 `integrations:failedToDeleteSavedQuery`; the save dialog keeps its existing

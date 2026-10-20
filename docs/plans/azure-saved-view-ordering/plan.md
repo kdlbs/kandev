@@ -38,15 +38,17 @@ of scope. Keep error rejection for callers and handle the page's void delete.
 
 The work order owns exact commands and results. Use deterministic deferred API
 responses without sleeps, and a narrow browser flow on desktop and phone.
-Stop after commit and parent validation handoff; do not open a PR yet.
+Parent validation completed before publication. Delivery follows the normal CI
+and review gates in [PR #4639](https://github.com/kdlbs/kandev/pull/4639).
 
 ## Results
 
-Implementation and task-defined checks are complete. Focused hook tests: 19
-passed. Desktop and phone: two browser cases passed each. Scoped lint,
-typecheck (6 GB Node heap), i18n, specs, and public-doc checks passed. See the
-work order for exact commands, RED/GREEN evidence, logs, and limitations.
-Delivery is held at the parent-validation checkpoint; no PR is open.
+Implementation and local task-defined checks are complete: 21 focused hook
+cases, three desktop browser flows, and three phone browser flows passed.
+Scoped lint, typecheck (6 GB Node heap), i18n, specs, public-doc validators, and
+PR documentation coverage preflight passed. The work order records exact
+commands, RED/GREEN evidence, and the failed-baseline review remediation.
+Live CI, review, and merge state are tracked in PR #4639.
 
 ## ASCII UI preview
 
