@@ -222,3 +222,9 @@ desktop and phone deletion smoke checks passed.
 PR review remediation uses translated interpolated messages for both applied
 filter labels and corrects the phone search guide. All locale checks passed.
 See [PR review remediation](plan.md#pr-review-remediation).
+
+CI remediation updates inherited phone menu and empty-state assertions to the
+shipped List controls. Search-toggle coverage remains on Kanban. Filter label,
+touch target, and focus-return coverage uses List's Filters drawer. Startup and
+Home coverage retains its route, workspace, reload, and preference assertions.
+See [CI remediation](plan.md#ci-remediation) for current validation results.

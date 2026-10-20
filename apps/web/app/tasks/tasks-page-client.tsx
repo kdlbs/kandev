@@ -190,7 +190,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
   );
   const query = useTasksListQueryState({
     workspaceId: activeWorkspaceId,
-    workflowId: settings.workflowId,
+    workflowId: display.activeWorkflowId,
     repositoryId: settings.repositoryIds[0] ?? null,
     persistScope,
   });

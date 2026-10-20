@@ -112,6 +112,9 @@ relative ordering. Add a regression for the shared search term `archive`.
 
 Distinguish an omitted scope field from an explicit `all`. Never use a truthy
 fallback that changes `all` back to the saved workflow or repository.
+For an omitted workflow, use the active workflow resolved for the workspace.
+Do not reapply a raw saved workflow ID after bootstrap rejects it for the
+resolved workspace. This resolution does not save portable settings.
 Validate explicit IDs against loaded metadata for the resolved workspace.
 Wait for that metadata before classifying an ID as unavailable.
 

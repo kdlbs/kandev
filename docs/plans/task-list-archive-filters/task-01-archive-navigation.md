@@ -188,3 +188,9 @@ regressions failed before the refinement in unit tests and a real browser.
 List controls mount after the route metadata reads settle. Controlled delayed
 workflow reads prove that desktop and phone workspace navigation show loading
 before the correct filtered rows.
+
+CI remediation restores the workflow resolved for the current workspace as
+List's ordinary default. A component regression verifies the task request and
+unchanged portable settings. The full desktop startup suite verifies that a
+workspace change followed by List displays the second workspace's task.
+See [CI remediation](plan.md#ci-remediation) for current validation results.

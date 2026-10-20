@@ -97,6 +97,7 @@ const tasks = [
 function renderPage(
   initialSort: "title_asc" | typeof key = "title_asc",
   initialGroup: "workflow_step" | typeof key = "workflow_step",
+  savedWorkflowId: string | null = null,
 ) {
   return render(
     <StateProvider
@@ -105,6 +106,7 @@ function renderPage(
         userSettings: {
           ...defaultSettingsState.userSettings,
           workspaceId: "ws1",
+          workflowId: savedWorkflowId,
           tasksListSort: initialSort,
           tasksListGroup: initialGroup,
           loaded: true,
@@ -137,6 +139,22 @@ afterEach(() => {
   replace.mockReset();
   updateUserSettings.mockClear();
   window.history.replaceState({}, "", "/");
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-002.5 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
+it("uses the resolved workspace workflow without saving a stale portable default", async () => {
+  window.history.replaceState({}, "", "/tasks?q=current&repository=all");
+  renderPage("title_asc", "workflow_step", "previous-workspace-workflow");
+
+  await waitFor(() =>
+    expect(listTasksByWorkspace).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ query: "current", workflowId: null }),
+      expect.anything(),
+    ),
+  );
+  expect(capturedStore.getState().userSettings.workflowId).toBe("previous-workspace-workflow");
+  expect(updateUserSettings).not.toHaveBeenCalled();
 });
 
 describe("TasksPageClient facet preference", () => {

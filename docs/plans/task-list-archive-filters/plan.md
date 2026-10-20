@@ -433,3 +433,61 @@ The final loading-state refinement passed all 175 unit tests, 17 desktop
 scenarios, 14 phone scenarios, typecheck, and changed-file lint without warnings.
 Its logs are `review-loading-all-unit.log`, `kandev-run.e2e.14kwCIII.log`, and
 `kandev-run.e2e.Kos825mR.log` in the same artifact directory.
+
+## CI remediation
+
+CI exposed a workflow fallback regression and six stale UI assertions across
+five E2E shards. List now uses the active workflow resolved for the workspace
+instead of reapplying a rejected saved workflow. Explicit URL filters retain
+their validation, and navigation does not save the resolved fallback.
+
+Phone search-toggle checks now select Kanban, while List search stays visible.
+The filter accessibility case uses List's dedicated Filters drawer and checks
+labels, 44px targets, focus return, and the absence of duplicate View options
+filters. Startup and Home tests expect the filtered empty message when the
+seeded workflow default is selected.
+
+Local reproductions used the same base and PR source as the failed CI run,
+with one browser worker and retries disabled. A component regression failed
+before the workflow correction. After the fix, all 38 targeted unit tests in
+five suites and all 13 desktop browser scenarios passed. Typecheck and
+changed-file ESLint passed without warnings. All 31 phone scenarios passed
+with retries disabled.
+
+Evidence is in `/tmp/kandev-archive-pr-delivery-1n02tpi8`, including
+`ci-remediation-evidence.json`, `ci-workflow-green-unit.log`, and
+`kandev-run.e2e.RcLoOzl1.log`. The phone log is `kandev-run.e2e.7UmKsM2V.log`.
+Exact-head CI and review validation remains
+pending until the remediation is pushed and its new checks finish.
+
+Run the unit checks from `apps/web`:
+
+```bash
+VITEST_MAX_WORKERS=2 pnpm exec vitest run \
+  app/tasks/tasks-page-client.facet-selection.test.tsx \
+  app/tasks/tasks-page-client.mr-hydration.test.tsx \
+  hooks/use-tasks-list-query-state.test.tsx \
+  lib/tasks/tasks-list-query.test.ts \
+  lib/kanban/resolve-workflow.test.ts
+```
+
+Run the browser checks from the repository root. The local runtime wrapper
+and the exact isolated merge are recorded in the evidence file.
+
+```bash
+pnpm --dir apps/web e2e:run --host --project chromium \
+  tests/settings/startup-page.spec.ts \
+  tests/task/task-list-workspace.spec.ts \
+  tests/task/task-list-archive-navigation.spec.ts \
+  --max-failures=1 --retries=0
+pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome \
+  tests/layout/mobile-unified-navigation.spec.ts \
+  tests/kanban/mobile-kanban-topbar.spec.ts \
+  tests/kanban/mobile-display-settings-groups.spec.ts \
+  tests/settings/mobile-startup-page.spec.ts \
+  tests/chat/mobile-quick-chat-entry.spec.ts \
+  tests/task/mobile-task-list-workspace.spec.ts \
+  tests/task/mobile-task-list-filters.spec.ts \
+  tests/task/mobile-task-list-archive-navigation.spec.ts \
+  --max-failures=1 --retries=0
+```
