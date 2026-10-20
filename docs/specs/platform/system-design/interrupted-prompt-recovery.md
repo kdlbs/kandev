@@ -111,7 +111,10 @@ The [silent prompt work package](../../../plans/silent-prompt-recovery/plan.md)
 records implementation and verification. `nativeResumeProofCursor` returns the
 distinct `errNativeResumeProjectionLag` sentinel when received and projected
 sequences differ. It wraps `ErrDurableAdoptionBlocked` for compatibility.
-The retry loop classifies it with `errors.Is`, never by message text.
+The retry loop owned by `GetNativeResumeDeliveryEvidence` must match
+`errNativeResumeProjectionLag` with `errors.Is` before handling
+`ErrDurableAdoptionBlocked`. Compatibility handling must not short-circuit the
+bounded projection wait. Never classify errors by message text.
 
 `GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
 proof. Retry only verified projection lag after authentication, cursor coverage,

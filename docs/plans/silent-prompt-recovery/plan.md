@@ -118,9 +118,9 @@ bounded fields, rune-aligned truncation, rejection of malformed UTF-8, and
 exclusion of synthetic prompt/token secrets.
 These cover Agents criteria .1-.6, .8-.9 and .12-.15.
 
-Task 02 adds `native_resume_projection_wait_test.go` in lifecycle and
-orchestrator. Tests cover catch-up, deadline, cancellation, identity change,
-storage error, and fresh full-proof validation.
+Task 02 adds `native_resume_projection_wait_test.go` in lifecycle; existing
+orchestrator recovery tests cover the caller. Tests cover catch-up, deadline,
+cancellation, identity change, storage error, and fresh full-proof validation.
 `TestNativeResumeProjectionWaitRejectsUnresolvedJournal` supplies authenticated
 unresolved journal work and a lagging cursor, then asserts an immediate blocked
 result with no wait or scheduled retry.
@@ -130,7 +130,7 @@ deadline. Real SQL/journal integration
 retains the unknown submission and releases only the matching block.
 These cover Platform criteria .5, .9, .12, .25 and .26.
 
-Names above describe tests to add, not tests already present.
+The named tests above were added and pass; see each work order's Results.
 
 ## E2E tests
 
