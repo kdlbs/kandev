@@ -43,7 +43,7 @@ func (r *Repository) ListUnresolvedClarificationBundles(
 	joinExtra, joinArgs := clarificationSidecarJoin(opts.Sidecar)
 	whereExtra, whereArgs := clarificationBundleWhereClause(opts)
 	args := append(append([]interface{}{}, joinArgs...), whereArgs...)
-	query := clarificationBundleQuery(drv, joinExtra, whereExtra)
+	query := clarificationBundleScopedQuery(drv, joinExtra, whereExtra, opts.EarlierTurns)
 	args = append(args, opts.Limit+1)
 
 	rows, err := r.ro.QueryContext(operationCtx, r.ro.Rebind(query), args...)
@@ -166,8 +166,16 @@ func clarificationSidecarPredicate(sidecar *models.ClarificationSidecarFilter) (
 // admitted here with no resolvable question_id could be listed but could
 // never be answered.
 func clarificationBundleQuery(drv, joinExtra, whereExtra string) string {
+	return clarificationBundleScopedQuery(drv, joinExtra, whereExtra, false)
+}
+
+// clarificationBundleScopedQuery is clarificationBundleQuery with the turn
+// conjunct selectable: earlierTurns=false is the answerable list above;
+// earlierTurns=true lists the read-only complement (see
+// clarificationBundleTurnScope).
+func clarificationBundleScopedQuery(drv, joinExtra, whereExtra string, earlierTurns bool) string {
 	return "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
-		clarificationBundleTableExpr(drv, joinExtra, whereExtra) +
+		clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra, earlierTurns) +
 		"\nORDER BY b.created_at ASC, b.pending_id ASC\nLIMIT ?"
 }
 
@@ -186,6 +194,36 @@ func clarificationBundleCountQuery(drv, joinExtra, whereExtra string) string {
 // what each conjunct means; kept in one place so the count query cannot drift
 // from the page query's notion of "answerable".
 func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
+	return clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra, false)
+}
+
+// clarificationBundleTurnScope returns the per-message turn conjunct and the
+// has_pending test for one scope. The current scope is the claim rule
+// (claimActiveClarificationBundle): the message's turn is the session's
+// current authoritative turn, and an absent status counts as pending. The
+// earlier scope is its exact complement on the turn conjunct, restricted to
+// an explicit status "pending": those questions were left open when the
+// session moved on to another turn, can never be claimed, and would otherwise
+// silently disappear from every list. Rows written before status existed are
+// deliberately not resurrected as unanswered.
+func clarificationBundleTurnScope(drv, statusExpr string, earlierTurns bool) (turn, hasPending string) {
+	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
+	current := fmt.Sprintf(`(
+			SELECT turn_row.id
+			FROM task_session_turns turn_row
+			WHERE turn_row.task_session_id = m.task_session_id
+			  AND %s
+			ORDER BY %s
+			LIMIT 1
+		  )`, predicate, orderBy)
+	if earlierTurns {
+		return fmt.Sprintf("COALESCE(m.turn_id, '') <> COALESCE(%s, '')", current),
+			fmt.Sprintf("COALESCE(%s, '') = 'pending'", statusExpr)
+	}
+	return "m.turn_id = " + current, fmt.Sprintf("COALESCE(%s, '') IN ('', 'pending')", statusExpr)
+}
+
+func clarificationBundleScopedTableExpr(drv, joinExtra, whereExtra string, earlierTurns bool) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
 	questionIDExpr := fmt.Sprintf(
@@ -195,15 +233,7 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
 	)
 	notParentQuestion := dialect.ExcludeTruthyMetadataPredicate(drv, "m.metadata", "parent_question")
 	nonTerminalSession := nonTerminalSessionPredicate("m")
-	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
-	currentTurn := fmt.Sprintf(`m.turn_id = (
-			SELECT turn_row.id
-			FROM task_session_turns turn_row
-			WHERE turn_row.task_session_id = m.task_session_id
-			  AND %s
-			ORDER BY %s
-			LIMIT 1
-		  )`, predicate, orderBy)
+	turnScope, hasPending := clarificationBundleTurnScope(drv, statusExpr, earlierTurns)
 	return fmt.Sprintf(`
 		FROM (
 			SELECT
@@ -211,7 +241,7 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
 				m.task_session_id AS session_id,
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
-				MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
+				MAX(CASE WHEN %[2]s THEN 1 ELSE 0 END) AS has_pending,
 				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
@@ -226,7 +256,7 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
 		WHERE b.has_pending = 1
 		  AND b.has_missing_question_id = 0
 		  %[3]s
-	`, pendingIDExpr, statusExpr, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr, joinExtra)
+	`, pendingIDExpr, hasPending, whereExtra, notParentQuestion, nonTerminalSession, turnScope, questionIDExpr, joinExtra)
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column

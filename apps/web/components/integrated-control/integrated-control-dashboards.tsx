@@ -4,10 +4,14 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
-import { ControlAggregateOverview } from "./control-aggregate-overview";
+import {
+  ControlAggregateOverview,
+  ControlInboxAttentionFallback,
+} from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
 import { ControlNativeComparison } from "./control-native-comparison";
 import { ControlProviderCircuits } from "./control-provider-circuits";
+import { ControlInbox } from "./control-inbox";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -22,6 +26,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
       data-testid={`control-dashboard-${view}`}
     >
+      <ControlInboxView view={view} officeEnabled={control.officeEnabled} />
       {view === "providers" && workspaces.length > 0 && <ControlProviderCircuits />}
       {view === "overview" && (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -77,6 +82,12 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       )}
     </div>
   );
+}
+
+function ControlInboxView({ view, officeEnabled }: { view: ControlView; officeEnabled: boolean }) {
+  if (view === "inbox") return <ControlInbox />;
+  if (view === "overview" && !officeEnabled) return <ControlInboxAttentionFallback />;
+  return null;
 }
 
 function Fact({ label, value }: { label: string; value: number | string }) {

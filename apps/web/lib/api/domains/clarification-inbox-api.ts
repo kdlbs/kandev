@@ -1,9 +1,11 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
+  ClarificationInboxEarlierPage,
   ClarificationInboxHiddenPage,
   ClarificationInboxPage,
   ClarificationInboxSnoozeDuration,
   ClarificationInboxUnansweredPage,
+  InboxRecoveryBlockPage,
 } from "@/lib/types/clarification-inbox";
 
 const BASE = "/api/v1/clarification-inbox";
@@ -26,6 +28,26 @@ export function listHiddenClarificationInbox(
 ): Promise<ClarificationInboxHiddenPage> {
   return fetchJson<ClarificationInboxHiddenPage>(
     `${BASE}/hidden?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+}
+
+export function listEarlierTurnClarificationInbox(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<ClarificationInboxEarlierPage> {
+  return fetchJson<ClarificationInboxEarlierPage>(
+    `${BASE}/earlier-turns?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
+}
+
+export function listInboxRecoveryBlocks(
+  workspaceId: string,
+  options?: ApiRequestOptions,
+): Promise<InboxRecoveryBlockPage> {
+  return fetchJson<InboxRecoveryBlockPage>(
+    `${BASE}/recovery-blocks?workspace_id=${encodeURIComponent(workspaceId)}`,
     options,
   );
 }

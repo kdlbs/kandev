@@ -46,6 +46,12 @@ type ListClarificationBundlesOptions struct {
 	// sidecar into the same query. Nil leaves the query byte-for-byte as it
 	// is without this feature (needs-you-inbox design, "Persistence").
 	Sidecar *ClarificationSidecarFilter
+	// EarlierTurns selects the read-only complement of the answerable list:
+	// bundles still carrying an explicit status "pending" whose turn is NOT
+	// the session's current turn. claimActiveClarificationBundle can never
+	// claim those, so they are listed only for an ordinary follow-up message.
+	// False leaves the query exactly as it is without this field.
+	EarlierTurns bool
 }
 
 // ClarificationSidecarFilter selects one operator's dismiss/snooze sidecar

@@ -145,9 +145,9 @@ function resetRecord(key: string | null) {
 
 type StoreApi = ReturnType<typeof useAppStoreApi>;
 
-function unansweredInboxEnabled(storeApi: StoreApi): boolean {
+function unansweredInboxEnabled(storeApi: StoreApi, workspaceId?: string): boolean {
   const workspaces = storeApi.getState().workspaces;
-  const active = workspaces?.items.find((item) => item.id === workspaces.activeId);
+  const active = workspaces?.items.find((item) => item.id === (workspaceId ?? workspaces.activeId));
   return Boolean(active?.clarification_unanswered_inbox_enabled);
 }
 
@@ -249,10 +249,11 @@ function clearInFlightWhenSettled(
  */
 export function useLateClarificationMessage(
   sourceMessage: Message | undefined,
-  options?: { targetSessionId?: string | null },
+  options?: { targetSessionId?: string | null; workspaceId?: string },
 ) {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
+  const workspaceId = options?.workspaceId;
   const { taskId, sessionId } = sourceIds(sourceMessage, options?.targetSessionId);
   const sourceKey = sourceAdmissionKey(sourceMessage, options?.targetSessionId);
   const excludedPendingIdRef = useRef<string | null>(null);
@@ -303,7 +304,7 @@ export function useLateClarificationMessage(
       };
       updateRecordState(admissionKey, { status: "sending", snapshot: admissionSnapshot });
       // Capture workspace enablement before asynchronous admission.
-      const closeUnanswered = unansweredInboxEnabled(storeApi);
+      const closeUnanswered = unansweredInboxEnabled(storeApi, workspaceId);
       const delivery = (async () => {
         try {
           await hydrateSourceSession({
@@ -339,7 +340,7 @@ export function useLateClarificationMessage(
       clearInFlightWhenSettled(record, delivery);
       return delivery;
     },
-    [handleSendMessageWithOutcome, sessionId, storeApi, t, taskId],
+    [handleSendMessageWithOutcome, sessionId, storeApi, t, taskId, workspaceId],
   );
 
   const reset = useCallback(() => resetRecord(sourceKey), [sourceKey]);
