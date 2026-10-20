@@ -281,16 +281,78 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 		return engine.ActionResult{}, nil
 	}
 
+	queueIfBusy := in.Action.AutoStartAgent != nil && in.Action.AutoStartAgent.QueueIfBusy
+	if queueIfBusy {
+		queued, err := c.queueStepPromptIfBusy(ctx, in)
+		if err != nil {
+			return engine.ActionResult{}, err
+		}
+		if queued {
+			return engine.ActionResult{}, nil
+		}
+	}
+
 	_, err := c.svc.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:         in.State.TaskID,
 		Intent:         IntentWorkflowStep,
 		SessionID:      in.State.SessionID,
 		WorkflowStepID: in.Step.ID,
 	})
+	if err != nil && queueIfBusy && isBusyLaunchError(err) {
+		queued, queueErr := c.queueStepPromptIfBusy(ctx, in)
+		if queueErr == nil && queued {
+			return engine.ActionResult{}, nil
+		}
+	}
 	if err != nil {
 		return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
 	}
 	return engine.ActionResult{}, nil
+}
+
+// queueStepPromptIfBusy queues the step's auto-start prompt when the session
+// is mid-turn, so the message queue delivers it once the current turn ends.
+// It reports false, without side effects, when the session can take a prompt
+// now and the caller should launch directly.
+func (c *autoStartAgentCallback) queueStepPromptIfBusy(ctx context.Context, in engine.ActionInput) (bool, error) {
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return false, fmt.Errorf("load session for queued auto-start: %w", err)
+	}
+	if session.State != taskmodels.TaskSessionStateRunning && session.State != taskmodels.TaskSessionStateStarting {
+		return false, nil
+	}
+	step, err := c.svc.workflowStepGetter.GetStep(ctx, in.Step.ID)
+	if err != nil {
+		return false, fmt.Errorf("load workflow step for queued auto-start: %w", err)
+	}
+	task, err := c.svc.repo.GetTask(ctx, in.State.TaskID)
+	if err != nil {
+		return false, fmt.Errorf("load task for queued auto-start: %w", err)
+	}
+	prompt, promptReferenceContext, err := c.svc.buildWorkflowEntryPrompt(
+		ctx, task.Description, step, task.ID, session.ID, session.QueueIncarnationID, session.IsPassthrough,
+	)
+	if err != nil {
+		return false, fmt.Errorf("build workflow prompt for queued auto-start: %w", err)
+	}
+	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+	if err := c.svc.autoStartStepPromptWithPromptContext(
+		ctx, task.ID, session, step, prompt, planMode, true, newStepHandoffOnce(), promptReferenceContext,
+	); err != nil {
+		return false, fmt.Errorf("queue auto-start prompt: %w", err)
+	}
+	c.svc.logger.Info("queued workflow step auto-start until the current turn ends",
+		zap.String("task_id", task.ID),
+		zap.String("session_id", session.ID),
+		zap.String("workflow_step_id", step.ID))
+	return true, nil
+}
+
+// isBusyLaunchError reports whether a launch failed only because the session
+// was already running a turn, so the prompt can wait in the queue.
+func isBusyLaunchError(err error) bool {
+	return isAgentAlreadyRunningError(err) || isSessionBusyError(err) || isTransientPromptError(err)
 }
 
 // runCodeReviewCallback starts a native code-review pass over the task's changed

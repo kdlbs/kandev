@@ -189,6 +189,10 @@ This feature adds no new permission boundary.
   child outcome. The parent continues to evaluate committed task state.
 - If the parent has no active or primary session, no new parent session is
   created. The skip is logged at debug/info level.
+- If an `auto_start_agent` action fires while the parent session is still in a
+  turn, the step prompt is queued instead of failing the launch. The message
+  queue delivers it once after the current turn ends, and the completed child
+  set is recorded as handled so a second delivery does not queue it again.
 - If the workflow engine rejects or fails a configured action, the error is
   logged and the child task's terminal state remains unchanged.
 - If multiple children finish concurrently, engine operation idempotency prevents
@@ -241,6 +245,11 @@ This feature adds no new permission boundary.
 - **GIVEN** a child has its own child, **WHEN** the grandchild completes, **THEN**
   only the direct parent of that grandchild is evaluated for
   `on_children_completed`.
+
+- **GIVEN** a parent step configures `on_children_completed` with
+  `auto_start_agent` and the parent session is running a turn, **WHEN** the last
+  direct child becomes terminal, **THEN** the parent is not prompted mid-turn and
+  receives the step prompt exactly once after that turn ends.
 
 - **GIVEN** a parent has no active or primary session, **WHEN** all direct
   children become terminal, **THEN** no session is created automatically and the

@@ -6184,8 +6184,7 @@ func (s *Service) handleCreatedAutoStartLaunchFailure(
 		queueCtx = withInitialCreatePromptPassthroughQueue(ctx)
 	}
 	promptQueued := false
-	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
-		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
+	if shouldQueueIfBusy && isBusyLaunchError(launchErr) {
 		if queueErr := s.queueAutoStartPrompt(
 			queueCtx, taskID, sessionID, prompt, planMode,
 			attachments, origin, userMessageRecorded, references, handoffText,
