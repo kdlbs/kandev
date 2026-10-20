@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { IconCopy, IconEdit, IconEye, IconEyeOff, IconKey, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -86,6 +86,15 @@ export function SecretListItemRow({
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
+
+  // A revealed value is a pre-edit snapshot; editing supersedes it, so hide it
+  // instead of showing a stale value that no longer matches the saved secret.
+  useEffect(() => {
+    if (isEditing) {
+      setRevealed(false);
+      setRevealedValue(null);
+    }
+  }, [isEditing]);
 
   /** Fetches and shows the secret value, or hides it when already revealed. */
   const handleReveal = async () => {

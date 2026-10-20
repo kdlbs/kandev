@@ -45,4 +45,34 @@ test.describe("workspace secrets edit", () => {
     await expect(testPage.getByText(newValue)).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(originalValue);
   });
+
+  test("hides a revealed value when an edit saves", async ({ testPage, apiClient, seedData }) => {
+    const name = `E2E Hide Reveal ${runToken()}`;
+    const originalValue = "e2e-hide-original-value";
+    const newValue = "e2e-hide-new-value";
+    await apiClient.createSecret(name, originalValue, {
+      scope: "workspace",
+      workspaceId: seedData.workspaceId,
+    });
+
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/secrets`);
+    await testPage.getByRole("button", { name: `Reveal secret ${name}` }).click();
+    await expect(testPage.getByText(originalValue)).toBeVisible();
+
+    await testPage.getByRole("button", { name: `Edit secret ${name}` }).click();
+    await testPage.getByPlaceholder("Secret value").fill(newValue);
+    const save = testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" });
+    await expect(save).toBeEnabled();
+    const updateResponse = waitForHttp(testPage, "PUT", /\/api\/v1\/secrets\/[^/]+$/, {
+      predicate: (response) => response.status() === 200,
+    });
+    await save.click();
+    await updateResponse;
+
+    await expect(testPage.locator("body")).not.toContainText(originalValue);
+    await testPage.getByRole("button", { name: `Reveal secret ${name}` }).click();
+    await expect(testPage.getByText(newValue)).toBeVisible();
+  });
 });
