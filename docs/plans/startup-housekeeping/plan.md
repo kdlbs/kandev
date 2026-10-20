@@ -243,3 +243,12 @@ original assertion reproduced locally; the updated focused frontend run passed
 129 tests across 12 files. CI's other frontend shard and lint/build job passed.
 This correction changes tests and delivery records only; rendered captures remain
 valid for the unchanged production tree.
+
+Kubernetes CI remediation: the prior head finished with 86 passing checks; its
+only test failure was a stopped-session reconciliation log wait, with the E2E
+aggregate failing as a consequence. The unchanged test reproduced that failure
+in an isolated real Kind cluster. Replaced the obsolete implementation-log wait
+with retained session state, user-message identity, Pod UID and PVC UID assertions
+before the existing workspace-readiness and manual-recovery flow. Both cases
+passed locally with retries disabled. This changes tests and delivery records;
+production behavior and the verified screenshots remain unchanged.

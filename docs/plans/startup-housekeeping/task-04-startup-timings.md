@@ -163,3 +163,9 @@ CI exposed a stale restart-dialog assertion prohibiting final progress polling.
 It now expects final-ready detail after completion and preserves no-poll checks
 for idle, starting and error phases. The focused run passed 129 tests across 12
 files; production UI is unchanged from the verified post-commit captures.
+
+The real Kubernetes restart case also retained an obsolete per-session log wait.
+It now checks waiting-session identity, unchanged user messages, and retained Pod
+and PVC identities before proving workspace readiness and manual recovery. The
+old assertion reproduced locally; both real Kind cases passed with retries
+explicitly disabled. No production UI change requires new screenshots.
