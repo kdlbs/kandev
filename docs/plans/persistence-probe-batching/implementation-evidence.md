@@ -256,3 +256,32 @@ service configuration from the child environment. No live instance changed.
 Temporary browser instrumentation is excluded from the patch. The PR branch
 now includes `main` through `e34761417d28e561ce9bd616cfa78c1b723df9ad`, which owns
 the transcript code exercised by CI.
+
+
+## Additional partition replay
+
+A replay of CI partition 24-4 with one worker restricted to two CPUs completed
+31 tests and failed two tests. All three Jira status-filter tests passed. The
+original Jira CI flake also did not recur in five focused runs at four-times
+CPU slowdown. No speculative Jira change was made.
+
+The tablet LSP test failed both under CPU restriction and at normal CPU
+availability. Reload correctly restored the editor tab, but the test waited
+for a visible chat panel. The test now waits for the tablet layout before its
+existing editor, retained-process, initialization-count, and progress checks.
+The corrected test passed with the desktop and mobile delayed-card tests:
+three tests, one worker, no retries. The two failing runs and the passing run
+are retained in `/tmp/kandev-run.e2e.bZQdpKmc.log`,
+`/tmp/kandev-run.e2e.hoVgftQW.log`, and
+`/tmp/kandev-run.e2e.AEPQDPjl.log`.
+
+The other pressure-run failure rejected native resume because received delivery
+events were not fully projected. The focused test passed at normal CPU
+availability. This observation remains unresolved and is not counted as a
+passing pressure check. Fresh CI and review evidence remain pending.
+
+Desktop and mobile screenshots show the complete latest changed-files card
+after delayed loading and reload. Capture preparation closed the disposable
+terminal panel to exclude the local host prompt. A failed capture attempt hit
+the terminal confirmation and a port conflict. The final capture used free
+explicit test ports and passed both viewport assertions.
