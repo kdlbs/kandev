@@ -133,4 +133,3 @@ store/handler/API tests and `use-repository-branches.ts` store ownership pattern
   API, configuration, screenshot, or terminology needing an update.
 - Ordinary hook commit receipt and exact final SHA are recorded in the external
   task plan and parent handoff after commit. No push, PR, or native delegation.
-
