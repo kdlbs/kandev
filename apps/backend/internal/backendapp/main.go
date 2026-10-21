@@ -717,7 +717,8 @@ func startAgentInfrastructure(
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
-	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
+	liveBranchMaterializer := newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
+	services.Task.SetBranchMaterializer(liveBranchMaterializer)
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
@@ -919,6 +920,7 @@ func startAgentInfrastructure(
 	// Bind only the path-returning orchestrator seam after its clone pipeline
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
+	liveBranchMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
 	// Azure DevOps owns connection-health and work-item/pull-request watcher
 	// polling. Watch matches flow through the shared orchestrator coordinator.

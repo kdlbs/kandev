@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -49,6 +50,7 @@ type agentctlRescanner interface {
 // or the task has never launched), it no-ops and lets the standard
 // multi-repo prepare path materialize on the next launch.
 type branchMaterializer struct {
+	hostCloner  orchestrator.RepositoryHostCloner
 	repo        branchMaterializerRepo
 	worktreeMgr *worktree.Manager
 	rescanner   agentctlRescanner
@@ -108,7 +110,7 @@ func (b *branchMaterializer) materializeUnfinalized(
 	if b == nil || b.worktreeMgr == nil {
 		return nil, nil
 	}
-	req, env, session, slug, ok, err := b.prepareMaterializeRequest(ctx, taskID, taskRepositoryID)
+	req, env, session, slug, ok, err := b.prepareMaterializeRequest(ctx, taskID, taskRepositoryID, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -141,21 +143,14 @@ func (b *branchMaterializer) finalize(materialization *branchMaterialization, ct
 
 // prepareMaterializeRequest builds the worktree.CreateRequest plus the
 // (env, session, slug) context the finalize step needs. Returns ok=false
-// for the legitimate "skip materialize" cases (no local path, no active
+// for the legitimate "skip materialize" cases (no active
 // session, env not provisioned); ok=true means CreateRequest is ready.
 func (b *branchMaterializer) prepareMaterializeRequest(
-	ctx context.Context, taskID, taskRepositoryID string,
+	ctx context.Context, taskID, taskRepositoryID string, expected *taskservice.BranchMaterializationTarget,
 ) (worktree.CreateRequest, *models.TaskEnvironment, *models.TaskSession, string, bool, error) {
 	task, tr, repo, err := b.loadContext(ctx, taskID, taskRepositoryID)
 	if err != nil {
 		return worktree.CreateRequest{}, nil, nil, "", false, err
-	}
-	if repo.LocalPath == "" {
-		// Provider-backed repos that haven't been cloned yet need the
-		// orchestrator's repoCloner path. Defer to next launch.
-		b.logger.Info("skipping materialize: repository has no local path",
-			zap.String("repository_id", repo.ID), zap.String("task_id", taskID))
-		return worktree.CreateRequest{}, nil, nil, "", false, nil
 	}
 	session, err := b.pickActiveSession(ctx, taskID)
 	if err != nil {
@@ -172,6 +167,15 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 	}
 	if env == nil {
 		return worktree.CreateRequest{}, nil, nil, "", false, nil
+	}
+	if err := b.verifyBranchCloneTarget(ctx, taskID, session, env, expected); err != nil {
+		return worktree.CreateRequest{}, nil, nil, "", false, err
+	}
+	if err := b.ensureHostRepositoryPath(ctx, taskID, session.ID, repo); err != nil {
+		return worktree.CreateRequest{}, nil, nil, "", false, err
+	}
+	if err := b.verifyBranchCloneTarget(ctx, taskID, session, env, expected); err != nil {
+		return worktree.CreateRequest{}, nil, nil, "", false, err
 	}
 	slug := deriveBranchSlugForRow(tr)
 	req := worktree.CreateRequest{

@@ -777,6 +777,9 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 	mu.Lock()
 	defer mu.Unlock()
 
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	gitDir := filepath.Join(targetPath, ".git")
 	if info, statErr := os.Stat(gitDir); statErr == nil && info.IsDir() {
 		if verifyExistingOrigin {
@@ -787,7 +790,10 @@ func (c *Cloner) ensureClonedAtPathWithOriginVerification(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return targetPath, err
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
 }
 
 // EnsureClonedWithBasicAuth retains the legacy basic-auth clone path.
@@ -821,6 +827,9 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 	mu := c.repoMu(targetPath)
 	mu.Lock()
 	defer mu.Unlock()
+	if err := c.validateManagedAttachmentMutation(ctx, targetPath); err != nil {
+		return "", err
+	}
 	origin, err := gitCredentialOrigin(cloneURL)
 	if err != nil {
 		return targetPath, err
@@ -834,7 +843,10 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 		c.fetch(ctx, targetPath, auth)
 		return targetPath, nil
 	}
-	return targetPath, c.clone(ctx, cloneURL, targetPath, auth)
+	if err := c.clone(ctx, cloneURL, targetPath, auth); err != nil {
+		return targetPath, err
+	}
+	return targetPath, c.validateManagedAttachmentMutation(ctx, targetPath)
 }
 
 func gitCredentialOrigin(cloneURL string) (string, error) {

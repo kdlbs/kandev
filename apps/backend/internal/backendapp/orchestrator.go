@@ -1304,6 +1304,15 @@ func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, re
 	return err
 }
 
+// UpdateVerifiedRepositoryLocalPath retains the repository snapshot validated by attachment.
+func (u *repoLocalPathUpdater) UpdateVerifiedRepositoryLocalPath(ctx context.Context, repository *taskmodels.Repository, localPath string) error {
+	if repository == nil || repository.ID == "" || localPath == "" {
+		return fmt.Errorf("verified repository identity and path are required")
+	}
+	_, err := u.svc.UpdateRepository(ctx, repository.ID, &taskservice.UpdateRepositoryRequest{LocalPath: &localPath, ExpectedUpdatedAt: &repository.UpdatedAt})
+	return err
+}
+
 func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {
 	if repositoryID == "" || defaultBranch == "" {
 		return fmt.Errorf("UpdateRepositoryDefaultBranch: repositoryID and defaultBranch must be non-empty")
