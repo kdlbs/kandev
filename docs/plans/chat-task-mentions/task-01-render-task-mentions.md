@@ -140,4 +140,3 @@ solve these without revisiting the design.
   coverage preflight, and diff checks passed.
 - Public docs: added a how-to section to `tasks-and-workflows.md` explaining
   task-chip navigation and legacy/ambiguous fallback.
-
