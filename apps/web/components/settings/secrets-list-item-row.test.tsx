@@ -10,10 +10,6 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isFinePointer: finePointer, isMobile }),
 }));
 
-vi.mock("@/lib/api/domains/secrets-api", () => ({
-  revealSecret: vi.fn(async () => ({ value: "revealed-stored-value" })),
-}));
-
 import { SecretListItemRow } from "./secrets-list-item-row";
 
 const secret: SecretListItem = {
@@ -25,9 +21,6 @@ const secret: SecretListItem = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-/** Value the mocked revealSecret API resolves with. */
-const REVEALED_VALUE = "revealed-stored-value";
-
 /** Renders the row with test fakes and returns the spies. */
 function renderRow(overrides: Partial<Parameters<typeof SecretListItemRow>[0]> = {}) {
   const onEdit = vi.fn();
@@ -35,7 +28,7 @@ function renderRow(overrides: Partial<Parameters<typeof SecretListItemRow>[0]> =
   const onDeleteCancel = vi.fn();
   const onDeleteConfirm = vi.fn();
   const onCopyMove = vi.fn();
-  const view = render(
+  render(
     <SecretListItemRow
       secret={secret}
       onEdit={onEdit}
@@ -45,12 +38,11 @@ function renderRow(overrides: Partial<Parameters<typeof SecretListItemRow>[0]> =
       onCopyMove={onCopyMove}
       isBusy={false}
       showCreate={false}
-      isEditing={false}
       isDeleteConfirming={false}
       {...overrides}
     />,
   );
-  return { onEdit, onDelete, onDeleteCancel, onDeleteConfirm, onCopyMove, rerender: view.rerender };
+  return { onEdit, onDelete, onDeleteCancel, onDeleteConfirm, onCopyMove };
 }
 
 afterEach(() => {
@@ -132,36 +124,6 @@ describe("SecretListItemRow", () => {
 
   it("disables copy/move while a create draft is open", () => {
     renderRow({ showCreate: true });
-    expect(copyMoveDisabled()).toBe(true);
-  });
-
-  it("hides the revealed value while that row is being edited", async () => {
-    const { rerender } = renderRow();
-    fireEvent.click(screen.getByRole("button", { name: "Reveal secret API Key" }));
-    expect(await screen.findByText(REVEALED_VALUE)).not.toBeNull();
-
-    rerender(
-      <SecretListItemRow
-        secret={secret}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        onDeleteCancel={vi.fn()}
-        onDeleteConfirm={vi.fn()}
-        onCopyMove={vi.fn()}
-        isBusy={false}
-        showCreate={false}
-        isEditing={true}
-        isDeleteConfirming={false}
-      />,
-    );
-
-    expect(screen.queryByText(REVEALED_VALUE)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Hide secret API Key" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reveal secret API Key" })).not.toBeNull();
-  });
-
-  it("disables copy/move while that row is being edited", () => {
-    renderRow({ isEditing: true });
     expect(copyMoveDisabled()).toBe(true);
   });
 

@@ -60,6 +60,7 @@ test.describe("workspace secrets edit", () => {
     await expect(testPage.getByText(originalValue)).toBeVisible();
 
     await testPage.getByRole("button", { name: `Edit secret ${name}` }).click();
+    await expect(testPage.getByRole("button", { name: `Reveal secret ${name}` })).toBeHidden();
     await testPage.getByPlaceholder("Secret value").fill(newValue);
     const save = testPage
       .getByTestId("settings-floating-save")

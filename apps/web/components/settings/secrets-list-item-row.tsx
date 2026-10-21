@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { IconCopy, IconEdit, IconEye, IconEyeOff, IconKey, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -22,7 +22,6 @@ type SecretListItemRowProps = {
   onCopyMove: (secret: SecretListItem) => void;
   isBusy: boolean;
   showCreate: boolean;
-  isEditing: boolean;
   isDeleteConfirming: boolean;
   isDeleteLoading?: boolean;
   isDeleteBlocked?: boolean;
@@ -38,7 +37,6 @@ type SecretListItemRowActionsProps = {
   onReveal: () => void | Promise<void>;
   isBusy: boolean;
   showCreate: boolean;
-  isEditing: boolean;
   isDeleteConfirming: boolean;
   isDeleteLoading: boolean;
   isDeleteBlocked: boolean;
@@ -72,7 +70,6 @@ export function SecretListItemRow({
   onCopyMove,
   isBusy,
   showCreate,
-  isEditing,
   isDeleteConfirming,
   isDeleteLoading = false,
   isDeleteBlocked = false,
@@ -86,15 +83,6 @@ export function SecretListItemRow({
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
-
-  // A revealed value is a pre-edit snapshot; editing supersedes it, so hide it
-  // instead of showing a stale value that no longer matches the saved secret.
-  useEffect(() => {
-    if (isEditing) {
-      setRevealed(false);
-      setRevealedValue(null);
-    }
-  }, [isEditing]);
 
   /** Fetches and shows the secret value, or hides it when already revealed. */
   const handleReveal = async () => {
@@ -143,7 +131,6 @@ export function SecretListItemRow({
           onReveal={handleReveal}
           isBusy={isBusy}
           showCreate={showCreate}
-          isEditing={isEditing}
           isDeleteConfirming={isDeleteConfirming}
           isDeleteLoading={isDeleteLoading}
           isDeleteBlocked={isDeleteBlocked}
@@ -172,7 +159,6 @@ function SecretListItemRowActions({
   onReveal,
   isBusy,
   showCreate,
-  isEditing,
   isDeleteConfirming,
   isDeleteLoading,
   isDeleteBlocked,
@@ -196,7 +182,7 @@ function SecretListItemRowActions({
               onClick={() => onCopyMove(secret)}
               // A Move removes the source; it must never run while that secret's
               // edit/create draft is open (the draft would outlive its row).
-              disabled={isBusy || showCreate || isEditing}
+              disabled={isBusy || showCreate}
               className="cursor-pointer"
               aria-label={t("settings:copyMoveSecretNamed", { name: secret.name })}
             >
@@ -221,7 +207,7 @@ function SecretListItemRowActions({
               variant="ghost"
               size="icon"
               onClick={() => onEdit(secret)}
-              disabled={isBusy || showCreate || isEditing}
+              disabled={isBusy || showCreate}
               className="cursor-pointer"
               aria-label={t("settings:editSecretNamed", { name: secret.name })}
             >

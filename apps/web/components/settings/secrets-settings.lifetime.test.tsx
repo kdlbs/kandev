@@ -154,7 +154,7 @@ async function renameThroughSettings() {
       { cache: "no-store", workspaceId: WORKSPACE_ID },
     ),
   );
-  expectMetadataRows([original]);
+  expectMetadataRows([]);
   await acknowledge(request, renamed);
 }
 
@@ -248,4 +248,27 @@ describe("rendered workspace settings acknowledgments", () => {
       expect(scopedRequests()).toHaveLength(source === "fetched" ? 1 : 0);
     },
   );
+});
+
+describe("rendered workspace settings edit visibility", () => {
+  it("replaces the edited secret's row with the edit form until the update settles", async () => {
+    render(<SettingsTree initialItems={[original]} />);
+    expectMetadataRows([original]);
+
+    const update = deferred(renamed);
+    transport.update.mockReturnValue(update.promise);
+    fireEvent.click(screen.getByRole("button", { name: `Edit secret ${original.name}` }));
+    expectMetadataRows([]);
+    expect(screen.queryByRole("button", { name: `Reveal secret ${original.name}` })).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText(NAME_PLACEHOLDER), {
+      target: { value: renamed.name },
+    });
+    await saveForm();
+    await waitFor(() => expect(transport.update).toHaveBeenCalled());
+    expectMetadataRows([]);
+
+    await acknowledge(update, renamed);
+    expectMetadataRows([renamed]);
+  });
 });
