@@ -205,8 +205,8 @@ func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID st
 }
 
 type runPermissionBackend interface {
-	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error)
-	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error)
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
 }
 
 func (f *facade) runPermissionBackend(executionID string) (runPermissionBackend, error) {
@@ -227,8 +227,7 @@ func (f *facade) ResolveRunPermission(ctx context.Context, executionID, requestI
 	if err != nil {
 		return err
 	}
-	_, err = backend.ResolveRunPermission(ctx, executionID, requestID, pendingID, optionID)
-	return err
+	return backend.ResolveRunPermission(ctx, executionID, requestID, pendingID, optionID)
 }
 
 // CancelRunPermission delegates to a backend that can address permissions
@@ -238,8 +237,7 @@ func (f *facade) CancelRunPermission(ctx context.Context, executionID, requestID
 	if err != nil {
 		return err
 	}
-	_, err = backend.CancelRunPermission(ctx, executionID, requestID, pendingID)
-	return err
+	return backend.CancelRunPermission(ctx, executionID, requestID, pendingID)
 }
 
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend

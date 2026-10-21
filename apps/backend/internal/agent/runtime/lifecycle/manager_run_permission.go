@@ -7,7 +7,6 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // ErrNotRunOwnedExecution rejects a run-keyed permission call for an
@@ -19,29 +18,19 @@ const runPermissionRequestTimeout = 30 * time.Second
 // ResolveRunPermission selects one exact option on a pending request of a
 // run-owned execution. Run-owned executions have no task session, so the
 // session-keyed permission calls cannot reach them.
-func (m *Manager) ResolveRunPermission(
-	ctx context.Context, executionID, requestID, pendingID, optionID string,
-) (*streams.PermissionResolveResponse, error) {
-	var response *streams.PermissionResolveResponse
-	err := m.withRunPermissionClient(ctx, executionID, func(ctx context.Context, client *agentctl.Client) error {
-		var err error
-		response, err = client.ResolvePermission(ctx, requestID, pendingID, optionID)
+func (m *Manager) ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error {
+	return m.withRunPermissionClient(ctx, executionID, func(ctx context.Context, client *agentctl.Client) error {
+		_, err := client.ResolvePermission(ctx, requestID, pendingID, optionID)
 		return err
 	})
-	return response, err
 }
 
 // CancelRunPermission cancels a pending request of a run-owned execution.
-func (m *Manager) CancelRunPermission(
-	ctx context.Context, executionID, requestID, pendingID string,
-) (*streams.PermissionCancelResponse, error) {
-	var response *streams.PermissionCancelResponse
-	err := m.withRunPermissionClient(ctx, executionID, func(ctx context.Context, client *agentctl.Client) error {
-		var err error
-		response, err = client.CancelPermission(ctx, requestID, pendingID)
+func (m *Manager) CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error {
+	return m.withRunPermissionClient(ctx, executionID, func(ctx context.Context, client *agentctl.Client) error {
+		_, err := client.CancelPermission(ctx, requestID, pendingID)
 		return err
 	})
-	return response, err
 }
 
 func (m *Manager) withRunPermissionClient(

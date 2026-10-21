@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 type runPermissionBackend struct {
@@ -17,16 +16,16 @@ type runPermissionBackend struct {
 
 func (b *runPermissionBackend) ResolveRunPermission(
 	_ context.Context, executionID, requestID, pendingID, optionID string,
-) (*streams.PermissionResolveResponse, error) {
+) error {
 	b.resolved = append(b.resolved, executionID+"|"+requestID+"|"+pendingID+"|"+optionID)
-	return &streams.PermissionResolveResponse{}, nil
+	return nil
 }
 
 func (b *runPermissionBackend) CancelRunPermission(
 	_ context.Context, executionID, requestID, pendingID string,
-) (*streams.PermissionCancelResponse, error) {
+) error {
 	b.canceled = append(b.canceled, executionID+"|"+requestID+"|"+pendingID)
-	return &streams.PermissionCancelResponse{}, nil
+	return nil
 }
 
 func TestRuntime_RunPermissionDelegatesByExecution(t *testing.T) {

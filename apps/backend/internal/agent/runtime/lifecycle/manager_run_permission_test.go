@@ -1,7 +1,6 @@
 package lifecycle
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,9 +9,9 @@ import (
 func TestRunPermission_UnknownExecutionIsNotFound(t *testing.T) {
 	manager := newTestManager(t)
 
-	_, err := manager.ResolveRunPermission(t.Context(), "missing", "req", "pending", "opt")
+	err := manager.ResolveRunPermission(t.Context(), "missing", "req", "pending", "opt")
 	require.ErrorIs(t, err, ErrExecutionNotFound)
-	_, err = manager.CancelRunPermission(t.Context(), "missing", "req", "pending")
+	err = manager.CancelRunPermission(t.Context(), "missing", "req", "pending")
 	require.ErrorIs(t, err, ErrExecutionNotFound)
 }
 
@@ -23,8 +22,8 @@ func TestRunPermission_RejectsTaskOwnedExecution(t *testing.T) {
 	execution := createTestExecution("exec-task", "task-1", "session-1")
 	require.NoError(t, manager.executionStore.Add(execution))
 
-	_, err := manager.ResolveRunPermission(t.Context(), "exec-task", "req", "pending", "opt")
+	err := manager.ResolveRunPermission(t.Context(), "exec-task", "req", "pending", "opt")
 	require.ErrorIs(t, err, ErrNotRunOwnedExecution)
-	_, err = manager.CancelRunPermission(t.Context(), "exec-task", "req", "pending")
-	require.True(t, errors.Is(err, ErrNotRunOwnedExecution))
+	err = manager.CancelRunPermission(t.Context(), "exec-task", "req", "pending")
+	require.ErrorIs(t, err, ErrNotRunOwnedExecution)
 }
