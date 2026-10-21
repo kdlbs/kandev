@@ -226,6 +226,11 @@ workspace there from the menu sheet instead.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
 
+If Save fails after some changes were accepted, keep the page open and select
+**Retry save**. Accepted repositories and custom scripts keep their saved identities;
+failed and newer edits stay available for retry. **Reset** restores the changes
+already accepted by the server and discards the remaining draft edits.
+
 If discovery cannot scan a root, the picker keeps repositories from successful
 roots available and retains its normal **Refresh repositories** action. Failed
 root paths stay in structured backend logs and are not shown in selectors. A

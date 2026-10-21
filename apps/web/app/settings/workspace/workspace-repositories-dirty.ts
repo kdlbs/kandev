@@ -75,7 +75,7 @@ export function mergeSavedRepositoryDraft(
   }
   const scripts = current.scripts.map((currentScript) => {
     const submittedIndex = submitted.scripts.findIndex((script) => script.id === currentScript.id);
-    if (submittedIndex < 0) return currentScript;
+    if (submittedIndex < 0) return { ...currentScript, repository_id: saved.id };
     const submittedScript = submitted.scripts[submittedIndex];
     const savedScript = saved.scripts[submittedIndex];
     if (!savedScript) return currentScript;

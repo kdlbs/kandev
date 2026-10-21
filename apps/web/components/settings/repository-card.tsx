@@ -358,6 +358,7 @@ type RepositoryCardProps = {
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
   onDeleteScript: (repoId: string, scriptId: string) => void;
   onSave: (repoId: string) => Promise<void>;
+  onDiscard?: (repoId: string) => void;
   onDelete: (repoId: string) => Promise<void> | void;
 };
 
@@ -438,6 +439,7 @@ export function RepositoryCard({
   onUpdateScript,
   onDeleteScript,
   onSave,
+  onDiscard,
   onDelete,
 }: RepositoryCardProps) {
   const { toast } = useToast();
@@ -468,7 +470,7 @@ export function RepositoryCard({
     canSave: !secretBindingValidation,
     invalidReason,
     save: handleSave,
-    discard: () => undefined,
+    discard: () => onDiscard?.(repository.id),
   });
 
   // Read-only (dedicated Improve Kandev workspace): show the repository
