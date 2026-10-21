@@ -472,6 +472,8 @@ export type SessionSliceActions = {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;

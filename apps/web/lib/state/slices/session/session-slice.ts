@@ -662,10 +662,46 @@ function buildTaskPlanCommentActions(set: ImmerSet) {
   };
 }
 
+/** Runtime read ownership is local to one session slice, with no retained history. */
+function buildTaskPlanReadActions(get: ImmerGet) {
+  const pendingReads = new Map<string, symbol>();
+  return {
+    retire: (taskId: string) => {
+      pendingReads.delete(taskId);
+    },
+    actions: {
+      beginTaskPlanRead: (taskId: string) => {
+        const token = Symbol();
+        pendingReads.set(taskId, token);
+        get().setTaskPlanLoading(taskId, true);
+        return token;
+      },
+      finishTaskPlanRead: (
+        taskId: string,
+        token: symbol,
+        plan?: Parameters<SessionSlice["setTaskPlan"]>[1],
+      ) => {
+        if (pendingReads.get(taskId) !== token) return false;
+        pendingReads.delete(taskId);
+        if (plan !== undefined) {
+          get().setTaskPlan(taskId, plan);
+          get().markTaskPlanSeen(taskId);
+        } else {
+          get().setTaskPlanLoading(taskId, false);
+        }
+        return true;
+      },
+    },
+  };
+}
+
 /** Create the task-plan store actions (set, loading, saving, clear, seen, revisions, preview, compare) backed by the given Immer setter and getter. */
 function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
+  const reads = buildTaskPlanReadActions(get);
   return {
+    ...reads.actions,
     setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
+      reads.retire(taskId);
       const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
       const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
@@ -688,6 +724,7 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
       }),
     ...buildTaskPlanCommentActions(set),
     clearTaskPlan: (taskId: string) => {
+      reads.retire(taskId);
       setPlanLastSeen(taskId, null);
       set((draft) => {
         // revisionContentCache is keyed by revisionId, so pick the IDs for this
