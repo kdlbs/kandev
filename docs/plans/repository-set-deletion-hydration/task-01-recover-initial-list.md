@@ -71,6 +71,8 @@ pre-commit/commit-msg results. No full suites or browser builds are required.
 - `apps/web/hooks/domains/workspace/use-repository-sets.ts`
 - `apps/web/hooks/domains/workspace/use-repository-sets.test.ts`
 - `apps/web/hooks/domains/workspace/use-repository-sets-hydration.test.tsx`
+- `apps/web/components/task-create-dialog.test.tsx` (consistent consumer store fixture)
+- `apps/web/components/task-create-dialog-setup.test.ts` (same store fixture contract)
 - `docs/specs/workspaces/requirements/repository-sets.md`
 - `docs/specs/workspaces/system-design/repository-sets.md`
 - This work order and its linked plan.
@@ -94,6 +96,26 @@ Owning pair's AC 001.6/.7 and client list ownership section; current hook,
 store/handler/API tests and `use-repository-branches.ts` store ownership pattern.
 
 ## Results
+
+Current-head CI frontend shard 2 reported 13 failures in the existing dialog
+lifecycle suite: its selector mock supplied repository-set state but its
+`getState()` mock omitted it. Reproduce the exact suite locally, then give both
+read paths the same complete empty loaded-list fixture. This is a test harness
+correction for the hook's store ownership, not a change to task form behavior.
+The owning repository-set behavior and tests remain unchanged. Targeted command:
+`(cd apps/web && pnpm exec vitest run --maxWorkers=1 components/task-create-dialog.test.tsx)`.
+Shard 1 subsequently reported the same fixture defect in all nine setup-hook
+tests. Reproduce and correct that fixture's selector and direct store reads as
+well. Its targeted command adds
+`components/task-create-dialog-setup.test.ts` to the command above. Original
+fixtures reproduced 13 dialog and nine setup failures. Both now derive selector
+and direct reads from the same complete fixture; existing assertions are
+unchanged. The expanded ten-suite command passed 105 tests, including all 16
+hydration integration cases. Post-crash verification repeated that command with
+`NODE_ENV=production` (Vitest selects its test environment), zero-warning ESLint
+on both fixtures, and the 6 GiB Node 24 typecheck including rich-output
+consistency: all passed (owned handle 37175). No runtime source changed in this
+fixture remediation.
 
 PR review follow-up: CodeRabbit identified hung-transport ownership retention;
 Claude suggested bounding event-driven recovery. Before remediation tests or
