@@ -74,8 +74,9 @@ real persistence, uniqueness and reload using disposable Git repositories.
 
 ## Verification results
 
-Local implementation and validation are complete. Parent exact-diff validation and
-separate delivery authorization remain pending; no push or PR has occurred.
+Local implementation and validation are complete. Parent exact-diff validation
+passed, and delivery was authorized. PR #4648 carries the change; final current-head
+CI, semantic reviews and protected merge confirmation remain external delivery gates.
 
 - Permanent causal RED on baseline: 10 failed / 5 passed. Failures include lost
   canonical identity, early sibling rejection, partial delete/update loss, Reset,
