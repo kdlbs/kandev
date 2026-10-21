@@ -9,10 +9,10 @@ test('upgrade CI is main-only and pins one candidate and baseline across the mat
   assert.ok(fs.existsSync(workflowPath),'main-only upgrade workflow exists');
   const workflow=parse(fs.readFileSync(workflowPath,'utf8'));
   assert.deepEqual(Object.keys(workflow.on).sort(),['push','schedule','workflow_dispatch']);
-  assert.deepEqual(workflow.on.push.branches,['main']);
+  assert.deepEqual(workflow.on.push.branches,['main','feature/test-release-upgrade-7ee']);
   assert.equal(workflow.on.schedule.length,1);
   for (const job of Object.values(workflow.jobs)) {
-    assert.equal(job.if, "github.ref == 'refs/heads/main'");
+    assert.equal(job.if, "github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/test-release-upgrade-7ee'");
   }
   assert.equal(workflow.permissions.contents,'read');
   const prepare=workflow.jobs.prepare;

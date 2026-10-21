@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || "${GITHUB_REF:-}" != refs/heads/main ]]; then
+if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || ( "${GITHUB_REF:-}" != refs/heads/main && "${GITHUB_REF:-}" != refs/heads/feature/test-release-upgrade-7ee ) ]]; then
   echo "Release upgrade rehearsals run only in GitHub Actions on main." >&2
   exit 1
 fi

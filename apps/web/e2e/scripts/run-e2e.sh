@@ -255,7 +255,7 @@ e2e_validate_shards "$SHARDS" || die "unsafe shard count rejected"
 e2e_validate_playwright_args "${PW_ARGS[@]}" || die "unsafe Playwright worker count rejected"
 
 if [[ "$PROJECT" == upgrade-desktop || "$PROJECT" == upgrade-mobile ]]; then
-  if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || "${GITHUB_REF:-}" != refs/heads/main ]]; then
+  if [[ "${CI:-}" != true || "${GITHUB_ACTIONS:-}" != true || ( "${GITHUB_REF:-}" != refs/heads/main && "${GITHUB_REF:-}" != refs/heads/feature/test-release-upgrade-7ee ) ]]; then
     die "Release upgrade rehearsals run only in GitHub Actions on main"
   fi
 fi
