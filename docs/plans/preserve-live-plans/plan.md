@@ -52,7 +52,7 @@ coverage is needed and no unrun browser evidence is claimed.
 ## Verification results
 
 Permanent RED: four causal cases failed (nine assertions), then passed after
-the guard. Final regression: 117 tests in 11 suites passed, including real
+the guard. Final regression: 118 tests in 11 suites passed, including real
 Plan panel/TipTap on desktop and phone. Changed-file ESLint, typecheck with
 8 GiB Node heap, documentation catalog/spec lint, PR documentation coverage
 preflight and diff checks passed. Exact commands and intermediate failures are
@@ -68,3 +68,17 @@ Normal commit precedes parent actual-diff validation; no push/PR before approval
 
 Admission must cover seen/loading/errors as well as content. Provider isolation,
 background reads and own-save/comment identity contracts must be preserved.
+
+
+## Review follow-up
+
+Corrected the requirement-mapping table conjunction and clarified that the
+creation test models an earlier absence response; the same token admission
+rejects non-null stale data in the existing update/delete cases. Retained the
+task-ID predicate: a previously captured refetch callback can be invoked after
+navigation, when its closure task differs from the current view. Added a real
+hook/store regression proving that neither starting nor failing that outgoing
+read clears/replaces the current view's error. Temporarily removing only this
+predicate failed both assertions; restoring production code passed. Production
+logic is unchanged. Local targeted regression now contains 118 tests in the
+same eleven suites. Remote CI/review evidence must be refreshed after the push.

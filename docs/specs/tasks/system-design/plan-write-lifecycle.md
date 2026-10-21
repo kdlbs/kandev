@@ -26,7 +26,7 @@ plan-reference compatibility.
 | --- | --- |
 | `REQ-TASKS-DOCUMENTS-001` | [Transactional write](#transactional-write) and [Error contract](#error-contract) |
 | `REQ-TASKS-DOCUMENTS-002` | [Attachment publication](#attachment-publication), [Candidate cleanup](#candidate-cleanup), and [Attachment consumers](#attachment-consumers) |
-| `REQ-TASKS-DOCUMENTS-003` | [Plan draft acknowledgement](#plan-draft-acknowledgement) and [Plan draft regression strategy](#plan-draft-regression-strategy), and [Plan snapshot admission](#plan-snapshot-admission) |
+| `REQ-TASKS-DOCUMENTS-003` | [Plan draft acknowledgement](#plan-draft-acknowledgement), [Plan draft regression strategy](#plan-draft-regression-strategy), and [Plan snapshot admission](#plan-snapshot-admission) |
 
 ## Components and responsibilities
 

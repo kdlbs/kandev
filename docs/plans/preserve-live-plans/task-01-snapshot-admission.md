@@ -82,7 +82,7 @@ Permanent RED before production: the four initial hook/store/draft/registered
 notification cases failed with nine behavioral assertions: update/delete/create
 rewind, unread consumption and older completion clearing replacement loading.
 No fixture exception. `/tmp/attempt8-red.log` records that run. Initial GREEN:
-four cases passed. Final expanded regression: 117 tests in 11 files passed,
+four cases passed. Final expanded regression: 118 tests in 11 files passed,
 including real Plan panel/TipTap update/delete for desktop and phone. No browser
 or production incident evidence is claimed.
 
@@ -97,4 +97,20 @@ Typecheck initially exceeded Node's default 4 GiB heap. The 8 GiB run exposed
 missing duplicated AppState declarations and test payload/mock typing; these
 were corrected and the test/lint commands rerun successfully. Final typecheck
 passed with `NODE_OPTIONS=--max-old-space-size=8192`. Normal commit hooks are required; their receipt accompanies the parent handoff.
-No publication authorized yet.
+Parent actual-diff validation passed and independently reran the original 117
+tests. Delivery was subsequently authorized; PR #4651 is open. Exact-current-head
+CI, semantic review disposition and protected merge remain delivery gates.
+
+
+## Review follow-up
+
+Corrected the requirement-mapping table conjunction and clarified that the
+creation test models an earlier absence response; the same token admission
+rejects non-null stale data in the existing update/delete cases. Retained the
+task-ID predicate: a previously captured refetch callback can be invoked after
+navigation, when its closure task differs from the current view. Added a real
+hook/store regression proving that neither starting nor failing that outgoing
+read clears/replaces the current view's error. Temporarily removing only this
+predicate failed both assertions; restoring production code passed. Production
+logic is unchanged. Local targeted regression now contains 118 tests in the
+same eleven suites. Remote CI/review evidence must be refreshed after the push.

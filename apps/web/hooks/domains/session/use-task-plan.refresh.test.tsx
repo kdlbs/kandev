@@ -113,6 +113,8 @@ it.each(["updated", "deleted", "created"] as const)(
     expect(h.result.current.draft.draftContent).toBe(expected?.content ?? "");
     const observed = h.result.current.store.getState().taskPlans;
     await act(async () => {
+      // Creation races with an earlier absence response; update/delete cover
+      // non-null stale snapshots through the same value-independent token guard.
       reply.resolve(event === "created" ? null : old);
       await request;
     });
@@ -502,4 +504,35 @@ it("preserves an accepted own save against an older snapshot", async () => {
   });
   expect(h.result.current.plan?.content).toBe(newer.content);
   expect(h.result.current.draft.draftContent).toBe(newer.content);
+});
+
+it("does not let a retained outgoing refetch callback clear or replace the current view's error", async () => {
+  const currentFailure = "Current task failure";
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const outgoing = deferred();
+  transport.request
+    .mockRejectedValueOnce(new Error(currentFailure))
+    .mockReturnValueOnce(outgoing.promise);
+  const h = renderHook(({ id }) => useConsumer(id), { wrapper, initialProps: { id: TASK } });
+  act(() => {
+    h.result.current.store.getState().setTaskPlan(TASK, old);
+    h.result.current.store.getState().setTaskPlan("other", { ...old, task_id: "other" });
+  });
+  const outgoingRefetch = h.result.current.refetch;
+  h.rerender({ id: "other" });
+  await act(async () => {
+    await h.result.current.refetch();
+  });
+  expect(h.result.current.error).toBe(currentFailure);
+  let request!: Promise<void>;
+  act(() => {
+    request = outgoingRefetch();
+  });
+  expect.soft(h.result.current.error).toBe(currentFailure);
+  await act(async () => {
+    outgoing.reject(new Error("Outgoing task failure"));
+    await request;
+  });
+  expect(h.result.current.error).toBe(currentFailure);
+  expect(h.result.current.store.getState().taskPlans.loadingByTaskId[TASK]).toBe(false);
 });
