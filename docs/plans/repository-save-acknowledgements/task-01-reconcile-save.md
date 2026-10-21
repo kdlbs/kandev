@@ -52,7 +52,7 @@ Existing desktop and phone composition is preserved (AC .2 through .4).
 ## Verification
 
 ```bash
-export PATH=/home/jcfs/.nvm/versions/node/v24.18.0/bin:$PATH
+# Requires Node 24 (select it with your version manager).
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run app/settings/workspace/workspace-repositories-save.test.tsx app/settings/workspace/workspace-repositories-client.test.tsx app/settings/workspace/workspace-repositories-dirty.test.ts components/settings/repository-card.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
@@ -126,3 +126,21 @@ sessions were created. Source changes stayed in the supplied isolated worktree;
 E2Es used disposable fixture checkouts and repository records, preserving the
 shared seed repository. Initial selector-only E2E timeout and default-heap
 exhaustion were corrected at the fixture/environment boundaries, respectively.
+
+## PR review refinement
+
+The first published implementation head completed CI with 67 passed, 22 skipped,
+one neutral, zero failed and zero pending checks. Claude and Greptile found no
+blocking correctness issues. CodeRabbit's portable Node prerequisite and per-test
+phone screenshot suggestions are addressed: screenshots attach directly to each
+Playwright test result. The submitted-order invariant is documented at the draft
+merge boundary. Optional suggestions to rewrite the discriminant guard or explain
+the map's unconditional deletion are acknowledged without changing correct logic.
+
+Review refinement verification: the four targeted Vitest suites passed all 70
+tests again. Revised desktop and Pixel 5 flows each passed two tests with one
+worker and zero retries. Changed-file ESLint passed. Phone screenshots now attach
+to the per-test Playwright report without a shared output filename.
+
+Final-head CI/review and merge confirmation are external delivery gates; the
+first-head counts above are historical evidence, not final-head claims.

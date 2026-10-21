@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -11,6 +11,7 @@ import type { Repository, RepositoryScript } from "../../../lib/types/http";
 
 export async function repositorySaveRetry({
   page,
+  testInfo,
   apiClient,
   backend,
   seedData,
@@ -18,6 +19,7 @@ export async function repositorySaveRetry({
   mobile = false,
 }: {
   page: Page;
+  testInfo: TestInfo;
   apiClient: ApiClient;
   backend: BackendContext;
   seedData: SeedData;
@@ -116,9 +118,9 @@ export async function repositorySaveRetry({
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
-      await page.screenshot({
-        path: path.join(process.env.KANDEV_E2E_ARTIFACT_DIR ?? "/tmp", "attempt7-phone-retry.png"),
-        fullPage: true,
+      await testInfo.attach("phone-retry", {
+        body: await page.screenshot({ fullPage: true }),
+        contentType: "image/png",
       });
     }
   } finally {

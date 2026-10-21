@@ -8,9 +8,10 @@ for (const fresh of [false, true]) {
     apiClient,
     backend,
     seedData,
-  }) => {
+  }, testInfo) => {
     await repositorySaveRetry({
       page: testPage,
+      testInfo,
       apiClient,
       backend,
       seedData,
