@@ -33,3 +33,16 @@ it("cancels on Escape without a subsequent blur commit", () => {
   expect(commit).not.toHaveBeenCalled();
   expect(cancel).toHaveBeenCalledTimes(1);
 });
+
+it("retains the native UTF-16 limit for ordinary tab inputs", () => {
+  render(
+    <TabRenameInput
+      initial="Terminal"
+      seqBadge={null}
+      maxLength={120}
+      onCommit={vi.fn()}
+      onCancel={vi.fn()}
+    />,
+  );
+  expect((screen.getByRole("textbox") as HTMLInputElement).maxLength).toBe(120);
+});

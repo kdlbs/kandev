@@ -55,7 +55,7 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 
 | Action             | Effect                                                                                                                                                                     |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rename**         | Changes the session's display name                                                                                                                                         |
+| **Rename**         | Desktop: changes the session's display name, up to 120 Unicode code points                                                                                                                                         |
 | **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
 | **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
 | **Restart session** | Stops and resumes the same active session. Keeps its history and workspace without sending a prompt. |
