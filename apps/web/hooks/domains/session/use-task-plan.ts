@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
@@ -150,7 +150,9 @@ function usePlanFetch({
   const beginRead = useAppStore((state) => state.beginTaskPlanRead);
   const finishRead = useAppStore((state) => state.finishTaskPlanRead);
   const viewRef = useRef({ taskId });
-  if (viewRef.current.taskId !== taskId) viewRef.current = { taskId };
+  useLayoutEffect(() => {
+    if (viewRef.current.taskId !== taskId) viewRef.current = { taskId };
+  }, [taskId]);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;

@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { Suspense, startTransition, useRef, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
@@ -535,4 +535,45 @@ it("does not let a retained outgoing refetch callback clear or replace the curre
   });
   expect(h.result.current.error).toBe(currentFailure);
   expect(h.result.current.store.getState().taskPlans.loadingByTaskId[TASK]).toBe(false);
+});
+
+it("keeps the committed task's read error when another task render suspends", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const reply = deferred();
+  transport.request.mockReturnValue(reply.promise);
+  const blocked = new Promise<void>(() => undefined);
+  const rendered: string[] = [];
+  const h = renderHook(
+    ({ id, suspend }) => {
+      const value = useConsumer(id);
+      rendered.push(id);
+      if (suspend) throw blocked;
+      return value;
+    },
+    {
+      initialProps: { id: TASK, suspend: false },
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <StateProvider>
+          <Suspense fallback={null}>{children}</Suspense>
+        </StateProvider>
+      ),
+    },
+  );
+  act(() => h.result.current.store.getState().setTaskPlan(TASK, old));
+  let request!: Promise<void>;
+  act(() => {
+    request = h.result.current.refetch();
+  });
+  act(() => {
+    startTransition(() => h.rerender({ id: "uncommitted-task", suspend: true }));
+  });
+  expect(rendered).toContain("uncommitted-task");
+  expect(h.result.current.plan).toEqual(old);
+  await act(async () => {
+    reply.reject(new Error("Committed task failure"));
+    await request;
+  });
+  expect.soft(h.result.current.error).toBe("Committed task failure");
+  expect(h.result.current.isLoading).toBe(false);
+  h.rerender({ id: TASK, suspend: false });
 });

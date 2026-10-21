@@ -351,7 +351,9 @@ their publication paths and delete keeps loaded=true.
 
 Retired successes/failures cannot publish, mark seen, clear replacement loading,
 or change errors. Hook-local read errors additionally require the originating
-task view; background success remains valid after navigation/unmount. Consumer
+task view. The view identity advances in a layout effect on commit, so a
+discarded or suspended render for another task cannot invalidate the still
+committed view. Background success remains valid after navigation/unmount. Consumer
 cleanup does not cancel another consumer's store-owned read. Entries are removed
 on completion/publication/clear; no historical generations, promises, or extra
 subscriptions are retained. Later fresh reads remain supported.
