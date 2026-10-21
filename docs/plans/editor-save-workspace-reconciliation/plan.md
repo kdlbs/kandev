@@ -95,7 +95,7 @@ Greptile identified that a conflicting observation matching the original disk
 bytes/hash could be mistaken for an accepted baseline. A real-hash hook/store
 regression failed on the old baseline/hash and false dirty state. Acceptance now
 also requires no current remote warning; existing accepted-snapshot controls
-continue to pass. The final targeted unit result is 89 tests across six suites.
+continue to pass. That first remediation passed 89 tests across six suites.
 An optional review comment now documents snapshot identity at the comparison.
 
 CodeRabbit identified shared seeded-repository contamination in the desktop
@@ -113,3 +113,28 @@ screenshot capture, and neighboring file-creation scenario (3 tests, 19.0s,
 retries disabled, managed one-worker budget). Both regression runs asserted
 source commit/status preservation. Current-head CI and review results remain
 external delivery gates recorded in the PR and parent messages.
+
+
+### Accepted baseline provenance
+
+A fresh full CodeRabbit review of the first remediation found an additional
+AC .10 ordering: Reload or a clean refresh accepts X, then typing and another
+agent warning Z arrive before the older receipt. The latest observation alone
+cannot prove which baseline was actually accepted. Four actual-producer REDs
+covered both acceptance paths and both distinct X and a return to the real
+original baseline/hash. A further RED covered explicit Reload of a preexisting
+snapshot while saving; a matching-save-echo control remains intact.
+
+The store now retains the last accepted workspace snapshot separately from the
+latest observation. Only real clean/matching refresh and Reload publication
+advance acceptance; warning-only publication preserves it. Receipt selection
+requires that this acceptance changed after admission and still matches the
+live baseline. A later matching save echo supersedes an older acceptance. This
+is bounded transient evidence per editor, never a history, API or persisted field.
+
+The six focused suites pass 95 tests. Typecheck and zero-warning changed-file
+lint passed. A fresh production build, extended regression/capture, and neighbor
+scenario passed 3 tests with retries disabled (23.3s). The desktop browser regression also exercises Reload while the
+receipt is pending, then typing and a later warning; typing back to the accepted
+baseline must disable Save after the delayed receipt, proving its dirty baseline
+through the actual UI. Final browser/review/CI results are recorded externally.

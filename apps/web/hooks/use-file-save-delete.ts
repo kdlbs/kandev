@@ -80,6 +80,33 @@ function captureOwner(fileKey: string, params: SaveDeleteParams) {
   return { sessionId, visit, file, panel, api, isCurrent };
 }
 
+function buildSavedFileState(file: FileEditorState, current: FileEditorState, newHash: string) {
+  const observation = current.workspaceSnapshot;
+  // Changed workspace publications install a fresh snapshot object.
+  const hasNewObservation =
+    observation && observation !== file.workspaceSnapshot && observation.content !== file.content;
+  const accepted = current.acceptedWorkspaceSnapshot;
+  const acceptedObservation =
+    accepted &&
+    accepted !== file.acceptedWorkspaceSnapshot &&
+    accepted.content !== file.content &&
+    current.originalContent === accepted.content &&
+    current.originalHash === accepted.hash &&
+    (hasNewObservation || accepted === observation);
+  const originalContent = acceptedObservation ? current.originalContent : file.content;
+  const originalHash = acceptedObservation ? current.originalHash : newHash;
+  return {
+    originalContent,
+    originalHash,
+    isDirty: current.content !== originalContent,
+    ...(!hasNewObservation && {
+      hasRemoteUpdate: false,
+      remoteContent: undefined,
+      remoteOriginalHash: undefined,
+    }),
+  };
+}
+
 function publishSavedFile(
   fileKey: string,
   file: FileEditorState,
@@ -87,7 +114,6 @@ function publishSavedFile(
   params: SaveDeleteParams,
   owner: NonNullable<ReturnType<typeof captureOwner>>,
 ) {
-  // Typing preserves the buffer lifetime while the saved snapshot stays fixed.
   const current = getOpenFiles().get(fileKey)!;
   lspClientManager.saveDocument(
     owner.sessionId,
@@ -96,29 +122,9 @@ function publishSavedFile(
     file.content,
     current.content,
   );
-  const observation = current.workspaceSnapshot;
-  // Changed workspace publications install a fresh snapshot object.
-  const hasNewObservation =
-    observation && observation !== file.workspaceSnapshot && observation.content !== file.content;
-  const acceptedObservation =
-    hasNewObservation &&
-    !current.hasRemoteUpdate &&
-    current.originalContent === observation.content &&
-    current.originalHash === observation.hash;
-  const originalContent = acceptedObservation ? current.originalContent : file.content;
-  const originalHash = acceptedObservation ? current.originalHash : response.new_hash;
-  const stillClean = current.content === originalContent;
-  params.updateFileState(fileKey, {
-    originalContent,
-    originalHash,
-    isDirty: !stillClean,
-    ...(!hasNewObservation && {
-      hasRemoteUpdate: false,
-      remoteContent: undefined,
-      remoteOriginalHash: undefined,
-    }),
-  });
-  if (stillClean && owner.isCurrent()) updatePanelAfterSave(file.path, file.name, file.repo);
+  const updates = buildSavedFileState(file, current, response.new_hash);
+  params.updateFileState(fileKey, updates);
+  if (!updates.isDirty && owner.isCurrent()) updatePanelAfterSave(file.path, file.name, file.repo);
   if (owner.isCurrent() && response.resolution === "overwritten") {
     params.toast({
       title: t("editors:fileSavedOverwritten"),
@@ -229,6 +235,7 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
       const remoteHash = file.remoteOriginalHash ?? (await calculateHash(file.remoteContent));
       if (!owner.isCurrent()) return;
       const current = getOpenFiles().get(fileKey)!;
+      // The buffer lifetime can survive a newer snapshot during hash preparation.
       if (
         !current.hasRemoteUpdate ||
         current.remoteContent !== file.remoteContent ||
@@ -236,7 +243,13 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         current.workspaceSnapshot !== file.workspaceSnapshot
       )
         return;
+      const acceptedWorkspaceSnapshot = file.workspaceSnapshot ?? {
+        content: file.remoteContent,
+        hash: remoteHash,
+      };
       updateFileState(fileKey, {
+        workspaceSnapshot: acceptedWorkspaceSnapshot,
+        acceptedWorkspaceSnapshot,
         content: file.remoteContent,
         originalContent: file.remoteContent,
         originalHash: remoteHash,

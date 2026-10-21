@@ -323,3 +323,80 @@ it("records the saved baseline when a conflicting observation matches the origin
   act(() => h.result.current.actions.handleFileChange(PATH, originalContent, REPO));
   expect(current()?.isDirty).toBe(true);
 });
+
+// @covers AC-UI-FILE-EDITOR-MUTATION-001.10
+it.each([
+  ["reload", ACCEPTED_CONTENT],
+  ["reload", "A disk"],
+  ["refresh", ACCEPTED_CONTENT],
+  ["refresh", "A disk"],
+] as const)(
+  "retains a baseline accepted by %s (%s) beneath a later warning",
+  async (mode, accepted) => {
+    const h = setup();
+    const originalHash = await fileDiff.calculateHash("A disk");
+    h.seed("A", REPO, false, { originalHash });
+    const reply = defer<Reply>();
+    mocks.save.mockReturnValueOnce(reply.promise);
+    const pending = start(() => h.result.current.actions.saveFile(PATH, REPO));
+    if (mode === "refresh") await refresh(h, "A buffer");
+    await refresh(h, accepted);
+    if (mode === "reload")
+      await act(async () => h.result.current.actions.applyRemoteUpdate(PATH, REPO));
+    act(() => h.result.current.actions.handleFileChange(PATH, TYPED_CONTENT, REPO));
+    await refresh(h, AGENT_CONTENT);
+    const baseline = {
+      originalContent: accepted,
+      originalHash: await fileDiff.calculateHash(accepted),
+    };
+    expect(current()).toMatchObject({ ...baseline, hasRemoteUpdate: true });
+    await settle(reply, pending);
+    expect(current()).toMatchObject({
+      ...baseline,
+      content: TYPED_CONTENT,
+      isDirty: true,
+      hasRemoteUpdate: true,
+      remoteContent: AGENT_CONTENT,
+      remoteOriginalHash: await fileDiff.calculateHash(AGENT_CONTENT),
+    });
+  },
+);
+
+it("preserves explicit Reload acceptance of a preexisting snapshot during save", async () => {
+  const h = setup();
+  h.seed();
+  await refresh(h, ACCEPTED_CONTENT);
+  const reply = defer<Reply>();
+  mocks.save.mockReturnValueOnce(reply.promise);
+  const pending = start(() => h.result.current.actions.saveFile(PATH, REPO));
+  await act(async () => h.result.current.actions.applyRemoteUpdate(PATH, REPO));
+  await settle(reply, pending);
+  expect(current()).toMatchObject({
+    content: ACCEPTED_CONTENT,
+    originalContent: ACCEPTED_CONTENT,
+    originalHash: await fileDiff.calculateHash(ACCEPTED_CONTENT),
+    isDirty: false,
+    hasRemoteUpdate: false,
+  });
+});
+
+it("records the save when a later matching echo supersedes a previously accepted baseline", async () => {
+  const h = setup();
+  h.seed();
+  const reply = defer<Reply>();
+  mocks.save.mockReturnValueOnce(reply.promise);
+  const pending = start(() => h.result.current.actions.saveFile(PATH, REPO));
+  await refresh(h, "A buffer");
+  await refresh(h, ACCEPTED_CONTENT);
+  act(() => h.result.current.actions.handleFileChange(PATH, TYPED_CONTENT, REPO));
+  await refresh(h, "A buffer");
+  await settle(reply, pending);
+  expect(current()).toMatchObject({
+    content: TYPED_CONTENT,
+    originalContent: "A buffer",
+    originalHash: "saved-A",
+    isDirty: true,
+    hasRemoteUpdate: false,
+    remoteContent: undefined,
+  });
+});

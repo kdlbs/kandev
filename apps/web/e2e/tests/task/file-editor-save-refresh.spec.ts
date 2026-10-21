@@ -52,6 +52,55 @@ async function holdSaveReceipt(page: Page, filePath: string) {
   return { held: () => Boolean(held), release: () => release() };
 }
 
+async function replaceEditorText(page: Page, content: string) {
+  await page.locator(".monaco-editor:visible").click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.type(content);
+}
+
+async function publishAgentEdit(
+  page: Page,
+  session: SessionPage,
+  diskPath: string,
+  filePath: string,
+  content: string,
+) {
+  fs.writeFileSync(diskPath, content);
+  await session.clickTab("Files");
+  const tab = page.locator(".dv-default-tab").filter({ hasText: filePath });
+  await expect(tab).toHaveCount(1);
+  await tab.click();
+}
+
+async function assertAcceptedBaselineSurvivesWarning(
+  page: Page,
+  session: SessionPage,
+  diskPath: string,
+  filePath: string,
+  hold: Awaited<ReturnType<typeof holdSaveReceipt>>,
+) {
+  const accepted = "accepted baseline content";
+  await replaceEditorText(page, "second submitted save");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect.poll(hold.held).toBe(true);
+  await replaceEditorText(page, "typing during second save");
+  await publishAgentEdit(page, session, diskPath, filePath, accepted);
+  const reload = page.getByRole("button", { name: "Reload", exact: true });
+  await expect(reload).toHaveCount(1);
+  await reload.click();
+  await expect(page.locator(".monaco-editor:visible .view-lines")).toContainText(accepted);
+  await replaceEditorText(page, "typing after accepted baseline");
+  await publishAgentEdit(page, session, diskPath, filePath, "latest agent content\n");
+  await expect(reload).toBeVisible();
+  hold.release();
+  const save = page.getByRole("button", { name: /^Save \(/ });
+  await expect(save).toBeEnabled();
+  await expect(reload).toBeVisible();
+  await replaceEditorText(page, accepted);
+  await expect(save).toBeDisabled();
+  expect(fs.readFileSync(diskPath, "utf8")).toBe("latest agent content\n");
+}
+
 test("keeps Reload available for an agent edit observed before a delayed save receipt", async ({
   testPage,
   apiClient,
@@ -135,6 +184,7 @@ test("keeps Reload available for an agent edit observed before a delayed save re
     await expect(editor.locator(".view-lines")).toContainText("newer agent content");
     await expect(reload).toHaveCount(0);
     expect(fs.readFileSync(diskPath, "utf8")).toBe("newer agent content\n");
+    await assertAcceptedBaselineSurvivesWarning(testPage, session, diskPath, filePath, hold);
   } finally {
     hold.release();
     if (diskPath) fs.rmSync(diskPath, { force: true });

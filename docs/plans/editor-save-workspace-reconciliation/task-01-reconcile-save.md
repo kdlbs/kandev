@@ -69,5 +69,10 @@ Documentation coverage preflight returned `covered` with no errors.
 
 Review remediation extends the same AC .10 with the real-original-hash alias
 regression and explicit Worktree executor isolation with source commit/status
-assertions; see the plan remediation record. The final targeted unit count is
+assertions; see the plan remediation record. The first remediation targeted unit count was
 89. Fresh-build regression/capture/neighbor E2E passed 3 tests with retries off.
+
+The acceptance-provenance extension adds six focused cases (final total 95),
+keeps original-hash alias/echo controls, and extends the same desktop E2E with
+Reload acceptance followed by a later warning and observable dirty-baseline proof.
+Acceptance is transient per buffer and remains separate from latest observation.

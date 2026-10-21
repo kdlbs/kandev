@@ -122,6 +122,7 @@ function publishWorkspaceContent(
     if (response.content === latest.content) {
       updateFileState(fileKey, {
         workspaceSnapshot,
+        acceptedWorkspaceSnapshot: workspaceSnapshot,
         resolvedPath: response.resolved_path,
         originalContent: response.content,
         originalHash: remoteHash,
@@ -160,6 +161,7 @@ function publishWorkspaceContent(
 
   updateFileState(fileKey, {
     workspaceSnapshot,
+    acceptedWorkspaceSnapshot: workspaceSnapshot,
     resolvedPath: response.resolved_path,
     content: response.content,
     originalContent: response.content,

@@ -289,26 +289,35 @@ panel effects, persistence and LSP arguments rather than isolated predicates.
 
 ## Save receipt and workspace observation reconciliation
 
-`FileEditorState.workspaceSnapshot` holds the last accepted workspace content
-and hash as a transient immutable object. Refresh installs a new object when
-it publishes changed content, baseline or remote state. Equal-content no-ops
-retain their object: they introduce no independently changed snapshot.
-Save admission captures that object with its existing buffer owner. Typing
-preserves it; persistence and wire payloads explicitly project descriptors and
-never serialize it. No counter, cache, backend ordering or API is introduced.
+`FileEditorState.workspaceSnapshot` holds the latest changed workspace
+observation as a transient immutable content/hash object. Refresh installs a
+new object when publishing changed content, baseline or remote state; equal
+no-ops keep their object. `acceptedWorkspaceSnapshot` separately identifies the
+last observation actually accepted into the baseline by clean/matching refresh
+or explicit Reload. A conflicting refresh changes only the observation pointer,
+so a later warning cannot erase evidence of an earlier acceptance. Reload reuses
+the observed object, or constructs one when preparing a legacy missing-hash
+snapshot. Typing preserves both pointers. Neither pointer enters persisted tab
+descriptors or wire requests.
 
-At save publication, reread the owned buffer and compare its workspace snapshot
-identity with the admitted snapshot. If the observation changed and its text
-differs from the saved text, preserve the current remote warning/content/hash.
-Only an observation without a current remote warning can count as accepted.
-Matching the original baseline bytes and hash while displaying a warning does
-not establish acceptance. If refresh already accepted that observation as
-baseline, retain its baseline and hash too. Otherwise install the acknowledged saved text/hash as baseline.
-Compute dirtiness against the selected baseline and retain live content. A save
-echo equal to the submitted text and preexisting observations do not keep an
-obsolete conflict. An accepted echo followed by a distinct clean refresh must
-also survive the old receipt. LSP still receives the actual saved text and live
-buffer, not an assertion that the saved receipt is the newest disk observation.
+Save admission captures both pointers with its existing buffer owner. At
+publication, `buildSavedFileState` compares the live observation with admission:
+a changed observation distinct from submitted text retains remote content/hash
+and Reload. Baseline retention independently requires a changed acceptance
+pointer whose text differs from submitted text and whose content/hash still
+match the live baseline. This retains acceptance even beneath a later warning,
+or when the accepted bytes happen to equal the admission-time baseline. Equality
+of original bytes/hash alone never establishes acceptance.
+
+Retain that accepted baseline when the latest observation is the accepted
+snapshot itself or is a distinct post-admission observation. A later matching
+save echo supersedes an earlier accepted baseline and uses the acknowledged
+saved text/hash without keeping an obsolete warning. Otherwise install the
+acknowledged saved text/hash. Derive dirtiness against the selected baseline and
+retain live typing. LSP still receives submitted disk text and live buffer text,
+not an assertion that the save receipt is the newest disk observation. The local
+helper separates this reconciliation from LSP, panel and feedback publication;
+there is no coordinator, backend ordering or API change.
 
 Revalidate the owner immediately before publication and before panel/feedback
 sinks after synchronous store subscribers. Reload's optional hash preparation
