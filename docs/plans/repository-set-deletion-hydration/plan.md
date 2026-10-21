@@ -43,7 +43,10 @@ list. Share a transient in-flight promise per store/workspace in the hook;
 read revision from the store before each attempt. Retry a successfully completed
 but overtaken snapshot only while unloaded. Stop on errors; settle shared
 loading even when the initiating consumer leaves. Reuse local request ownership
-patterns rather than introducing a general cache resource.
+patterns rather than introducing a general cache resource. PR review identified
+that a hung request could retain shared ownership indefinitely. Bound the whole
+initial/recovery operation to 30 seconds with one abort signal and clear its
+timer on settlement; exercise real transport abort and retry before delivery.
 
 Open PR inventory and relevant patches refreshed before implementation:
 1512 `a8655ad9` only removes older legacy workspace state; 3656 `e43f6612`
@@ -75,13 +78,14 @@ terminology, command, configuration, API, or user workflow requires an update.
 
 ## Verification results
 
-Task 01 completed. Eight targeted suites passed (80 tests); the final
-test-only typing correction was followed by all 14 new integration tests
-passing. Scoped ESLint passed with zero warnings, Node 24 typecheck passed
+Task 01 completed. Eight targeted suites passed after PR liveness remediation (82 tests),
+including all 16 integration tests. Two deadline regressions first failed on
+the pre-remediation source, then passed with a shared operation deadline. Scoped ESLint passed with zero warnings, Node 24 typecheck passed
 with a 6 GiB V8 heap under the unchanged 8 GiB guard, and documentation
 catalog, full spec lint, actual-path coverage, and diff checks passed.
-See Task 01 for command receipts and limits. Delivery stops at the normal-hook
-commit for independent parent validation; no push or PR is authorized.
+See Task 01 for command receipts and limits. The initial delivery checkpoint stopped at a normal-hook commit for independent
+parent validation. Later delivery authorization and exact-head CI/review evidence
+are tracked in the external task plan.
 
 ## Risks
 

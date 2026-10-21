@@ -45,11 +45,23 @@ beforeEach(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(
-      (url: string) =>
-        new Promise<Response>((resolve) => {
-          const read = { url, resolve };
+      (url: string, options?: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const read = {
+            url,
+            resolve: (value: Response) => {
+              options?.signal?.removeEventListener("abort", abort);
+              resolve(value);
+            },
+          };
+          const abort = () => {
+            pending.delete(read);
+            reject(options?.signal?.reason);
+          };
           reads.push(read);
           pending.add(read);
+          if (options?.signal?.aborted) abort();
+          else options?.signal?.addEventListener("abort", abort, { once: true });
         }),
     ),
   );
@@ -78,6 +90,7 @@ afterEach(async () => {
     for (const read of pending) read.resolve(response([]));
     pending.clear();
   });
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -386,5 +399,83 @@ describe("repository-set menu consumer", () => {
     expect(onApply).toHaveBeenCalledWith(repositorySet(SURVIVOR));
     expect(view.result.current.isLoading).toBe(false);
     expect(reads).toHaveLength(2);
+  });
+});
+
+describe("repository-set shared read deadlines", () => {
+  it("settles a hung refresh, preserves accepted data, and permits a fresh refresh", async () => {
+    const view = await mount();
+    await release(0, [repositorySet(SURVIVOR)]);
+    vi.useFakeTimers();
+    let refresh!: Promise<void>;
+    act(() => {
+      refresh = view.result.current.refresh();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(reads).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(29_999);
+    });
+    expect(view.result.current.isLoading).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(view.result.current.isLoading).toBe(false);
+    await refresh;
+    expect(view.result.current.sets.map((set) => set.id)).toEqual([SURVIVOR]);
+    act(() => {
+      refresh = view.result.current.refresh();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(reads).toHaveLength(3);
+    await release(2, [repositorySet(SURVIVOR), repositorySet("set-new")]);
+    await refresh;
+    expect(view.result.current.sets.map((set) => set.id)).toEqual(["set-new", SURVIVOR]);
+    expect(view.result.current.isLoading).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds the whole unloaded recovery operation and can retry without resurrection", async () => {
+    vi.useFakeTimers();
+    const view = renderHook(() => ({ ...useRepositorySets(WS), store: useAppStoreApi() }), {
+      wrapper: Wrapper,
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(reads).toHaveLength(1);
+    act(() => deleted(view.result.current.store));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    await release(0, [repositorySet(DELETED), repositorySet(SURVIVOR)]);
+    expect(reads).toHaveLength(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_999);
+    });
+    expect(view.result.current.isLoading).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(view.result.current.isLoading).toBe(false);
+    expect(view.result.current.sets).toEqual([]);
+    expect(view.result.current.store.getState().repositorySets.loadedByWorkspaceId[WS]).toBeFalsy();
+    let refresh!: Promise<void>;
+    act(() => {
+      refresh = view.result.current.refresh();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(reads).toHaveLength(3);
+    await release(2, [repositorySet(SURVIVOR)]);
+    await refresh;
+    expect(view.result.current.sets.map((set) => set.id)).toEqual([SURVIVOR]);
+    expect(view.result.current.isLoading).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

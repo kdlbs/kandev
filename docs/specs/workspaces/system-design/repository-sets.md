@@ -190,6 +190,13 @@ events and loaded status, stops automatic retries, and permits a later mount or
 manual refresh to retry. Independent providers never share request ownership.
 No tombstones or request state are persisted.
 
+The shared read has a 30-second deadline across the initial HTTP attempt and
+all recovery attempts. They share one abort signal. Deadline expiry follows
+the same failure cleanup as a rejected request, preserving cached sets and
+allowing a later retry. Settlement clears the timer as well as ownership and
+loading, so a hung transport or continuous event churn cannot retain the
+single-flight owner indefinitely.
+
 New Task, New Subtask, and repository settings consume this same hook on desktop
 and phone. Recovery changes the available sets without changing draft rows or
 any layout, navigation, touch, or scrolling behavior.

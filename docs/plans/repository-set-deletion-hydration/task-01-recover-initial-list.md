@@ -41,6 +41,9 @@ plugin preferences, live data mutation, push, PR, merge, and other agents.
   failed recovery settles unloaded and can retry without a request storm.
 - Shared consumers and lifecycle/key/provider changes preserve request and
   cache ownership; cached complete data remains usable.
+- A hung read or repeated recovery cannot retain shared ownership beyond a
+  30-second operation deadline; abort settles loading and permits a fresh retry
+  while preserving accepted cache contents.
 
 ## Verification
 
@@ -91,6 +94,24 @@ Owning pair's AC 001.6/.7 and client list ownership section; current hook,
 store/handler/API tests and `use-repository-branches.ts` store ownership pattern.
 
 ## Results
+
+PR review follow-up: CodeRabbit identified hung-transport ownership retention;
+Claude suggested bounding event-driven recovery. Before remediation tests or
+production edits, the owning design now specifies one 30-second deadline for
+the whole shared operation, preserving the existing failure/retry contract.
+Deadline RED: two fake-clock transport-abort cases failed at 30 seconds because
+loading remained true (20466, exit 1); 14 prior cases were excluded by the name
+filter. GREEN: the complete eight-suite command above passed 82 tests, including
+all 16 integration cases (94567, exit 0). The cases prove that a hung loaded
+refresh preserves accepted data and can retry, and that unloaded recovery shares
+the original deadline rather than resetting it. Both verify cleared timers after
+successful retry. The actual fetch transport honors the API-carried abort signal;
+no list API, hook, store, or registered handler is mocked.
+
+The same sequential command then passed zero-warning scoped ESLint and the
+6 GiB Node 24 typecheck, including rich-output consistency. Catalog, full spec
+lint, coverage, and ordinary hook receipts accompany this remediation. The
+following earlier receipts remain historical evidence of the initial repair.
 
 - Dependency install: `pnpm install --frozen-lockfile` from `apps`, exit 0
   (owned handle 46519). Node 24.18.0 was added after the guard shims on PATH.
