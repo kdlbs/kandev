@@ -3,6 +3,7 @@ import {
   continuationPhase,
   interruptionRecoveryKey,
   retryNoticeVisible,
+  retainedTurnRecoveryKey,
 } from "./interruption-recovery-feedback";
 
 describe("provider interruption feedback", () => {
@@ -54,5 +55,32 @@ describe("provider interruption feedback", () => {
     expect(
       interruptionRecoveryKey({ recovery_disposition: "cancelled", attempts_started: 1 }),
     ).toBe("chat:providerRecoveryCancelledBody");
+  });
+});
+
+// @covers AC-PLATFORM-TURN-CONTINUITY-003.5
+describe("capacity recovery deadline feedback", () => {
+  it("distinguishes window expiry from exhausted attempts and refusal", () => {
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "window_expired",
+        attempts_started: 3,
+      }),
+    ).toBe("chat:retainedTurnRecoveryWindowExpiredBody");
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "restart_interrupted",
+        attempts_started: 6,
+      }),
+    ).toBe("chat:retainedTurnRecoveryRestartBody");
+    expect(
+      retainedTurnRecoveryKey({
+        runtime_retained: true,
+        recovery_disposition: "refused",
+        attempts_started: 0,
+      }),
+    ).toBe("chat:retainedTurnRecoveryStoppedBody");
   });
 });

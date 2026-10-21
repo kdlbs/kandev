@@ -271,7 +271,10 @@ func TestRetainedRuntimeConfirmedAbsenceUsesExistingReplayFallback(t *testing.T)
 	probe := &retainedRuntimeProbeAgentManager{mockAgentManager: mgr, running: false}
 	svc.agentManager = probe
 
-	svc.handleAgentTurnFailed(context.Background(), retainedTurnFailureDataForReplay())
+	data := retainedTurnFailureDataForReplay()
+	data.ErrorMessage = overloaded529
+	data.ProviderError = nil
+	svc.handleAgentTurnFailed(context.Background(), data)
 	value, ok := svc.transientRetries.Load("s1")
 	require.True(t, ok)
 	entry := value.(*transientRetryEntry)

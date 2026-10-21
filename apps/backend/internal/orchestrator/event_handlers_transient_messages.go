@@ -45,14 +45,21 @@ func (s *Service) createTransientRetryStatusMessageLocked(
 	if s.messageCreator == nil || state.retired.Load() {
 		return
 	}
+	policy := transientRetryPolicy{}
 	if value, ok := s.transientRetries.Load(data.SessionID); ok {
 		if entry, ok := value.(*transientRetryEntry); ok {
 			entry.mu.Lock()
+			policy = entry.policy
 			data.RecoveryAttemptsStarted = entry.started
 			entry.mu.Unlock()
 		}
 	}
 	content, meta := transientRetryStatusMessage(data, classified, attempt, delay, retryAt)
+	if !policy.windowEndsAt.IsZero() {
+		meta["max_attempts"] = policy.maxAttempts()
+		meta["retry_window_ends_at"] = policy.windowEndsAt.UTC().Format(time.RFC3339Nano)
+		content = fmt.Sprintf("%s. Retrying in %ds (attempt %d/%d)", transientFailureLabel(classified), int(delay.Seconds()), attempt, policy.maxAttempts())
+	}
 	if s.transientRetryMessages != nil {
 		s.updateTransientRetryStatusMessageLocked(ctx, data, content, meta)
 		return

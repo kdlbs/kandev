@@ -1,3 +1,4 @@
+import { driveCapacityRetries } from "../../helpers/capacity-retry-clock";
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { watchWs } from "../../helpers/causal-waits";
@@ -219,6 +220,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
 }) => {
   const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel", {
     initialPrompt: "/e2e:simple-message",
+    controlRetryClock: true,
   });
   try {
     const ws = watchWs(testPage);
@@ -227,7 +229,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
     await session.waitForLoad();
     await session.sendMessageViaButton("/capacity-cancel");
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toContainText(/attempt 1 of 5/i);
+    await expect(session.transientRetryCard()).toContainText(/attempt 1 of 11/i);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
     const bounds = await session.recoveryCancelRetryButton().boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
@@ -251,7 +253,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
   }
 });
 
-test("phone and desktop: one capacity episode exhausts after five dispatches and keeps Chat available", async ({
+test("phone and desktop: one capacity episode exhausts after eleven dispatches and keeps Chat available", async ({
   testPage,
   desktopTestPage,
   apiClient,
@@ -282,16 +284,17 @@ test("phone and desktop: one capacity episode exhausts after five dispatches and
       30_000,
       "waiting for the task session execution identity",
     );
+    await driveCapacityRetries(backend, apiClient, fixture.sessionId, 11);
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "exhausted");
     assertRetainedFailureMessage(failure);
-    expect(failure.metadata?.attempts_started).toBe(5);
+    expect(failure.metadata?.attempts_started).toBe(11);
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
     const feedback = session.activeChat().getByTestId("retained-turn-recovery-feedback");
     await expect(feedback).toBeVisible();
-    await expect(feedback).toContainText("5");
+    await expect(feedback).toContainText("11");
     expect(
       await pollUntil(
         async () => {
@@ -311,12 +314,12 @@ test("phone and desktop: one capacity episode exhausts after five dispatches and
       .activeChat()
       .getByTestId("retained-turn-recovery-feedback");
     await expect(desktopFeedback).toBeVisible();
-    await expect(desktopFeedback).toContainText("5");
+    await expect(desktopFeedback).toContainText("11");
     const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
     expect(messages.filter((message) => message.metadata?.runtime_retained === true)).toHaveLength(
       1,
     );
-    assertRetainedACPTrace(fixture.tracePath, 6);
+    assertRetainedACPTrace(fixture.tracePath, 12);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

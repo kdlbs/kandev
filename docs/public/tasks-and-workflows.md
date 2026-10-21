@@ -661,8 +661,14 @@ For a supported interactive task, Kandev can continue an unfinished request
 in the same live conversation after the normal retry delay when the model is
 at capacity and at least one tool has a confirmed result. Kandev keeps those
 actions in the conversation and asks the agent to continue without repeating
-them. This does not guarantee exactly-once execution. The inline notice shows
-the attempt count and lets you cancel while Kandev waits. Kandev leaves the
+them. This does not guarantee exactly-once execution. Eligible capacity recovery
+uses up to 11 additional attempts within 30 minutes, with waits increasing from
+5 seconds to at most 5 minutes. The inline notice shows the attempt count, next
+retry, recovery deadline, and **Cancel** action. Sending a new message, changing
+the session configuration, or cancelling stops pending recovery. A backend
+restart also stops automatic recovery; it does not restore the retry schedule.
+The deadline prevents another retry but does not interrupt a turn already running.
+Kandev leaves the
 error for you to handle when a tool or permission is still pending, an outcome
 is uncertain, background work is unaccounted for, the provider does not
 support live continuation, or the runtime is no longer usable. The composer

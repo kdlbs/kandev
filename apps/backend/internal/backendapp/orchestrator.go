@@ -82,6 +82,7 @@ func provideOrchestrator(
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	retryClock *e2eCapacityRetryClock,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -92,6 +93,9 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	if retryClock != nil {
+		serviceCfg.RetryClock = retryClock
+	}
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =

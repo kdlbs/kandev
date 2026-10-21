@@ -62,6 +62,7 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
+	RetryClock RetryClock
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
