@@ -53,7 +53,8 @@ python3 scripts/list-docs.py validate && python3 scripts/lint-spec-files.py --al
 
 ## Verification results
 
-Author-reported results are recorded in the work order.
+Author-reported results and contributor-review consumer validation are
+recorded in the work order.
 
 ## Risks
 

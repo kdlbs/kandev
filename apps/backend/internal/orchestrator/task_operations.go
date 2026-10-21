@@ -3073,13 +3073,11 @@ func (s *Service) buildWorkflowEntryPrompt(
 ) (string, string, error) {
 	basePrompt := taskDescription
 	if step.Prompt == "" && strings.TrimSpace(taskDescription) != "" {
-		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID, incarnationID)
+		fallback, err := s.claimWorkflowPromptFallback(ctx, taskID, step.ID, sessionID, incarnationID, taskDescription)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to claim workflow prompt fallback: %w", err)
 		}
-		if !claimed {
-			basePrompt = ""
-		}
+		basePrompt = fallback
 	}
 	// A replacement session is intentionally a fresh prompt boundary. It has
 	// no prior claim, so the task description is eligible again after a reused
@@ -4113,21 +4111,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	if err != nil {
 		return fmt.Errorf("failed to get session: %w", err)
 	}
-	if session.TaskID != taskID {
-		return fmt.Errorf("session does not belong to task")
-	}
-	effectiveProfile, err := s.resolveStepAgentProfileForTaskID(ctx, taskID, step)
-	if err != nil {
+	if err := s.validateWorkflowAutoStartAdmission(ctx, session); err != nil {
 		return err
 	}
-	if effectiveProfile != "" && effectiveProfile != session.AgentProfileID {
-		return fmt.Errorf(
-			"workflow step profile mismatch: step %q resolves to profile %q but session %q uses profile %q; route the session before prompting",
-			workflowStepID,
-			effectiveProfile,
-			session.ID,
-			session.AgentProfileID,
-		)
+	if err := s.validateWorkflowStepPromptSession(ctx, taskID, session, step); err != nil {
+		return err
 	}
 
 	dbTask, err := s.repo.GetTask(ctx, taskID)
@@ -4145,9 +4133,6 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		}
 	}
 
-	if session.ReviewStatus == models.ReviewStatusPending {
-		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
-	}
 	preConsultRes, refused, err := s.admitOrDeferWorkflowStepEnsureWithBinding(ctx, taskID, sessionID, workflowStepID, entryBinding)
 	if err != nil {
 		return err
@@ -4181,10 +4166,14 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		}
 	}
 
-	effectivePrompt, promptReferenceContext, err := s.buildWorkflowEntryPrompt(
-		ctx, dbTask.Description, step, taskID, sessionID, session.QueueIncarnationID, session.IsPassthrough,
-	)
-	if err != nil {
+	var effectivePrompt, promptReferenceContext string
+	if err := s.withWorkflowAutoStartInputAdmission(ctx, session, step, false, func() error {
+		var buildErr error
+		effectivePrompt, promptReferenceContext, buildErr = s.buildWorkflowEntryPrompt(
+			ctx, dbTask.Description, step, taskID, sessionID, session.QueueIncarnationID, session.IsPassthrough,
+		)
+		return buildErr
+	}); err != nil {
 		return fmt.Errorf("failed to build workflow prompt: %w", err)
 	}
 
@@ -4215,7 +4204,13 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// excludes the handoff text, then appended last. Queue promotion and
 	// manual auto-start dispatch once with no replacement launch, so no
 	// shared stepHandoffOnce is needed here.
-	handoffText := s.claimStepHandoffTextForLaunch(ctx, taskID, workflowStepID)
+	var handoffText string
+	if err := s.withWorkflowAutoStartInputAdmission(ctx, session, step, true, func() error {
+		handoffText = s.claimStepHandoffTextForLaunch(ctx, taskID, workflowStepID)
+		return nil
+	}); err != nil {
+		return err
+	}
 	effectivePrompt = appendStepHandoffToPrompt(effectivePrompt, handoffText)
 	composedLaunchPrompt := appendStepHandoffToPrompt(promptForEmptinessCheck, handoffText)
 
@@ -4223,12 +4218,19 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	// included): if promptTask's own internal ErrExecutionNotFound recovery
 	// fires, it must reuse this composed prompt rather than recomposing from
 	// the destination step's own template and discarding the handoff.
+	var cancellationFence *promptCancellationFence
+	var expectedIdentity *messagequeue.QueueSessionIdentity
+	if admission := workflowAutoStartAdmissionFromContext(ctx, taskID, sessionID); admission != nil {
+		cancellationFence, expectedIdentity = &admission.cancellationFence, &admission.identity
+	}
 	_, err = s.promptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false, launchOriginAutomatic, promptTaskOptions{
-		promptAlreadyComposed:  true,
-		fallbackLaunchPrompt:   composedLaunchPrompt,
-		fallbackRetryPrompt:    effectivePrompt,
-		promptReferenceContext: promptReferenceContext,
-		ceilingEntryBinding:    entryBinding,
+		cancellationFence:       cancellationFence,
+		expectedSessionIdentity: expectedIdentity,
+		promptAlreadyComposed:   true,
+		fallbackLaunchPrompt:    composedLaunchPrompt,
+		fallbackRetryPrompt:     effectivePrompt,
+		promptReferenceContext:  promptReferenceContext,
+		ceilingEntryBinding:     entryBinding,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to prompt session: %w", err)
@@ -10384,6 +10386,7 @@ type lockedCancelInFlightGuard struct {
 }
 
 type cancelInFlightGuardHeldContextKey struct{}
+type cancelInFlightGuardSessionContextKey struct{}
 
 func withCancelInFlightGuardHeld(ctx context.Context) context.Context {
 	return context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, true)
@@ -10395,6 +10398,19 @@ func cancelInFlightGuardHeld(ctx context.Context) bool {
 	}
 	held, _ := ctx.Value(cancelInFlightGuardHeldContextKey{}).(bool)
 	return held
+}
+
+// withCancelInFlightGuardHeldForSession scopes ownership to the guarded session.
+func withCancelInFlightGuardHeldForSession(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(withCancelInFlightGuardHeld(ctx), cancelInFlightGuardSessionContextKey{}, sessionID)
+}
+
+func cancelInFlightGuardHeldForSession(ctx context.Context, sessionID string) bool {
+	if sessionID == "" || !cancelInFlightGuardHeld(ctx) {
+		return false
+	}
+	owner, _ := ctx.Value(cancelInFlightGuardSessionContextKey{}).(string)
+	return owner == sessionID
 }
 
 func (s *Service) lockCancelInFlightGuard(sessionID string) *lockedCancelInFlightGuard {

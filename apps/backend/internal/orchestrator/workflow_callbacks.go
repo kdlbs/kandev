@@ -297,7 +297,12 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 	// A launch refused as busy never reached the agent, so the prompt is still
 	// owed: queue it if the session is mid-turn, otherwise launch again. Every
 	// attempt shares one handoff claim so a refused attempt cannot consume it.
+	ctx, admissionErr := c.svc.withWorkflowAutoStartAdmission(ctx, in.State.TaskID, in.State.SessionID)
+	if admissionErr != nil {
+		return engine.ActionResult{}, admissionErr
+	}
 	handoffOnce := newStepHandoffOnce()
+	ctx = withWorkflowPromptFallback(ctx, in.State.TaskID, in.Step.ID)
 	ctx = withStepHandoffOnce(ctx, in.State.TaskID, in.Step.ID, handoffOnce)
 	// Each busy rejection, including the last, is followed by a mid-turn check.
 	var err error
@@ -319,6 +324,7 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 		if !isPromptRejectedAsBusy(err) {
 			break
 		}
+		ctx = context.WithValue(ctx, workflowAutoStartRetryKey{}, true)
 	}
 	return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
 }
@@ -347,6 +353,9 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(
 	if err != nil {
 		return false, fmt.Errorf("load session for queued auto-start: %w", err)
 	}
+	if err := c.svc.validateWorkflowAutoStartAdmission(ctx, session); err != nil {
+		return false, err
+	}
 	if !sessionMidTurn(session) {
 		return false, nil
 	}
@@ -361,18 +370,21 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(
 	if err != nil {
 		return false, fmt.Errorf("load task for queued auto-start: %w", err)
 	}
-	prompt, promptReferenceContext, err := c.svc.buildWorkflowEntryPrompt(
-		ctx, task.Description, step, task.ID, session.ID, session.QueueIncarnationID, session.IsPassthrough,
-	)
-	if err != nil {
-		return false, fmt.Errorf("build workflow prompt for queued auto-start: %w", err)
-	}
-	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-	if err := c.svc.autoStartStepPromptWithPromptContext(
-		ctx, task.ID, session, step, prompt, planMode, true, handoffOnce, promptReferenceContext,
-	); err != nil {
+	if err := c.svc.withWorkflowAutoStartInputAdmission(ctx, session, step, true, func() error {
+		prompt, promptReferenceContext, err := c.svc.buildWorkflowEntryPrompt(
+			ctx, task.Description, step, task.ID, session.ID, session.QueueIncarnationID, session.IsPassthrough,
+		)
+		if err != nil {
+			return fmt.Errorf("build workflow prompt for queued auto-start: %w", err)
+		}
+		planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
+		return c.svc.autoStartStepPromptWithPromptContext(
+			ctx, task.ID, session, step, prompt, planMode, true, handoffOnce, promptReferenceContext,
+		)
+	}); err != nil {
 		return false, fmt.Errorf("queue auto-start prompt: %w", err)
 	}
+
 	c.svc.logger.Info("queued workflow step auto-start until the current turn ends",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
@@ -387,7 +399,7 @@ func (c *autoStartAgentCallback) queueStepPromptIfBusy(
 // guard, so it is skipped when the caller already holds it; that caller drains
 // the queue itself once it settles the turn.
 func (c *autoStartAgentCallback) drainIfTurnEnded(ctx context.Context, sessionID string) {
-	if workflowProfileSwitchGuardIsHeld(ctx, sessionID) || cancelInFlightGuardHeld(ctx) {
+	if workflowProfileSwitchGuardIsHeld(ctx, sessionID) || cancelInFlightGuardHeldForSession(ctx, sessionID) {
 		return
 	}
 	latest, err := c.svc.repo.GetTaskSession(ctx, sessionID)

@@ -46,6 +46,23 @@ and are unchanged. The `on_enter` auto-start path is unchanged.
    uncertain delivery, is returned unchanged, so a prompt that may already have
    been delivered is never queued or sent again.
 
+The busy queue path retains the direct launch's prompt authorization, task/session
+binding, effective profile, and pending-approval checks. Each callback snapshots
+one session incarnation and cancellation revision. Queue insertion revalidates them under
+the session guard and uses identity-bound queue admission; a busy retry passes
+the same identity and revision to prompt admission. Direct launch validates
+the original incarnation before constructing the prompt or claiming one-shot
+inputs. Input validation and each fallback or handoff claim share the session
+guard, including after the post-readiness session reload. The guard is released
+before runtime readiness or provider I/O. The captured admission remains present
+when a reload returns another task binding; the complete original tuple must
+still match before any claim. An acknowledged cancellation
+or a replaced incarnation therefore cannot become a fresh launch attempt.
+
+A confirmed busy refusal does not authorize terminal-session recovery. A retry
+stops when the original session becomes terminal; initial and manual recovery
+routes keep their existing policy.
+
 ## Step handoff across attempts
 
 A step handoff carry token is claimed once per step entry.
@@ -57,17 +74,31 @@ action and passes it in the context, scoped to the task and step
 text claimed by a refused launch rides on the retry or on the queued prompt.
 Without a scoped once, the launch claims directly as before.
 
+For an empty step prompt, `buildWorkflowEntryPrompt` can claim the initial
+task-description fallback before prompt admission. A callback retains the exact
+claimed description for its task, step, session, and incarnation across busy
+retries and queue fallback. The SQL claim remains single-use; another action or
+session incarnation must claim independently.
+
 ## Turn ending while queueing
 
 The ready handler that ends a turn settles it and drains the queue under the
-session guard. The callback reads the session state, then queues, without that
-guard, so the turn can end in between: its drain then finds an empty queue.
-After queueing, the callback re-reads the session. When the session is no
-longer mid-turn, it runs the guarded queue drain
+session guard. The callback initially reads the session outside that guard.
+The turn can end before guarded queue insertion, so the ready handler can
+find an empty queue. Insertion releases any guard it acquired before the
+callback re-reads the session. When the session is no longer mid-turn, it runs
+the guarded queue drain
 (`drainQueuedMessageForPromptableSession`), which delivers the prompt once; a
 concurrent drain claims the same message at most once. The callback skips this
 drain when its caller already holds the session guard, since that caller owns
-the turn settlement and its drain.
+the turn settlement and its drain. Ownership is session-scoped: a child's held
+guard cannot suppress the parent's drain. Dynamic successor launch records the
+owning session alongside its existing generic held-guard marker. Resume-attempt
+registration clears the generic marker before detached lifecycle work, which
+also invalidates the scoped ownership check. When targeting a different session,
+the callback clears unowned inherited guard authority before direct launch or
+queue-triggered resume, so legacy resume registration acquires the target's
+guard rather than inheriting the child's.
 
 ## Operation settlement
 
@@ -89,3 +120,9 @@ that the prompt is delivered once and leaves the queue. The
 turn (launched again), by a started turn (queued), a non-busy launch error
 (returned, nothing queued), and a handoff claimed by a refused launch (carried
 on the queued prompt).
+
+Review remediation also exercises real `LaunchSession` / `promptTask` busy
+rejections, acknowledged cancellation, profile/approval rejection, and a
+session-incarnation replacement before insertion. SQLite queue tests check
+fallback and handoff retention through queue merging and concurrent duplicate
+completion delivery, followed by exactly one consumer dispatch.
