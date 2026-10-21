@@ -180,8 +180,8 @@ function SecretListItemRowActions({
             <Button
               variant="ghost"
               onClick={() => onCopyMove(secret)}
-              // A Move removes the source; it must never run while that secret's
-              // edit/create draft is open (the draft would outlive its row).
+              // A Move removes the source; it must never run while a create
+              // draft is open (the draft would outlive its row).
               disabled={isBusy || showCreate}
               className="cursor-pointer"
               aria-label={t("settings:copyMoveSecretNamed", { name: secret.name })}

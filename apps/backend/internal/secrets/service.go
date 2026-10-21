@@ -191,9 +191,15 @@ func (s *Service) updateStored(ctx context.Context, id, workspaceID string, req 
 }
 
 // getStored reads a secret back after a write with the same scope the write
-// used; the UserVisibleStore's global Get accepts Global secrets only.
+// used. The workspace write already authorized the caller, so the scoped
+// read goes through the store surface without re-running the service-level
+// workspace authorizer; the UserVisibleStore's global Get accepts Global
+// secrets only.
 func (s *Service) getStored(ctx context.Context, id, workspaceID string) (*Secret, error) {
 	if workspaceID != "" {
+		if scoped, ok := s.store.(ScopedSecretStore); ok {
+			return scoped.GetForWorkspace(ctx, id, workspaceID)
+		}
 		return s.GetForWorkspace(ctx, id, workspaceID)
 	}
 	return s.Get(ctx, id)

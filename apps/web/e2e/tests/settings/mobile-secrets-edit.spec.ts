@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { settledBoundingBox } from "../../helpers/settled-box";
 
@@ -26,7 +27,9 @@ for (const scope of ["workspace", "global"] as const) {
     await testPage.goto(path);
     const row = testPage.getByTestId(`secret-row-${secret.id}`);
     await expect(row).toHaveCount(1);
+    const revealed = waitForHttp(testPage, "POST", /\/api\/v1\/secrets\/[^/?]+\/reveal/);
     await row.getByRole("button", { name: `Reveal secret ${name}`, exact: true }).tap();
+    await revealed;
     await expect(row.getByText(originalValue, { exact: true })).toBeVisible();
     const edit = row.getByRole("button", { name: `Edit secret ${name}`, exact: true });
     const editBox = await settledBoundingBox(edit);
@@ -45,7 +48,11 @@ for (const scope of ["workspace", "global"] as const) {
     const saveBox = await settledBoundingBox(save);
     expect(saveBox.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "phone secret edit form");
+    const saved = waitForHttp(testPage, "PUT", /\/api\/v1\/secrets\/[^/]+$/, {
+      predicate: (response) => response.status() === 200,
+    });
     await save.tap();
+    await saved;
     await expect(row.getByText(renamed, { exact: true })).toBeVisible();
     await expect(testPage.getByPlaceholder("Secret value")).toHaveCount(0);
     await expect(testPage.locator("body")).not.toContainText(originalValue);
@@ -53,7 +60,9 @@ for (const scope of ["workspace", "global"] as const) {
 
     await testPage.reload();
     await expect(row.getByText(renamed, { exact: true })).toBeVisible();
+    const rerevealed = waitForHttp(testPage, "POST", /\/api\/v1\/secrets\/[^/?]+\/reveal/);
     await row.getByRole("button", { name: `Reveal secret ${renamed}`, exact: true }).tap();
+    await rerevealed;
     await expect(row.getByText(rotatedValue, { exact: true })).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(originalValue);
     await assertNoDocumentHorizontalOverflow(testPage, "phone secret edit result");
