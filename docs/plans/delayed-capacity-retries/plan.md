@@ -214,3 +214,20 @@ is handled by the authorized PR delivery workflow after the local commit.
 Task 02 updated the recovery explanation in `docs/public/tasks-and-workflows.md`
 with limits, Cancel, manual fallback, and restart behavior. Earlier completed
 packages remain historical evidence for their original behavior.
+
+## PR remediation verification
+
+Review regressions now prove that a fifth transport-restoration attempt can
+finish its already-counted admission, and rejected retained-runtime replays do
+not increment the actual started count. Budget checks remain at new-attempt
+admission; owner validation still enforces deadline, identity, and authorization.
+Restart retirement clears pending timing/actions and attempts stale-action cleanup
+if conversion fails. Changed-error settlement is covered through the terminal
+handler inside and after the original capacity window. The requirement's stale
+pending-implementation label and temporary E2E timeout diagnostics were removed.
+
+After reconciling main's shared-policy refactor, the affected backend race
+selection, 65 frontend tests, typecheck, and all 16 desktop/phone browser tests
+passed again. Four fresh captures replace the earlier verification assets.
+The initial PR head's 89 passed, 15 skipped, and one neutral remote check are
+historical; the remediation commit requires fresh remote CI and review evidence.

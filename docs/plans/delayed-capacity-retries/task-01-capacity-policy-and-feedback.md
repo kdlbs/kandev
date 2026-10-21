@@ -164,3 +164,13 @@ and replay-to-continuation cases. Changed-package Go lint reports zero issues.
 All 65 focused frontend tests, localization checks, frontend typecheck, and focused
 source/E2E lint passed. Desktop and phone rendered proof passed (8 tests each).
 See the plan's verification results for exact selection and artifact freshness.
+
+PR remediation adds `TestInterruptionContinuationFifthRestoreDispatches`,
+`TestCapacityDelayedRetryChangedErrorSettlesEpisode`,
+`TestCapacityDelayedRetryRejectedReplayDoesNotCount`, and
+`TestCapacityDelayedRetryRestartNoticeUpdateFailure`. Red reproduced the final
+restoration block, rejected-replay overcount, and skipped restart cleanup; the
+corrected cases and full affected race selection pass on the reconciled tree.
+The replay acceptance fixtures now use the real turn service. Immutable policy
+reads remain intentionally unlocked; capacity episodes still never restore a
+lost runtime. Fresh remote verification remains the PR workflow's final gate.

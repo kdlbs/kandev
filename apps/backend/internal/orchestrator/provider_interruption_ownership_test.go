@@ -29,13 +29,7 @@ func dispatchContinuationFixture(t *testing.T) (*Service, *mockAgentManager, *tr
 func installContinuationRestoreFixture(t *testing.T, svc *Service) *mockAgentManager {
 	t.Helper()
 	mgr := svc.agentManager.(*mockAgentManager)
-	if svc.turnService == nil {
-		repo := svc.repo.(*sqliterepo.Repository)
-		svc.turnService = taskservice.NewService(taskservice.Repos{
-			Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo,
-			GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo,
-		}, &recordingEventBus{}, testLogger(), taskservice.RepositoryDiscoveryConfig{})
-	}
+	installInterruptionTurnService(t, svc)
 	mgr.isAgentRunning = true
 	mgr.currentPromptExecutionID = "replacement-1"
 	mgr.currentPromptGeneration.Store(7)
@@ -56,6 +50,18 @@ func installContinuationRestoreFixture(t *testing.T, svc *Service) *mockAgentMan
 		return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-1"}, nil
 	}
 	return mgr
+}
+
+func installInterruptionTurnService(t *testing.T, svc *Service) {
+	t.Helper()
+	if svc.turnService != nil {
+		return
+	}
+	repo := svc.repo.(*sqliterepo.Repository)
+	svc.turnService = taskservice.NewService(taskservice.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo,
+		GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo, TaskEnvironments: repo, Reviews: repo,
+	}, &recordingEventBus{}, testLogger(), taskservice.RepositoryDiscoveryConfig{})
 }
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-002.3

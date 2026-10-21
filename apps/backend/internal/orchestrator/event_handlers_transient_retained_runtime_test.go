@@ -18,6 +18,7 @@ import (
 func TestTransientReplayUsesRetainedRuntime(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
+	installInterruptionTurnService(t, svc)
 	mgr := configureRetainedReplayRuntime(t, svc)
 	armTransientPromptEvidence(svc)
 	svc.rememberTurnPrompt("s1", "retry the request", "", false, nil)

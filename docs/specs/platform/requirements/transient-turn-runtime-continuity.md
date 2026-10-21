@@ -135,4 +135,4 @@ Older remote components without the new evidence retain conservative existing re
 - [System design](../system-design/transient-turn-runtime-continuity.md)
 - [Implementation plan](../../../plans/transient-turn-runtime-continuity/plan.md)
 - [Capacity continuation amendment](../../../plans/model-capacity-continuation/plan.md)
-- [Delayed capacity retries](../../../plans/delayed-capacity-retries/plan.md) (pending implementation of the October 21 timing amendment)
+- [Delayed capacity retries](../../../plans/delayed-capacity-retries/plan.md) (October 21 timing amendment)

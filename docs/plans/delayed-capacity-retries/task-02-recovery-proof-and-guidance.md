@@ -146,3 +146,10 @@ continuity checks; Task 01 regressions and fixes address both. Test-only correct
 aligned mock response copy, phone sending, and eleven-attempt assertions. Earlier
 stale-artifact preflight rejections are not counted as behavioral validation.
 Public guidance, documentation validators/tests, spec gates, and PR coverage pass.
+
+After PR remediation and reconciliation with main's shared-policy refactor,
+Chromium and mobile-chrome each passed all eight scenarios again. Both suites
+used freshly rebuilt backend/delivery/plugin artifacts and production web assets
+with unchanged freshness gates. New desktop/phone waiting and expired captures
+were collected for the remediation head. Timeout diagnostics now preserve the
+original polling error without secondary file or API reads.

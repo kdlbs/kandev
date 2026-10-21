@@ -339,7 +339,7 @@ func (s *Service) validateContinuationOwner(ctx context.Context, taskID, session
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if entry.stopDisposition(s.transientRetryNow()) != "" {
+	if entry.policy.expired(s.transientRetryNow()) {
 		return ErrResumeAttemptCancelled
 	}
 	current, ok := s.transientRetries.Load(sessionID)

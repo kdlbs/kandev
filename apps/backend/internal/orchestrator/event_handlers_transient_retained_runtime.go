@@ -172,6 +172,12 @@ func (s *Service) retryRetainedRuntimePrompt(
 		return nil
 	}
 	onAccepted := func(turnID string) {
+		entry.mu.Lock()
+		if !started {
+			entry.started++
+			started = true
+		}
+		entry.mu.Unlock()
 		if prompt.onAccepted != nil {
 			prompt.onAccepted(turnID)
 		}
@@ -192,12 +198,6 @@ func (s *Service) retryRetainedRuntimePrompt(
 			beforeProviderAdmission: func() error {
 				if current, ok := s.transientRetries.Load(sessionID); !ok || current != entry || entry.policy.expired(s.transientRetryNow()) {
 					return ErrResumeAttemptCancelled
-				}
-				if !started {
-					entry.mu.Lock()
-					entry.started++
-					entry.mu.Unlock()
-					started = true
 				}
 				return nil
 			},

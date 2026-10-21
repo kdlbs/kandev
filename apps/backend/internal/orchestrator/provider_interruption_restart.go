@@ -118,10 +118,11 @@ func (s *Service) retireLiveCapacityNotice(ctx context.Context, session *models.
 	notice.Metadata["recovery_disposition"] = "restart_interrupted"
 	notice.Metadata["runtime_retained"] = true
 	notice.Metadata["failure_scope"] = retainedFailureScope
-	delete(notice.Metadata, "actions")
+	for _, key := range []string{"actions", "retry_window_ends_at", "retry_at", "retry_in_seconds", "recovery_phase"} {
+		delete(notice.Metadata, key)
+	}
 	if err := s.transientRetryMessages.UpdateMessage(ctx, notice); err != nil {
 		s.logger.Warn("failed to retire live capacity retry notice", zap.String("session_id", session.ID), zap.Error(err))
-		return true
 	}
 	s.resolveTransientRetryMessagesLocked(ctx, session.ID)
 	return true

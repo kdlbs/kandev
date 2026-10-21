@@ -213,24 +213,14 @@ func TestCapacityDelayedRetryFinalAdmissionDeadline(t *testing.T) {
 }
 
 func TestCapacityDelayedRetryRestartRetirementWithLiveRuntime(t *testing.T) {
-	svc, messages, _ := newPersistentTransientRetryTestService(t)
-	svc.createTransientRetryStatusMessage(context.Background(), watcher.AgentEventData{
-		TaskID: "t1", SessionID: "s1", RecoveryMode: recoveryModeContinue, RecoveryAttemptsStarted: 6,
-	}, &routingerr.Error{Code: routingerr.CodeModelCapacity}, 7, time.Minute, time.Now().Add(time.Minute))
-	notices := retryingMessages(t, messages)
-	require.Len(t, notices, 1)
-	notices[0].Metadata["retry_window_ends_at"] = time.Now().Add(30 * time.Minute).Format(time.RFC3339Nano)
-	require.NoError(t, messages.UpdateMessage(context.Background(), notices[0]))
-	require.NoError(t, svc.repo.UpdateTaskSessionState(context.Background(), "s1", models.TaskSessionStateWaitingForInput, ""))
-	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
-	require.NoError(t, err)
-	svc.agentManager.(*mockAgentManager).isAgentRunning = true
+	svc, messages, session := liveCapacityRestartFixture(t)
 	svc.retireInterruptedNoticeOnStartup(context.Background(), session)
 	rows, err := messages.ListMessages(context.Background(), "s1")
 	require.NoError(t, err)
 	require.Len(t, rows, 1, "a live idle runtime still needs a truthful stopped-retry explanation")
 	require.Equal(t, "restart_interrupted", rows[0].Metadata["recovery_disposition"])
 	require.Equal(t, true, rows[0].Metadata["runtime_retained"])
+	require.NotContains(t, rows[0].Metadata, "retry_window_ends_at")
 	require.Empty(t, transientRetryNotices(rows, "t1", "s1"))
 	require.Empty(t, svc.agentManager.(*mockAgentManager).capturedPrompts)
 }
