@@ -41,6 +41,8 @@ test.describe("workspace secrets edit", () => {
     await expect(testPage.getByText(renamed, { exact: true })).toBeVisible();
     await expect(testPage.getByText(name, { exact: true })).toBeHidden();
 
+    await testPage.reload();
+    await expect(testPage.getByText(renamed, { exact: true })).toBeVisible();
     await testPage.getByRole("button", { name: `Reveal secret ${renamed}` }).click();
     await expect(testPage.getByText(newValue)).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(originalValue);

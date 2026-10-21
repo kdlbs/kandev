@@ -38,5 +38,7 @@ stale revealed value across an edit.
 
 - `go test ./internal/secrets/...`
 - `apps/backend/internal/backendapp/secret_workspace_update_integration_test.go`
+- `go test -trimpath -race ./internal/secrets -run TestRegisteredWorkspaceUpdate -count=1`
 - `pnpm --filter @kandev/web exec vitest run components/settings/...`
-- `pnpm e2e:run -- e2e/tests/settings/secrets-edit.spec.ts`
+- `pnpm e2e:run --project chromium tests/settings/secrets-edit.spec.ts --retries=0`
+- `pnpm e2e:run --project mobile-chrome tests/settings/mobile-secrets-edit.spec.ts --retries=0`

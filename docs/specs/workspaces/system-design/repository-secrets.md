@@ -23,7 +23,7 @@ The existing repository-secrets requirement retains the other runtime and storag
 `apps/backend/internal/secrets/service.go` authorize the request through a
 workspace-scoped read, then route the write through the optional
 `WorkspaceSecretUpdater` store surface (`UserVisibleStore.UpdateForWorkspace`
-re-authorizes before delegating) instead of the global `Update`, whose
+rechecks secret visibility before delegating) instead of the global `Update`, whose
 `UserVisibleStore` wrapper accepts Global secrets only. The post-update
 read-back uses the same workspace scope, so an acknowledged edit returns the
 updated row rather than a missing-secret error. This satisfies
@@ -35,6 +35,12 @@ the edit form replaces the row. Unmounting the row discards its local reveal
 state, which prevents a revealed pre-edit value from surviving the save; a
 reveal after the save settles fetches through the workspace-scoped endpoint and
 returns the updated value.
+
+Phone editing keeps the existing Settings card/form composition and content scroll owner,
+with visible touch actions and the shared floating Save control. The nearest shipped
+pattern is the Workspace Secrets create flow; editing uses that same inline form.
+Desktop and phone E2E cover persisted edits after reload, and phone coverage also
+checks Global edits, touch targets, and horizontal containment.
 
 ## Metadata list lifetimes
 
