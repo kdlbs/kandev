@@ -97,10 +97,12 @@ function publishSavedFile(
     current.content,
   );
   const observation = current.workspaceSnapshot;
+  // Changed workspace publications install a fresh snapshot object.
   const hasNewObservation =
     observation && observation !== file.workspaceSnapshot && observation.content !== file.content;
   const acceptedObservation =
     hasNewObservation &&
+    !current.hasRemoteUpdate &&
     current.originalContent === observation.content &&
     current.originalHash === observation.hash;
   const originalContent = acceptedObservation ? current.originalContent : file.content;

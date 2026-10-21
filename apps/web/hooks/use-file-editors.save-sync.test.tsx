@@ -298,3 +298,28 @@ it.each(["navigation", "reopen", "host"] as const)(
     expect(mocks.toast).not.toHaveBeenCalled();
   },
 );
+
+// @covers AC-UI-FILE-EDITOR-MUTATION-001.10
+it("records the saved baseline when a conflicting observation matches the original disk bytes", async () => {
+  const h = setup();
+  const originalContent = "A disk";
+  const originalHash = await fileDiff.calculateHash(originalContent);
+  h.seed("A", REPO, false, { originalHash });
+  const reply = defer<Reply>();
+  mocks.save.mockReturnValueOnce(reply.promise);
+  const pending = start(() => h.result.current.actions.saveFile(PATH, REPO));
+  await refresh(h, originalContent);
+  expect(current()).toMatchObject({ hasRemoteUpdate: true, remoteOriginalHash: originalHash });
+  await settle(reply, pending);
+  expect(current()).toMatchObject({
+    content: "A buffer",
+    originalContent: "A buffer",
+    originalHash: "saved-A",
+    isDirty: false,
+    hasRemoteUpdate: true,
+    remoteContent: originalContent,
+    remoteOriginalHash: originalHash,
+  });
+  act(() => h.result.current.actions.handleFileChange(PATH, originalContent, REPO));
+  expect(current()?.isDirty).toBe(true);
+});

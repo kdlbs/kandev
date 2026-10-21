@@ -62,9 +62,8 @@ test("keeps Reload available for an agent edit observed before a delayed save re
   test.setTimeout(90_000);
   const filePath = `save-refresh-${Date.now()}.txt`;
   const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
-  git.createFile(filePath, "initial disk content\n");
-  git.stageAll();
-  git.commit("seed save refresh file");
+  const seedBaseline = git.getCurrentSha();
+  const seedStatus = git.exec("git status --porcelain");
   const hold = await holdSaveReceipt(testPage, filePath);
   const profile = await createStandardProfile(apiClient, `save-refresh-${Date.now()}`);
   const task = await apiClient.createTaskWithAgent(
@@ -76,6 +75,7 @@ test("keeps Reload available for an agent edit observed before a delayed save re
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.worktreeExecutorProfileId,
     },
   );
   let diskPath = "";
@@ -86,11 +86,17 @@ test("keeps Reload available for an agent edit observed before a delayed save re
           const environment = await apiClient.getTaskEnvironment(task.id);
           const root = environment?.repos?.[0]?.worktree_path ?? environment?.workspace_path;
           diskPath = root ? path.join(root, filePath) : "";
-          return Boolean(diskPath && fs.existsSync(diskPath));
+          return Boolean(
+            environment?.status === "ready" && diskPath && fs.existsSync(path.dirname(diskPath)),
+          );
         },
         { timeout: 30_000 },
       )
       .toBe(true);
+    expect(fs.realpathSync(path.dirname(diskPath))).not.toBe(
+      fs.realpathSync(seedData.repositoryPath),
+    );
+    fs.writeFileSync(diskPath, "initial disk content\n");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -131,7 +137,8 @@ test("keeps Reload available for an agent edit observed before a delayed save re
     expect(fs.readFileSync(diskPath, "utf8")).toBe("newer agent content\n");
   } finally {
     hold.release();
-    fs.rmSync(path.join(seedData.repositoryPath, filePath), { force: true });
     if (diskPath) fs.rmSync(diskPath, { force: true });
+    expect(git.getCurrentSha()).toBe(seedBaseline);
+    expect(git.exec("git status --porcelain")).toBe(seedStatus);
   }
 });

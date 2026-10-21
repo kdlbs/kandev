@@ -38,7 +38,7 @@ Run from repository root with Node 24 on PATH:
 (cd apps/web && pnpm exec vitest run hooks/use-file-editors.mutation-ownership.test.tsx hooks/use-file-editors.save-sync.test.tsx hooks/use-file-save-delete.test.ts hooks/file-editors-sync.test.ts hooks/file-editors-sync.ownership.test.tsx components/task/file-editor-panel.workspace-sync.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 (cd apps/web && pnpm exec eslint --max-warnings 0 hooks/use-file-save-delete.ts hooks/file-editors-sync.ts lib/state/dockview-store.ts hooks/use-file-editors.mutation-ownership.test.tsx hooks/use-file-editors.save-sync.test.tsx hooks/file-editor-mutation.test-helpers.tsx e2e/tests/task/file-editor-save-refresh.spec.ts)
-(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/file-editor-save-refresh.spec.ts)
+(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/task/file-editor-save-refresh.spec.ts tests/task/file-tree-create.spec.ts -- --grep 'keeps Reload|New file at root creates' --retries=0)
 (cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-file-viewer.spec.ts -- --grep 'tapping file in All-files tab opens viewer')
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -66,3 +66,8 @@ and diff checks passed. The original desktop command performed a fresh managed
 build; after correcting only its Save selector, the passing rerun added
 `--no-build`. Shared test fixtures were extracted to stay within file-size limits.
 Documentation coverage preflight returned `covered` with no errors.
+
+Review remediation extends the same AC .10 with the real-original-hash alias
+regression and explicit Worktree executor isolation with source commit/status
+assertions; see the plan remediation record. The final targeted unit count is
+89. Fresh-build regression/capture/neighbor E2E passed 3 tests with retries off.

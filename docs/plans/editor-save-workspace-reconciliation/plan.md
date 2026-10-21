@@ -88,3 +88,28 @@ scrolling and navigation. No ASCII preview is needed for unchanged markup.
 An observation is evidence available to the frontend, not proof of disk write
 ordering. Equal-content refresh no-ops must stay no-ops. Never retain an old
 warning solely because a save was once pending; never lose successful-save proof.
+
+## Review remediation
+
+Greptile identified that a conflicting observation matching the original disk
+bytes/hash could be mistaken for an accepted baseline. A real-hash hook/store
+regression failed on the old baseline/hash and false dirty state. Acceptance now
+also requires no current remote warning; existing accepted-snapshot controls
+continue to pass. The final targeted unit result is 89 tests across six suites.
+An optional review comment now documents snapshot identity at the comparison.
+
+CodeRabbit identified shared seeded-repository contamination in the desktop
+E2E. A baseline-commit assertion reproduced it. The fixture now creates its
+file only in an explicitly selected Worktree executor checkout, verifies
+source/task paths differ,
+and asserts the shared source commit and status remain unchanged at cleanup.
+No hard reset or other mutation of the shared source checkout is needed.
+
+Remediation typecheck and zero-warning changed-file lint passed. The production
+build was refreshed after the acceptance correction. The isolation assertion
+initially caught the default Local executor's shared checkout; explicitly
+selecting the existing Worktree profile then passed the actual regression,
+screenshot capture, and neighboring file-creation scenario (3 tests, 19.0s,
+retries disabled, managed one-worker budget). Both regression runs asserted
+source commit/status preservation. Current-head CI and review results remain
+external delivery gates recorded in the PR and parent messages.

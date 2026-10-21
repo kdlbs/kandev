@@ -300,8 +300,10 @@ never serialize it. No counter, cache, backend ordering or API is introduced.
 At save publication, reread the owned buffer and compare its workspace snapshot
 identity with the admitted snapshot. If the observation changed and its text
 differs from the saved text, preserve the current remote warning/content/hash.
-If refresh already accepted that observation as baseline, retain its baseline
-and hash too. Otherwise install the acknowledged saved text/hash as baseline.
+Only an observation without a current remote warning can count as accepted.
+Matching the original baseline bytes and hash while displaying a warning does
+not establish acceptance. If refresh already accepted that observation as
+baseline, retain its baseline and hash too. Otherwise install the acknowledged saved text/hash as baseline.
 Compute dirtiness against the selected baseline and retain live content. A save
 echo equal to the submitted text and preexisting observations do not keep an
 obsolete conflict. An accepted echo followed by a distinct clean refresh must
