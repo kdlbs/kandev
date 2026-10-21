@@ -29,6 +29,7 @@ export const ChangeRequestStatusChip = forwardRef<
   return (
     <button
       {...props}
+      data-slot="change-request-status-chip"
       ref={ref}
       type={type}
       className={cn(CHANGE_REQUEST_STATUS_CHIP_CLASS, className)}

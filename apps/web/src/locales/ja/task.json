@@ -2860,5 +2860,11 @@
   "deleteUnverifiedWorkspaceOption": "ワークスペースの変更を確認できなくても削除する",
   "deleteUnverifiedWorkspaceDescription": "ローカルの変更が失われる可能性があります。安全に削除できないファイルは、クリーンアップ待ちとして保持されます。",
   "deleteCleanupPendingTitle": "タスクを削除しました。クリーンアップは保留中です。",
-  "deleteCleanupPendingDescription": "安全に削除できないファイルは保護されます。Kandev がクリーンアップを再試行します。"
+  "deleteCleanupPendingDescription": "安全に削除できないファイルは保護されます。Kandev がクリーンアップを再試行します。",
+  "restartSession": "セッションを再起動",
+  "sessionActionRestart": "セッションを再起動しています...",
+  "sessionRestartRequested": "セッションの再起動を要求しました",
+  "sessionRestartFailed": "セッションの再起動に失敗しました",
+  "sessionRestartUnavailable": "現在の状態ではこのセッションを再起動できません。",
+  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。"
 }

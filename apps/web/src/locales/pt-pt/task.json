@@ -2860,5 +2860,11 @@
   "deleteUnverifiedWorkspaceOption": "Eliminar mesmo que não seja possível verificar as alterações na área de trabalho",
   "deleteUnverifiedWorkspaceDescription": "As alterações locais podem perder-se. Os ficheiros que não possam ser removidos em segurança ficam a aguardar limpeza.",
   "deleteCleanupPendingTitle": "Tarefa eliminada. Limpeza pendente.",
-  "deleteCleanupPendingDescription": "Os ficheiros que não possam ser removidos em segurança continuam protegidos. O Kandev tentará a limpeza novamente."
+  "deleteCleanupPendingDescription": "Os ficheiros que não possam ser removidos em segurança continuam protegidos. O Kandev tentará a limpeza novamente.",
+  "restartSession": "Reiniciar sessão",
+  "sessionActionRestart": "A reiniciar a sessão...",
+  "sessionRestartRequested": "Reinício da sessão solicitado",
+  "sessionRestartFailed": "Falha ao reiniciar a sessão",
+  "sessionRestartUnavailable": "Não é possível reiniciar esta sessão no estado atual.",
+  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente."
 }

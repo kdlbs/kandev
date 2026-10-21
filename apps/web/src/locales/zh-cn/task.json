@@ -2860,5 +2860,11 @@
   "deleteUnverifiedWorkspaceOption": "即使无法检查工作区更改也删除",
   "deleteUnverifiedWorkspaceDescription": "本地更改可能会丢失。无法安全删除的文件将保留，等待清理。",
   "deleteCleanupPendingTitle": "任务已删除。清理待处理。",
-  "deleteCleanupPendingDescription": "无法安全删除的文件仍受保护。Kandev 将重试清理。"
+  "deleteCleanupPendingDescription": "无法安全删除的文件仍受保护。Kandev 将重试清理。",
+  "restartSession": "重启会话",
+  "sessionActionRestart": "正在重启会话...",
+  "sessionRestartRequested": "已请求重启会话",
+  "sessionRestartFailed": "会话重启失败",
+  "sessionRestartUnavailable": "此会话在当前状态下无法重启。",
+  "sessionRestartConnectionUnavailable": "连接不可用。请重新连接后再试。"
 }

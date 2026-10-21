@@ -2860,5 +2860,11 @@
   "deleteUnverifiedWorkspaceOption": "Ďēĺēţē ēvēń ĩƒ ŵōŕķśƥàćē ćĥàńĝēś ćàńńōţ ƀē ćĥēćķēď",
   "deleteUnverifiedWorkspaceDescription": "Ĺōćàĺ ćĥàńĝēś ḿàŷ ƀē ĺōśţ. Ƒĩĺēś ţĥàţ ćàńńōţ ƀē śàƒēĺŷ ŕēḿōvēď ŵĩĺĺ ŕēḿàĩń ƥēńďĩńĝ ćĺēàńũƥ.",
   "deleteCleanupPendingTitle": "Ţàśķ ďēĺēţēď. Ćĺēàńũƥ ƥēńďĩńĝ.",
-  "deleteCleanupPendingDescription": "Ƒĩĺēś ţĥàţ ćàńńōţ ƀē śàƒēĺŷ ŕēḿōvēď ŕēḿàĩń ƥŕōţēćţēď. Ķàńďēv ŵĩĺĺ ŕēţŕŷ ćĺēàńũƥ."
+  "deleteCleanupPendingDescription": "Ƒĩĺēś ţĥàţ ćàńńōţ ƀē śàƒēĺŷ ŕēḿōvēď ŕēḿàĩń ƥŕōţēćţēď. Ķàńďēv ŵĩĺĺ ŕēţŕŷ ćĺēàńũƥ.",
+  "restartSession": "Ŕēśţàŕţ śēśśĩōń",
+  "sessionActionRestart": "Ŕēśţàŕţĩńĝ śēśśĩōń...",
+  "sessionRestartRequested": "Śēśśĩōń ŕēśţàŕţ ŕēqũēśţēď",
+  "sessionRestartFailed": "Śēśśĩōń ŕēśţàŕţ ƒàĩĺēď",
+  "sessionRestartUnavailable": "Ţĥĩś śēśśĩōń ćàńńōţ ƀē ŕēśţàŕţēď ĩń ĩţś ćũŕŕēńţ śţàţē.",
+  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń."
 }

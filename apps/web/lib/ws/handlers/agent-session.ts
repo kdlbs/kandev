@@ -25,6 +25,7 @@ import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import { isSessionRestartPending } from "@/lib/session/session-restart-state";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -362,6 +363,21 @@ function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSession
   }
 }
 
+/** Retains the active restart target or a protected user pin during automatic adoption. */
+function shouldPreserveSessionSelection(
+  store: StoreApi<AppState>,
+  taskId: string,
+  incoming: { sessionId: string; newState: TaskSessionState | undefined },
+) {
+  const state = store.getState();
+  return (
+    (state.tasks.activeTaskId === taskId &&
+      isSessionRestartPending(store, state.tasks.activeSessionId)) ||
+    (state.tasks.pinnedSessionId !== incoming.sessionId &&
+      shouldPreservePinnedSessionForTask(state, taskId, incoming))
+  );
+}
+
 /**
  * After a `session.state_changed` event, decide whether the chat UI should
  * follow a workflow-driven session switch. Covers both event orderings:
@@ -380,12 +396,7 @@ function maybeAdoptSessionOnTransition(
   previousState: TaskSessionState | undefined,
 ): void {
   const state = store.getState();
-  if (
-    state.tasks.pinnedSessionId !== sessionId &&
-    shouldPreservePinnedSessionForTask(state, taskId, { sessionId, newState })
-  ) {
-    return;
-  }
+  if (shouldPreserveSessionSelection(store, taskId, { sessionId, newState })) return;
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;

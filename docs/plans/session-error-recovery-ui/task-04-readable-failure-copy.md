@@ -159,3 +159,11 @@ the change, including preview-secret redaction, raw-output exclusion, clipboard
 content, and a missing recovery card. Desktop and phone browser assertions
 now check that the original failure text remains in the disclosure. Both browser cases passed with retries disabled and fresh captures. Changed-file
 ESLint, TypeScript, catalog validation, and specification lint also passed.
+
+### Session restart integration
+
+Main added a session-tab restart regression that still expected the previous
+uncertainty message. The merged CI failure reproduced locally with retries
+disabled. Updated that one expected string to the current message. The case
+then passed, retaining its history, recovery-action, and request-order checks.
+No other test retained that old message after the integration.

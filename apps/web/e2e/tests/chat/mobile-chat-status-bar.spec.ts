@@ -5,6 +5,10 @@ import type { AppState } from "../../../lib/state/store";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { openConversationUsageTask } from "./conversation-usage-helpers";
+import {
+  COMPOSER_HISTORY_PROMPT,
+  revealTranscriptControls,
+} from "../workflow/composer-action-layout-helpers";
 
 const test = base.extend({
   prCapture: async ({ testPage }, use, testInfo) => {
@@ -41,6 +45,159 @@ async function associatePR(api: ApiClient, taskId: string, state = "merged") {
     state,
   });
 }
+
+async function expectContainedTouchTargets(bar: Locator) {
+  const bounds = (await bar.boundingBox())!;
+  const boxes = await bar.locator("button:visible").evaluateAll((buttons) =>
+    buttons.map((button) => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      return { x, y, width, height };
+    }),
+  );
+  for (const [index, box] of boxes.entries()) {
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.x).toBeGreaterThanOrEqual(bounds.x);
+    expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
+    for (const other of boxes.slice(index + 1)) {
+      const overlapX =
+        Math.min(box.x + box.width, other.x + other.width) - Math.max(box.x, other.x);
+      const overlapY =
+        Math.min(box.y + box.height, other.y + other.height) - Math.max(box.y, other.y);
+      expect(overlapX <= 1 || overlapY <= 1).toBe(true);
+    }
+  }
+  expect(
+    await bar
+      .page()
+      .evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
+  ).toBe(true);
+}
+
+async function expectSameControlRow(status: Locator, utility: Locator) {
+  await expect
+    .poll(async () => {
+      const left = (await status.boundingBox())!;
+      const right = (await utility.boundingBox())!;
+      return Math.abs(left.y + left.height / 2 - right.y - right.height / 2);
+    })
+    .toBeLessThanOrEqual(1);
+}
+
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.6, .7
+test("shares status and transcript controls when they fit", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  await apiClient.saveUserSettings({ show_transcript_auto_scroll_control: true });
+  const { taskId, session } = await openConversationUsageTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Shared mobile composer row",
+    'e2e:plan([{"content":"Review shared controls","status":"in_progress"}])\ne2e:message("Controls ready.")',
+  );
+  await associatePR(apiClient, taskId, "open");
+  const bar = session.chatStatusBar();
+  const todo = bar.getByTestId("todo-indicator");
+  const ci = bar.getByTestId("pr-status-chip");
+  const usage = bar.getByTestId("conversation-usage-trigger");
+  await expect(todo).toBeVisible();
+  await expect(ci).toBeVisible();
+  await expect(usage).toBeVisible();
+  for (const width of [393, 640, 767]) {
+    await testPage.setViewportSize({ width, height: 851 });
+    await expectSameControlRow(todo, usage);
+    await expectSameControlRow(ci, usage);
+    await expectContainedTouchTargets(bar);
+  }
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await waitForFiniteAnimations(bar);
+  await prCapture.screenshot("mobile-composer-shared-row", {
+    caption: "Status icons and transcript utilities share a phone row",
+  });
+  await bar.getByTestId("proceed-next-step").focus();
+  await testPage.keyboard.press("Tab");
+  await expect(todo).toBeFocused();
+  await testPage.keyboard.press("Tab");
+  await expect(ci).toBeFocused();
+  await todo.tap();
+  await expect(testPage.getByTestId("todo-indicator-popover")).toContainText(
+    "Review shared controls",
+  );
+  await testPage.keyboard.press("Escape");
+  await ci.tap();
+  await expect(testPage.getByTestId("pr-status-chip-drawer")).toBeVisible();
+  await testPage.getByTestId("pr-status-chip-drawer-close").tap();
+  await usage.tap();
+  const drawer = testPage.getByTestId("conversation-usage-drawer");
+  await expect(drawer).toContainText("1,200");
+  await drawer.getByRole("button", { name: "Close" }).first().tap();
+  await expect(usage).toBeFocused();
+});
+
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.7
+test("wraps status and transcript controls without shrinking targets", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  try {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    const { taskId, session } = await openConversationUsageTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Wrapped mobile composer row",
+      'e2e:plan([{"content":"Review wrapping","status":"in_progress"}])\n' +
+        COMPOSER_HISTORY_PROMPT,
+    );
+    await associatePR(apiClient, taskId, "open");
+    await testPage.setViewportSize({ width: 320, height: 851 });
+    await revealTranscriptControls(session.activeChat());
+    const bar = session.chatStatusBar();
+    const todo = bar.getByTestId("todo-indicator");
+    const controls = bar.getByTestId("chat-status-bar-right-controls");
+    await expect(todo).toBeVisible();
+    await expect(bar.getByTestId("pr-status-chip")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const status = (await todo.boundingBox())!;
+        const utilities = (await controls.boundingBox())!;
+        return utilities.y >= status.y + status.height;
+      })
+      .toBe(true);
+    await expectContainedTouchTargets(bar);
+    await waitForFiniteAnimations(bar);
+    await prCapture.screenshot("mobile-composer-wrapped-row", {
+      caption: "Dense phone controls wrap without shrinking touch targets",
+    });
+    await bar.getByTestId("scroll-to-start-button").tap();
+    await expect
+      .poll(() =>
+        session
+          .activeChat()
+          .locator(".chat-message-list")
+          .evaluate((element) => element.scrollTop),
+      )
+      .toBe(0);
+    await bar.getByTestId("jump-to-latest-button").tap();
+    await expect(bar.getByTestId("jump-to-latest-button")).toBeHidden();
+  } finally {
+    await apiClient.saveUserSettings({
+      show_scroll_to_start: settings.show_scroll_to_start === true,
+      show_scroll_to_last_prompt: settings.show_scroll_to_last_prompt === true,
+    });
+  }
+});
 
 async function expectPhoneControls(page: Page, banner: Locator) {
   const bar = page.getByTestId("chat-status-bar");
@@ -266,6 +423,14 @@ test("retains phone targets on fine pointers and compact desktop controls", asyn
       page,
       caption: "Desktop retains compact inline task controls",
     });
+    await associatePR(apiClient, taskId, "open");
+    await page.setViewportSize({ width: 393, height: 851 });
+    await expect(bar.getByTestId("pr-status-chip")).toBeVisible();
+    await expectSameControlRow(
+      bar.getByTestId("pr-status-chip"),
+      bar.getByTestId("conversation-usage-trigger"),
+    );
+    await expectContainedTouchTargets(bar);
   } finally {
     await context.close();
   }

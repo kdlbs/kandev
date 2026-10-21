@@ -2860,5 +2860,11 @@
   "deleteUnverifiedWorkspaceOption": "Delete even if workspace changes cannot be checked",
   "deleteUnverifiedWorkspaceDescription": "Local changes may be lost. Files that cannot be safely removed will remain pending cleanup.",
   "deleteCleanupPendingTitle": "Task deleted. Cleanup pending.",
-  "deleteCleanupPendingDescription": "Files that cannot be safely removed remain protected. Kandev will retry cleanup."
+  "deleteCleanupPendingDescription": "Files that cannot be safely removed remain protected. Kandev will retry cleanup.",
+  "restartSession": "Restart session",
+  "sessionActionRestart": "Restarting session...",
+  "sessionRestartRequested": "Session restart requested",
+  "sessionRestartFailed": "Session restart failed",
+  "sessionRestartUnavailable": "This session cannot be restarted in its current state.",
+  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again."
 }
