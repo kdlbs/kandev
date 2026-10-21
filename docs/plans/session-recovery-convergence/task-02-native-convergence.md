@@ -115,7 +115,7 @@ a cursor behind the peer's journal high-water mark. Retain the admission fence
 and wait for complete projection before returning proof. Revalidate advancing
 stream evidence under the same owner; reject changed ownership and honor caller
 cancellation. The shared wait is bounded to 10 seconds, polls every 200 ms after
-verified lag, and issues evidence reads
+verified lag or monotonic same-owner stream progress, and issues evidence reads
 only, without repeating Resume or sending an old prompt.
 
 The new lifecycle tests reproduced both incomplete snapshots before the change.
@@ -141,8 +141,8 @@ now covers that decrease. Focused proof race tests, changed-package Go lint
 Main introduced the shared projection-wait owner in PR #4623. Conflict resolution
 uses that owner, deadline, and polling cadence. It retains the journal high-water
 check and requires sequence progress rather than byte changes for a retry.
-The acknowledgement regression now starts with verified projection lag, as the
-shared wait requires. The scrolling regression uses main's observer collection
+The acknowledgement regression covers progress after verified projection lag.
+The scrolling regression uses main's observer collection
 and keeps the reader-position and disabled-follow shrink cases.
 
 The ported proof-status test rejected unchanged status and byte-only changes
@@ -156,3 +156,15 @@ failure details.
 ```bash
 GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -C apps/backend -trimpath -p 1 -race -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestNativeResume(Proof|Projection)' -count=1
 ```
+
+The outside-diff review finding also covers progress on the first proof attempt.
+That result now enters the shared wait without requiring an earlier lag result.
+The new settling-progress test and the continuous-progress deadline case both
+failed before the correction. Only authenticated monotonic sequence progress can
+start this wait; byte-only changes and other evidence failures still return.
+
+The focused lifecycle and caller race checks passed after the correction.
+Changed-package Go lint reported zero issues. Both desktop and both phone
+projection-recovery cases passed with retries disabled after rebuilding the
+runtime. Catalog validation and specification lint passed. Existing screenshots
+remain accurate because this follow-up changes no frontend source or layout.

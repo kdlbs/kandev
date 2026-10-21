@@ -117,8 +117,10 @@ The retry loop owned by `GetNativeResumeDeliveryEvidence` must match
 bounded projection wait. Never classify errors by message text.
 
 `GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
-proof. Retry only verified projection lag after authentication, cursor coverage,
-submission retirement, and identity validation. Capture session, execution,
+proof. Retry only verified projection lag or monotonic same-owner stream progress
+after authentication, cursor coverage, submission retirement, and identity
+validation. Either result starts the bounded wait, including on the first proof
+attempt. Capture session, execution,
 incarnation, stream, native session, and harness generation from that proof
 attempt. Use a 10-second maximum and 200 ms polling, shortened by caller
 cancellation/deadline. Do not detach this wait from the recovery request.

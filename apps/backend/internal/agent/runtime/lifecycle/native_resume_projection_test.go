@@ -119,6 +119,17 @@ func TestNativeResumeProofRevalidatesAdvancingAcknowledgment(t *testing.T) {
 	require.Equal(t, 4, repository.reads)
 }
 
+func TestNativeResumeProofWaitsForInitialStreamProgress(t *testing.T) {
+	repository := &nativeProjectionRepository{adoptionDeliveryRepository: durableAdoptionRepository(), advanceAck: true}
+	repository.cursor.ReceivedSequence = 5
+	repository.cursor.ProjectedSequence = 5
+	manager := nativeProjectionManager(t, repository)
+	proof, err := manager.GetNativeResumeDeliveryEvidence(t.Context(), "session-1")
+	require.NoError(t, err)
+	require.EqualValues(t, 5, proof.Cursor.ProjectedSequence)
+	require.Equal(t, 4, repository.reads)
+}
+
 func TestNativeResumeProofProjectionWaitHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

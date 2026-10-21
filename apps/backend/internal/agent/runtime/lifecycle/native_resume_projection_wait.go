@@ -71,7 +71,7 @@ func (m *Manager) waitForNativeResumeProjection(ctx context.Context, owner nativ
 			return nil, errors.Join(errNativeResumeProjectionLag, ctx.Err())
 		}
 		lag := errors.Is(err, errNativeResumeProjectionLag)
-		if !lag && (!waiting || !errors.Is(err, errNativeResumeStreamProgress)) {
+		if !lag && !errors.Is(err, errNativeResumeStreamProgress) {
 			return proof, err
 		}
 		if !waiting {
