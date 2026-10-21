@@ -83,3 +83,17 @@ func Provide(
 	}
 	return svc, cleanup, nil
 }
+
+func clientRateTracker(client Client) *RateTracker {
+	switch c := client.(type) {
+	case *PATClient:
+		if c != nil {
+			return c.rateTracker
+		}
+	case *GHClient:
+		if c != nil {
+			return c.rateTracker
+		}
+	}
+	return nil
+}

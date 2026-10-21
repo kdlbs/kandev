@@ -18,8 +18,7 @@ import (
 
 const (
 	defaultPRPollInterval          = 1 * time.Minute
-	defaultReviewPollInterval      = 5 * time.Minute
-	defaultIssuePollInterval       = 5 * time.Minute
+	defaultWatchPollInterval       = 5 * time.Minute
 	prWatchFallbackWorkspaceBudget = 5
 	prWatchFallbackCycleBudget     = 10
 	// rateLimitedSleepCap bounds the rate-limit sleep so a misreported reset
@@ -27,31 +26,14 @@ const (
 	rateLimitedSleepCap = 10 * time.Minute
 )
 
-// searchBucketExhausted reports whether the search bucket is currently
-// exhausted. Used by per-watch loops to bail out mid-cycle once a single
-// search request has tripped the limit, so the remaining watches don't issue
-// doomed searches that worsen secondary-limit penalties. Returns false when
-// the tracker is unavailable (tests, disabled feature).
-func (p *Poller) searchBucketExhausted(loop string) bool {
-	if p.service == nil || p.service.rateTracker == nil {
-		return false
-	}
-	if p.service.rateTracker.WaitDuration(ResourceSearch) <= 0 {
-		return false
-	}
-	p.logger.Debug("search bucket exhausted; stopping watch loop early",
-		zap.String("loop", loop))
-	return true
-}
-
 // waitForRateLimit returns true after sleeping the loop until the relevant
 // resource bucket has quota again, or false if ctx was cancelled. When the
 // bucket is healthy the call is a no-op and returns true immediately.
 func (p *Poller) waitForRateLimit(ctx context.Context, resource Resource, loop string) bool {
-	if p.service == nil || p.service.rateTracker == nil {
+	if p.service == nil || p.service.RateTracker() == nil {
 		return true
 	}
-	d := p.service.rateTracker.BackgroundWaitDuration(resource)
+	d := p.service.RateTracker().BackgroundWaitDuration(resource)
 	if d <= 0 {
 		return true
 	}
@@ -119,9 +101,11 @@ type Poller struct {
 	fallbackWorkspaceCursor int
 	fallbackTargetCursors   map[string]int
 
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	started bool
+	cancel       context.CancelFunc
+	watchQueueMu sync.Mutex
+	watchCursor  int
+	wg           sync.WaitGroup
+	started      bool
 }
 
 // NewPoller creates a new background poller.
@@ -147,10 +131,9 @@ func (p *Poller) Start(ctx context.Context) {
 	ctx, p.cancel = context.WithCancel(ctx)
 	ctx = pollerContext(ctx)
 
-	p.wg.Add(3) //nolint:mnd
+	p.wg.Add(2)
 	go p.prMonitorLoop(ctx)
-	go p.reviewQueueLoop(ctx)
-	go p.issueWatchLoop(ctx)
+	go p.watchQueueLoop(ctx)
 
 	p.logger.Info("GitHub poller started")
 }
@@ -170,6 +153,7 @@ func (p *Poller) Stop() {
 		p.cancel()
 	}
 	p.wg.Wait()
+	p.service.clearWatchFilterProgress("")
 	p.started = false
 	p.logger.Info("GitHub poller stopped")
 }
@@ -901,107 +885,6 @@ func branchListContains(branches []string, branch string) bool {
 	return false
 }
 
-// reviewQueueLoop polls review watches for new PRs.
-func (p *Poller) reviewQueueLoop(ctx context.Context) {
-	defer p.wg.Done()
-
-	if p.waitForRateLimit(ctx, ResourceSearch, "review_queue") {
-		p.checkReviewWatches(ctx)
-	}
-
-	ticker := time.NewTicker(defaultReviewPollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !p.waitForRateLimit(ctx, ResourceSearch, "review_queue") {
-				return
-			}
-			p.checkReviewWatches(ctx)
-		}
-	}
-}
-
-func (p *Poller) checkReviewWatches(ctx context.Context) {
-	watches, err := p.service.store.ListEnabledReviewWatches(ctx)
-	if err != nil {
-		p.logger.Error("failed to list review watches", zap.Error(err))
-		return
-	}
-	// Note: do NOT early-return on len(watches) == 0 — the global orphan
-	// sweep below is precisely what handles the "user disabled / deleted
-	// every watch" case. Fall through to the no-op loop and run the sweep.
-	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
-	cleanupCycle := newReviewCleanupCycle(ctx, p)
-	cleanupAdmission := scheduledReviewCleanupAdmission{
-		workspace: cleanupCycle.admitWorkspace,
-		record:    cleanupCycle.admit,
-	}
-	for _, watch := range watches {
-		cleanupCycle.registerWatch(watch)
-		// A previous iteration in this same cycle may have exhausted the
-		// search bucket. Skip remaining per-watch checks instead of issuing
-		// another doomed search, but fall through to the orphan sweep below
-		// since it doesn't touch the search API.
-		if p.searchBucketExhausted("review_watch") {
-			break
-		}
-		p.logger.Debug("polling review watch",
-			zap.String("watch_id", watch.ID),
-			zap.String("workspace_id", watch.WorkspaceID),
-			zap.String("custom_query", watch.CustomQuery),
-			zap.Int("repo_filters", len(watch.Repos)),
-			zap.String("review_scope", watch.ReviewScope))
-
-		newPRs, err := p.service.CheckReviewWatch(ctx, watch)
-		if err != nil {
-			p.logger.Debug("failed to check review watch",
-				zap.String("id", watch.ID), zap.Error(err))
-			continue
-		}
-		p.logger.Debug("review watch checked",
-			zap.String("watch_id", watch.ID),
-			zap.Int("new_prs", len(newPRs)))
-		for _, pr := range newPRs {
-			p.logger.Info("new PR found for review",
-				zap.String("watch_id", watch.ID),
-				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
-				zap.Int("pr_number", pr.Number),
-				zap.String("title", pr.Title))
-			p.service.publishNewReviewPREvent(ctx, watch, pr)
-		}
-		// Clean up tasks for merged/closed PRs that the user hasn't opened.
-		cleanup, err := p.service.cleanupScheduledMergedReviewTasks(ctx, watch, cleanupAdmission)
-		if err != nil {
-			p.logCleanupError("failed to cleanup merged review tasks", err,
-				zap.String("watch_id", watch.ID))
-		} else {
-			cleanupCycle.apply(cleanup, watch.WorkspaceID, watch)
-		}
-		if cleanup.Deleted > 0 {
-			p.logger.Info("cleaned up merged review tasks",
-				zap.String("watch_id", watch.ID), zap.Int("deleted", cleanup.Deleted))
-		}
-	}
-	// Global orphan sweep: catches dedup rows whose watch was deleted or
-	// disabled. Without this pass those rows (and the tasks they reference)
-	// would never be re-examined, since the per-watch loop only iterates
-	// enabled watches.
-	cleanup, err := p.service.cleanupScheduledOrphanedReviewTasks(ctx, cleanupAdmission)
-	if err != nil {
-		p.logCleanupError("failed to sweep orphaned review tasks", err)
-	} else {
-		cleanupCycle.apply(cleanup, "", nil)
-		if cleanup.Deleted > 0 {
-			p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleanup.Deleted))
-		}
-	}
-	p.pruneReviewCleanupRecordCircuits(ctx)
-}
-
 // logCleanupError logs a poller cleanup failure at WARN, except when the error
 // is a context cancellation. That happens when the poll cycle is interrupted by
 // backend shutdown, which is expected teardown rather than a fault, so it is
@@ -1013,83 +896,4 @@ func (p *Poller) logCleanupError(msg string, err error, fields ...zap.Field) {
 		return
 	}
 	p.logger.Warn(msg, fields...)
-}
-
-// issueWatchLoop polls issue watches for new GitHub issues.
-func (p *Poller) issueWatchLoop(ctx context.Context) {
-	defer p.wg.Done()
-
-	if p.waitForRateLimit(ctx, ResourceSearch, "issue_watch") {
-		p.checkIssueWatches(ctx)
-	}
-
-	ticker := time.NewTicker(defaultIssuePollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if !p.waitForRateLimit(ctx, ResourceSearch, "issue_watch") {
-				return
-			}
-			p.checkIssueWatches(ctx)
-		}
-	}
-}
-
-func (p *Poller) checkIssueWatches(ctx context.Context) {
-	watches, err := p.service.store.ListEnabledIssueWatches(ctx)
-	if err != nil {
-		p.logger.Error("failed to list issue watches", zap.Error(err))
-		return
-	}
-	// Note: do NOT early-return on len(watches) == 0 — the orphan sweep
-	// below is what reaps tasks for disabled/deleted watches. Fall through.
-	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
-	for _, watch := range watches {
-		if p.searchBucketExhausted("issue_watch") {
-			break
-		}
-		p.logger.Debug("polling issue watch",
-			zap.String("watch_id", watch.ID),
-			zap.String("workspace_id", watch.WorkspaceID),
-			zap.String("custom_query", watch.CustomQuery),
-			zap.Int("repo_filters", len(watch.Repos)))
-
-		newIssues, err := p.service.CheckIssueWatch(ctx, watch)
-		if err != nil {
-			p.logger.Debug("failed to check issue watch",
-				zap.String("id", watch.ID), zap.Error(err))
-			continue
-		}
-		p.logger.Debug("issue watch checked",
-			zap.String("watch_id", watch.ID),
-			zap.Int("new_issues", len(newIssues)))
-		for _, issue := range newIssues {
-			p.logger.Info("new issue found for watch",
-				zap.String("watch_id", watch.ID),
-				zap.String("repo", issue.RepoOwner+"/"+issue.RepoName),
-				zap.Int("issue_number", issue.Number),
-				zap.String("title", issue.Title))
-			p.service.publishNewIssueEvent(ctx, watch, issue)
-		}
-		// Clean up tasks for closed issues that the user hasn't opened.
-		if cleaned, err := p.service.CleanupClosedIssueTasks(ctx, watch); err != nil {
-			p.logger.Warn("failed to cleanup closed issue tasks",
-				zap.String("watch_id", watch.ID), zap.Error(err))
-			if cleanupBatchShouldStop(err) {
-				return
-			}
-		} else if cleaned > 0 {
-			p.logger.Info("cleaned up closed issue tasks",
-				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
-		}
-	}
-	if cleaned, err := p.service.CleanupAllOrphanedIssueTasks(ctx); err != nil {
-		p.logger.Warn("failed to sweep orphaned issue tasks", zap.Error(err))
-	} else if cleaned > 0 {
-		p.logger.Info("swept orphaned issue tasks", zap.Int("deleted", cleaned))
-	}
 }

@@ -286,10 +286,7 @@ func TestClearToken_NoSecretManager(t *testing.T) {
 	}
 }
 
-// Regression: PAT clients minted via the service must share the rate tracker.
-// ConfigureToken previously created a bare NewPATClient and dropped quota
-// signals on the floor, so the UI / health / poller throttling all went stale
-// after a token reconfigure.
+// Unverified PAT clients retain observations without borrowing another identity.
 func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
 	svc := &Service{
@@ -301,8 +298,8 @@ func TestService_NewPATClient_AttachesRateTracker(t *testing.T) {
 	if c == nil {
 		t.Fatalf("newPATClient returned nil")
 	}
-	if c.rateTracker != svc.rateTracker {
-		t.Fatalf("expected rate tracker to be wired onto the new PAT client")
+	if c.rateTracker == nil || c.rateTracker == svc.rateTracker {
+		t.Fatalf("expected a private tracker for an unverified PAT client")
 	}
 	if c.rateAdmission == nil {
 		t.Fatal("expected principal admission to be wired onto the new PAT client")

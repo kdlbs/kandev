@@ -209,7 +209,15 @@ func (c *RateCoordinator) coordinate(
 	key := ratePrincipalKey(host, principal)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A tracker already bound to another principal is never transferable.
+	for ownedKey, state := range c.principals {
+		if ownedKey != key && state.tracker == preferred {
+			preferred = nil
+			break
+		}
+	}
 	if state := c.principals[key]; state != nil {
+		state.tracker.mergeProvisional(preferred)
 		return state.tracker, &RateAdmission{principal: state}
 	}
 	if preferred == nil {
@@ -220,7 +228,10 @@ func (c *RateCoordinator) coordinate(
 		logger:    c.logger,
 		resources: make(map[Resource]*rateAdmissionState),
 	}
-	c.principals[key] = state
+	// Unknown human identity belongs only to this client until verification.
+	if principal.Kind == AuthPrincipalApp || strings.TrimSpace(principal.Login) != "" {
+		c.principals[key] = state
+	}
 	return preferred, &RateAdmission{principal: state}
 }
 

@@ -456,8 +456,8 @@ func TestCredentialResolverLegacyIdentityProbeUsesAdmission(t *testing.T) {
 				Limit: 5000, ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now().UTC(),
 			})
 			resolver := NewCredentialResolver(nil, nil)
-			resolver.rateTracker = tracker
 			client := test.client(t, &tokenCalls)
+			wireRateTracker(client, tracker)
 			resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
 				return client, AuthMethodPAT, nil
 			})
@@ -507,7 +507,7 @@ func TestCredentialResolverLegacyIdentityProbeUsesAdmission(t *testing.T) {
 	}
 }
 
-func TestLegacyResolverUsesServiceRateTracker(t *testing.T) {
+func TestLegacyResolverUsesCanonicalPrincipalTracker(t *testing.T) {
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-legacy-rate-limit")
 	connection := &WorkspaceConnection{
@@ -535,11 +535,12 @@ func TestLegacyResolverUsesServiceRateTracker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if resolved.RateTracker != service.rateTracker {
-		t.Fatalf("resolved tracker = %p, want service tracker %p", resolved.RateTracker, service.rateTracker)
+	canonical, _ := service.rateCoordinator.coordinate(defaultGitHubHost, resolved.Principal, nil)
+	if resolved.RateTracker != canonical {
+		t.Fatalf("resolved tracker = %p, want canonical tracker %p", resolved.RateTracker, canonical)
 	}
-	if legacy.rateTracker != service.rateTracker {
-		t.Fatalf("legacy client tracker = %p, want service tracker %p", legacy.rateTracker, service.rateTracker)
+	if legacy.rateTracker != canonical {
+		t.Fatalf("legacy client tracker = %p, want canonical tracker %p", legacy.rateTracker, canonical)
 	}
 }
 

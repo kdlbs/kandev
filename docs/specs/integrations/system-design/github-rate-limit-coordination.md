@@ -46,6 +46,9 @@ observation time, and admission uses that same fixed boundary before reopening.
 GraphQL classification inspects the error array before recording success.
 An HTTP 200 rate error uses response quota evidence, not the status alone.
 Message-only rate errors use the same classifier as typed rate errors.
+Only `errors[]` can provide GraphQL payload error evidence. Text inside `data`
+must not become rate evidence, including titles containing `RATE_LIMITED`.
+HTTP refusal status and headers remain valid independent evidence.
 The CLI path retains available payload evidence before it handles subprocess
 failure. Successful payloads remain successful even when they spend the last point.
 
@@ -78,6 +81,56 @@ configuration, credential fingerprint, and local sync generation that created it
 Configuration replacement, deletion, manual completion, or credential change
 invalidates old work. Only a complete, current fetch can reach reconciliation.
 Terminal completion and shutdown release continuation data and in-flight ownership.
+
+### Refusal ordering
+
+`RateTracker.ObserveSecondary` updates one resource under its existing mutex.
+An incoming refusal cannot shorten an unexpired retry boundary. The retained
+boundary keeps the retry source that established it. A later boundary replaces
+both fields. A successful response follows the separate existing clearing rule.
+Primary snapshots and other resources remain independent.
+
+### Legacy identity binding
+
+Each canonical principal owns its tracker and admission state exclusively.
+A service-wide preferred tracker must not become the mutable tracker for two
+known principals. A new unverified legacy client starts with private provisional
+observations. After identity discovery, bind it to the canonical principal.
+Merge only observations from that same client into the canonical tracker,
+without shortening an active retry boundary. Preserve known canonical state
+when credentials rotate. Never infer identity equivalence from a shared source
+label, workspace fallback, or tracker pointer.
+
+Token replacement and clearing invalidate resolver caches without clearing
+canonical rate state. Audit startup attachment, resolver fallback, and service
+status/poller readers together. Compatibility accessors follow the active legacy
+client under existing service synchronization. They must not overwrite a client's
+canonical tracker after binding. Unknown identity remains provisional until a
+successful identity lookup. Workspace authorization and credential caches keep
+their existing scope.
+
+### Issue and review polling progress
+
+Retain a small cursor for background issue/review filter sweeps. Scope each
+cursor by workspace, watch identity, effective configuration, and credential
+identity/generation. Resume at the first unfinished filter after admission
+reopens. Re-resolve authorization and credentials before each resumed pass.
+Completed filter results may follow the existing discovery/deduplication path.
+An internal polling outcome distinguishes a completed sweep from deferred work,
+so successful discoveries are not discarded when a later filter defers.
+A deferred sweep must not claim a complete successful poll.
+
+Use one five-minute discovery loop for issue and review watches. Rotate the
+starting watch across the combined inventory so both kinds can progress. Preserve opportunities for other principals while one is blocked.
+Keep state proportional to active watches and prune removed or disabled entries.
+Changed configuration, credential identity, workspace deletion, and service stop
+invalidate progress. Manual checks remain independent and cannot reuse an old
+background cursor. A restart begins a fresh sweep. Existing persisted task
+reservations prevent duplicate task creation.
+
+Do not wait inside the global polling loop, create one goroutine per watch, or
+bypass admission. Preserve the independent orphan-cleanup passes. Workflow Sync
+keeps its separate continuation and durable retry owner.
 
 ## Workflow Sync recovery
 
@@ -155,7 +208,8 @@ data from Kandev estimates.
 
 - [Original implementation](../../../plans/github-rate-limit-coordination/plan.md).
 - [PR 3143 repair package](../../../plans/github-rate-limit-pr3143-repair/plan.md).
+- [Integration repair, October 2026](../../../plans/github-rate-limit-integration-repair/plan.md).
 
-The repair package records completed implementation and verification for these
-requirements. Runtime behavior follows the cancellation, continuation, and
-internal snapshot rules in this design.
+The earlier repair package records historical implementation and verification.
+Runtime behavior follows the cancellation, continuation, and internal snapshot
+rules in this design.

@@ -92,7 +92,7 @@ func TestNewServiceCoordinatesLegacyClientByResolvedLogin(t *testing.T) {
 	resolvedTracker, _ := service.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
 		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared, Login: "test-user",
 	}, nil)
-	if service.rateTracker != resolvedTracker {
+	if service.RateTracker() != resolvedTracker {
 		t.Fatal("startup legacy client was not registered under its resolved login")
 	}
 }
@@ -106,7 +106,8 @@ func TestCoordinateLegacyClientGatesIdentityProbe(t *testing.T) {
 	})
 	var requests atomic.Int32
 	client := &PATClient{
-		token: "token",
+		token:       "token",
+		rateTracker: tracker,
 		httpClient: &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			requests.Add(1)
 			return &http.Response{

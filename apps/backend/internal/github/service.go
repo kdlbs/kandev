@@ -14,8 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/watchreset"
 )
 
-const legacyWorkspaceIdentity = "legacy"
-
 // Auth method constants.
 const (
 	AuthMethodNone = "none"
@@ -208,6 +206,8 @@ type Service struct {
 	// independent of the passive cooldown.
 	passiveWorkspaceRefreshMu sync.Mutex
 	passiveWorkspaceRefreshAt map[string]time.Time
+	watchProgressMu           sync.Mutex
+	watchFilterProgress       map[watchPollKey]*watchFilterCursor
 	batchedProgressMu         sync.Mutex
 	batchedPRProgress         map[string]*batchedPRProgressEntry
 	batchedBranchProgress     map[string]*batchedBranchProgressEntry
@@ -278,7 +278,6 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 	}
 	if store != nil {
 		service.resolver = NewCredentialResolver(store, secrets)
-		service.resolver.SetRateTracker(service.rateTracker)
 		service.resolver.SetRateCoordinator(service.rateCoordinator)
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
@@ -295,14 +294,11 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 }
 
 func (s *Service) coordinateLegacyClientAtConstruction(client Client) {
-	login := legacyWorkspaceIdentity
+	login := ""
 	if tokenClient, ok := client.(*TokenClient); ok && tokenClient != nil {
 		login = strings.TrimSpace(tokenClient.username)
-		if login == "" {
-			login = legacyWorkspaceIdentity
-		}
 	}
-	s.coordinateLegacyClient(context.Background(), client, login)
+	s.bindLegacyClient(client, login)
 }
 
 // ListGHAccounts returns the configured account source. Production uses the
@@ -330,12 +326,18 @@ func (s *Service) Stop() {
 			s.invalidateAllPRDiscoveryAttempts("")
 		}
 		s.clearBatchedPRProgress()
+		s.clearWatchFilterProgress("")
 	})
 }
 
-// RateTracker exposes the service's rate-limit tracker so factory callers
-// can wire it into individual clients.
+// RateTracker returns the active legacy client's tracker for compatibility
+// status readers. Workspace requests use their resolved principal's tracker.
 func (s *Service) RateTracker() *RateTracker {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tracker := clientRateTracker(s.client); tracker != nil {
+		return tracker
+	}
 	return s.rateTracker
 }
 
@@ -352,10 +354,7 @@ func (s *Service) getPromptResolver() PromptResolver {
 	return s.promptResolver
 }
 
-// newPATClient builds a PATClient pre-wired with the service's shared rate
-// tracker. Centralizing this guards against forgetting the wiring on auth
-// flips (e.g. ConfigureToken), which would otherwise leave PAT calls
-// invisible to the rate-limit UI, health checks, and poller throttling.
+// newPATClient keeps unverified credential observations private until binding.
 func (s *Service) newPATClient(ctx context.Context, token string) *PATClient {
 	c := NewPATClient(token)
 	s.coordinateLegacyClient(ctx, c, "")
@@ -363,31 +362,26 @@ func (s *Service) newPATClient(ctx context.Context, token string) *PATClient {
 }
 
 func (s *Service) coordinateLegacyClient(ctx context.Context, client Client, login string) {
+	s.bindLegacyClient(client, login)
+	if client != nil && strings.TrimSpace(login) == "" {
+		if resolved := resolvedLegacyLogin(ctx, client); resolved != "" {
+			s.bindLegacyClient(client, resolved)
+		}
+	}
+}
+
+// bindLegacyClient runs before publication, with no provider I/O.
+func (s *Service) bindLegacyClient(client Client, login string) {
 	if client == nil {
 		return
 	}
-	if s.rateTracker == nil {
-		s.rateTracker = NewRateTracker(nil, s.logger)
-	}
 	if s.rateCoordinator == nil {
-		s.rateCoordinator = NewRateCoordinator(nil, s.logger)
+		s.rateCoordinator = NewRateCoordinator(s.eventBus, s.logger)
 	}
-	principal := AuthPrincipal{
-		Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared,
-		Login: login, WorkspaceID: legacyWorkspaceIdentity,
-	}
-	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
+	principal := AuthPrincipal{Kind: AuthPrincipalHuman, Source: ConnectionSourceLegacyShared, Login: login}
+	tracker, admission := s.rateCoordinator.coordinate(defaultGitHubHost, principal, clientRateTracker(client))
 	wireRateTracker(client, tracker)
 	wireRateAdmission(client, admission)
-	if strings.TrimSpace(login) == "" {
-		login = resolvedLegacyLogin(ctx, client)
-		if login != "" {
-			principal.Login = login
-			tracker, admission = s.rateCoordinator.coordinate(defaultGitHubHost, principal, s.rateTracker)
-			wireRateTracker(client, tracker)
-			wireRateAdmission(client, admission)
-		}
-	}
 }
 
 func resolvedLegacyLogin(ctx context.Context, client Client) string {

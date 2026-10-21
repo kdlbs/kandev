@@ -231,3 +231,11 @@ The corrected test passed 100 repeated runs, the complete Workflow Sync
 package passed, and the corrected test passed 10 race-enabled runs. Pushing the
 follow-up starts a new CI run. E2E jobs on the previous head were still in
 progress when this follow-up was prepared.
+
+## Integration repair follow-up, 2026-10-20
+
+[The integration repair package](../github-rate-limit-integration-repair/plan.md) tracks four newly
+reproduced defects at `00fce40d68869ed476f4602962ad2d61f32efa76`.
+Earlier completed work orders and counts remain historical receipts.
+The new package is implemented and verified on 2026-10-21. Its results do not
+replace these historical receipts.

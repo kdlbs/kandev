@@ -84,6 +84,16 @@ agents and operators.
 - **AC-INTEGRATIONS-GITHUB-RATE-002.5:** When workspaces use distinct GitHub App
   installations, their observed budgets and throttle states shall remain isolated.
 
+- **AC-INTEGRATIONS-GITHUB-RATE-002.6:** When clients use different verified
+  human principals, their observed budgets and throttle states shall remain
+  isolated, including legacy account replacement. Credential rotation for the
+  same verified principal shall retain that principal's active restrictions.
+- **AC-INTEGRATIONS-GITHUB-RATE-002.7:** While configuration remains stable and
+  admission repeatedly permits background requests, every enabled issue/review
+  watch and every configured repository filter shall eventually receive a read.
+  Deferral shall not permanently repeat the first filter or first watch.
+  Resumed reads shall use current workspace authorization and credentials.
+
 ### REQ-INTEGRATIONS-GITHUB-RATE-003: Safe workflow-sync retry
 
 **Intent:** A failing synchronized workflow source must not create repeated
@@ -139,6 +149,8 @@ from a separate diagnostic request.
 
 - [Original implementation](../../../plans/github-rate-limit-coordination/plan.md).
 - [PR 3143 repair package](../../../plans/github-rate-limit-pr3143-repair/plan.md).
+
+- [Integration repair, October 2026](../../../plans/github-rate-limit-integration-repair/plan.md).
 
 ## Out of scope
 

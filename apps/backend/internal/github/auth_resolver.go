@@ -89,7 +89,6 @@ type CredentialResolver struct {
 	legacyGit       legacyTransportCredentialFactory
 	ghToken         ghAccountTokenResolver
 	now             func() time.Time
-	rateTracker     *RateTracker
 	rateCoordinator *RateCoordinator
 
 	mu              sync.Mutex
@@ -126,10 +125,6 @@ func (r *CredentialResolver) SetLegacyTransportFactory(factory legacyTransportCr
 	if factory != nil {
 		r.legacyGit = factory
 	}
-}
-
-func (r *CredentialResolver) SetRateTracker(tracker *RateTracker) {
-	r.rateTracker = tracker
 }
 
 func (r *CredentialResolver) SetRateCoordinator(coordinator *RateCoordinator) {
@@ -304,9 +299,6 @@ func (r *CredentialResolver) coordinateResolved(host string, resolved *ResolvedC
 		return
 	}
 	preferred := resolved.RateTracker
-	if preferred == nil && resolved.Principal.Source == ConnectionSourceLegacyShared {
-		preferred = r.rateTracker
-	}
 	tracker, admission := r.rateCoordinator.coordinate(host, resolved.Principal, preferred)
 	resolved.RateTracker = tracker
 	wireRateTracker(resolved.Client, tracker)
@@ -460,14 +452,14 @@ func (r *CredentialResolver) resolveLegacy(
 		(purpose == CredentialPurposeGitTransport && strings.TrimSpace(credential) == "") {
 		return nil, ErrGitHubNotConfigured
 	}
-	tracker := r.rateTracker
+	tracker := clientRateTracker(client)
 	if tracker == nil {
 		tracker = NewRateTracker(nil, nil)
 	}
 	tracker, admission := r.coordinateLegacyClient(
 		connection.GitHubHost,
 		connection.WorkspaceID,
-		connection.Login,
+		"",
 		tracker,
 	)
 	wireRateTracker(client, tracker)

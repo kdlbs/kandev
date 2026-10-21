@@ -2038,39 +2038,6 @@ func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
 	}
 }
 
-func TestSearchBucketExhausted(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-
-	if poller.searchBucketExhausted("test") {
-		t.Errorf("expected false when no exhaustion recorded")
-	}
-
-	// Mark the search bucket exhausted with a future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceSearch,
-		Limit:     30,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-
-	if !poller.searchBucketExhausted("test") {
-		t.Errorf("expected true when search bucket exhausted")
-	}
-
-	// Other buckets exhausting must not trip the search guard.
-	poller2, svc2, _, _ := setupPollerTest(t)
-	svc2.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceCore,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-	if poller2.searchBucketExhausted("test") {
-		t.Errorf("expected false when only core (not search) is exhausted")
-	}
-}
-
 func TestDetectPRForWatch_FailsClosedWithoutWorkspace(t *testing.T) {
 	poller, _, mockClient, _ := setupPollerTest(t)
 

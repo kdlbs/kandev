@@ -20,11 +20,12 @@ type ExhaustedRateLimit struct {
 // Returns an empty slice when none are exhausted, so callers can safely
 // `len()` the result.
 func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
-	if s.rateTracker == nil {
+	tracker := s.RateTracker()
+	if tracker == nil {
 		return nil
 	}
 	out := []ExhaustedRateLimit{}
-	for resource, snap := range s.rateTracker.All() {
+	for resource, snap := range tracker.All() {
 		if snap.Exhausted() {
 			out = append(out, ExhaustedRateLimit{
 				Resource: string(resource),
@@ -39,7 +40,7 @@ func (s *Service) ExhaustedRateLimits() []ExhaustedRateLimit {
 // returned by GetStatus and the rate-limit WS notification. Returns nil
 // when no buckets are known yet so the field stays omitted.
 func (s *Service) rateLimitInfo() *GitHubRateLimitInfo {
-	return rateLimitInfoForTracker(s.rateTracker)
+	return rateLimitInfoForTracker(s.RateTracker())
 }
 
 func rateLimitInfoForTracker(tracker *RateTracker) *GitHubRateLimitInfo {
@@ -218,6 +219,9 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.ClearAccessibleReposCaches()
 	s.ClearRepoErrorCache()
 	s.ClearPRCaches()
+	if s.resolver != nil {
+		s.resolver.InvalidateAll()
+	}
 	s.mu.Unlock()
 
 	return nil
@@ -247,6 +251,9 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	s.ClearAccessibleReposCaches()
 	s.ClearRepoErrorCache()
 	s.ClearPRCaches()
+	if s.resolver != nil {
+		s.resolver.InvalidateAll()
+	}
 	s.mu.Unlock()
 
 	// Try to re-establish connection via other methods

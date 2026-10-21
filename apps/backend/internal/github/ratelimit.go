@@ -316,6 +316,12 @@ func (r *RateTracker) ObserveSecondary(resource Resource, retryAt time.Time, sou
 	now := time.Now().UTC()
 	r.mu.Lock()
 	previous := r.secondary[resource]
+	// Overlapping refusals cannot shorten an active provider restriction.
+	if previous.RetryAt.After(now) && (previous.RetryAt.After(retryAt) ||
+		(previous.RetryAt.Equal(retryAt) && source != RetrySourceRetryAfter)) {
+		r.mu.Unlock()
+		return
+	}
 	r.secondary[resource] = SecondaryRateLimitState{
 		Resource: resource, Active: retryAt.After(now), RetryAt: retryAt,
 		ObservedAt: now, RetrySource: source, Reason: secondaryRateLimitReason,
@@ -440,4 +446,36 @@ func (r *RateTracker) markRateExhausted(resource Resource, resetAt time.Time) {
 		ResetAt:           resetAt,
 		UpdatedAt:         time.Now().UTC(),
 	})
+}
+
+// mergeProvisional transfers observations made before this client's identity
+// was known. The coordinator serializes transfers and verifies tracker ownership.
+func (r *RateTracker) mergeProvisional(other *RateTracker) {
+	if other == nil || other == r {
+		return
+	}
+	other.mu.RLock()
+	defer other.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for resource, snapshot := range other.snapshots {
+		current, exists := r.snapshots[resource]
+		if !exists || (snapshot.UpdatedAt.After(current.UpdatedAt) && !current.Exhausted()) {
+			r.snapshots[resource] = snapshot
+			r.exhausted[resource] = snapshot.Exhausted()
+		}
+	}
+	for resource, state := range other.primary {
+		if state.RetryAt.After(r.primary[resource].RetryAt) {
+			r.primary[resource] = state
+		}
+	}
+	for resource, state := range other.secondary {
+		current := r.secondary[resource]
+		if state.RetryAt.After(current.RetryAt) ||
+			(state.RetryAt.Equal(current.RetryAt) && state.RetrySource == RetrySourceRetryAfter) {
+			r.secondary[resource] = state
+		}
+	}
+	r.signalChangedLocked()
 }

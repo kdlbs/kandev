@@ -202,3 +202,25 @@ func assertAdmissionRetry(t *testing.T, admission *RateAdmission, want time.Time
 		t.Fatalf("next background retry = %s, want %s", deferred.RetryAt, want)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.6
+// @covers AC-INTEGRATIONS-GITHUB-RATE-004.3
+func TestGraphQLSuccessfulDataDoesNotThrottle(t *testing.T) {
+	for _, clientKind := range []string{"PAT", "CLI"} {
+		for _, suffix := range []string{"", `,"errors":[]`, `,"errors":[{"type":"NOT_FOUND","message":"unknown repository"}]`} {
+			t.Run(clientKind+suffix, func(t *testing.T) {
+				body := `{"data":{"repository":{"pullRequest":{"title":"Handle RATE_LIMITED errors and secondary rate limits"}},"rateLimit":{"limit":5000,"remaining":4999,"resetAt":"2030-01-01T00:00:00Z"}}` + suffix + `}`
+				tracker, _, out, err := executeGraphQLPayload(t, clientKind, http.StatusOK, nil, body, 0)
+				if err != nil {
+					t.Fatalf("successful data rejected: %v", err)
+				}
+				if out["data"] == nil {
+					t.Fatal("successful data was discarded")
+				}
+				if tracker.Secondary(ResourceGraphQL).Active {
+					t.Fatal("successful data established a secondary throttle")
+				}
+			})
+		}
+	}
+}

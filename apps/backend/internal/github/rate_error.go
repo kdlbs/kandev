@@ -233,19 +233,18 @@ func classifyFailureKind(status int, body, remainingHeader, retryAfterHeader str
 
 // secondaryRateLimitResponse reports whether a response points at secondary
 // throttling. Any 429 qualifies after primary exhaustion is ruled out by the
-// caller. An explicit rate/abuse signal in the body qualifies at any status
-// (GraphQL returns HTTP 200 with a rate-limited errors array), and a
+// caller. GraphQL HTTP 200 errors use the structured error array. A
 // Retry-After header qualifies on a 403 even when the body is a bare
 // "Forbidden" that would otherwise read as an access failure.
 func secondaryRateLimitResponse(status int, lowerBody, retryAfterHeader string) bool {
 	if status == http.StatusTooManyRequests {
 		return true
 	}
-	if strings.Contains(lowerBody, "rate_limited") {
-		return true
-	}
 	if status != http.StatusForbidden {
 		return false
+	}
+	if strings.Contains(lowerBody, "rate_limited") {
+		return true
 	}
 	if strings.Contains(lowerBody, "rate limit") || strings.Contains(lowerBody, "abuse detection") ||
 		strings.Contains(lowerBody, "secondary rate") {

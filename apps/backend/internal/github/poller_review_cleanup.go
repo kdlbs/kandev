@@ -65,7 +65,7 @@ func (c *reviewCleanupCycle) admit(task *ReviewPRTask, tracker *RateTracker) (bo
 	if allowed, stopWorkspace := c.admitWorkspace(watch.WorkspaceID); !allowed {
 		return false, stopWorkspace
 	}
-	serviceTracker := c.poller.service.rateTracker
+	serviceTracker := c.poller.service.RateTracker()
 	if tracker != nil && tracker != serviceTracker && tracker.WaitDuration(ResourceCore) > 0 {
 		c.recordCoreQuotaSkip()
 		return false, true
@@ -83,8 +83,8 @@ func (c *reviewCleanupCycle) admitWorkspace(workspaceID string) (bool, bool) {
 		return false, false
 	}
 	c.workspaceFingerprint(workspaceID)
-	if c.poller.service != nil && c.poller.service.rateTracker != nil &&
-		c.poller.service.rateTracker.WaitDuration(ResourceCore) > 0 {
+	if c.poller.service != nil && c.poller.service.RateTracker() != nil &&
+		c.poller.service.RateTracker().WaitDuration(ResourceCore) > 0 {
 		c.recordCoreQuotaSkip()
 		return false, true
 	}

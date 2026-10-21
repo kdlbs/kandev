@@ -51,3 +51,11 @@ satisfies every criterion. The follow-up covers GraphQL classification,
 cancellation persistence, automatic continuation, and the internal snapshot
 boundary. Its work orders record their results. Current PR delivery is tracked
 in the workspace task's Delivery checklist.
+
+## Integration repair follow-up, 2026-10-20
+
+[The integration repair package](../github-rate-limit-integration-repair/plan.md) tracks four newly
+reproduced defects at `00fce40d68869ed476f4602962ad2d61f32efa76`.
+Earlier completed work orders and counts remain historical receipts.
+The new package is implemented and verified on 2026-10-21. Its results do not
+replace these historical receipts.

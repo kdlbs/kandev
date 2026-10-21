@@ -124,6 +124,17 @@ Passive workspace refreshes follow these intervals. An explicit pull request
 refresh checks immediately, subject to the workspace's authentication and
 GitHub rate limits.
 
+#### Issue and review watch polling
+
+Issue and review watches share a rotating background polling cycle. When
+GitHub admission defers a repository read, later cycles resume that filter.
+Completed discoveries can create tasks while other filters remain pending.
+A partial cycle does not update the watch's completed-poll timestamp.
+
+Watches use the workspace's current credentials and repository scope on each
+cycle. Different verified human accounts have separate rate state. Rotating a
+token for the same account retains that account's active restrictions.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
