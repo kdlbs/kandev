@@ -4,6 +4,7 @@ system: plugins
 requirements:
   - REQ-PLUGINS-MARKETPLACE-001
   - REQ-PLUGINS-MARKETPLACE-002
+  - REQ-PLUGINS-MARKETPLACE-004
 created: 2026-07-18
 owners:
   - jcfs
@@ -26,6 +27,7 @@ installer described here. Native plugin behavior remains owned by this document.
 | `REQ-PLUGINS-MARKETPLACE-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-PLUGINS-MARKETPLACE-002` | [Curated release propagation](#curated-release-propagation) |
 | `REQ-PLUGINS-MARKETPLACE-003` | [Registry preview images](#registry-preview-images) |
+| `REQ-PLUGINS-MARKETPLACE-004` | [Auto-update (opt-in)](#auto-update-opt-in) |
 
 ## Registry preview images
 
@@ -483,6 +485,16 @@ API: `GET/PUT /api/plugins/settings` (`{auto_update_default}`) for the
 instance-wide default and `PUT /api/plugins/:id/auto-update` (`{auto_update:
 true|false|null}`) for the per-plugin override. Both require the same operator
 authority as the rest of plugin management.
+
+`useAutoUpdateSettings` serializes accepted PUTs within its mounted page, using
+a promise tail and synchronous intent counter. Only the latest intent publishes
+its receipt or rollback; every successful receipt updates the accepted baseline.
+The baseline starts unknown: failed GET uses the off fallback, not confirmed
+data. Late initial GET cannot replace an admitted edit. Accepted writes drain
+after unmount, without publishing state or toasts; disposed callbacks admit
+nothing. This is local orchestration, without cross-mount ordering or transport
+exactly-once claims. Both switch consumers share this state; row overrides use
+their separate endpoint.
 
 ## Out of scope
 
