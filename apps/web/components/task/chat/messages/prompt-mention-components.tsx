@@ -801,21 +801,36 @@ function PromptMentionHoverPreview({
   onOpenChange,
   onToggle,
 }: PromptMentionHoverPreviewProps) {
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  // A close revokes delayed opens until fresh trigger intent.
+  const allowDelayedOpen = useRef(true);
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) allowDelayedOpen.current = false;
+    if (!nextOpen || allowDelayedOpen.current) onOpenChange(nextOpen);
+  };
+  const handleToggle = () => {
+    allowDelayedOpen.current = !open;
+    onToggle();
+  };
+  const handleNewIntent = () => {
+    allowDelayedOpen.current = true;
+  };
   const handleClick = (event: MouseEvent) => {
     event.stopPropagation();
-    onToggle();
+    handleToggle();
   };
   const handleKeyDown = (event: KeyboardEvent) => {
     if (!focusable || (event.key !== "Enter" && event.key !== " ")) return;
     event.preventDefault();
     event.stopPropagation();
-    onToggle();
+    handleToggle();
   };
 
   return (
-    <HoverCard open={open} onOpenChange={onOpenChange} openDelay={300} closeDelay={0}>
+    <HoverCard open={open} onOpenChange={handleOpenChange} openDelay={300} closeDelay={0}>
       <HoverCardTrigger asChild>
         <span
+          ref={triggerRef}
           data-testid="custom-prompt-mention"
           data-prompt-name={name}
           tabIndex={focusable ? 0 : undefined}
@@ -824,13 +839,23 @@ function PromptMentionHoverPreview({
           aria-label={focusable ? label : undefined}
           title={labelClassName ? label : undefined}
           className={className}
+          onPointerEnter={handleNewIntent}
+          onFocus={handleNewIntent}
           onClick={handleClick}
           onKeyDown={handleKeyDown}
         >
           <PromptMentionLabel value={value} className={labelClassName} />
         </span>
       </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
+      <HoverCardContent
+        side="top"
+        align="start"
+        className="w-80 max-h-80 overflow-y-auto"
+        onPointerDownOutside={(event) => {
+          // Trigger activation owns its toggle, including closing an open preview.
+          if (triggerRef.current?.contains(event.target as Node)) event.preventDefault();
+        }}
+      >
         <PromptPreview content={content} />
       </HoverCardContent>
     </HoverCard>
