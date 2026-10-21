@@ -115,4 +115,10 @@ ran locally after the user's CI-only instruction. Product runtime code is unchan
 
 Review remediation keeps upgrade projects out of ordinary Playwright discovery, covers runner opt-in inherited by workers without CLI arguments, bounds PostgreSQL readiness to 90 seconds, and points missing-report failures to the actual CI job log instead of a nonexistent shard log.
 
-Verification is pending CI for this revision.
+Remediation verification passed in [CI run 39686419086](https://github.com/kdlbs/kandev/actions/runs/39686419086)
+at candidate `59bfe1d15b23eed7e25763b8cb0b3a60120fb9ce`: all seven upgrade
+scenarios, 15 Node contracts and 10 fixture/config/oracle tests passed. The
+worker-selection regression found in the first remediation run is covered by
+an inherited-environment config test. Main-only guards are restored in the
+policy/documentation follow-up; this is not an additional upgrade rehearsal.
+PR checks and review/merge gates remain external and pending at commit time.
