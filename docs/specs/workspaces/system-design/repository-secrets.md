@@ -29,6 +29,13 @@ read-back uses the same workspace scope, so an acknowledged edit returns the
 updated row rather than a missing-secret error. This satisfies
 AC-WORKSPACES-REPOSITORY-SECRETS-001.15's persistence clause.
 
+Initial validation and post-write read-back share the same store-level visibility
+routine, with workspace authorization performed once before the write. A
+`ScopedSecretStore` supplies its scoped read; a legacy `SecretStore` retains the
+metadata `Get` plus Global-or-same-workspace visibility check. The production
+`UserVisibleStore` continues to exclude internal secrets and delegate ownership
+checks to the encrypted store.
+
 `SecretsSettings` in `apps/web/components/settings/secrets-settings.tsx` filters
 the edited secret's row out of the list while its edit is open or in flight, so
 the edit form replaces the row. Unmounting the row discards its local reveal

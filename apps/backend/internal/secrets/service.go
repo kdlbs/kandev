@@ -119,6 +119,11 @@ func (s *Service) GetForWorkspace(ctx context.Context, id, workspaceID string) (
 	if err := s.authorizeScope(ctx, ScopeWorkspace, workspaceID); err != nil {
 		return nil, err
 	}
+	return s.getStoredForWorkspace(ctx, id, workspaceID)
+}
+
+// getStoredForWorkspace applies store visibility after the caller authorizes access.
+func (s *Service) getStoredForWorkspace(ctx context.Context, id, workspaceID string) (*Secret, error) {
 	if scoped, ok := s.store.(ScopedSecretStore); ok {
 		return scoped.GetForWorkspace(ctx, id, workspaceID)
 	}
@@ -190,17 +195,11 @@ func (s *Service) updateStored(ctx context.Context, id, workspaceID string, req 
 	return s.store.Update(ctx, id, req)
 }
 
-// getStored reads a secret back after a write with the same scope the write
-// used. The workspace write already authorized the caller, so the scoped
-// read goes through the store surface without re-running the service-level
-// workspace authorizer; a store without that surface cannot support scoped
-// reads and fails closed.
+// getStored reads back a write using the authorized scope. Its caller already
+// authorized workspace access; only store visibility is checked again.
 func (s *Service) getStored(ctx context.Context, id, workspaceID string) (*Secret, error) {
 	if workspaceID != "" {
-		if scoped, ok := s.store.(ScopedSecretStore); ok {
-			return scoped.GetForWorkspace(ctx, id, workspaceID)
-		}
-		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
+		return s.getStoredForWorkspace(ctx, id, workspaceID)
 	}
 	return s.Get(ctx, id)
 }
