@@ -59,7 +59,7 @@ export async function runRehearsal(options) {
     manifest=path.resolve(root,manifest);
     const baseline=JSON.parse(fs.readFileSync(manifest,'utf8'));
     if (options.baseline !== 'latest' && baseline.tag !== options.baseline) throw new Error('provided manifest does not match requested baseline');
-    const env={...process.env, KANDEV_UPGRADE_MANIFEST:manifest, KANDEV_UPGRADE_ENGINE:options.engine,
+    const env={...process.env, KANDEV_UPGRADE_MANIFEST:manifest, KANDEV_UPGRADE_ENGINE:options.engine, KANDEV_UPGRADE_PROJECT:options.project,
       PLAYWRIGHT_JSON_OUTPUT_FILE:path.join(output,'playwright.json'), PLAYWRIGHT_JUNIT_OUTPUT_FILE:path.join(output,'junit.xml')};
     // Candidate processes never receive GitHub authentication from acquisition.
     delete env.GH_TOKEN;delete env.GITHUB_TOKEN;

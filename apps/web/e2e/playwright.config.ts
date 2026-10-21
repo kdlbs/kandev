@@ -1,11 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const CI = !!process.env.CI;
-const upgradeRun = process.argv.some((arg, index, args) =>
-  ["upgrade-desktop", "upgrade-mobile"].some(
-    (project) =>
-      arg === `--project=${project}` || (arg === "--project" && args[index + 1] === project),
-  ),
+const upgradeRun = ["upgrade-desktop", "upgrade-mobile"].includes(
+  process.env.KANDEV_UPGRADE_PROJECT ?? "",
 );
 
 export default defineConfig({

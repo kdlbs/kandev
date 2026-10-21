@@ -113,6 +113,6 @@ ran locally after the user's CI-only instruction. Product runtime code is unchan
 
 ## PR review remediation
 
-Review remediation keeps upgrade projects out of ordinary Playwright discovery, covers explicit selection in both CLI forms, bounds PostgreSQL readiness to 90 seconds, and points missing-report failures to the actual CI job log instead of a nonexistent shard log.
+Review remediation keeps upgrade projects out of ordinary Playwright discovery, covers runner opt-in inherited by workers without CLI arguments, bounds PostgreSQL readiness to 90 seconds, and points missing-report failures to the actual CI job log instead of a nonexistent shard log.
 
 Verification is pending CI for this revision.
