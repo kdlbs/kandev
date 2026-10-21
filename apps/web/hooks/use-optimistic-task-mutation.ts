@@ -88,10 +88,11 @@ export function useOptimisticTaskMutation() {
           sequence,
           settledPatch ? toTaskScopeValues(settledPatch) : taskScopePatch,
         );
+        const isLatestWrite = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
         const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
         if (reconciliation) {
           applyTaskScopeReconciliation(taskId, reconciliation, ctx.applyPatch, storeApi);
-        } else if (settledPatch) {
+        } else if (settledPatch && isLatestWrite) {
           applyTaskScopeReconciliation(
             taskId,
             toTaskScopeValues(settledPatch),

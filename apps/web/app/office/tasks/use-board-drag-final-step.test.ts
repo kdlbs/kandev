@@ -79,4 +79,50 @@ describe("applyStatusDrop on Done before the final workflow step", () => {
     });
     expect(d.onError).toHaveBeenCalledWith("Cannot mark done: awaiting approval from CEO");
   });
+
+  it("does not apply an older move result while a newer drop is still in flight", async () => {
+    let current = task("t1", "in_progress");
+    let resolveFirst!: (value: { status: OfficeTaskStatus; workflowStepName: string }) => void;
+    const first = new Promise<{ status: OfficeTaskStatus; workflowStepName: string }>((res) => {
+      resolveFirst = res;
+    });
+    let resolveSecond!: (value: { status: OfficeTaskStatus }) => void;
+    const second = new Promise<{ status: OfficeTaskStatus }>((res) => {
+      resolveSecond = res;
+    });
+    const d = {
+      getTask: vi.fn(() => current),
+      patchTask: vi.fn((_id: string, patch: Partial<OfficeTask>) => {
+        current = { ...current, ...patch };
+      }),
+      updateStatus: vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
+      onError: vi.fn(),
+      onInfo: vi.fn(),
+    } satisfies StatusDropDeps;
+
+    const doneDrop = applyStatusDrop("t1", "done", d);
+    const blockedDrop = applyStatusDrop("t1", "blocked", d);
+    resolveFirst({ status: "in_progress", workflowStepName: "Ship" });
+    await doneDrop;
+
+    expect(current.status).toBe("blocked");
+
+    resolveSecond({ status: "blocked" });
+    await blockedDrop;
+    expect(current.status).toBe("blocked");
+  });
+
+  it("explains a move queued behind the final step's WIP limit", async () => {
+    const d = deps(task("t1", "in_progress"), async () => ({
+      status: "in_progress",
+      workflowStepName: "Done",
+      queued: true,
+    }));
+
+    await applyStatusDrop("t1", "done", d);
+
+    expect(d.onInfo).toHaveBeenCalledWith(
+      'Queued for "Done". The task finishes when the step has room.',
+    );
+  });
 });

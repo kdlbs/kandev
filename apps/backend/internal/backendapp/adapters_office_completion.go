@@ -8,7 +8,7 @@ import (
 )
 
 type officePendingApproverReader interface {
-	PendingApproversForCompletion(ctx context.Context, taskID string) ([]dashboard.PendingApproverDTO, error)
+	PendingApproversForCompletion(ctx context.Context, taskID, stepID string) ([]dashboard.PendingApproverDTO, error)
 }
 
 // officeApprovalGuardAdapter lets the task service consult Office approvers
@@ -18,9 +18,9 @@ type officeApprovalGuardAdapter struct {
 }
 
 func (a officeApprovalGuardAdapter) PendingApproversForCompletion(
-	ctx context.Context, taskID string,
+	ctx context.Context, taskID, stepID string,
 ) ([]taskservice.PendingApprover, error) {
-	pending, err := a.reader.PendingApproversForCompletion(ctx, taskID)
+	pending, err := a.reader.PendingApproversForCompletion(ctx, taskID, stepID)
 	if err != nil {
 		return nil, err
 	}

@@ -183,11 +183,12 @@ export type UpdateTaskPayload = {
   resume?: boolean;
 };
 
-// `status` and `workflow_step` are present only when a Done request moved the
-// task to its workflow's final step.
+// `status`, `queued` and `workflow_step` are present only when a Done request
+// moved the task to its workflow's final step.
 export type UpdateTaskResponse = {
   ok: boolean;
   status?: string;
+  queued?: boolean;
   workflow_step?: { id?: string; name?: string };
 };
 

@@ -11,10 +11,10 @@ import (
 )
 
 // OfficeApprovalGuard reports the approvers whose decision still blocks an
-// Office task from completing. Implemented in backendapp over the Office
-// dashboard so this package does not import it.
+// Office task from completing on targetStepID. Implemented in backendapp over
+// the Office dashboard so this package does not import it.
 type OfficeApprovalGuard interface {
-	PendingApproversForCompletion(ctx context.Context, taskID string) ([]PendingApprover, error)
+	PendingApproversForCompletion(ctx context.Context, taskID, targetStepID string) ([]PendingApprover, error)
 }
 
 // PendingApprover names one approver without a current approval.
@@ -52,14 +52,14 @@ func (s *Service) SetOfficeApprovalGuard(guard OfficeApprovalGuard) {
 // Office task while any approver is pending. It runs before the move writes
 // anything, so a refusal leaves the task untouched.
 func (s *Service) guardOfficeHumanCompletion(
-	ctx context.Context, task *models.Task, nextState v1.TaskState, opts MoveTaskOptions,
+	ctx context.Context, task *models.Task, targetStepID string, nextState v1.TaskState, opts MoveTaskOptions,
 ) error {
 	if s.officeApprovalGuard == nil || !task.IsFromOffice ||
 		opts.StepHistoryActor != wfmodels.StepTransitionActorHuman ||
 		nextState != v1.TaskStateCompleted || task.State == v1.TaskStateCompleted {
 		return nil
 	}
-	pending, err := s.officeApprovalGuard.PendingApproversForCompletion(ctx, task.ID)
+	pending, err := s.officeApprovalGuard.PendingApproversForCompletion(ctx, task.ID, targetStepID)
 	if err != nil {
 		return fmt.Errorf("resolve pending approvers: %w", err)
 	}

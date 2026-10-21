@@ -56,10 +56,12 @@ workflow instead of being refused.
 - **AC-OFFICE-HUMAN-DONE-001.2:** After that move, the task shall show `done`
   only when the final step is a completing step. Otherwise the task shall show
   the status the move produced, and the user shall be told that the task moved
-  to the named step without being completed.
+  to the named step without being completed. When the final step's WIP limit
+  queues the move, the user shall be told that the task is queued for that step
+  and finishes when the step has room.
 - **AC-OFFICE-HUMAN-DONE-001.3:** When the move is refused (pending approvers,
-  an unmet completion gate, an active session, a pending move, or any other
-  move refusal), the task's status, step, decisions and queued runs shall be
+  an unmet completion gate, an active session that also blocks a manual move, a
+  pending move, or any other move refusal), the task's status, step, decisions and queued runs shall be
   unchanged, and no reviewer or approver shall be woken. The card shall return
   to its original column and the user shall see the reason. A pending-approver
   refusal shall name the pending approvers.
@@ -81,7 +83,7 @@ have not approved.
 
 - **AC-OFFICE-HUMAN-DONE-002.1:** A human move of an Office task into a
   completing step shall be refused before any write when the task has at least
-  one pending approver. The refusal shall be HTTP 409 with code
+  one pending approver, counting the destination step's template approvers. The refusal shall be HTTP 409 with code
   `task_approvals_pending` and shall list the pending approvers.
 - **AC-OFFICE-HUMAN-DONE-002.2:** A refused move shall leave the task's step,
   state, decisions and step-entry actions unchanged, and shall publish no task

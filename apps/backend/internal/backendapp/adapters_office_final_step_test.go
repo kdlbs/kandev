@@ -16,6 +16,7 @@ import (
 type fakeFinalStepTasks struct {
 	task    *models.Task
 	moveErr error
+	queue   bool
 	moves   []string
 	opts    taskservice.MoveTaskOptions
 }
@@ -35,6 +36,11 @@ func (f *fakeFinalStepTasks) MoveTaskWithOptions(
 	moved := *f.task
 	moved.WorkflowStepID = stepID
 	moved.State = v1.TaskStateCompleted
+	if f.queue {
+		moved.WorkflowStepID = f.task.WorkflowStepID
+		moved.State = f.task.State
+		moved.QueuedForStepID = stepID
+	}
 	return &taskservice.MoveTaskResult{Task: &moved, WorkflowStep: &wfmodels.WorkflowStep{ID: stepID, Name: "Done"}}, nil
 }
 
@@ -129,5 +135,27 @@ func TestOfficeFinalStepMover_UnclassifiedErrorPassesThrough(t *testing.T) {
 	var refused *dashboard.FinalStepMoveRefusedError
 	if errors.As(err, &refused) || !errors.Is(err, moveErr) {
 		t.Fatalf("err = %v, want the raw move error", err)
+	}
+}
+
+func TestFinalWorkflowStep_BreaksPositionTiesByID(t *testing.T) {
+	steps := []*wfmodels.WorkflowStep{
+		{ID: "step-b", Position: 3}, {ID: "step-c", Position: 3}, nil, {ID: "step-a", Position: 3},
+	}
+
+	if got := finalWorkflowStep(steps); got == nil || got.ID != "step-c" {
+		t.Fatalf("final step = %+v, want step-c", got)
+	}
+}
+
+func TestOfficeFinalStepMover_ReportsWIPQueuedMove(t *testing.T) {
+	tasks := &fakeFinalStepTasks{task: workTask(), queue: true}
+
+	result, err := newFinalStepAdapter(tasks).MoveTaskToFinalStep(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("MoveTaskToFinalStep: %v", err)
+	}
+	if !result.Queued || result.State != string(v1.TaskStateInProgress) || result.StepName != "Done" {
+		t.Fatalf("result = %+v, want queued for Done with the prior state", result)
 	}
 }

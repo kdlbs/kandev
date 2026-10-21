@@ -54,17 +54,28 @@ func (a officeFinalStepMoverAdapter) MoveTaskToFinalStep(
 	if err != nil {
 		return nil, classifyFinalStepMoveError(err)
 	}
-	result := &dashboard.FinalStepMoveResult{State: string(moved.Task.State), StepID: final.ID, StepName: final.Name}
+	result := &dashboard.FinalStepMoveResult{
+		State:    string(moved.Task.State),
+		StepID:   final.ID,
+		StepName: final.Name,
+		Queued:   moved.Task.QueuedForStepID == final.ID,
+	}
 	if moved.WorkflowStep != nil {
 		result.StepID, result.StepName = moved.WorkflowStep.ID, moved.WorkflowStep.Name
 	}
 	return result, nil
 }
 
+// finalWorkflowStep returns the step with the highest position, breaking a
+// position tie by the larger ID so the choice does not depend on list order.
 func finalWorkflowStep(steps []*wfmodels.WorkflowStep) *wfmodels.WorkflowStep {
 	var final *wfmodels.WorkflowStep
 	for _, step := range steps {
-		if step != nil && (final == nil || step.Position > final.Position) {
+		if step == nil {
+			continue
+		}
+		if final == nil || step.Position > final.Position ||
+			(step.Position == final.Position && step.ID > final.ID) {
 			final = step
 		}
 	}

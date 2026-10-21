@@ -669,6 +669,7 @@ func (h *Handler) updateTask(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"ok":            true,
 			"status":        moved.Status,
+			"queued":        moved.Queued,
 			"workflow_step": gin.H{"id": moved.StepID, "name": moved.StepName},
 		})
 		return

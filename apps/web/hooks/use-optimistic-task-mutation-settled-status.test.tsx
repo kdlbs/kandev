@@ -110,4 +110,28 @@ describe("useOptimisticTaskMutation settled status", () => {
     expect(state.task.status).toBe("done");
     expect(storeStatus()).toBe("done");
   });
+
+  it("ignores an older reported status while a newer status write is pending", async () => {
+    const { state, mutate } = setup();
+    let resolveSecond!: (value: { status: string }) => void;
+    const second = new Promise<{ status: string }>((res) => {
+      resolveSecond = res;
+    });
+
+    let secondWrite!: Promise<void>;
+    await act(async () => {
+      const firstWrite = mutate()("t-1", { status: "done" }, async () => ({
+        status: "in_progress",
+      }));
+      secondWrite = mutate()("t-1", { status: "blocked" }, () => second);
+      await firstWrite;
+    });
+    expect(state.task.status).toBe("blocked");
+
+    await act(async () => {
+      resolveSecond({ status: "blocked" });
+      await secondWrite;
+    });
+    expect(state.task.status).toBe("blocked");
+  });
 });

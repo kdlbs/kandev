@@ -224,3 +224,19 @@ func TestUpdateTaskEndpoint_HumanDoneRefusedMoveConflict_CarriesCode(t *testing.
 		t.Errorf("response has status %v, want none", body["status"])
 	}
 }
+
+func TestUpdateTaskEndpoint_HumanDoneQueued_ReportsQueued(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskAtNonTerminalStep(t, deps.db, "ep-hd4", "ws-hd", "HD", "in_progress", "Work")
+	deps.svc.SetTaskFinalStepMover(&fakeFinalStepMover{result: &dashboard.FinalStepMoveResult{
+		State: "IN_PROGRESS", StepID: "step-done", StepName: "Done", Queued: true,
+	}})
+
+	w, body := patchStatusDone(t, deps, "ep-hd4")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %v", w.Code, body)
+	}
+	if body["status"] != "in_progress" || body["queued"] != true {
+		t.Errorf("body = %v, want in_progress and queued", body)
+	}
+}

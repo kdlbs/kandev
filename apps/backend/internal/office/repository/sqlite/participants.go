@@ -807,9 +807,23 @@ type officeSeatRow struct {
 // workflow. ListTaskParticipantsAtCurrentStep deliberately does NOT use this
 // helper — see its own doc comment.
 func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFilter string) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAt(ctx, taskID, "", roleFilter)
+}
+
+// ListTaskParticipantsAtStep returns the task's seats as they would read with
+// the task standing at stepID: per-task rows across the task's workflow plus
+// the template rows of stepID. An empty stepID means the current step.
+func (r *Repository) ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]Participant, error) {
+	return r.listWorkflowScopedSeatsAt(ctx, taskID, stepID, role)
+}
+
+func (r *Repository) listWorkflowScopedSeatsAt(ctx context.Context, taskID, atStepID, roleFilter string) ([]Participant, error) {
 	workflowID, stepID, err := r.taskWorkflowContext(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if atStepID != "" && stepID != "" {
+		stepID = atStepID
 	}
 	if stepID == "" {
 		return []Participant{}, nil

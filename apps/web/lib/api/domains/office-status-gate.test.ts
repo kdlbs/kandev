@@ -111,11 +111,10 @@ describe("updateTaskStatusOrTranslateGate final-step outcomes", () => {
       status: "todo",
     });
   });
-
-  // @covers AC-OFFICE-HUMAN-DONE-001.3
 });
 
 describe("updateTaskStatusOrTranslateGate refusals", () => {
+  // @covers AC-OFFICE-HUMAN-DONE-001.3
   it("throws StatusChangeRefusedError naming approvers when a 409 has a reason but no status", async () => {
     updateTaskMock.mockRejectedValueOnce(
       new ApiError(APPROVALS_PENDING_MESSAGE, 409, {

@@ -323,6 +323,7 @@
   "cannotMarkDoneCompletionCriteria": "完了にできない: タスクの完了条件が検証されていない",
   "cannotMarkDoneMoveRefused": "完了にできない: タスクをワークフローの最終ステップに移動できない",
   "movedToFinalStepNotCompleted": "「{{step}}」に移動した。このステップではタスクは完了しない。",
+  "movedToFinalStepQueued": "「{{step}}」の待ち行列に入った。ステップに空きができるとタスクは完了する。",
   "cannotPreviewThisFile": "このファイルはプレビューできない",
   "changeGithubIssue": "GitHub issue を変更",
   "changes": "変更",

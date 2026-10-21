@@ -607,12 +607,14 @@ func (s *DashboardService) allApproversApproved(ctx context.Context, taskID stri
 }
 
 // PendingApproversForCompletion returns the approvers, with display names,
-// whose missing approval blocks the task from completing. Consulted by the
-// task service before a human move completes an Office task.
+// whose missing approval blocks the task from completing on stepID (empty
+// means its current step). Consulted by the task service before a human move
+// completes an Office task, so the destination step's template approvers
+// count.
 func (s *DashboardService) PendingApproversForCompletion(
-	ctx context.Context, taskID string,
+	ctx context.Context, taskID, stepID string,
 ) ([]PendingApproverDTO, error) {
-	pending, err := s.pendingApprovers(ctx, taskID)
+	pending, err := s.pendingApproversAtStep(ctx, taskID, stepID)
 	if err != nil || len(pending) == 0 {
 		return nil, err
 	}
@@ -622,7 +624,13 @@ func (s *DashboardService) PendingApproversForCompletion(
 // pendingApprovers returns the agent IDs of approvers without a
 // current approved decision. An empty result means the gate is clear.
 func (s *DashboardService) pendingApprovers(ctx context.Context, taskID string) ([]string, error) {
-	approvers, err := s.repo.ListTaskParticipants(ctx, taskID, models.ParticipantRoleApprover)
+	return s.pendingApproversAtStep(ctx, taskID, "")
+}
+
+// pendingApproversAtStep is pendingApprovers with the task's seats read as if
+// it stood at stepID; an empty stepID reads the current step.
+func (s *DashboardService) pendingApproversAtStep(ctx context.Context, taskID, stepID string) ([]string, error) {
+	approvers, err := s.repo.ListTaskParticipantsAtStep(ctx, taskID, stepID, models.ParticipantRoleApprover)
 	if err != nil {
 		return nil, err
 	}

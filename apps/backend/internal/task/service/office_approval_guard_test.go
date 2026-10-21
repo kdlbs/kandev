@@ -14,10 +14,12 @@ type fakeOfficeApprovalGuard struct {
 	pending []PendingApprover
 	err     error
 	calls   int
+	stepIDs []string
 }
 
-func (g *fakeOfficeApprovalGuard) PendingApproversForCompletion(_ context.Context, _ string) ([]PendingApprover, error) {
+func (g *fakeOfficeApprovalGuard) PendingApproversForCompletion(_ context.Context, _, stepID string) ([]PendingApprover, error) {
 	g.calls++
+	g.stepIDs = append(g.stepIDs, stepID)
 	return g.pending, g.err
 }
 
@@ -103,8 +105,8 @@ func TestMoveTask_OfficeHumanIntoCompletingStep_NoPendingApprovers_Completes(t *
 	if _, err := f.svc.MoveTaskWithOptions(context.Background(), "task-guard", "wf-source", "step-done", 0, humanMove()); err != nil {
 		t.Fatalf("MoveTaskWithOptions: %v", err)
 	}
-	if guard.calls != 1 {
-		t.Fatalf("guard calls = %d, want 1", guard.calls)
+	if guard.calls != 1 || guard.stepIDs[0] != "step-done" {
+		t.Fatalf("guard calls = %d for steps %v, want 1 for the destination step-done", guard.calls, guard.stepIDs)
 	}
 	f.mustState(t, "step-done", string(v1.TaskStateCompleted))
 }

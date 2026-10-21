@@ -28,6 +28,9 @@ type FinalStepMoveResult struct {
 	Status   string
 	StepID   string
 	StepName string
+	// Queued reports a move that is waiting for room under the step's WIP
+	// limit; the task keeps its prior state until the step admits it.
+	Queued bool
 }
 
 // FinalStepMoveRefusedError reports a final-step move that was refused

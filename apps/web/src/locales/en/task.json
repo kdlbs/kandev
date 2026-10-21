@@ -323,6 +323,7 @@
   "cannotMarkDoneCompletionCriteria": "Cannot mark done: the task's completion criteria are not verified",
   "cannotMarkDoneMoveRefused": "Cannot mark done: the task could not be moved to the final workflow step",
   "movedToFinalStepNotCompleted": "Moved to \"{{step}}\". This step doesn't complete the task.",
+  "movedToFinalStepQueued": "Queued for \"{{step}}\". The task finishes when the step has room.",
   "cannotPreviewThisFile": "Cannot preview this file",
   "changeGithubIssue": "Change GitHub issue",
   "changes": "Changes",

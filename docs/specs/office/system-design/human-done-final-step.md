@@ -42,7 +42,7 @@ path, the engine path, and the final-step Done path are unchanged.
 // OfficeApprovalGuard reports the approvers whose decision still blocks an
 // Office task from completing.
 type OfficeApprovalGuard interface {
-    PendingApproversForCompletion(ctx context.Context, taskID string) ([]PendingApprover, error)
+    PendingApproversForCompletion(ctx context.Context, taskID, targetStepID string) ([]PendingApprover, error)
 }
 
 type PendingApprover struct {
@@ -67,9 +67,13 @@ wired the move proceeds unchanged, which keeps non-Office deployments and unit
 tests on the current path.
 
 `backendapp` wires the guard with an adapter over
-`DashboardService.pendingApprovers` plus `resolvePendingApprovers` (names),
-so "pending" keeps one definition: workflow-scoped approver seats without a
-current approval.
+`DashboardService.PendingApproversForCompletion`, which reads approver seats
+as if the task stood at the destination step
+(`Repository.ListTaskParticipantsAtStep`: per-task seats across the workflow
+plus the destination step's template seats) and resolves names. "Pending"
+keeps one definition, approver seats without a current approval, and a
+template approver on the destination step counts even though the task has
+not reached it yet.
 
 `task/handlers.handleSelectedMoveError` maps the error to 409
 `{code: "task_approvals_pending", error, pending_approvers: [{agent_profile_id, name}]}`.
@@ -110,7 +114,8 @@ move path it writes no state, activity or event of its own: the move publishes
 owns completion side effects. A step lookup error aborts the request.
 
 The `backendapp` adapter `officeFinalStepMoverAdapter` reads the task, takes
-the step with the highest position from `ListStepsByWorkflow`, and calls
+the step with the highest position from `ListStepsByWorkflow` (a position tie
+goes to the larger step ID), and calls
 `MoveTaskWithOptions` with `StepHistoryActor: human` and
 `AllowActivePrimarySession: true`, the same options as `httpMoveTask`. It
 classifies refusals into `*dashboard.FinalStepMoveRefusedError{Reason, Code, Pending}`
@@ -129,8 +134,14 @@ fields, and **no `status` field**: the absence of `status` tells the client
 that nothing changed.
 
 On success the PATCH returns 200
-`{ok: true, status, workflow_step: {id, name}}`. Other PATCH requests keep
-returning `{ok: true}`.
+`{ok: true, status, queued, workflow_step: {id, name}}`. `queued` is true when
+the final step's WIP limit queued the move (`QueuedForStepID` is the final
+step); the task then keeps its prior state until the step admits it. Other
+PATCH requests keep returning `{ok: true}`.
+
+The step read and the move are not one transaction. If another actor moves the
+task in between, `MoveTaskWithOptions` revalidates the task and either applies
+the move to the final step or refuses it like any other move.
 
 ## Frontend
 
@@ -152,9 +163,12 @@ returned status. `hooks/use-optimistic-task-mutation.ts` settles a status
 mutation on the status its API call returns, which covers the status picker
 (`components/task/simple/components/status-picker.tsx`). A
 `StatusChangeRefusedError` restores the pre-mutation snapshot like any failed
-write. When the returned status is not the requested `done`, both show the info
-toast `task:movedToFinalStepNotCompleted` with the step name
-(`finalStepMoveNotice`).
+write. A response only corrects the displayed status while its write is the
+latest one for the task (`shouldRestoreAfterFailedWrite`); otherwise the
+reconciliation of the last write to settle decides. When the returned status
+is not the requested `done`, both show an info toast with the step name
+(`finalStepMoveNotice`): `task:movedToFinalStepQueued` for a queued move,
+otherwise `task:movedToFinalStepNotCompleted`.
 
 `components/task/task-move-error-message.ts` maps `task_approvals_pending` to
 `task:taskMoveErrorApprovalsPending` for Kanban and task-page moves.

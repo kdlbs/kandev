@@ -292,6 +292,7 @@
   "cannotMarkDoneCompletionCriteria": "无法标记为完成：任务的完成标准尚未验证",
   "cannotMarkDoneMoveRefused": "无法标记为完成：无法将任务移至工作流的最后一步",
   "movedToFinalStepNotCompleted": "已移至“{{step}}”。此步骤不会完成任务。",
+  "movedToFinalStepQueued": "已排队等待“{{step}}”。该步骤有空位时任务即完成。",
   "cannotPreviewThisFile": "无法预览此文件",
   "changeGithubIssue": "更改 GitHub 议题",
   "changes": "变更",

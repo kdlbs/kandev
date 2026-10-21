@@ -131,10 +131,11 @@ function settleStatusDrop(
   const settledStatus = (outcome?.status ?? targetStatus) as OfficeTaskStatus;
   const settled: TaskScopeValues = { status: settledStatus, rawStatus: settledStatus };
   recordWriteSettled(taskId, TASK_SCOPE, sequence, settled);
+  const isLatestWrite = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
   const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
   if (reconciliation) {
     deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
-  } else if (settledStatus !== targetStatus) {
+  } else if (settledStatus !== targetStatus && isLatestWrite) {
     deps.patchTask(taskId, toOfficeTaskReconciliationPatch(settled));
   }
   const notice = outcome ? finalStepMoveNotice(targetStatus, outcome) : null;

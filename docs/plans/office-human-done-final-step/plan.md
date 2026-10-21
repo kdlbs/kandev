@@ -145,11 +145,12 @@ toasts match desktop.
 | --- | --- |
 | AC-OFFICE-HUMAN-DONE-002.1, .2 | `task/service/office_approval_guard_test.go` `TestMoveTask_OfficeHumanIntoCompletingStep_ApproversPending_RefusedBeforeWrite`, `TestMoveTask_OfficeHumanApprovalGuardError_AbortsMove` |
 | AC-OFFICE-HUMAN-DONE-002.3 | same file: `TestMoveTask_OfficeEngineMove_SkipsApprovalGuard`, `TestMoveTask_NonOfficeTask_SkipsApprovalGuard`, `TestMoveTask_OfficeHumanIntoNonCompletingStep_SkipsApprovalGuard`, `TestMoveTask_OfficeHumanWithoutGuard_Completes` |
-| AC-OFFICE-HUMAN-DONE-002.1 | `task/handlers/move_approvals_error_test.go` `TestHandleSelectedMoveError_ApprovalsPending409`; `office/dashboard/pending_approvers_completion_test.go`; `backendapp/adapters_office_completion_test.go` |
+| AC-OFFICE-HUMAN-DONE-002.1 | `task/handlers/move_approvals_error_test.go` `TestHandleSelectedMoveError_ApprovalsPending409`; `office/dashboard/pending_approvers_completion_test.go` (incl. `TestPendingApproversForCompletion_CountsTemplateApproverAtDestinationStep`); `backendapp/adapters_office_completion_test.go`; the guard receives the destination step in `TestMoveTask_OfficeHumanIntoCompletingStep_NoPendingApprovers_Completes` |
 | AC-OFFICE-HUMAN-DONE-002.4 | `components/task/task-move-error-message.test.ts` "maps task_approvals_pending to the approvals-pending message" |
 | AC-OFFICE-HUMAN-DONE-001.1 | `office/dashboard/human_done_final_step_test.go` `TestUpdateTaskStatusAsHuman_DoneAtWork_MovesToFinalStep`, `TestUpdateTaskEndpoint_HumanDoneAtWork_MovesToFinalStep`; `backendapp/adapters_office_final_step_test.go` `TestOfficeFinalStepMover_MovesToHighestPositionStepAsHuman` |
-| AC-OFFICE-HUMAN-DONE-001.2 | `TestUpdateTaskStatusAsHuman_FinalStepDoesNotComplete_ReturnsMovedStatus`; `office-status-gate.test.ts` "returns the status and step the backend moved the task to", `finalStepMoveNotice`; `use-board-drag-final-step.test.ts` "settles on a non-done move result and reports the step"; `use-optimistic-task-mutation-settled-status.test.tsx` |
+| AC-OFFICE-HUMAN-DONE-001.2 | `TestUpdateTaskStatusAsHuman_FinalStepDoesNotComplete_ReturnsMovedStatus`; `TestUpdateTaskEndpoint_HumanDoneQueued_ReportsQueued`; `TestOfficeFinalStepMover_ReportsWIPQueuedMove`; `use-board-drag-final-step.test.ts` "explains a move queued behind the final step's WIP limit"; `office-status-gate.test.ts` "returns the status and step the backend moved the task to", `finalStepMoveNotice`; `use-board-drag-final-step.test.ts` "settles on a non-done move result and reports the step"; `use-optimistic-task-mutation-settled-status.test.tsx` |
 | AC-OFFICE-HUMAN-DONE-001.3 | `TestUpdateTaskStatusAsHuman_DoneAtWork_MoveRefused_NoStateChangeNoWake`, `TestUpdateTaskEndpoint_HumanDoneRefused_409WithoutStatus`, `TestUpdateTaskEndpoint_HumanDoneRefusedMoveConflict_CarriesCode`, `TestOfficeFinalStepMover_TranslatesRefusals`; `office-status-gate.test.ts` refusals; `use-board-drag-final-step.test.ts` "rolls a refused human done back to the original column" |
+| AC-OFFICE-HUMAN-DONE-001.1 (determinism, overlap) | `TestFinalWorkflowStep_BreaksPositionTiesByID`; `use-board-drag-final-step.test.ts` "does not apply an older move result while a newer drop is still in flight"; `use-optimistic-task-mutation-settled-status.test.tsx` "ignores an older reported status while a newer status write is pending" |
 | AC-OFFICE-HUMAN-DONE-001.4 | `TestUpdateTaskStatusAsHuman_TerminalStep_KeepsDirectGate`; existing `approval_gate_step_test.go` agent cases |
 
 ## E2E tests
@@ -179,6 +180,13 @@ toasts match desktop.
   files, `i18n:check`, `i18n:ratchet`, `e2e:sleep-ratchet` and `make fmt` clean.
 - E2E `chromium`: `board-done-final-step` (2), `approval-flow` and `tasks` (8)
   pass. `mobile-chrome`: `mobile-board-done-final-step` (2) pass.
+
+Review fixup (PR #4642), 2026-10-21: the approver guard reads the
+destination step's template approvers; the final step picks a stable winner on
+position ties; a WIP-queued move reports `queued` and shows its own notice; an
+older status response no longer overrides a newer in-flight choice. Focused
+Go packages (`office/dashboard`, `office/repository/sqlite`, `task/service`,
+`backendapp`) and the web suites above pass after the fixup.
 
 ## Risks
 

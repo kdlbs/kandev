@@ -14,7 +14,7 @@ type fakePendingApproverReader struct {
 }
 
 func (f fakePendingApproverReader) PendingApproversForCompletion(
-	context.Context, string,
+	context.Context, string, string,
 ) ([]dashboard.PendingApproverDTO, error) {
 	return f.pending, f.err
 }
@@ -24,7 +24,7 @@ func TestOfficeApprovalGuardAdapter_MapsPendingApprovers(t *testing.T) {
 		pending: []dashboard.PendingApproverDTO{{AgentProfileID: "agent-ceo", Name: "CEO"}},
 	}}
 
-	got, err := adapter.PendingApproversForCompletion(context.Background(), "task-1")
+	got, err := adapter.PendingApproversForCompletion(context.Background(), "task-1", "step-done")
 	if err != nil {
 		t.Fatalf("PendingApproversForCompletion: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestOfficeApprovalGuardAdapter_PropagatesReadError(t *testing.T) {
 	readErr := errors.New("read failed")
 	adapter := officeApprovalGuardAdapter{reader: fakePendingApproverReader{err: readErr}}
 
-	if _, err := adapter.PendingApproversForCompletion(context.Background(), "task-1"); !errors.Is(err, readErr) {
+	if _, err := adapter.PendingApproversForCompletion(context.Background(), "task-1", "step-done"); !errors.Is(err, readErr) {
 		t.Fatalf("err = %v, want read error", err)
 	}
 }

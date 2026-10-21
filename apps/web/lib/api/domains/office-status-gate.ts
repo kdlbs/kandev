@@ -29,6 +29,8 @@ const GATE_REASONS: ReadonlySet<string> = new Set([
 export type StatusUpdateOutcome = {
   status: OfficeTaskStatus | TaskStatus;
   workflowStepName?: string;
+  /** The move is waiting for room under the final step's WIP limit. */
+  queued?: boolean;
 };
 
 // Builds the message the user sees when the approver gate rejects the move.
@@ -109,23 +111,28 @@ function refusalMessage(err: ApiError, reason: ApprovalGateReason): string {
 
 function toOutcome(
   requested: OfficeTaskStatus | TaskStatus,
-  response: { status?: string; workflow_step?: { name?: string } } | undefined,
+  response: { status?: string; queued?: boolean; workflow_step?: { name?: string } } | undefined,
 ): StatusUpdateOutcome {
   const outcome: StatusUpdateOutcome = {
     status: (response?.status as OfficeTaskStatus | TaskStatus | undefined) || requested,
   };
   const stepName = response?.workflow_step?.name;
   if (stepName) outcome.workflowStepName = stepName;
+  if (response?.queued) outcome.queued = true;
   return outcome;
 }
 
 // The info message for a Done request that moved the task to the final step
-// without completing it, or null when the task reached the requested status.
+// without completing it (or queued it behind the step's WIP limit), or null
+// when the task reached the requested status.
 export function finalStepMoveNotice(
   requested: OfficeTaskStatus | TaskStatus,
   outcome: StatusUpdateOutcome,
 ): string | null {
   if (outcome.status === requested || !outcome.workflowStepName) return null;
+  if (outcome.queued) {
+    return t("task:movedToFinalStepQueued", { step: outcome.workflowStepName });
+  }
   return t("task:movedToFinalStepNotCompleted", { step: outcome.workflowStepName });
 }
 
