@@ -38,7 +38,11 @@ nonempty route identifiers, excluding separators/control characters and bounding
 their length. Do not extract arbitrary Markdown or executable URLs.
 
 Bound source scanning and scanned reference records using explicit constants (initial
-limits: 256 KiB of source, 200 references, 512 code units per title, 256 per ID).
+limits: 256 KiB of source, 200 references, 4,096 code units per record line,
+512 per title, 256 per ID). Reject oversized lines before applying the record
+regex, whose ID capture has the same finite safe-character limit. Find system
+blocks with a forward `indexOf` scan and stop when no closing tag remains;
+unmatched opening tags must not restart a scan over the remaining source.
 When source exceeds the limit, skip task decoration rather than truncate into
 a partial record. Ignore malformed records. Deduplicate identical pairs; discard
 every mapping for a title associated with conflicting IDs in the message.

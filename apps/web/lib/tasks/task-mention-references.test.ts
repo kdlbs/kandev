@@ -142,3 +142,31 @@ describe("task mention reference limits", () => {
     ).toEqual([{ title: "Good", taskId: "good" }]);
   });
 });
+
+describe("task mention parser scan limits", () => {
+  it("rejects an overlong record before parsing while retaining a valid sibling", () => {
+    const valid = context([{ title: "Retry", taskId: "task-1" }]);
+    const oversized = context([{ title: "Oversized", taskId: "task-2" }]).replace(
+      "step: In progress)",
+      `step: ${"x".repeat(5_000)})`,
+    );
+    expect(taskMentionReferences(oversized + valid)).toEqual([
+      { title: "Retry", taskId: "task-1" },
+    ]);
+  });
+
+  it("handles a long comma-free record-shaped line within the source budget", () => {
+    const valid = context([{ title: "Retry", taskId: "task-1" }]);
+    const malformed = valid.replace(/- Retry.*\n/, `- Retry${" (id: a".repeat(30_000)}\n`);
+    expect(taskMentionReferences(malformed + valid)).toEqual([
+      { title: "Retry", taskId: "task-1" },
+    ]);
+  });
+
+  it("stops after unmatched system openers without dropping earlier references", () => {
+    const valid = context([{ title: "Retry", taskId: "task-1" }]);
+    expect(taskMentionReferences(valid + "<kandev-system>".repeat(17_000))).toEqual([
+      { title: "Retry", taskId: "task-1" },
+    ]);
+  });
+});

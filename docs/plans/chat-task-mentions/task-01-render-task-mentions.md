@@ -122,10 +122,13 @@ solve these without revisiting the design.
   message tests failed on missing task links; real desktop submission failed
   with zero chips instead of two. A rendered regression also reproduced the
   global Markdown underline overriding chip styling.
-- Final targeted Vitest command above: **107 tests passed across seven suites**.
+- Final targeted Vitest command above: **110 tests passed across seven suites**.
 - Review regressions: literal Markdown task titles, shared normalization, real
   math versus literal-dollar prose, ambiguous serialized records, pointer styling,
-  and UTF-8 byte budgets are covered. The desktop and phone fixtures select a
+  and UTF-8 byte budgets are covered. Additional regressions reject oversized
+  records and retain valid siblings around long comma-free records and unmatched
+  system openers. The malformed fixtures took 4.8 seconds before the parser fix;
+  the forward scan and pre-regex record limit remove that repeated scanning. The desktop and phone fixtures select a
   task title containing literal Markdown.
 - Typecheck: passed with `NODE_OPTIONS=--max-old-space-size=6144`. The initial
   default 4 GiB Node heap exhausted; the retry stayed within the guarded 8 GiB
