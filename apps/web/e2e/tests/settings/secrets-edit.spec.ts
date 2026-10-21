@@ -43,7 +43,9 @@ test.describe("workspace secrets edit", () => {
 
     await testPage.reload();
     await expect(testPage.getByText(renamed, { exact: true })).toBeVisible();
+    const revealed = waitForHttp(testPage, "POST", /\/api\/v1\/secrets\/[^/]+\/reveal$/);
     await testPage.getByRole("button", { name: `Reveal secret ${renamed}` }).click();
+    expect((await revealed).status()).toBe(200);
     await expect(testPage.getByText(newValue)).toBeVisible();
     await expect(testPage.locator("body")).not.toContainText(originalValue);
   });
@@ -58,7 +60,9 @@ test.describe("workspace secrets edit", () => {
     });
 
     await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/secrets`);
+    const originalReveal = waitForHttp(testPage, "POST", /\/api\/v1\/secrets\/[^/]+\/reveal$/);
     await testPage.getByRole("button", { name: `Reveal secret ${name}` }).click();
+    expect((await originalReveal).status()).toBe(200);
     await expect(testPage.getByText(originalValue)).toBeVisible();
 
     await testPage.getByRole("button", { name: `Edit secret ${name}` }).click();
@@ -75,7 +79,9 @@ test.describe("workspace secrets edit", () => {
     await updateResponse;
 
     await expect(testPage.locator("body")).not.toContainText(originalValue);
+    const rotatedReveal = waitForHttp(testPage, "POST", /\/api\/v1\/secrets\/[^/]+\/reveal$/);
     await testPage.getByRole("button", { name: `Reveal secret ${name}` }).click();
+    expect((await rotatedReveal).status()).toBe(200);
     await expect(testPage.getByText(newValue)).toBeVisible();
   });
 });
