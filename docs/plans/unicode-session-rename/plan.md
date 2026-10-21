@@ -82,7 +82,7 @@ for exact commands, failures, coverage boundaries and receipt paths.
 
 - Unit RED: 9 behavioral failures / 9 controls passed. Native desktop RED
   observed a 60-emoji write when submitting an unchanged legal 120-emoji name.
-- GREEN: 57 focused tests; 2 desktop and 1 native phone browser checks, no
+- GREEN: 57 focused tests; 2 desktop and 1 scoped native phone browser checks, no
   retries; scoped ESLint zero warnings; typecheck passed with CI's documented
   8 GiB heap; doc catalog, full spec lint, PR-doc coverage and diff checks passed.
 - One session-only limiter serves both input consumers and the committer.
@@ -93,3 +93,19 @@ for exact commands, failures, coverage boundaries and receipt paths.
   base is retained for parent validation. Later delivery requires combined
   current-main validation, including dependency refresh.
 - Stop after the normal hooked commit: ready_for_parent_validation. No push/PR.
+
+## Parent evidence correction and known limitation
+
+The original de5ba1ff phone screenshot showed a restart error despite the test
+passing. Parent review exposed a separate native Session-actions trigger defect:
+a tap retargets a click onto Restart session, sending stop and launch before
+Escape. It is preserved as a known unfixed defect, with exact diagnostic logs
+and source trace in the [work-order correction](task-01-preserve-unicode-names.md#parent-checkpoint-phone-evidence-correction).
+It has no Unicode source connection. No clean mobile menu claim remains.
+
+Per the parent's explicit scope decision, this package verifies only canonical
+Unicode labels and real touch selection on phones. The strengthened scenario
+requires a real selected-session subscription, zero lifecycle mutation requests,
+zero toasts and no horizontal overflow; it omits the unrelated lifecycle menu.
+Rename absence is source-traced only. Fresh phone evidence and captures replace
+the invalid menu-flow evidence; no mobile menu/Radix production change is made.
