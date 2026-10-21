@@ -20,7 +20,8 @@ async function runPermissionRoutine(
     executor_preference: '{"type":"local_pc"}',
   });
   const agentId = agent.id as string;
-  // Office launches take auto-approval from the Office agent's own setting.
+  // Auto-approval follows the launched execution profile. This workspace has no
+  // provider routing, so that is the Office agent's own profile row.
   if (autoApprove) await officeApi.updateAgent(agentId, { auto_approve: true });
   // AGENTS.md is inlined into the taskless prompt; the mock agent runs the
   // named scenario, which requests a permission before finishing its turn.
@@ -78,7 +79,7 @@ async function runPermissionRoutine(
 // AC-OFFICE-TASKLESS-001.1 / .9: no task or session UI exists to answer a
 // taskless permission request, so Office answers it and the run finishes.
 test.describe("Office taskless routine permissions", () => {
-  test("rejects the request when the agent does not auto-approve", async ({
+  test("rejects the request when the launched profile does not auto-approve", async ({
     officeApi,
     officeSeed,
     seedData,
@@ -93,7 +94,7 @@ test.describe("Office taskless routine permissions", () => {
     expect(decisions).toEqual(["rejected"]);
   });
 
-  test("approves the request when the agent auto-approves", async ({
+  test("approves the request when the launched profile auto-approves", async ({
     officeApi,
     officeSeed,
     seedData,

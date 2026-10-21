@@ -35,8 +35,9 @@ requests a permission reaches a terminal run outcome and frees the agent.
 
 ## Acceptance
 
-- Two cases, one per decision path: with the Office agent's `auto_approve`
-  off the run records `rejected`; with it on, `approved`. Both runs reach
+- Two cases, one per decision path: with the launched profile's `auto_approve`
+  off the run records `rejected`; with it on, `approved`. The e2e workspace has
+  no provider routing, so the launched profile is the Office agent's own row. Both runs reach
   `finished` and the agent returns to `idle`. With the Office handler
   disabled, both runs stay `claimed`.
 
@@ -79,6 +80,8 @@ Done 2026-10-20.
 
 - `go test ./cmd/mock-agent/ -count=1`: pass.
 - `pnpm e2e:run --host --shards 1 --project chromium tests/office/taskless-routine-permission.spec.ts`:
-  2 passed (`rejected` with agent auto-approve off, `approved` with it on).
+  2 passed (`rejected` with the launched profile's auto-approve off, `approved` with it on).
+- Manual check on a routed dev workspace (2026-10-21): the agent's own flag had no
+  effect; enabling auto-approve on the routed claude-acp profile produced `approved`.
 - Red check: with the Office subscription removed, both cases failed with the
   run detail still `claimed`.

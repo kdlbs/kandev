@@ -335,11 +335,13 @@ must not store task messages or call task-session resolution for them.
 
 Office subscribes to the same subject family and admits a request through the
 event-admission rule above (claimed run, exact attempt, execution ID). It then
-decides:
+decides. Office does not read an auto-approve setting itself: agentctl marks
+the request from the launched execution profile, which provider routing may
+have selected ([agents-03](agents-03.md)).
 
 | Request | Decision |
 | --- | --- |
-| auto-approval pending (the Office agent's `auto_approve` is on; agentctl marks the request) | resolve with the offered auto-approval option |
+| auto-approval pending (the launched execution profile auto-approves; agentctl marks the request) | resolve with the offered auto-approval option |
 | otherwise, a reject option is offered | resolve with the first reject option |
 | otherwise | cancel the request |
 

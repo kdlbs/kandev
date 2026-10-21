@@ -57,7 +57,7 @@ next.
 - Run-owned permission event subject and payload owner fields.
 - Explicit orchestrator ignore of run-owned permission requests.
 - Execution-keyed permission resolve/cancel on the shared runtime facade.
-- Office taskless permission policy: approve when the Office agent auto-approves,
+- Office taskless permission policy: approve when the launched execution profile auto-approves,
   otherwise reject (or cancel), with a run event per decision.
 - Unit, integration and Playwright regression coverage.
 
@@ -106,7 +106,7 @@ next.
 
 ### Compatibility
 
-| Execution | Office agent `auto_approve` | Result |
+| Execution | Launched execution profile `auto_approve` | Result |
 | --- | --- | --- |
 | task-owned | any | unchanged (orchestrator path) |
 | run-owned | on | approved by Office; turn continues |
