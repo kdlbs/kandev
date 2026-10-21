@@ -46,32 +46,118 @@ async function associatePR(api: ApiClient, taskId: string, state = "merged") {
   });
 }
 
-async function expectContainedTouchTargets(bar: Locator) {
-  const bounds = (await bar.boundingBox())!;
-  const boxes = await bar.locator("button:visible").evaluateAll((buttons) =>
-    buttons.map((button) => {
-      const { x, y, width, height } = button.getBoundingClientRect();
+async function sampleTouchGeometry(bar: Locator, bannerId?: string) {
+  return bar.evaluate((element, id) => {
+    const bounds = (target: Element) => {
+      const { x, y, width, height } = target.getBoundingClientRect();
       return { x, y, width, height };
-    }),
-  );
-  for (const [index, box] of boxes.entries()) {
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.height).toBeGreaterThanOrEqual(44);
-    expect(box.x).toBeGreaterThanOrEqual(bounds.x);
-    expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1);
-    for (const other of boxes.slice(index + 1)) {
-      const overlapX =
-        Math.min(box.x + box.width, other.x + other.width) - Math.max(box.x, other.x);
-      const overlapY =
-        Math.min(box.y + box.height, other.y + other.height) - Math.max(box.y, other.y);
-      expect(overlapX <= 1 || overlapY <= 1).toBe(true);
+    };
+    const banner = id ? element.querySelector(`[data-testid="${id}"]`) : null;
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      document: {
+        width: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      },
+      bar: bounds(element),
+      banner: banner ? { ...bounds(banner), order: getComputedStyle(banner).order } : null,
+      controls: Array.from(element.querySelectorAll("button")).map((button) => {
+        const visibility = getComputedStyle(button).visibility;
+        return {
+          testId: button.getAttribute("data-testid"),
+          label: button.getAttribute("aria-label") ?? button.textContent,
+          connected: button.isConnected,
+          rendered:
+            button.getClientRects().length > 0 && !["hidden", "collapse"].includes(visibility),
+          ...bounds(button),
+        };
+      }),
+    };
+  }, bannerId);
+}
+
+type TouchGeometry = Awaited<ReturnType<typeof sampleTouchGeometry>>;
+
+function touchTargetViolations(
+  control: TouchGeometry["controls"][number],
+  bar: TouchGeometry["bar"],
+  leftTolerance: number,
+) {
+  const violations: string[] = [];
+  const label = control.testId ?? control.label;
+  if (!control.connected || control.width < 44 || control.height < 44) {
+    violations.push(`Disconnected or undersized touch target: ${label}`);
+  }
+  if (
+    control.x < bar.x - leftTolerance ||
+    control.x + control.width > bar.x + bar.width + 1 ||
+    control.y < bar.y - 1 ||
+    control.y + control.height > bar.y + bar.height + 1
+  ) {
+    violations.push(`Touch target outside status bar: ${label}`);
+  }
+  return violations;
+}
+
+function noticeGeometryViolations(sample: TouchGeometry, required: string[]) {
+  const violations: string[] = [];
+  if (
+    !sample.banner ||
+    sample.banner.width < sample.bar.width - 1 ||
+    sample.banner.order !== "-9999"
+  ) {
+    violations.push("Notice must span the first status-bar row");
+  }
+  for (const id of required) {
+    const control = sample.controls.find((target) => target.testId === id);
+    if (sample.banner && control && control.y < sample.banner.y + sample.banner.height) {
+      violations.push(`Required control must follow notice: ${id}`);
     }
   }
-  expect(
-    await bar
-      .page()
-      .evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth),
-  ).toBe(true);
+  return violations;
+}
+
+function touchGeometryViolations(sample: TouchGeometry, withBanner: boolean) {
+  const violations: string[] = [];
+  const required = ["share-task-button", "conversation-usage-trigger", "proceed-next-step"];
+  for (const id of required) {
+    const matches = sample.controls.filter((control) => control.testId === id);
+    if (matches.length !== 1 || !matches[0].rendered) {
+      violations.push(`Required control must be unique and rendered: ${id}`);
+    }
+  }
+  const controls = sample.controls.filter((control) => control.rendered);
+  if (!controls.length) violations.push("No rendered status-bar controls");
+  for (const [index, control] of controls.entries()) {
+    const label = control.testId ?? control.label ?? `button ${index}`;
+    violations.push(...touchTargetViolations(control, sample.bar, withBanner ? 1 : 0));
+    for (const other of controls.slice(index + 1)) {
+      const overlapX =
+        Math.min(control.x + control.width, other.x + other.width) - Math.max(control.x, other.x);
+      const overlapY =
+        Math.min(control.y + control.height, other.y + other.height) - Math.max(control.y, other.y);
+      if (overlapX > 1 && overlapY > 1)
+        violations.push(`Overlapping targets: ${label}, ${other.testId ?? other.label}`);
+    }
+  }
+  if (sample.document.scrollWidth > sample.document.width)
+    violations.push("Horizontal document overflow");
+  if (withBanner) violations.push(...noticeGeometryViolations(sample, required));
+  return violations;
+}
+
+async function expectSettledTouchGeometry(bar: Locator, bannerId?: string) {
+  await expect
+    .poll(async () => {
+      const sample = await sampleTouchGeometry(bar, bannerId);
+      const violations = touchGeometryViolations(sample, bannerId !== undefined);
+      return violations.length ? [{ violations, sample }] : [];
+    })
+    .toEqual([]);
+}
+
+async function expectContainedTouchTargets(bar: Locator) {
+  await expectSettledTouchGeometry(bar);
 }
 
 async function expectSameControlRow(status: Locator, utility: Locator) {
@@ -200,29 +286,9 @@ test("wraps status and transcript controls without shrinking targets", async ({
 });
 
 async function expectPhoneControls(page: Page, banner: Locator) {
-  const bar = page.getByTestId("chat-status-bar");
-  const barBox = (await bar.boundingBox())!;
-  const bannerBox = (await banner.boundingBox())!;
-  expect(bannerBox.width).toBeGreaterThanOrEqual(barBox.width - 1);
-  await expect(banner).toHaveCSS("order", "-9999");
-  const targets = bar.locator("button:visible");
-  for (const control of await targets.all()) {
-    const box = (await control.boundingBox())!;
-    expect(box.height, await control.getAttribute("data-testid")).toBeGreaterThanOrEqual(44);
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.x).toBeGreaterThanOrEqual(barBox.x - 1);
-    expect(box.x + box.width).toBeLessThanOrEqual(barBox.x + barBox.width + 1);
-    expect(box.y + box.height).toBeLessThanOrEqual(barBox.y + barBox.height + 1);
-  }
-  for (const testId of ["share-task-button", "conversation-usage-trigger", "proceed-next-step"]) {
-    const box = (await bar.getByTestId(testId).boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
-  }
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-    ),
-  ).toBe(true);
+  const bannerId = await banner.getAttribute("data-testid");
+  expect(bannerId).not.toBeNull();
+  await expectSettledTouchGeometry(page.getByTestId("chat-status-bar"), bannerId!);
 }
 
 async function removeBoardMembership(page: Page, taskId: string) {

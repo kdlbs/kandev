@@ -31,6 +31,7 @@ workflow routing, Office identity, launch intent and durable incarnation.
 - apps/backend/internal/orchestrator/dependency_prepared_session.go
 - apps/backend/internal/orchestrator/dependency_prepared_session_test.go
 - apps/backend/internal/mcp/handlers/dependency_prepared_move_test.go
+- apps/web/e2e/tests/chat/mobile-chat-status-bar.spec.ts
 - docs/specs/tasks/system-design/task-dependencies.md
 - docs/specs/tasks/system-design/deferred-start-step-entry.md
 
@@ -94,3 +95,63 @@ labelled as checkpoints. External receipt paths were replaced by self-contained
 command/result summaries. Prior-head CI passed 82 checks and skipped 13; final
 head checks, review disposition and protected merge remain tracked externally.
 No source/test changes were needed for the review findings.
+
+## Test-only CI geometry follow-up
+
+The controller authorized a bounded mobile test synchronization candidate after
+CI attempts at unchanged backend code failed at two geometry assertions. No
+production UI, hover behavior, launch policy or backend code changes are part
+of this follow-up. Public documentation has no additional impact.
+
+The old phone helper naturally failed with nine indexed button locators after
+the optional Jump to latest control disappeared, leaving eight current buttons.
+Diagnostics retained its identity, viewport and current bounds. The installed
+Playwright implementation also selects the array before a separate awaited
+`evaluateAll` callback. A controlled real transcript scroll between these two
+phases reproduced a disconnected Jump to latest node measuring zero on both
+base d5387f0 and CI merge 0bd1474; fresh current controls were connected and at
+least 44 pixels. The precise zero-width control from CI remains unidentified.
+
+Both local helpers now acquire current descendants, parent bounds and notice
+geometry in one browser callback, then poll the complete invariant set using
+the existing default assertion timeout. Required named controls must be unique
+and rendered. No zero-size required target is filtered out. The 44-pixel
+minimums, containment tolerances, overlap limit, notice order/row, viewport
+coverage and existing named-control/action scenarios remain enforced. Failures
+include control identity, connected/rendered state, viewport and sampled bounds.
+No test retry, timeout, sleep, skip or product behavior change was added.
+
+Verification in the CI runtime image uses one worker, 2 CPUs and 4 GiB memory,
+with CI profiles and strict WebSocket accounting. Test-only probes are restored
+before the final unchanged scenario runs:
+
+- Natural old phone helper: 7 passed, 1 expected timeout across four repeats of
+  the two failing scenarios, retries disabled (1 CPU pressure).
+- Controlled old sampling: expected zero-width assertion failure on base and CI
+  merge. Corrected current-snapshot helper passes the same lifecycle boundary.
+- Sustained zero-width, hidden, overlapping and duplicate required Share controls
+  each fail the corrected helper. Positive boundary case passes; four expected
+  mutant failures and one pass in 54.4 seconds on base, retries disabled.
+- Final base full file: 6 passed in 1.0 minute, retries disabled.
+- Final CI merge full file: 6 passed in 59.7 seconds. Two focused scenarios
+  repeated four times under the same 1-CPU pressure as natural RED: 8 passed
+  in 2.7 minutes, retries disabled.
+- Current-main synthetic merge (21949f6 + approved PR head): 6 passed in
+  59.0 seconds, retries disabled, after rebuilding production web assets.
+- Scoped ESLint passes without warnings. Formatting, documentation coverage,
+  catalog/specification and whitespace validation pass.
+
+Exact browser commands inside the isolated runtime image, from `apps/web`:
+
+```sh
+pnpm e2e:raw --project=mobile-chrome e2e/tests/chat/mobile-chat-status-bar.spec.ts --retries=0 --trace=on --reporter=line
+pnpm e2e:raw --project=mobile-chrome e2e/tests/chat/mobile-chat-status-bar.spec.ts --grep 'wraps status and transcript controls|gives the terminal notice' --repeat-each=4 --retries=0 --trace=on --reporter=line
+```
+
+The controller approved the exact three-file candidate and current-main
+integration after independently passing the full mobile file (6/6, 1.0 minute)
+in the same constrained CI image with retries disabled. Normal hook commit,
+exact-lease push and new-head CI/review are authorized. The old-head failed gate
+is historical evidence and cannot authorize merge; all required checks and
+semantic reviews must complete for the new head. The preexisting hover
+dismissal finding remains deferred.

@@ -219,3 +219,15 @@ remain ineligible. The requested running-sibling/sender-ID test would establish
 a different move-recipient contract. This repair prevents the eligible duplicate
 session and preserves primary selection, authenticated move authority and the
 explicit exclusion of existing stranded/ineligible sessions.
+
+## Mobile CI assertion follow-up
+
+A bounded test-only synchronization candidate is recorded in
+[the work order](task-01-reuse-prepared-primary.md#test-only-ci-geometry-follow-up).
+It preserves the approved backend behavior and existing mobile contracts.
+The controller approved this candidate and integration onto main `21949f6`.
+Its independent CI-image run passed all six mobile scenarios in 1.0 minute,
+with one worker, 2 CPUs, 4 GiB and retries disabled. The rebased candidate tree
+matched the reviewed tree before this delivery-record update. New exact-head
+CI and semantic reviews remain required before protected merge. Hover product
+changes remain outside this work.
