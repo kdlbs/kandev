@@ -6,7 +6,7 @@ import { prepareRelease } from './prepare-release.mjs';
 import { assertUpgradeCI } from './ci-only.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const scenarios = {
+export const scenarios = {
   'upgrade-desktop': ['baseline seed provenance', 'preserves release data and replays startup', 'executes old and new task lifecycles after upgrade'],
   'upgrade-mobile': ['phone preserves release history and sends a follow-up after upgrade'],
 };

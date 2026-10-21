@@ -42,6 +42,7 @@ jobs:
         id: identity
         run: echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Acquire one verified baseline
+        id: baseline
         env:
           GH_TOKEN: ${{ github.token }}
           BASELINE: ${{ inputs.baseline || 'latest' }}
@@ -49,6 +50,12 @@ jobs:
           node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs
           node scripts/upgrade/prepare-release.mjs --tag "$BASELINE" --out .cache/upgrade/baseline
           tar -czf .cache/upgrade/baseline.tar.gz -C .cache/upgrade/baseline manifest.json runtime
+      - name: Publish upgrade summary
+        if: always()
+        env:
+          UPGRADE_CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha || github.sha }}
+          UPGRADE_JOB_OUTCOME: ${{ failure() && 'failure' || cancelled() && 'cancelled' || steps.baseline.outcome }}
+        run: node scripts/upgrade/summary.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: upgrade-baseline
@@ -103,7 +110,7 @@ jobs:
       - name: Check harness contracts
         if: matrix.engine == 'sqlite' && matrix.project == 'upgrade-desktop'
         run: |
-          node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs scripts/upgrade/run.test.mjs scripts/upgrade/workflow-contract.test.mjs
+          node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs scripts/upgrade/run.test.mjs scripts/upgrade/workflow-contract.test.mjs scripts/upgrade/summary.test.mjs
           (cd apps/web && pnpm exec vitest run --config e2e/upgrade.vitest.config.ts)
           (cd apps/web && pnpm exec eslint e2e/fixtures/upgrade-backend.ts e2e/fixtures/upgrade-backend.test.ts e2e/helpers/upgrade-*.ts e2e/tests/upgrade/*.ts e2e/upgrade-global-setup.ts e2e/upgrade.vitest.config.ts e2e/playwright.config.ts)
           bash -n scripts/upgrade/run.sh apps/web/e2e/scripts/run-e2e.sh
@@ -111,11 +118,20 @@ jobs:
           python3 scripts/list-docs.py validate
           python3 scripts/lint-spec-files.py --all
       - name: Rehearse upgrade
+        id: rehearsal
         env:
           KANDEV_UPGRADE_MANIFEST: .cache/upgrade/baseline/manifest.json
           UPGRADE_ENGINE: ${{ matrix.engine }}
           UPGRADE_PROJECT: ${{ matrix.project }}
         run: bash scripts/upgrade/run.sh --engine "$UPGRADE_ENGINE" --project "$UPGRADE_PROJECT"
+      - name: Publish upgrade summary
+        if: always()
+        env:
+          UPGRADE_CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+          UPGRADE_ENGINE: ${{ matrix.engine }}
+          UPGRADE_PROJECT: ${{ matrix.project }}
+          UPGRADE_JOB_OUTCOME: ${{ failure() && 'failure' || cancelled() && 'cancelled' || steps.rehearsal.outcome }}
+        run: node scripts/upgrade/summary.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

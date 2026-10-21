@@ -952,3 +952,9 @@ fixture storage and PostgreSQL services are cleaned up on failure too.
 
 The frozen SQL fixtures under backend store conformance remain independent
 historical migration gates. They do not substitute for this live rehearsal.
+
+The upgrade workflow's **Summary** tab shows the Stable release and source commit,
+verified archive digest, candidate commit, and planned matrix. Each database/browser
+job adds its actual test list, statuses, durations, and artifact name, including
+failure and missing-report cases. These summaries are published even when an
+acquisition, setup, or test step fails. The job's result remains the acceptance gate.

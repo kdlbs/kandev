@@ -43,3 +43,15 @@ test('the managed runner guards upgrade projects before it can build', () => {
   for (const field of ['CI','GITHUB_ACTIONS','GITHUB_REF']) assert.ok(guard.includes(field));
   assert.ok(guard.includes('die '));
 });
+
+
+test('upgrade jobs always publish migration identity and test summaries, including failure paths', () => {
+  const workflow=parse(fs.readFileSync(workflowPath,'utf8'));
+  for (const job of Object.values(workflow.jobs)) {
+    const summary=job.steps.find(s => s.name === 'Publish upgrade summary');
+    assert.equal(summary.if,'always()');
+    assert.equal(summary.run,'node scripts/upgrade/summary.mjs');
+    assert.ok(summary.env.UPGRADE_JOB_OUTCOME.includes('outcome'));
+  }
+  assert.ok(workflow.jobs.rehearse.steps.find(s => s.name === 'Check harness contracts').run.includes('scripts/upgrade/summary.test.mjs'));
+});

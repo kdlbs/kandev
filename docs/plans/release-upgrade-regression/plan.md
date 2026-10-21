@@ -140,3 +140,14 @@ ran locally after the user's CI-only instruction. Product runtime code is unchan
   separately while keeping the requested gate failed.
 - Main-only CI discovers regressions after merge. Nightly runs also detect a
   changed Stable baseline even when no new main commit is pushed.
+
+## Run summary follow-up
+
+Each Actions job now publishes an always-run Markdown summary with the verified
+Stable tag, source SHA and archive digest, candidate SHA, workflow identity,
+database/browser project, scenario results and durations, and evidence artifact
+name. Acquisition lists the planned seven scenarios. Failed setup, absent reports,
+skips, duplicate results and retries remain explicit; summary formatting cannot
+turn a failed runner into acceptance. Formatter/output and workflow-wiring tests
+are included in CI. This follow-up has not run locally, following the user's
+CI-only instruction; its verification is pending the next main workflow run.
