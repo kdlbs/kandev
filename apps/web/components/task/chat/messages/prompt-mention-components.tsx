@@ -39,6 +39,14 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
+import type { TaskMentionReference } from "@/lib/tasks/task-mention-references";
+import { TaskMentionChip } from "./task-mention-components";
+
+const EMPTY_TASK_REFERENCES: readonly TaskMentionReference[] = [];
+type MentionPresentation = {
+  interactive: boolean;
+  tasks?: ReadonlyMap<string, TaskMentionReference>;
+};
 
 type PromptMentionMarkdownTag =
   | "a"
@@ -100,15 +108,21 @@ export function usePromptMentionNames() {
 export function usePromptMentionMarkdownComponents(
   promptNames: string[],
   entityReferences: readonly EntityReference[],
+  taskReferences: readonly TaskMentionReference[] = EMPTY_TASK_REFERENCES,
 ): Components | undefined {
   return useMemo(() => {
     const mentionNames = buildPromptMentionNames(promptNames);
+    const tasks = new Map(taskReferences.map((reference) => [reference.title, reference]));
+    const allNames = buildPromptMentionNames([...tasks.keys(), ...mentionNames]);
     const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
-    if (mentionNames.length === 0) {
+    if (allNames.length === 0) {
       return entityReferences.length === 0 ? undefined : baseComponents;
     }
     const renderChildren = (children: ReactNode, keyPrefix: string, interactive = true) =>
-      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix, interactive);
+      renderChildrenWithPromptMentions(children, interactive ? allNames : mentionNames, keyPrefix, {
+        interactive,
+        tasks,
+      });
     return {
       ...baseComponents,
       a: ({ children, node, ...props }: MarkdownChildrenProps<"a">) => {
@@ -164,14 +178,14 @@ export function usePromptMentionMarkdownComponents(
         return <th {...props}>{renderChildren(children, "th")}</th>;
       },
     };
-  }, [promptNames, entityReferences]);
+  }, [promptNames, entityReferences, taskReferences]);
 }
 
 function renderChildrenWithPromptMentions(
   children: ReactNode,
   promptNames: string[],
   keyPrefix: string,
-  interactive = true,
+  presentation: MentionPresentation = { interactive: true },
   precedingCharacter?: string,
 ): ReactNode[] {
   let previousCharacter = precedingCharacter;
@@ -183,7 +197,7 @@ function renderChildrenWithPromptMentions(
         child,
         promptNames,
         childKeyPrefix,
-        interactive,
+        presentation,
         previousCharacter,
       );
     } else if (!isValidElement(child)) {
@@ -203,7 +217,7 @@ function renderChildrenWithPromptMentions(
               element.props.children,
               promptNames,
               childKeyPrefix,
-              interactive,
+              presentation,
               previousCharacter,
             ),
           }),
@@ -604,15 +618,26 @@ export function renderTextWithPromptMentions(
   text: string,
   promptNames: string[],
   keyPrefix: string,
-  interactive = true,
+  presentation: boolean | MentionPresentation = true,
   precedingCharacter?: string,
 ) {
+  const { interactive, tasks } =
+    typeof presentation === "boolean" ? { interactive: presentation } : presentation;
   const occurrences = new Map<string, number>();
   return splitMarkdownPromptMentionSegments(text, promptNames, precedingCharacter).map(
     (segment) => {
       if (segment.kind === "text") return segment.value;
       const occurrence = occurrences.get(segment.name) ?? 0;
       occurrences.set(segment.name, occurrence + 1);
+      const task = tasks?.get(segment.name);
+      if (task && interactive) {
+        return (
+          <TaskMentionChip
+            key={promptMentionKey(keyPrefix, segment, occurrence)}
+            reference={task}
+          />
+        );
+      }
       return (
         <PromptMentionChip
           key={promptMentionKey(keyPrefix, segment, occurrence)}

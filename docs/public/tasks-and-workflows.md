@@ -405,6 +405,16 @@ disclosure shows its actual model and session. Before a session exists, it
 shows the planned replacement model. A profile that becomes unavailable blocks
 creation until you choose another profile or reset the row.
 
+### Open a task mentioned in chat
+
+Type `@` in the chat composer and select a task from the suggestions. After
+sending, its mention appears as a task chip with an icon. Click the chip, focus
+it and press Enter, or tap it on your phone to open that task. The reference
+keeps pointing to the same task after its title changes.
+
+Ordinary typed `@text` is not turned into a task link. Older messages without
+a usable task reference, or references with ambiguous titles, remain plain text.
+
 ### Navigate long chat transcripts
 
 When your latest prompt has fully left the transcript viewport, **Scroll to
