@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
@@ -53,7 +54,7 @@ func TestQueueRun_ReadableCausingRunResetsGateFailureState(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "root",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 	}); err != nil {
 		t.Fatalf("queue root: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestQueueRun_ReadableCausingRunResetsGateFailureState(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "follow_on",
-		ActorKind:      models.ActorKindSystem,
+		ActorKind:      runsmodels.ActorKindSystem,
 		CausingRunID:   root.ID,
 	}); err != nil {
 		t.Fatalf("queue follow-on: %v", err)
@@ -93,7 +94,7 @@ func TestQueueRun_SelfTriggerAllowancePassResetsGateFailureState(t *testing.T) {
 	if _, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
 		AgentProfileID: "agent-primary",
 		Reason:         "self_trigger_reason",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-primary",
 	}); err != nil {
 		t.Fatalf("queue: %v", err)

@@ -1085,17 +1085,6 @@ func (e *Executor) transitionSessionState(
 	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, nil, state, errorMessage, nil)
 }
 
-func (e *Executor) transitionSessionStateFrom(
-	ctx context.Context,
-	taskID, sessionID string,
-	expectedState, state models.TaskSessionState,
-	errorMessage string,
-) (bool, models.TaskSessionState, error) {
-	return e.transitionSessionStateWithHook(
-		ctx, taskID, sessionID, &expectedState, state, errorMessage, nil,
-	)
-}
-
 func (e *Executor) transitionSessionStateWithHook(
 	ctx context.Context,
 	taskID, sessionID string,

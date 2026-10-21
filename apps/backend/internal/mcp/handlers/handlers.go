@@ -1568,10 +1568,6 @@ func (h *Handlers) resolveMCPAutoStartConfig(ctx context.Context, task *models.T
 	return config
 }
 
-func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, map[string]interface{}, error) {
-	return h.resolveMCPLaunchMetadataWithSource(ctx, task, agentProfileID, executorProfileID, sourceTaskID, "")
-}
-
 func (h *Handlers) resolveMCPLaunchMetadataWithSource(
 	ctx context.Context,
 	task *models.Task,

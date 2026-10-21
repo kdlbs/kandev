@@ -11138,10 +11138,6 @@ func validateCancelledSessionState(
 	return nil
 }
 
-func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID string) error {
-	return s.verifyCancelledTurnClosedOwned(ctx, sessionID, "")
-}
-
 func (s *Service) verifyCancelledTurnClosedOwned(ctx context.Context, sessionID, expectedTurnID string) error {
 	if s.turnService == nil {
 		return nil

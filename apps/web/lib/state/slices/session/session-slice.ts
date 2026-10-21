@@ -1,6 +1,7 @@
+import type { SliceCreator } from "@/lib/state/slice-creator";
 import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
-import type { StateCreator } from "zustand";
+
 import type { Draft } from "immer";
 import { original } from "immer";
 import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
@@ -1254,12 +1255,7 @@ function buildQueueActions(set: ImmerSet) {
 }
 
 /** Create the session slice, combining the default state with all session action builders wired to the store's Immer set/get. */
-export const createSessionSlice: StateCreator<
-  SessionSlice,
-  [["zustand/immer", never]],
-  [],
-  SessionSlice
-> = (set, get) => ({
+export const createSessionSlice: SliceCreator<SessionSlice> = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
   ...buildTurnActions(set),

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"github.com/google/uuid"
@@ -122,7 +123,7 @@ const issueWatchSelectColumns = `created_by_user_id, id, workspace_id, sentry_in
 // CreateIssueWatch persists a new issue watch row. ID and timestamps are
 // assigned here so callers can pass a partially-populated struct.
 func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
-	w.CreatedByUserID = executorCreatorUserID(ctx)
+	w.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if w.ID == "" {
 		w.ID = uuid.New().String()
 	}

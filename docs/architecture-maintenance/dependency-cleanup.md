@@ -5,14 +5,23 @@
 The [baseline files](../../config/architecture-lint/) and compatibility ledger own current counts.
 Numbers here describe this dated inventory, not a second live database.
 
-| ID     | Boundary                       | Inventory                                              | Status              | Next bounded result                                                                |
-| ------ | ------------------------------ | ------------------------------------------------------ | ------------------- | ---------------------------------------------------------------------------------- |
+| ID     | Boundary                       | Inventory                                              | Status              | Next bounded result                                                                                        |
+| ------ | ------------------------------ | ------------------------------------------------------ | ------------------- | ---------------------------------------------------------------------------------------------------------- |
 | DEP-01 | Typed root-store composition   | 45 unsafe-cast findings after Azure DevOps removal     | Complete            | Azure DevOps slice typed without a root-store cast ([PR #4009](https://github.com/kdlbs/kandev/pull/4009)) |
-| DEP-02 | Office run aliases             | 31 registered aliases after shared contract extraction | Proposed            | Migrate a coherent consumer group, then remove aliases with no remaining consumers |
-| DEP-03 | Runs importing Office          | Six exact edges remain                                 | Needs design        | Classify policy adapters before selecting an edge                                  |
-| DEP-04 | Runtime implementation imports | 61 exact findings                                      | Needs investigation | Select one caller group and identify missing facade capability                     |
-| DEP-05 | Task importing Office          | Seven exact findings                                   | Needs design        | Define the required domain contract without copying Office policy                  |
-| DEP-06 | Unregistered deprecations      | 15 exact declarations                                  | Proposed            | Triage each declaration for removal or justified registration                      |
+| DEP-02 | Office run aliases             | 31 registered aliases after shared contract extraction | Proposed            | Migrate a coherent consumer group, then remove aliases with no remaining consumers                         |
+| DEP-03 | Runs importing Office          | Six exact edges remain                                 | Needs design        | Classify policy adapters before selecting an edge                                                          |
+| DEP-04 | Runtime implementation imports | 61 exact findings                                      | Needs investigation | Select one caller group and identify missing facade capability                                             |
+| DEP-05 | Task importing Office          | Seven exact findings                                   | Needs design        | Define the required domain contract without copying Office policy                                          |
+| DEP-06 | Unregistered deprecations      | 15 exact declarations                                  | Proposed            | Triage each declaration for removal or justified registration                                              |
+
+## Current cleanup implementation
+
+The [complexity audit implementation](complexity-audit-2026-10-20/implementation.md)
+removes all 45 remaining root-store casts and the 27 remaining Office run aliases.
+The live baseline and compatibility ledger own the resulting counts; the table
+above remains a dated inventory. Shared authority policies retain their existing
+behavior. Other import-boundary entries remain subject to their recorded design
+conditions.
 
 ## DEP-01: type one slice
 

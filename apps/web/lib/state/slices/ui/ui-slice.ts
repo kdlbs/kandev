@@ -2,8 +2,9 @@ import {
   readImagePreviewsExpandedByDefault,
   writeImagePreviewsExpandedByDefault,
 } from "@/lib/settings/image-preview-defaults";
+import type { SliceCreator } from "@/lib/state/slice-creator";
 import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
-import type { StateCreator } from "zustand";
+
 import {
   getLocalStorage,
   getStoredCollapsedSubtaskParents,
@@ -419,10 +420,7 @@ function buildNotificationActions(set: ImmerSet) {
   };
 }
 
-export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
-  set,
-  get,
-) => ({
+export const createUISlice: SliceCreator<UISlice> = (set, get) => ({
   ...defaultUIState,
   // Hydrate from sessionStorage at slice creation (runs in the browser, after
   // the default static state) so tests and SSR both see a fresh read.

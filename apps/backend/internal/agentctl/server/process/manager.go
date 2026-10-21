@@ -2356,7 +2356,7 @@ func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, over
 		base[githubauth.CredentialCLIShimDirEnv],
 		base[githubauth.CredentialCLIBashEnvEnv],
 	)
-	removeObsoleteManagedCredentialEnvironment(base)
+	githubauth.RemoveManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
 			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
@@ -2412,27 +2412,6 @@ func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools
 	// Unwrap those owned entries before rebuilding the active environment.
 	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
 	config.ActivateManagedGitTools(env, shimDir, bashEnv)
-}
-
-func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
-	for _, key := range []string{
-		githubauth.CredentialBrokerURLEnv,
-		githubauth.CredentialHelperPathEnv,
-		githubauth.CredentialCLIShimDirEnv,
-		githubauth.CredentialCLIBashEnvEnv,
-		githubauth.CredentialParentBashEnv,
-		githubauth.CredentialLeaseEnv,
-		githubauth.CredentialReissueCapabilityEnv,
-		githubauth.CredentialTaskIDEnv,
-		githubauth.CredentialSessionIDEnv,
-		githubauth.CredentialRepositoryEnv,
-		githubauth.CredentialOwnerEnv,
-		githubauth.CredentialRepoEnv,
-		githubauth.CredentialHostEnv,
-		githubauth.CredentialScopesEnv,
-	} {
-		delete(env, key)
-	}
 }
 
 func environmentMapFromSlice(env []string) map[string]string {

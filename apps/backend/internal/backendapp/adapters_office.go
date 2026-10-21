@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/github"
 	officeconfig "github.com/kandev/kandev/internal/office/config"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -282,7 +284,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		models.MetaKeyOfficeCarrierCreatingRunID:  "",
 		models.MetaKeyOfficeCarrierHumanRooted:    false,
 		models.MetaKeyOfficeCarrierRoutineID:      routineID,
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindSystem),
 		models.MetaKeyOfficeCarrierActorID:        "",
 	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct

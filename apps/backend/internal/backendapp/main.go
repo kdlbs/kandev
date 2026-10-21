@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/hostnames"
@@ -2420,7 +2422,7 @@ func (a *runsServiceEngineAdapter) QueueRun(
 		}
 	}
 	if carrier.ActorKind == "" {
-		carrier.ActorKind = officemodels.ActorKindSystem
+		carrier.ActorKind = runsmodels.ActorKindSystem
 	}
 	humanRooted := carrier.HumanRooted
 	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{

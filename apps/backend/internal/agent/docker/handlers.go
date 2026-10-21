@@ -285,10 +285,6 @@ func handleListContainers(
 	}
 }
 
-func newContainerResponses(containers []ContainerInfo) []containerResponse {
-	return newContainerResponsesWithTaskTitles(context.Background(), containers, nil)
-}
-
 func newContainerResponsesWithTaskTitles(ctx context.Context, containers []ContainerInfo, taskTitleProvider TaskTitleProvider) []containerResponse {
 	resp := make([]containerResponse, len(containers))
 	for i, ctr := range containers {

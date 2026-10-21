@@ -1342,10 +1342,6 @@ func canUpdateDeliveryReconciliationFailure(
 	}
 }
 
-func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
-	m.publishStreamDisconnectErrorWithAttempt(execution, err, "")
-}
-
 func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	execution *AgentExecution,
 	err error,

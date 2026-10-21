@@ -91,7 +91,7 @@ func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (shared.QueueOutcome, error) {
-	outcome, err := s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "", "")
+	outcome, err := s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, runsmodels.ActorKindSystem, "", "")
 	return outcome, err
 }
 
@@ -110,7 +110,7 @@ func (s *Service) QueueRun(
 func (s *Service) QueueRunWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 	causingRunID string,
 ) (runsservice.QueueOutcome, error) {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
@@ -155,7 +155,7 @@ func (s *Service) QueueRunFromTaskBoundary(
 func (s *Service) QueueRunFromTaskBoundaryWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 ) error {
 	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, &actorKind, actorID)
 }
@@ -163,7 +163,7 @@ func (s *Service) QueueRunFromTaskBoundaryWithActor(
 func (s *Service) queueRunFromTaskBoundary(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
-	actorKindOverride *models.ActorKind, actorIDOverride string,
+	actorKindOverride *runsmodels.ActorKind, actorIDOverride string,
 ) error {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
@@ -196,7 +196,7 @@ func (s *Service) queueRunFromTaskBoundary(
 		})
 		return err
 	}
-	actorKind := models.ActorKindSystem
+	actorKind := runsmodels.ActorKindSystem
 	actorID := ""
 	if actorKindOverride != nil && actorKindOverride.Valid() {
 		actorKind = *actorKindOverride
@@ -255,7 +255,7 @@ func (s *Service) QueueRunFromWakeup(
 	outcome, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
 		Payload:         PayloadWithAgent("{}", agentProfileID),
-		ActorKind:       models.ActorKindSystem,
+		ActorKind:       runsmodels.ActorKindSystem,
 		RoutineID:       routineID,
 		ContextSnapshot: contextSnapshot,
 		SkipCoalesce:    true,
@@ -390,13 +390,13 @@ func (s *Service) queueRunInline(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (runsservice.QueueOutcome, error) {
-	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, runsmodels.ActorKindSystem, "")
 }
 
 func (s *Service) queueRunInlineAsActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 ) (runsservice.QueueOutcome, error) {
 	if idempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
@@ -423,7 +423,7 @@ func (s *Service) queueRunInlineAsActor(
 	if idempotencyKey != "" {
 		idemKeyPtr = &idempotencyKey
 	}
-	req := &models.Run{
+	req := &runsmodels.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: agentInstanceID,
 		Reason:         reason,
@@ -482,7 +482,7 @@ func PayloadWithAgent(payload, agentInstanceID string) map[string]any {
 // the bus is not configured. Publish errors are logged at debug and
 // swallowed — the queue write already succeeded by the time we get
 // here.
-func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempotencyKey string) {
+func (s *Service) publishRunQueued(ctx context.Context, req *runsmodels.Run, idempotencyKey string) {
 	if s.eb == nil {
 		return
 	}

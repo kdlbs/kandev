@@ -875,37 +875,6 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 	return nil
 }
 
-func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
-	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	args := []string{"-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags}
-	if out, err := c.runConfiguredGitCombined(ctx, gitFetchTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, authURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		c.logger.Warn("authenticated git fetch failed (non-fatal)",
-			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
-	}
-}
-
-func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, header string) error {
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("create parent directory: %w", err)
-	}
-	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	args := []string{"clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath}
-	if out, err := c.runConfiguredGitCombined(ctx, gitCloneTimeout, args,
-		func(cmd *exec.Cmd) (func(), error) {
-			configureHTTPHeaderCommand(cmd, cloneURL, header)
-			return func() {}, nil
-		},
-	); err != nil {
-		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
-	}
-	return nil
-}
-
 func (c *Cloner) runConfiguredGitCombined(
 	ctx context.Context,
 	execTimeout time.Duration,

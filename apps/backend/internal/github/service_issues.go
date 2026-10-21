@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -73,7 +74,7 @@ func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
 	}
 
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreateIssueWatch(ctx, iw); err != nil {

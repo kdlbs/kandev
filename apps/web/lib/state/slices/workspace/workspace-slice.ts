@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { WorkspaceSlice, WorkspaceSliceState } from "./types";
 import type { RepositoryBranchPolicy, RepositorySet } from "@/lib/types/http";
 
@@ -31,12 +32,7 @@ export const defaultWorkspaceState: WorkspaceSliceState = {
   },
 };
 
-export const createWorkspaceSlice: StateCreator<
-  WorkspaceSlice,
-  [["zustand/immer", never]],
-  [],
-  WorkspaceSlice
-> = (set, get) => ({
+export const createWorkspaceSlice: SliceCreator<WorkspaceSlice> = (set, get) => ({
   ...defaultWorkspaceState,
   setActiveWorkspace: (workspaceId) => {
     if (get().workspaces.activeId === workspaceId) {

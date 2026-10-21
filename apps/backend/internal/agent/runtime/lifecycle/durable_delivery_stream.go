@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -318,18 +317,6 @@ func (sm *StreamManager) deliveryReplayCursor(ctx context.Context, repository Ag
 	return uint64(cursor.ProjectedSequence), nil
 }
 
-func (sm *StreamManager) receiveDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) (bool, error) {
-	if event.DeliverySequence > math.MaxInt64 {
-		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
-	}
-	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
-}
-
 func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	ctx context.Context,
 	deliveryEvent *models.AgentDeliveryEvent,
@@ -356,27 +343,6 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 		return false, err
 	}
 	return cursor == nil || cursor.ProjectedSequence < deliveryEvent.Sequence, nil
-}
-
-func (sm *StreamManager) projectDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) error {
-	return sm.projectDurableAgentEventWithEffect(ctx, execution, event, repository, deliveryEffectForEvent(event))
-}
-
-func (sm *StreamManager) projectDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	effect *models.AgentDeliveryEffect,
-) error {
-	return sm.projectDurableAgentDeliveryEventWithEffect(
-		ctx, durableAgentEvent(execution, event), repository, effect,
-	)
 }
 
 func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
@@ -423,47 +389,6 @@ func projectedDeliveryTerminalOutcome(event *models.AgentDeliveryEvent) models.D
 	default:
 		return ""
 	}
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-) error {
-	return sm.projectAndAcknowledgeDurableAgentEventWithEffect(
-		ctx, execution, event, repository, acknowledger, deliveryEffectForEvent(event),
-	)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	deliveryEvent := durableAgentEvent(execution, event)
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
-	ctx context.Context,
-	deliveryEvent *models.AgentDeliveryEvent,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
 }
 
 func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffect {

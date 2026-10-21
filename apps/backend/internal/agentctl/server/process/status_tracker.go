@@ -46,16 +46,6 @@ type StatusTrackerConfig struct {
 	StabilityWindow time.Duration // Time state must be stable before reporting (default 0)
 }
 
-// DefaultStatusTrackerConfig returns the default configuration.
-func DefaultStatusTrackerConfig() StatusTrackerConfig {
-	return StatusTrackerConfig{
-		Rows:            24,
-		Cols:            80,
-		CheckInterval:   100 * time.Millisecond,
-		StabilityWindow: 0,
-	}
-}
-
 // StatusTracker uses a virtual terminal emulator to track agent state.
 type StatusTracker struct {
 	logger    *logger.Logger
@@ -241,16 +231,4 @@ func (t *StatusTracker) emitStateChange(newState AgentState) {
 		t.callback(t.sessionID, newState)
 		t.mu.Lock()
 	}
-}
-
-// NoOpDetector is a detector that always returns StateUnknown.
-// Used when no detector is configured.
-type NoOpDetector struct{}
-
-func (d *NoOpDetector) DetectState(lines []string, glyphs [][]vt10x.Glyph) AgentState {
-	return StateUnknown
-}
-
-func (d *NoOpDetector) ShouldAcceptStateChange(currentState, newState AgentState) bool {
-	return true
 }

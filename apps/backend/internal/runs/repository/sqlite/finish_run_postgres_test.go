@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/testutil"
@@ -56,7 +57,7 @@ func TestPostgresFinishRun_DoesNotOverwriteAConcurrentlyCancelledRun(t *testing.
 		t.Fatalf("set canceller search_path: %v", err)
 	}
 
-	run := &models.Run{AgentProfileID: "a1", Reason: "task_assigned", Payload: "{}", Status: "queued"}
+	run := &runsmodels.Run{AgentProfileID: "a1", Reason: "task_assigned", Payload: "{}", Status: "queued"}
 	if err := repo.CreateRun(ctx, run); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestPostgresFinishRun_DoesNotOverwriteAConcurrentlyCancelledRun(t *testing.
 
 	var (
 		wg          sync.WaitGroup
-		finishedRun *models.Run
+		finishedRun *runsmodels.Run
 		finishErr   error
 		finishDone  = make(chan struct{})
 		commitErr   error

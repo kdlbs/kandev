@@ -1189,16 +1189,6 @@ func availableWorkspaceEnvironmentOwner(
 	return "", nil
 }
 
-func (s *HandoffService) prepareCascadeResourceCleanup(
-	ctx context.Context,
-	deadline time.Time,
-	taskIDs []string,
-	cascadeID string,
-	trigger models.TaskResourceCleanupTrigger,
-) (map[string]string, error) {
-	return s.prepareCascadeResourceCleanupWithCompensation(ctx, ctx, deadline, taskIDs, cascadeID, trigger, false)
-}
-
 func (s *HandoffService) prepareCascadeResourceCleanupWithCompensation(
 	ctx, compensationCtx context.Context,
 	deadline time.Time,

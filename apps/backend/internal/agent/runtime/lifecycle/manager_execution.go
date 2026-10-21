@@ -1605,17 +1605,6 @@ func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstan
 	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
 }
 
-func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
-}
-
-func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	if instance == nil || instance.ContainerID == "" {
-		return
-	}
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
-}
-
 func (m *Manager) persistRuntimeSecret(
 	ctx context.Context,
 	instance *ExecutorInstance,

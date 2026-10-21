@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -34,7 +36,7 @@ func (q *raceTestRunQueuer) QueueRunFromWakeup(
 	outcome, row, err := q.svc.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
 		Payload:         map[string]any{"agent_profile_id": agentProfileID},
-		ActorKind:       officemodels.ActorKindSystem,
+		ActorKind:       runsmodels.ActorKindSystem,
 		RoutineID:       routineID,
 		ContextSnapshot: contextSnapshot,
 		SkipCoalesce:    true,
@@ -91,12 +93,12 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              "run-cron",
 		AgentProfileID:  agent.ID,
 		Reason:          shared.RunReasonRoutineDispatchCron,
 		Payload:         "{}",
-		Status:          officemodels.RunStatus("queued"),
+		Status:          runsmodels.RunStatus("queued"),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
@@ -118,7 +120,7 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find inflight: %v", err)
 	}
-	if inflight.Status != officemodels.RunStatus("queued") {
+	if inflight.Status != runsmodels.RunStatus("queued") {
 		t.Fatalf("precondition: inflight.Status = %q, want queued", inflight.Status)
 	}
 

@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -17,7 +18,7 @@ func seedFinishedRun(
 ) string {
 	t.Helper()
 	ctx := context.Background()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: agentID, Reason: "task_assigned", Payload: "{}",
 		Status: "queued", CoalescedCount: 1, SessionID: sessionID,
 	}
@@ -142,11 +143,11 @@ func TestListTerminalRunsInWindow_ExcludesQueuedAndClaimed(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	queued := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	queued := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, queued); err != nil {
 		t.Fatalf("create queued: %v", err)
 	}
-	claimed := &models.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
+	claimed := &runsmodels.Run{AgentProfileID: "agent-a", Reason: "task_assigned", Payload: "{}", Status: "queued", CoalescedCount: 1}
 	if err := repo.CreateRun(ctx, claimed); err != nil {
 		t.Fatalf("create claimed: %v", err)
 	}

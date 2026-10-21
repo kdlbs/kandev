@@ -767,18 +767,6 @@ func (m *Manager) buildAgentCommandWithContext(
 	return newAgentCommands(args, continueArgs), nil
 }
 
-func (m *Manager) resolveManagedRuntimeVersion(
-	ctx context.Context,
-	runtime agentruntime.Runtime,
-	agentConfig agents.Agent,
-) (string, error) {
-	options, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
-	if err != nil {
-		return "", err
-	}
-	return options.ManagedRuntimeVersion, nil
-}
-
 func (m *Manager) resolveManagedRuntimeCommandOptions(
 	ctx context.Context,
 	runtime agentruntime.Runtime,

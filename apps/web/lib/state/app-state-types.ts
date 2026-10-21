@@ -193,7 +193,6 @@ export type AppState = KanbanSlice & {
   gitlabIssueWatches: (typeof defaultGitLabState)["gitlabIssueWatches"];
   gitlabMRWatches: (typeof defaultGitLabState)["gitlabMRWatches"];
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
-  gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
   taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
 
@@ -486,13 +485,7 @@ export type AppState = KanbanSlice & {
     hydrationEpoch: number,
     observationAtRequestStart?: ActiveTurnWindowObservation,
   ) => void;
-  completeTurn: (
-    sessionId: string,
-    turnId: string,
-    completedAt: string,
-    metadata?: Record<string, unknown>,
-    updatedAt?: string,
-  ) => void;
+  completeTurn: import("./slices/session/types").SessionSliceActions["completeTurn"];
   /** Marks a turn as the session's active turn (or null to clear it). */
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   /** Reconciles the active-turn marker after REST hydration, epoch-guarded. */

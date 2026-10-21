@@ -665,13 +665,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 	return repoclone.RemoteRefStateHasRefs, nil
 }
 
-func (e *Executor) refreshAzureDevOpsRepositoryForSession(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) error {
-	_, err := e.refreshAzureDevOpsRepositoryForSessionWithState(ctx, repo, cloneURL)
-	return err
-}
-
 func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (repoclone.RemoteRefState, error) {
@@ -2360,18 +2353,6 @@ func (e *Executor) applyResumeWorkspaceFolders(
 		}
 	}
 	return nil
-}
-
-func (e *Executor) configureResumeGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	session *models.TaskSession,
-	repositories []*repoInfo,
-	beforeCredentialLease func() error,
-) error {
-	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
-		ctx, req, session, repositories, beforeCredentialLease, nil, true,
-	)
 }
 
 func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(

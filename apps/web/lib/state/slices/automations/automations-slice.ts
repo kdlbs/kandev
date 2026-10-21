@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { AutomationsSlice, AutomationsSliceState } from "./types";
 
 export const defaultAutomationsState: AutomationsSliceState = {
@@ -6,9 +7,7 @@ export const defaultAutomationsState: AutomationsSliceState = {
   automationRuns: { byAutomationId: {}, loading: {}, mutationEpoch: {}, deleting: {} },
 };
 
-type ImmerSet = Parameters<
-  StateCreator<AutomationsSlice, [["zustand/immer", never]], [], AutomationsSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<AutomationsSlice>>[0];
 
 function createAutomationsActions(
   set: ImmerSet,
@@ -173,12 +172,7 @@ function createRunsActions(
   };
 }
 
-export const createAutomationsSlice: StateCreator<
-  AutomationsSlice,
-  [["zustand/immer", never]],
-  [],
-  AutomationsSlice
-> = (set, get, _api) => ({
+export const createAutomationsSlice: SliceCreator<AutomationsSlice> = (set, get) => ({
   ...defaultAutomationsState,
   ...createAutomationsActions(set),
   ...createListActions(set, get),
