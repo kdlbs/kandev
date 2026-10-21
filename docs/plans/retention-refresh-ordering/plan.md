@@ -122,3 +122,35 @@ copy or navigation; internal requirements/design/plan updated only.
 Rejecting obsolete full snapshots must preserve newer sweep/count fields. A
 retired read must not suppress an admitted write acknowledgement. Browser route
 navigation must preserve app store while replacing the pathname-keyed provider.
+
+## Delivery remediation
+
+Parent independently validated all 11 paths and reran the 74 tests before
+separately authorizing PR delivery. Initial PR CI exposed an early one-shot
+backend recovery-phase assertion in `e2e/helpers/silent-prompt-stall.ts` and a
+Monitor-card assertion before mock-agent output in `e2e/tests/chat/monitor.spec.ts`.
+The CI artifacts show the former reading transient `reconnecting` and the latter
+already rendering the expected card immediately after its assertion timeout.
+Local isolated retries-disabled runs passed; these do not waive the CI failure.
+
+Use direct backend polling for the existing expected uncertain phase and the
+Monitor script's terminal assistant message before asserting the corresponding
+UI. Preserve the assertions, mock scripts, recovery/deletion authority, retry
+settings and timeouts on the UI assertions. This is test synchronization repair,
+not a changed recovery or Monitor contract. Re-run both complete affected files,
+their shared desktop recovery scenario, and the original retention checks.
+Post-change validation: the full phone recovery file passed 4 tests (41.0s),
+full Monitor file passed 3 tests (21.0s), and the shared desktop uncertain
+cancellation case passed 1 test (9.8s), all with retries disabled. A replay of the
+failed shard's original membership passed 146 tests with 1 skip in 11.0 minutes,
+using one local worker instead of CI's four partitions. Membership was preserved;
+source fingerprints were regenerated through the repository's catalog producer
+after the test edits. This is local evidence; fresh remote CI remains required.
+Combined-merge verification remains
+external and pinned to its exact head/base pair at delivery.
+
+Final local remediation checks: the original five suites passed all 74 tests
+again (13.02s); Node 24 / 8 GiB typecheck, targeted ESLint, Prettier, catalog,
+full specification lint and whitespace checks passed. No production source
+changed in this follow-up. Normal commit hooks and fresh remote evidence remain
+delivery steps recorded in the task handoff.

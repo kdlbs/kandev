@@ -116,3 +116,33 @@ Catalog, full spec lint, working-tree docs coverage and whitespace checks passed
 Normal commit hooks and exact committed-head docs/diff gates are delivery checks
 recorded in the parent handoff. Public docs remain accurate; only internal docs
 needed updates. No subagents, push, PR or broad audit.
+
+## Delivery CI follow-up
+
+The parent authorized bounded CI remediation after independent diff validation.
+Two existing E2E assertions need causal backend readiness instead of early UI
+sampling: the silent-prompt recovery phase and Monitor script completion. Repair
+only those waits and retain the existing expected values. See the plan's delivery
+remediation section. Run full `tests/chat/monitor.spec.ts`, full phone
+`tests/session/mobile-stall-notice-recovery.spec.ts`, and the shared desktop
+uncertain cancellation case, all with one worker and `--retries=0`. No product,
+wire, persistence or authority behavior changes.
+
+```bash
+(cd apps/web && CI=true GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --no-build --project chromium tests/chat/monitor.spec.ts --retries=0)
+(cd apps/web && CI=true GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --no-build --project mobile-chrome tests/session/mobile-stall-notice-recovery.spec.ts --retries=0)
+(cd apps/web && CI=true GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --no-build --project chromium tests/session/stall-notice-recovery.spec.ts --grep 'watchdog preserves the turn and cancellation stays blocked when uncertain' --retries=0)
+```
+
+Post-change results: Monitor 3 passed, phone recovery 4 passed, desktop uncertain
+cancellation 1 passed. The failed shard's original membership also passed locally:
+146 passed and 1 skipped, one worker, retries disabled, 11.0 minutes. Catalog
+fingerprints were regenerated for the edited tests without changing membership.
+Fresh exact-head remote CI/reviews and final combined-merge verification remain
+delivery gates; these local results do not waive the failed original CI run.
+
+Final local remediation checks: the original five suites passed all 74 tests
+again (13.02s); Node 24 / 8 GiB typecheck, targeted ESLint, Prettier, catalog,
+full specification lint and whitespace checks passed. No production source
+changed in this follow-up. Normal commit hooks and fresh remote evidence remain
+delivery steps recorded in the task handoff.
