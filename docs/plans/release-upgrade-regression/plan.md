@@ -149,5 +149,12 @@ database/browser project, scenario results and durations, and evidence artifact
 name. Acquisition lists the planned seven scenarios. Failed setup, absent reports,
 skips, duplicate results and retries remain explicit; summary formatting cannot
 turn a failed runner into acceptance. Formatter/output and workflow-wiring tests
-are included in CI. This follow-up has not run locally, following the user's
-CI-only instruction; its verification is pending the next main workflow run.
+are included in CI. User-requested demonstration run
+[39612973568](https://github.com/kdlbs/kandev/actions/runs/39612973568)
+compared `v0.97.0` with `e42dbdce9ae23f19128ddacb6863466201740687`:
+all seven scenarios and summary tests passed, and all four summary steps
+succeeded. GitHub rejected the first attempt before starting jobs because status
+functions are not available in step env expressions; `job.status` corrected the
+workflow and is covered by its contract test. The temporary exact-branch
+exception is removed in the final follow-up; main-only execution is restored.
+No upgrade workloads or formatter tests ran locally.
