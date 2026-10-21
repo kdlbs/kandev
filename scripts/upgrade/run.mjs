@@ -66,7 +66,7 @@ export async function runRehearsal(options) {
     if (options.engine === 'postgres' && !env.KANDEV_UPGRADE_POSTGRES_URL) {
       container=`kandev-upgrade-${process.pid}-${Date.now()}`;
       run('docker',['run','--detach','--rm','--name',container,'-e','POSTGRES_USER=kandev','-e','POSTGRES_PASSWORD=kandev','-e','POSTGRES_DB=postgres','-p','127.0.0.1::5432','--health-cmd','pg_isready -U kandev -d postgres','--health-interval','1s','--health-retries','60','postgres:16-alpine']);
-      run('docker',['exec',container,'sh','-c','until pg_isready -U kandev -d postgres; do sleep 1; done']);
+      run('docker',['exec',container,'sh','-c','until pg_isready -U kandev -d postgres; do sleep 1; done'],{timeout:90_000,killSignal:'SIGKILL'});
       const binding=execFileSync('docker',['port',container,'5432'],{encoding:'utf8'}).trim().split('\n')[0];
       env.KANDEV_UPGRADE_POSTGRES_URL=`postgresql://kandev:kandev@${binding}/postgres`;
       env.KANDEV_UPGRADE_POSTGRES_CONTAINER=container;
@@ -77,7 +77,7 @@ export async function runRehearsal(options) {
     let failure;
     try { run('bash',args,{cwd:path.join(root,'apps/web'),env}); } catch (error) { failure=error; }
     const reportPath=path.join(output,'playwright.json');
-    if (!fs.existsSync(reportPath)) throw new Error(`upgrade produced no required scenario report; logs: /tmp/e2e-host-shard-1.log; evidence: ${output}`, {cause:failure});
+    if (!fs.existsSync(reportPath)) throw new Error(`upgrade produced no required scenario report; see the CI job log; evidence: ${output}`, {cause:failure});
     assertComplete(JSON.parse(fs.readFileSync(reportPath,'utf8')),options.project);
     if (failure) throw failure;
     console.log(`Upgrade accepted: ${baseline.tag} -> ${execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim()} (${options.engine}/${options.project}); evidence: ${output}`);

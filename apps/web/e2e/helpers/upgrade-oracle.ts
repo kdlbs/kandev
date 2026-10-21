@@ -16,6 +16,26 @@ export function assertPreserved(expected: unknown, actual: unknown, at = "seed")
     `preservation mismatch at ${at}: expected ${JSON.stringify(expected)}, actual ${JSON.stringify(actual)}`,
   );
 }
+type HistoryTask = { id: string; sessions: { id: string; messages: { id: string }[] }[] };
+
+export function assertHistoricalMessagesPreserved(
+  before: { tasks: unknown[] },
+  after: { tasks: unknown[] },
+) {
+  for (const task of before.tasks as HistoryTask[]) {
+    const current = (after.tasks as HistoryTask[]).find((candidate) => candidate.id === task.id);
+    for (const session of task.sessions) {
+      const actual = current?.sessions.find((candidate) => candidate.id === session.id);
+      const originalIds = new Set(session.messages.map((message) => message.id));
+      assertPreserved(
+        session.messages,
+        actual?.messages.filter((message) => originalIds.has(message.id)),
+        `history.${task.id}.${session.id}`,
+      );
+    }
+  }
+}
+
 function select(value: unknown, keys: string[]) {
   const row = value as Record<string, unknown>;
   return Object.fromEntries(keys.map((key) => [key, row[key] ?? null]));

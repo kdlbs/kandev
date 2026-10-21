@@ -2,7 +2,7 @@ name: Release upgrade regression
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/test-release-upgrade-7ee]
   schedule:
     - cron: '23 3 * * *'
   workflow_dispatch:
@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/test-release-upgrade-7ee'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -64,7 +64,7 @@ jobs:
           retention-days: 7
 
   rehearse:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/test-release-upgrade-7ee'
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -112,7 +112,7 @@ jobs:
         run: |
           node --test scripts/upgrade/ci-only.test.mjs scripts/upgrade/prepare-release.test.mjs scripts/upgrade/run.test.mjs scripts/upgrade/workflow-contract.test.mjs scripts/upgrade/summary.test.mjs
           (cd apps/web && pnpm exec vitest run --config e2e/upgrade.vitest.config.ts)
-          (cd apps/web && pnpm exec eslint e2e/fixtures/upgrade-backend.ts e2e/fixtures/upgrade-backend.test.ts e2e/helpers/upgrade-*.ts e2e/tests/upgrade/*.ts e2e/upgrade-global-setup.ts e2e/upgrade.vitest.config.ts e2e/playwright.config.ts)
+          (cd apps/web && pnpm exec eslint e2e/fixtures/upgrade-backend.ts e2e/fixtures/upgrade-backend.test.ts e2e/helpers/upgrade-*.ts e2e/tests/upgrade/*.ts e2e/upgrade-global-setup.ts e2e/upgrade.vitest.config.ts e2e/playwright.config.ts e2e/playwright.config.test.ts)
           bash -n scripts/upgrade/run.sh apps/web/e2e/scripts/run-e2e.sh
           python3 .github/scripts/lint-action-pinning_test.py
           python3 scripts/list-docs.py validate
@@ -140,7 +140,6 @@ jobs:
             .cache/upgrade/run-*/playwright.json
             .cache/upgrade/run-*/junit.xml
             apps/web/e2e/test-results
-            /tmp/e2e-host-shard-1.log
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

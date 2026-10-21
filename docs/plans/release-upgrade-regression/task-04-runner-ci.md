@@ -110,3 +110,9 @@ exception enabled it; the final policy-only follow-up restores main-only workflo
 runner and fixture guards and rejects this branch in the guard contract. That
 follow-up is not claimed as an additional upgrade rehearsal. No upgrade workloads
 ran locally after the user's CI-only instruction. Product runtime code is unchanged.
+
+## PR review remediation
+
+Review remediation keeps upgrade projects out of ordinary Playwright discovery, covers explicit selection in both CLI forms, bounds PostgreSQL readiness to 90 seconds, and points missing-report failures to the actual CI job log instead of a nonexistent shard log.
+
+Verification is pending CI for this revision.

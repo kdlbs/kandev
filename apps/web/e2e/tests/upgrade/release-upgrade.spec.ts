@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/upgrade-backend";
 import { seedUpgrade, interruptUpgrade } from "../../helpers/upgrade-seed";
 
 import {
+  assertHistoricalMessagesPreserved,
   assertPassiveUpgradeReads,
   assertPreserved,
   captureUpgradeState,
@@ -9,7 +10,11 @@ import {
 } from "../../helpers/upgrade-oracle";
 import { checkUpgradeDatabase } from "../../helpers/upgrade-database";
 
-import { browserUpgradeFollowup, exerciseUpgradeLifecycle } from "../../helpers/upgrade-lifecycle";
+import {
+  assertUpgradeLifecycleResult,
+  browserUpgradeFollowup,
+  exerciseUpgradeLifecycle,
+} from "../../helpers/upgrade-lifecycle";
 
 // @covers AC-PLATFORM-UPGRADE-REGRESSION-001.1, AC-PLATFORM-UPGRADE-REGRESSION-001.2
 test("baseline seed provenance", async ({ upgrade }) => {
@@ -44,11 +49,13 @@ test("executes old and new task lifecycles after upgrade", async ({ upgrade, pag
   await exerciseUpgradeLifecycle(upgrade, seed);
   if (upgrade.engine === "sqlite") await browserUpgradeFollowup(page, upgrade, seed);
   const changed = await captureUpgradeState(upgrade, seed);
+  assertHistoricalMessagesPreserved(before, changed);
   saveUpgradeSnapshot(upgrade, "post-action.json", changed);
   await upgrade.stop();
   checkUpgradeDatabase(upgrade, seed, true);
   await upgrade.start("candidate");
   assertPreserved(changed, await captureUpgradeState(upgrade, seed));
+  await assertUpgradeLifecycleResult(upgrade, seed);
   await upgrade.stop();
   checkUpgradeDatabase(upgrade, seed, false);
 });

@@ -100,3 +100,9 @@ exception enabled it; the final policy-only follow-up restores main-only workflo
 runner and fixture guards and rejects this branch in the guard contract. That
 follow-up is not claimed as an additional upgrade rehearsal. No upgrade workloads
 ran locally after the user's CI-only instruction. Product runtime code is unchanged.
+
+## PR review remediation
+
+Review remediation verifies the review profile and requested workflow step after switching, archived state before cleanup, and completed/unarchived final state after actions and restart.
+
+Verification is pending CI for this revision.

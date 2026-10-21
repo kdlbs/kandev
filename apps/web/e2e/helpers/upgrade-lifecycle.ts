@@ -111,11 +111,15 @@ export async function exerciseUpgradeLifecycle(backend: UpgradeBackend, seed: Up
   const next = (await api.listTaskSessions(fresh.id)).sessions.find(
     (s) => s.id !== fresh.session_id,
   )!;
+  expect(next.agent_profile_id).toBe(seed.reviewProfileId);
+  expect((await api.getTask(fresh.id)).workflow_step_id).toBe(seed.steps[1].id);
   await waitForUpgradeTurn(api, fresh.id, next.id);
   await api.moveTask(fresh.id, seed.workflowId, seed.steps.at(-1)!.id);
   await api.updateTaskState(fresh.id, "COMPLETED");
   expect((await api.getTask(fresh.id)).state).toBe("COMPLETED");
+  expect((await api.getTask(fresh.id)).workflow_step_id).toBe(seed.steps.at(-1)!.id);
   await api.archiveTask(fresh.id);
+  expect((await api.getTask(fresh.id)).archived_at).toBeTruthy();
   await waitForUpgradeArchive(backend, fresh.id);
   await api.unarchiveTask(fresh.id);
   await api.wsRequest("task.plan.create", {
@@ -124,6 +128,7 @@ export async function exerciseUpgradeLifecycle(backend: UpgradeBackend, seed: Up
     content: "Preserved candidate plan",
   });
   seed.tasks.new = fresh;
+  await assertUpgradeLifecycleResult(backend, seed);
   const environment = await api.getTaskEnvironment(seed.tasks.waiting.id);
   const worktree = environment?.repos?.[0]?.worktree_path ?? environment?.worktree_path;
   if (!worktree) throw new Error("resumed worktree path missing");
@@ -131,6 +136,19 @@ export async function exerciseUpgradeLifecycle(backend: UpgradeBackend, seed: Up
     "UPGRADE_PRESERVED_FILE\n",
   );
 }
+export async function assertUpgradeLifecycleResult(backend: UpgradeBackend, seed: UpgradeSeed) {
+  const fresh = seed.tasks.new;
+  const task = await backend.api.getTask(fresh.id);
+  expect(task.state).toBe("COMPLETED");
+  expect(task.workflow_step_id).toBe(seed.steps.at(-1)!.id);
+  expect(task.archived_at ?? null).toBeNull();
+  const sessions = (await backend.api.listTaskSessions(fresh.id)).sessions;
+  expect(sessions).toHaveLength(2);
+  expect(sessions.find((session) => session.id !== fresh.session_id)?.agent_profile_id).toBe(
+    seed.reviewProfileId,
+  );
+}
+
 export async function browserUpgradeFollowup(
   page: Page,
   backend: UpgradeBackend,

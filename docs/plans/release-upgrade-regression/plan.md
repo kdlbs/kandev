@@ -158,3 +158,9 @@ functions are not available in step env expressions; `job.status` corrected the
 workflow and is covered by its contract test. The temporary exact-branch
 exception is removed in the final follow-up; main-only execution is restored.
 No upgrade workloads or formatter tests ran locally.
+
+## PR review remediation
+
+Review remediation strengthens post-action message preservation and requested lifecycle outcomes, isolates upgrade projects from default Playwright discovery, bounds PostgreSQL readiness, and removes the nonexistent single-shard log reference. Prior exact-head CI evidence is historical; these changes require a fresh CI upgrade rehearsal and PR checks. No local workload or test execution is permitted.
+
+Verification is pending CI for this revision.

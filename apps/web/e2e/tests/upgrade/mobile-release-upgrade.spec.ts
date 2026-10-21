@@ -1,6 +1,7 @@
 import { test } from "../../fixtures/upgrade-backend";
 import { seedUpgrade, interruptUpgrade } from "../../helpers/upgrade-seed";
 import {
+  assertHistoricalMessagesPreserved,
   assertPassiveUpgradeReads,
   assertPreserved,
   captureUpgradeState,
@@ -20,6 +21,7 @@ test("phone preserves release history and sends a follow-up after upgrade", asyn
   await resumeUpgradeTask(upgrade, seed.tasks.waiting, seed.profileId, seed.executorProfileId);
   await browserUpgradeFollowup(page, upgrade, seed);
   const after = await captureUpgradeState(upgrade, seed);
+  assertHistoricalMessagesPreserved(before, after);
   await upgrade.start("candidate");
   assertPreserved(after, await captureUpgradeState(upgrade, seed));
 });

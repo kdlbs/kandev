@@ -19,3 +19,33 @@ it("reports the field path rather than silently dropping changed relationships",
     assertPreserved({ session: { task_id: "old" } }, { session: { task_id: "other" } }),
   ).toThrow(/session.task_id/);
 });
+
+it("preserves original message identities, contents and order while allowing appended turns", async () => {
+  const { assertHistoricalMessagesPreserved } = await import("./upgrade-oracle");
+  const messages = [
+    { id: "user", content: "original request" },
+    { id: "agent", content: "original response" },
+  ];
+  const snapshot = (history: unknown[]) => ({
+    tasks: [{ id: "task", sessions: [{ id: "session", messages: history }] }],
+  });
+  expect(() =>
+    assertHistoricalMessagesPreserved(
+      snapshot(messages),
+      snapshot([...messages, { id: "new", content: "follow-up" }]),
+    ),
+  ).not.toThrow();
+  for (const history of [
+    messages.slice(1),
+    [{ ...messages[0], content: "changed" }, messages[1]],
+    [messages[0], { ...messages[1], id: "copied" }],
+    [...messages].reverse(),
+    [...messages, messages[0]],
+  ])
+    expect(() => assertHistoricalMessagesPreserved(snapshot(messages), snapshot(history))).toThrow(
+      /preservation/,
+    );
+  expect(() => assertHistoricalMessagesPreserved(snapshot(messages), { tasks: [] })).toThrow(
+    /preservation/,
+  );
+});

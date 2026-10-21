@@ -101,3 +101,9 @@ exception enabled it; the final policy-only follow-up restores main-only workflo
 runner and fixture guards and rejects this branch in the guard contract. That
 follow-up is not claimed as an additional upgrade rehearsal. No upgrade workloads
 ran locally after the user's CI-only instruction. Product runtime code is unchanged.
+
+## PR review remediation
+
+Review remediation adds an independent post-action history oracle: original message IDs, contents and ordering must survive while new turns may be appended. Mutation coverage rejects deletion, content changes, replacement IDs, reordering and duplicates.
+
+Verification is pending CI for this revision.

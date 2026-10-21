@@ -1,6 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const CI = !!process.env.CI;
+const upgradeRun = process.argv.some((arg, index, args) =>
+  ["upgrade-desktop", "upgrade-mobile"].some(
+    (project) =>
+      arg === `--project=${project}` || (arg === "--project" && args[index + 1] === project),
+  ),
+);
 
 export default defineConfig({
   testDir: "./tests",
@@ -38,20 +44,24 @@ export default defineConfig({
   },
 
   projects: [
-    {
-      name: "upgrade-desktop",
-      testMatch: /upgrade\/release-upgrade\.spec\.ts/,
-      retries: 0,
-      timeout: 600_000,
-      use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" },
-    },
-    {
-      name: "upgrade-mobile",
-      testMatch: /upgrade\/mobile-release-upgrade\.spec\.ts/,
-      retries: 0,
-      timeout: 600_000,
-      use: { ...devices["Pixel 5"], trace: "retain-on-failure" },
-    },
+    ...(upgradeRun
+      ? [
+          {
+            name: "upgrade-desktop",
+            testMatch: /upgrade\/release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Desktop Chrome"], trace: "retain-on-failure" as const },
+          },
+          {
+            name: "upgrade-mobile",
+            testMatch: /upgrade\/mobile-release-upgrade\.spec\.ts/,
+            retries: 0,
+            timeout: 600_000,
+            use: { ...devices["Pixel 5"], trace: "retain-on-failure" as const },
+          },
+        ]
+      : []),
     {
       // The office-routing-* specs call `backend.restart()` with
       // KANDEV_MOCK_PROVIDERS, which permanently mutates the backend's
@@ -145,9 +155,5 @@ export default defineConfig({
   // No webServer — each Playwright worker spawns its own frontend
   // via the backend fixture (see fixtures/backend.ts)
 
-  globalSetup: process.argv.some(
-    (arg) => arg.includes("upgrade-desktop") || arg.includes("upgrade-mobile"),
-  )
-    ? "./upgrade-global-setup.ts"
-    : "./global-setup.ts",
+  globalSetup: upgradeRun ? "./upgrade-global-setup.ts" : "./global-setup.ts",
 });
