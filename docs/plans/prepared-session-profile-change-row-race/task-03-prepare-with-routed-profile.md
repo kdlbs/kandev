@@ -36,6 +36,17 @@ routed launch uses the concrete profile from `routing.Resolver.Resolve`, so the
 IDs differ whenever routing yields a candidate, and every such launch tears down
 the prepared runtime.
 
+Two further paths kept the runtime on the agent ID after the first change:
+
+- The task workbench's `session.launch` auto-start is downgraded to a prepare
+  while the task is blocked and reaches `PrepareTaskSession` without going
+  through `EnsureSession`, so the preview has to live in `PrepareTaskSession`.
+- `PrepareTaskSession`'s background workspace launch adopts the dynamic
+  profile resolver's result. For a non-dynamic profile that resolver echoes the
+  profile it was given, and for an Office session it is given the owner's agent
+  ID, so it overwrote the routed profile and the `executors_running` row
+  recorded the agent ID.
+
 ## In scope
 
 - An orchestrator hook (for example `SetOfficeLaunchProfilePreview`) that
@@ -44,8 +55,11 @@ the prepared runtime.
   reason, taking the first candidate's `ExecutionProfileID`. With no candidate,
   or when routing is unavailable, it returns the agent ID (the scheduler's
   legacy path).
-- `EnsureSession` uses the hook for Office tasks whose resolved profile is the
-  assignee agent, keeping the agent ID as the session owner.
+- `PrepareTaskSession` uses the hook for Office tasks whose resolved profile is
+  the assignee agent, keeping the agent ID as the session owner. This covers
+  both `session.ensure` and the downgraded `session.launch` prepare.
+- The prepare's background launch adopts the dynamic resolver's result only
+  when it chose a concrete profile different from the logical one.
 - Preparation records no route attempt, changes no provider health, and never
   parks a run.
 
@@ -72,7 +86,7 @@ Write the tests first and confirm each fails before the production change.
 
 ```bash
 # From apps/backend:
-go test -trimpath ./internal/orchestrator -run 'TestEnsureSession_OfficeTaskUsesRoutedProfile|TestLaunchPreparedSession_ProfileReplacement' -count=1 -race
+go test -trimpath ./internal/orchestrator -run 'TestEnsureSession_OfficeTask|TestPrepareTaskSession_|TestLaunchPreparedSession_ProfileReplacement' -count=1 -race
 go test -trimpath ./internal/backendapp -run TestOfficeLaunchProfilePreview -count=1
 # From repo root:
 bash scripts/lint-go-changed <changed-go-files>
@@ -88,6 +102,7 @@ path.
 ## Files likely touched
 
 - `apps/backend/internal/orchestrator/session_ensure.go`
+- `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/service.go` (hook field)
 - `apps/backend/internal/backendapp/main.go` (wiring next to the scheduler's resolver)
 - `apps/backend/internal/backendapp/office_launch_profile_preview.go` and its test (new)
@@ -117,21 +132,29 @@ path.
 
 ## Results
 
-- `EnsureSession` now prepares an assigned Office task's session with the
+- `PrepareTaskSession` prepares an assigned Office task's session with the
   profile returned by `SetOfficeLaunchProfilePreview`. Without a candidate, or
   when the preview fails (logged as a warning), it keeps the agent ID.
+- The prepare's background launch no longer replaces that profile with the
+  dynamic resolver's echo of the owner ID; it adopts the resolver's result only
+  for a concrete dynamic choice.
 - `backendapp` wires the preview to the scheduler's own `routing.Resolver`
   with empty `ResolveOptions` and returns the first candidate's profile.
 - Tests written first and confirmed red:
   - `TestEnsureSession_OfficeTaskUsesRoutedProfile`: session bound to
-    `agent-ceo` instead of `profile-routed` before the change.
+    `agent-ceo` instead of `profile-routed` before the first change.
+  - `TestPrepareTaskSession_OfficeTaskUsesRoutedProfile`: with the production
+    profile resolver installed, the session row was routed but the runtime
+    launch used `agent-ceo`.
   - `TestOfficeLaunchProfilePreview_*`: stub returned `""` and no error.
-  - E2E "prepared session binds to the routed profile the run launches with":
-    with the wiring removed, the launch profile differed from the prepared
-    session's. The second E2E case opens the task before routing is enabled and
-    still exercises the Task 02 replacement path.
+  - E2E "prepared session binds to the routed profile the run launches with"
+    now also asserts the prepared execution is reused (same
+    `agent_execution_id`). Against the earlier commit it failed because the
+    runtime was replaced; manual testing on a dev instance showed the same
+    `execution profile changed` stop. The second E2E case opens the task before
+    routing is enabled and asserts the Task 02 replacement path.
 - Verified with:
-  - `go test -trimpath ./internal/orchestrator -run 'TestEnsureSession_OfficeTask|TestLaunchPreparedSession_ProfileReplacement' -count=1 -race`
+  - `go test -trimpath ./internal/orchestrator -run 'Dynamic|Prepare|EnsureSession|LaunchPrepared' -count=1`
   - `go test -trimpath ./internal/backendapp -run TestOfficeLaunchProfilePreview -count=1`
   - `pnpm e2e:run --host --shards 1 --project chromium --repeat-each 3 tests/office/prepared-session-profile-replacement.spec.ts` (6/6)
   - `make fmt`, `make typecheck`, `make lint` (Node heap raised for `tsc`)

@@ -45,11 +45,11 @@ async function prepareBlockedTask({ testPage, apiClient, officeApi, officeSeed }
 
   await testPage.goto(`/t/${task.id}`);
   await expect
-    .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
-      timeout: 20_000,
-      message: "opening the task page never prepared a session",
-    })
-    .toBeGreaterThan(0);
+    .poll(
+      async () => (await apiClient.listTaskSessions(task.id)).sessions[0]?.agent_execution_id ?? "",
+      { timeout: 20_000, message: "opening the task page never prepared a session runtime" },
+    )
+    .not.toBe("");
   const [prepared] = (await apiClient.listTaskSessions(task.id)).sessions;
   return { blocker, task, prepared };
 }
@@ -82,14 +82,15 @@ async function resolveBlockerAndLaunch(
   expect(attempts.map((a) => a.outcome)).toEqual(["launched"]);
   expect((await findRun())?.routing_blocked_status ?? "").toBe("");
 
+  const liveSession = async () =>
+    (await apiClient.listTaskSessions(taskId)).sessions.find((s) => s.id === sessionId);
   await expect
-    .poll(
-      async () =>
-        (await apiClient.listTaskSessions(taskId)).sessions.find((s) => s.id === sessionId)?.state,
-      { timeout: 20_000, message: "the prepared session did not reach a live state" },
-    )
+    .poll(async () => (await liveSession())?.state, {
+      timeout: 20_000,
+      message: "the prepared session did not reach a live state",
+    })
     .toMatch(/^(STARTING|RUNNING|WAITING_FOR_INPUT|IDLE|COMPLETED)$/);
-  return attempts;
+  return { attempts, launched: await liveSession() };
 }
 
 /**
@@ -115,9 +116,16 @@ test.describe("Office prepared session profile replacement", () => {
     await enableRouting(clients);
     const { blocker, task, prepared } = await prepareBlockedTask(clients);
 
-    const attempts = await resolveBlockerAndLaunch(clients, blocker.id, task.id, prepared.id);
+    const { attempts, launched } = await resolveBlockerAndLaunch(
+      clients,
+      blocker.id,
+      task.id,
+      prepared.id,
+    );
 
     expect(attempts[0].execution_profile_id).toBe(prepared.execution_profile_id);
+    // The prepared runtime is reused rather than replaced.
+    expect(launched?.agent_execution_id).toBe(prepared.agent_execution_id);
   });
 
   test("routing that changes after preparation replaces the prepared runtime", async ({
@@ -132,8 +140,14 @@ test.describe("Office prepared session profile replacement", () => {
     const { blocker, task, prepared } = await prepareBlockedTask(clients);
     await enableRouting(clients);
 
-    const attempts = await resolveBlockerAndLaunch(clients, blocker.id, task.id, prepared.id);
+    const { attempts, launched } = await resolveBlockerAndLaunch(
+      clients,
+      blocker.id,
+      task.id,
+      prepared.id,
+    );
 
     expect(attempts[0].execution_profile_id).not.toBe(prepared.execution_profile_id);
+    expect(launched?.agent_execution_id).not.toBe(prepared.agent_execution_id);
   });
 });

@@ -127,7 +127,7 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	launchResp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:           taskID,
 		Intent:           intent,
-		AgentProfileID:   s.officeLaunchProfileForPrepare(ctx, task, agentProfileID),
+		AgentProfileID:   agentProfileID,
 		WorkflowStepID:   task.WorkflowStepID,
 		LaunchWorkspace:  true,
 		AutoStart:        intent == IntentStart,

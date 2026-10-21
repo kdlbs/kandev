@@ -9,16 +9,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // newOfficeEnsureService seeds an assigned Office task with no session and
-// returns a service whose prepare path can create its session.
+// returns a service whose prepare path can create its session, plus the
+// profiles the prepare's workspace launch requested.
 func newOfficeEnsureService(t *testing.T) (*Service, interface {
 	ListTaskSessions(context.Context, string) ([]*models.TaskSession, error)
-}) {
+}, <-chan string) {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -33,12 +37,41 @@ func newOfficeEnsureService(t *testing.T) (*Service, interface {
 	}))
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t-prepare"] = &v1.Task{ID: "t-prepare", WorkspaceID: "ws-p", WorkflowID: "wf-p"}
+	launched := make(chan string, 4)
 	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launched <- req.AgentProfileID
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-prepared"}, nil
 		},
 	}
-	return createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr), repo
+	return createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr), repo, launched
+}
+
+// staticProfileStore makes every profile a concrete (non-dynamic) claude
+// profile, so the production profile resolver echoes the logical profile back.
+type staticProfileStore struct {
+	store.Repository
+}
+
+func (staticProfileStore) GetAgentProfile(_ context.Context, id string) (*settingsmodels.AgentProfile, error) {
+	return &settingsmodels.AgentProfile{ID: id, AgentID: "agent-claude"}, nil
+}
+
+func (staticProfileStore) GetAgent(_ context.Context, id string) (*settingsmodels.Agent, error) {
+	return &settingsmodels.Agent{ID: id, Name: "claude-acp"}, nil
+}
+
+// launchedProfile waits for the prepare's background workspace launch, whose
+// request profile is what the session's runtime row records.
+func launchedProfile(t *testing.T, launched <-chan string) string {
+	t.Helper()
+	select {
+	case profile := <-launched:
+		return profile
+	case <-time.After(10 * time.Second):
+		t.Fatal("the prepared session's workspace was never launched")
+		return ""
+	}
 }
 
 func preparedOfficeSession(t *testing.T, svc *Service, repo interface {
@@ -55,7 +88,7 @@ func preparedOfficeSession(t *testing.T, svc *Service, repo interface {
 }
 
 func TestEnsureSession_OfficeTaskUsesRoutedProfile(t *testing.T) {
-	svc, repo := newOfficeEnsureService(t)
+	svc, repo, launched := newOfficeEnsureService(t)
 	var previewed [2]string
 	svc.SetOfficeLaunchProfilePreview(func(_ context.Context, workspaceID, agentID string) (string, error) {
 		previewed = [2]string{workspaceID, agentID}
@@ -68,6 +101,31 @@ func TestEnsureSession_OfficeTaskUsesRoutedProfile(t *testing.T) {
 	assert.Equal(t, "agent-ceo", session.AgentProfileID, "the Office agent still owns the session")
 	assert.Equal(t, "profile-routed", session.ExecutionProfileID,
 		"the prepared session binds to the profile Office would launch with")
+	assert.Equal(t, "profile-routed", launchedProfile(t, launched),
+		"the prepared runtime is launched with the routed profile")
+}
+
+// The task workbench's auto-start launch is downgraded to a prepare while the
+// task is blocked; it must bind the same routed profile as session.ensure.
+func TestPrepareTaskSession_OfficeTaskUsesRoutedProfile(t *testing.T) {
+	svc, repo, launched := newOfficeEnsureService(t)
+	// The prepare's background launch consults the production resolver, which
+	// resolves the session owner. For an Office session that owner is the
+	// agent identity, not the routed execution profile.
+	svc.profileExecutionResolver = agentruntime.NewProfileExecutionResolver(staticProfileStore{}, nil, false)
+	svc.SetOfficeLaunchProfilePreview(func(context.Context, string, string) (string, error) {
+		return "profile-routed", nil
+	})
+
+	_, err := svc.PrepareTaskSession(context.Background(), "t-prepare", "agent-ceo", "", "", "", true)
+	require.NoError(t, err)
+
+	sessions, err := repo.ListTaskSessions(context.Background(), "t-prepare")
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	assert.Equal(t, "agent-ceo", sessions[0].AgentProfileID)
+	assert.Equal(t, "profile-routed", sessions[0].ExecutionProfileID)
+	assert.Equal(t, "profile-routed", launchedProfile(t, launched))
 }
 
 func TestEnsureSession_OfficeTaskKeepsAgentProfileWithoutRoutedCandidate(t *testing.T) {
@@ -78,13 +136,14 @@ func TestEnsureSession_OfficeTaskKeepsAgentProfileWithoutRoutedCandidate(t *test
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			svc, repo := newOfficeEnsureService(t)
+			svc, repo, launched := newOfficeEnsureService(t)
 			svc.SetOfficeLaunchProfilePreview(preview)
 
 			session := preparedOfficeSession(t, svc, repo)
 
 			assert.Equal(t, "agent-ceo", session.AgentProfileID)
 			assert.Equal(t, "agent-ceo", session.ExecutionProfileID)
+			assert.Equal(t, "agent-ceo", launchedProfile(t, launched))
 		})
 	}
 }
