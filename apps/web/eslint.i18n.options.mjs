@@ -1955,7 +1955,6 @@ export const i18nGuardFiles = [
   // migration record and the `lint:i18n` preview scope, no longer the bound.
   "app/actions/agents.ts",
   "app/demo/messages/demo-messages-data.ts",
-  "app/layout.tsx",
   "app/stats/stats-data.tsx",
   "app/stats/stats-utils.ts",
   "app/tasks/rich-task-row-details.ts",

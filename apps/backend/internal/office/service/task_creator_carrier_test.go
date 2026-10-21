@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -62,7 +64,7 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "heartbeat", `{}`, "",
-		models.ActorKindUser, "user-1", ""); err != nil {
+		runsmodels.ActorKindUser, "user-1", ""); err != nil {
 		t.Fatalf("queue causing run: %v", err)
 	}
 	runs, err := repo.ListRuns(ctx, "ws-1")
@@ -110,9 +112,9 @@ func TestCreateOfficeTaskAsAgent_WithCausingRunID_PersistsCarrier(t *testing.T) 
 		t.Errorf("carrier routine_id = %v, want %q",
 			metadata[taskmodels.MetaKeyOfficeCarrierRoutineID], causingRun.RoutineID)
 	}
-	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(models.ActorKindAgent) {
+	if metadata[taskmodels.MetaKeyOfficeCarrierActorKind] != string(runsmodels.ActorKindAgent) {
 		t.Errorf("carrier actor_kind = %v, want %q",
-			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], models.ActorKindAgent)
+			metadata[taskmodels.MetaKeyOfficeCarrierActorKind], runsmodels.ActorKindAgent)
 	}
 	if metadata[taskmodels.MetaKeyOfficeCarrierActorID] != agent.ID {
 		t.Errorf("carrier actor_id = %v, want %q",

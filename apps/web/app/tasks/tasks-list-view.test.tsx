@@ -44,8 +44,8 @@ function makeTask(overrides: Partial<Task>): Task {
 function props(tasks: Task[]): TasksListViewProps {
   return {
     total: tasks.length,
-    showArchived: false,
-    setShowArchived: () => undefined,
+    archiveMode: "active",
+    setArchiveMode: () => undefined,
     tasksListSort: DEFAULT_TASKS_LIST_SORT,
     onTasksListSortChange: () => undefined,
     tasksListGroup: DEFAULT_TASKS_LIST_GROUP,

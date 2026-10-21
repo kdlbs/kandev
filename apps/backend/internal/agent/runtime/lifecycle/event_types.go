@@ -82,8 +82,7 @@ type PromptAttemptEvidence struct {
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
-// The activity epoch lets the consumer reject a stale watchdog snapshot. A
-// never-started prompt is terminal only when its snapshot remains current.
+// The activity epoch lets the consumer reject a stale watchdog snapshot.
 type AgentStalledPayload struct {
 	AgentExecutionID string        `json:"agent_execution_id"`
 	TaskID           string        `json:"task_id"`
@@ -96,8 +95,10 @@ type AgentStalledPayload struct {
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolTitle        string        `json:"tool_title,omitempty"`
 	ToolStatus       string        `json:"tool_status,omitempty"`
-	// NeverStarted is true when the agent has not emitted a single event since
-	// this prompt was dispatched — a terminal failure, not a mid-work pause.
+	PromptAccepted   bool          `json:"prompt_accepted"`
+	OutputObserved   bool          `json:"output_observed"`
+	// NeverStarted is a compatibility alias for !OutputObserved. It does not
+	// establish startup failure or authorize process teardown.
 	NeverStarted bool `json:"never_started"`
 }
 

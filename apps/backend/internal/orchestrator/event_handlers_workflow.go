@@ -2492,7 +2492,8 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		}
 		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
-			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
+			reusePreparedPrimary: launchIntent == IntentStart && models.HasStartWhenUnblockedIntent(task),
+			ExecutorID:           intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})

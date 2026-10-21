@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -99,12 +101,12 @@ func (h *testHarness) seedWakeup(id, source, payload string) {
 
 func (h *testHarness) seedRun(id, status string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          "routine",
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
@@ -117,12 +119,12 @@ func (h *testHarness) seedRun(id, status string) {
 // exercise the idle-skip reason-classification promotion logic.
 func (h *testHarness) seedRunWithReason(id, status, reason string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          reason,
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 	}
@@ -197,14 +199,14 @@ func TestDispatch_NoInflight_CreatesFreshRun_ThroughAuthoritativeSeam(t *testing
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if run.PriorityClass != officemodels.PriorityClassPeriodic {
-		t.Errorf("priority_class = %v, want PriorityClassPeriodic (%v)", run.PriorityClass, officemodels.PriorityClassPeriodic)
+	if run.PriorityClass != runsmodels.PriorityClassPeriodic {
+		t.Errorf("priority_class = %v, want PriorityClassPeriodic (%v)", run.PriorityClass, runsmodels.PriorityClassPeriodic)
 	}
 	if run.WorkspaceID != "ws-1" {
 		t.Errorf("workspace_id = %q, want %q (resolved from the agent profile, not left empty)", run.WorkspaceID, "ws-1")
 	}
-	if run.ActorKind != officemodels.ActorKindSystem {
-		t.Errorf("actor_kind = %q, want %q", run.ActorKind, officemodels.ActorKindSystem)
+	if run.ActorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want %q", run.ActorKind, runsmodels.ActorKindSystem)
 	}
 	if run.RoutineID != "r-1" {
 		t.Errorf("routine_id = %q, want %q (routine launch budget accounting depends on this)", run.RoutineID, "r-1")

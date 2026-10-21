@@ -1247,10 +1247,7 @@ func (s *Service) handleSessionLaunchFailure(
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-// Returns whether the session itself was durably transitioned to FAILED — a
-// caller that is about to force-stop the process on the strength of that
-// transition (stopNeverStartedExecution) must not do so when this reports
-// false, or it kills the process while the session row still claims RUNNING.
+// Returns whether the session itself was durably transitioned to FAILED.
 func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
@@ -1452,6 +1449,7 @@ func (s *Service) StartTaskWithLaunchContext(
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
+	reusePreparedPrimary bool
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
@@ -1884,6 +1882,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if !promoted {
 			selectedExplicitSession = nil
 		}
+	}
+	if sessionID == "" && opts.reusePreparedPrimary && !isOfficeTask && explicitStartRoute == nil {
+		var releasePrepared func()
+		sessionID, releasePrepared, err = s.claimPreparedDependencyPrimary(ctx, task.ID, agentProfileID, executorID, executorProfileID)
+		if err != nil {
+			return nil, err
+		}
+		defer releasePrepared()
 	}
 	if sessionID == "" {
 		if explicitStartRoute != nil {
@@ -4682,27 +4688,22 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		}
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
-	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
+	claim, claimed := s.claimForcedExecutionCleanupWithToken(sessionID, executionID)
+	if claimed {
+		if err := s.stopPromptUnreadyExecution(ctx, sessionID, executionID, cause); err != nil {
+			s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sessionID, executionID), claim)
+			return err
+		}
+		s.completeExecutionTeardownClaim(sessionID, executionID, claim)
+	} else if claim, ok := s.executionTeardownClaimFor(sessionID, executionID); !ok || !claim.cleanupCompleted {
+		// Another lifecycle path owns this execution's teardown and has not
+		// finished it. A completed exact claim means it is already stopped.
 		return fmt.Errorf(
 			"execution %s teardown is already owned for session %s",
 			executionID,
 			sessionID,
 		)
 	}
-
-	s.logger.Warn("stopping prompt-unready agent execution before resume",
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", executionID),
-		zap.Error(cause))
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
-	defer cancelCleanup()
-	if s.lspLeases != nil {
-		s.lspLeases.StopLSPLeasesForExecution(executionID)
-	}
-	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
-		return err
-	}
-	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	taskID := ""
 	if refreshed != nil {
@@ -4726,6 +4727,23 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 			State:     refreshed.State,
 		}
 	}
+	return nil
+}
+
+func (s *Service) stopPromptUnreadyExecution(ctx context.Context, sessionID, executionID string, cause error) error {
+	s.logger.Warn("stopping prompt-unready agent execution before resume",
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", executionID),
+		zap.Error(cause))
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	defer cancelCleanup()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
+	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
+		return err
+	}
+	s.markExecutionFailed(sessionID, executionID)
 	return nil
 }
 
@@ -5698,6 +5716,11 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
 	if err := s.executor.Stop(ctx, sessionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			if settled, settleErr := s.settleExecutionLessSessionStop(ctx, sessionID); settled || settleErr != nil {
+				return settleErr
+			}
+		}
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
@@ -11130,10 +11153,6 @@ func validateCancelledSessionState(
 		)
 	}
 	return nil
-}
-
-func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID string) error {
-	return s.verifyCancelledTurnClosedOwned(ctx, sessionID, "")
 }
 
 func (s *Service) verifyCancelledTurnClosedOwned(ctx context.Context, sessionID, expectedTurnID string) error {

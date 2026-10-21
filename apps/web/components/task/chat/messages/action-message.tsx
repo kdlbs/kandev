@@ -53,13 +53,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     sessionMetadata,
   );
   if (historyState) {
-    return (
-      <RecoveryHistory
-        comment={comment}
-        metadata={metadata}
-        activeOwner={historyState.activeOwner}
-      />
-    );
+    return <RecoveryHistory comment={comment} metadata={metadata} />;
   }
   return <ActionMessageControls comment={comment} />;
 });

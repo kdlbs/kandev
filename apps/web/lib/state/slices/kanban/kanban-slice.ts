@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { Draft } from "immer";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 import { generateUUID } from "@/lib/utils";
@@ -89,12 +90,8 @@ export const defaultKanbanState: KanbanSliceState = {
   taskRemoval: createTaskRemovalState(),
 };
 
-type KanbanSliceSet = Parameters<
-  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
->[0];
-type KanbanSliceGet = Parameters<
-  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
->[1];
+type KanbanSliceSet = Parameters<SliceCreator<KanbanSlice>>[0];
+type KanbanSliceGet = Parameters<SliceCreator<KanbanSlice>>[1];
 
 type SidebarArchivedTaskActions = Pick<
   KanbanSliceActions,
@@ -505,12 +502,7 @@ function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskAction
   };
 }
 
-export const createKanbanSlice: StateCreator<
-  KanbanSlice,
-  [["zustand/immer", never]],
-  [],
-  KanbanSlice
-> = (set, get) => ({
+export const createKanbanSlice: SliceCreator<KanbanSlice> = (set, get) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
   ...createTaskActions(set, get),

@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/hostnames"
@@ -717,7 +719,8 @@ func startAgentInfrastructure(
 	log.Info("Worktree Manager initialized",
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
-	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
+	liveBranchMaterializer := newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
+	services.Task.SetBranchMaterializer(liveBranchMaterializer)
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
 	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
@@ -815,9 +818,10 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
+	services.capacityRetryClock = newE2ECapacityRetryClock()
 	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.Auth, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
-		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
+		repos.SystemSettings, sessionCapacityEnvironment, services.capacityRetryClock, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -919,6 +923,7 @@ func startAgentInfrastructure(
 	// Bind only the path-returning orchestrator seam after its clone pipeline
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
+	liveBranchMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
 	// Azure DevOps owns connection-health and work-item/pull-request watcher
 	// polling. Watch matches flow through the shared orchestrator coordinator.
@@ -1035,6 +1040,8 @@ func startAgentInfrastructure(
 		startPluginsSubsystems(ctx, services.Plugins, lifecycleMgr, eventBus, log,
 			func(fn func() error) { addRuntimeCleanup(fn) })
 	}
+
+	startConversationSearch(ctx, repos.Task, log, func(stop func() error) { addRuntimeCleanup(stop) })
 
 	// Start the task delivery ledger sweep. Must run after task/repository
 	// tables exist (already true here, provided in provideRepositories) —
@@ -2418,7 +2425,7 @@ func (a *runsServiceEngineAdapter) QueueRun(
 		}
 	}
 	if carrier.ActorKind == "" {
-		carrier.ActorKind = officemodels.ActorKindSystem
+		carrier.ActorKind = runsmodels.ActorKindSystem
 	}
 	humanRooted := carrier.HumanRooted
 	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{

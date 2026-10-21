@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"os"
 	"strings"
 	"sync"
@@ -4688,7 +4689,7 @@ func normalizedString(value *string) string {
 
 // CreateReviewWatch creates a new review watch configuration.
 func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
-	rw.CreatedByUserID = executorCreatorUserID(ctx)
+	rw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if rw.ID == "" {
 		rw.ID = uuid.New().String()
 	}
@@ -5147,7 +5148,7 @@ func hydrateIssueWatch(iw *IssueWatch) {
 
 // CreateIssueWatch creates a new issue watch configuration.
 func (s *Store) CreateIssueWatch(ctx context.Context, iw *IssueWatch) error {
-	iw.CreatedByUserID = executorCreatorUserID(ctx)
+	iw.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if iw.ID == "" {
 		iw.ID = uuid.New().String()
 	}

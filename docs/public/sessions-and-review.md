@@ -51,20 +51,36 @@ Prompts support pasted, dropped, or selected attachments. A prompt can contain a
 
 ## Manage session state
 
-Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
+Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, then select the session row's **Session actions** button. Available actions depend on the session's current state.
 
 | Action             | Effect                                                                                                                                                                     |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Rename**         | Changes the session's display name                                                                                                                                         |
 | **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
 | **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
+| **Restart session** | Stops and resumes the same active session. Keeps its history and workspace without sending a prompt. |
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
+Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
+
+Restart keeps the selected conversation open throughout the attempt. If you select another conversation
+while restart is pending, Kandev keeps your later selection.
+
+While a session restarts, you can edit its draft, but you cannot send it.
+**Restarting session...** appears above the composer until the restart requests
+finish. Other sessions remain usable. Sending becomes available under the normal
+readiness rules. If restart requires recovery, use the recovery actions first.
+
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
+
+If the runtime is already gone, stopping a session that is waiting for input or
+has finished closes its stale open turn and preserves its session state. A
+session that is still launching can return a stop error; retry after the launch
+has settled.
 
 When a turn, startup, or resume fails:
 
@@ -73,7 +89,7 @@ When a turn, startup, or resume fails:
 - If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
 - When **Start fresh session** replaces an existing conversation, it opens a new native conversation and delivery stream. Unresolved work from the previous conversation stays in history and is not sent to the provider again.
 - **Restore read-only workspace** does not send the pending prompt or dismiss its startup warning. The warning is resolved only after the provider confirms readiness for the matching recovery attempt.
-- For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
+- For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Every error entry keeps its summary and expandable technical details in the chat history, even while the recovery card is visible. Recovery buttons appear only on the current card.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
@@ -403,6 +419,11 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 **Shift+Tab** to switch without clearing your query or moving focus from the
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
+
+Content search retries briefly while repositories become available. If polling
+finishes successfully with no collected matches, it shows **No content matches found.**
+If the final attempt fails and no matches were collected, it shows a retryable
+failure instead. Matches already found remain available during retries.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
 

@@ -277,7 +277,7 @@ Proposed initial retention policy:
 - Preserve summary rows and expiry reasons until conversation deletion removes their owner.
 - Apply the same policy to archived tasks; archive itself does not expire history.
 
-These limits are proposed defaults, not measurements. Use typed policy constants; public retention controls remain outside scope.
+Use typed policy constants for these unmeasured defaults; public controls remain outside scope.
 Serialize global byte admission and eviction through existing maintenance/storage mutation conventions.
 Expiry atomically clears content links, marks affected entries expired, and updates the summary revision.
 Delete shared payloads only when no retained link references them.
@@ -412,7 +412,7 @@ Use the existing Traditional Chinese conversion workflow.
 
 ## Bounds
 
-The following defaults are proposed operational bounds, subject to measured validation before implementation is marked complete:
+Proposed bounds require measurement before completion:
 
 | Work | Initial bound | Limit behavior |
 | --- | --- | --- |
@@ -431,8 +431,10 @@ The following defaults are proposed operational bounds, subject to measured vali
 Honor shared Git process admission and managed process-group termination.
 Deadlines include filters, executor transport, SQL persistence, and ref/export verification.
 Do not retry authentication, unsupported index shapes, malformed output, or output-limit failures as transient errors.
-End capture cannot remain pending after the bounded terminal attempt settles.
-Accepted endpoints never change on comparison/export retry.
+Settle terminal failure durably and release the capture fence. Unavailable,
+incomplete settlement may bypass `start_accepted`, preserving policy and revision
+guards. Ready results require accepted starts. Never recapture missing starts or
+change accepted endpoints on retry.
 
 ## Observability and measurements
 
@@ -440,7 +442,7 @@ Record `turn_changes_capture_duration`, `turn_changes_compare_duration`, `turn_c
 `turn_changes_capture_failures_total`, and `turn_changes_retained_bytes` through existing metrics/log conventions.
 Use closed labels: endpoint, executor kind, result, and reason.
 IDs and paths belong only in structured logs, not metric labels. Do not log contents or credentials.
-Known overlap records come from admitted execution intervals on the same checkout; external writer coverage remains unknown.
+Overlap records cover admitted intervals on the same checkout; external writers remain unknown.
 
 Work order 09 owns representative benchmarks, environment reporting, ten-observation samples, storage growth, and limit qualification.
 No source-only latency claims are acceptable.

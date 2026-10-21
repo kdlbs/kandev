@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
@@ -52,7 +53,7 @@ func (sm *SessionManager) persistDurablePromptTurnBinding(ctx context.Context, e
 	return nil
 }
 
-func restoreRecoveredPromptTurnBinding(execution *AgentExecution, submissionID string) error {
+func restoreRecoveredPromptTurnBinding(execution *AgentExecution, peer journal.SubmissionSummary) error {
 	value := execution.MetadataSnapshot()[deliveryPromptTurnBindingMetadataKey]
 	if value == nil {
 		return nil
@@ -63,10 +64,31 @@ func restoreRecoveredPromptTurnBinding(execution *AgentExecution, submissionID s
 		binding.TaskID != execution.TaskID || binding.SessionID != execution.SessionID ||
 		binding.ExecutionID != execution.ID || binding.IncarnationID != execution.DeliveryIncarnationID ||
 		binding.HarnessGeneration != execution.DeliveryHarnessGeneration ||
-		binding.StreamID != execution.DeliveryStreamID || binding.SubmissionID != submissionID {
+		binding.StreamID != execution.DeliveryStreamID || binding.SubmissionID != peer.ID {
 		return fmt.Errorf("%w: %w: recovered prompt turn does not match the admitted delivery owner",
 			ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch)
 	}
-	execution.setPromptTurnID(binding.TurnID)
+	applyRecoveredPromptTurnBinding(execution, binding, peer)
 	return nil
+}
+
+func applyRecoveredPromptTurnBinding(execution *AgentExecution, binding deliveryPromptTurnBinding, peer journal.SubmissionSummary) {
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	if execution.promptGeneration != 0 && execution.promptGeneration != binding.PromptGeneration {
+		return
+	}
+	execution.promptTurnID = binding.TurnID
+	if binding.PromptGeneration == 0 || execution.promptCompletionGeneration == binding.PromptGeneration ||
+		peer.StreamID != binding.StreamID || peer.HarnessGeneration != binding.HarnessGeneration ||
+		(peer.State != journal.SubmissionAccepted && peer.State != journal.SubmissionDispatching) {
+		return
+	}
+	execution.promptGeneration = binding.PromptGeneration
+	execution.dispatchedPromptGeneration = binding.PromptGeneration
+	if execution.promptTurnIDs == nil {
+		execution.promptTurnIDs = make(map[uint64]string)
+	}
+	execution.promptTurnIDs[binding.PromptGeneration] = binding.TurnID
+	execution.armAcceptedPromptActivity()
 }

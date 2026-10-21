@@ -1,5 +1,5 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { forwardRef, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 import { useRouter } from "@/lib/routing/client-router";
@@ -20,6 +20,24 @@ import type { ShortcutCatalogEntry } from "@/lib/sidebar/shortcut-catalog";
 import type { ProjectedSidebarNode } from "@/lib/sidebar/layout-projection";
 import { SidebarCustomizationFeedback } from "./sidebar-customization-feedback";
 import { useSidebarCustomization } from "@/hooks/domains/sidebar/use-sidebar-customization";
+
+// Radix activation belongs to the navigation DOM, not its portaled React descendants.
+const SidebarCustomizeTrigger = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<"div">>(
+  function SidebarCustomizeTrigger({ onPointerDown, onContextMenu, ...props }, ref) {
+    return (
+      <div
+        {...props}
+        ref={ref}
+        onPointerDown={(event) => {
+          if (event.currentTarget.contains(event.target as Node)) onPointerDown?.(event);
+        }}
+        onContextMenu={(event) => {
+          if (event.currentTarget.contains(event.target as Node)) onContextMenu?.(event);
+        }}
+      />
+    );
+  },
+);
 
 export function SidebarCustomizeMenu({
   nodes,
@@ -52,7 +70,7 @@ export function SidebarCustomizeMenu({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={!enabled}>
-        <div
+        <SidebarCustomizeTrigger
           className="min-h-6 min-w-0 shrink-0"
           aria-label={t("settings:sidebarCustomize")}
           tabIndex={nodes.every((node) => !node.visible) ? 0 : undefined}
@@ -65,7 +83,7 @@ export function SidebarCustomizeMenu({
           }}
         >
           {children}
-        </div>
+        </SidebarCustomizeTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent
         className="w-64 max-h-[80dvh] overflow-y-auto"

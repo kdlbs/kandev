@@ -1,15 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
+import { selectTaskListFilter } from "./task-list-archive-helpers";
 
 const listPath = /\/api\/v1\/workspaces\/[^/]+\/tasks$/;
 
 test.describe("Mobile task list search", () => {
-  test("menu search action reveals, filters, and clears on collapse", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("visible search filters and clears the list", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "List Alpha Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -23,17 +19,11 @@ test.describe("Mobile task list search", () => {
     await expect(testPage.getByTestId("mobile-topbar-page-context")).toBeVisible();
 
     const taskList = testPage.getByTestId("tasks-list");
-    const searchBar = testPage.getByTestId("mobile-search-bar");
-    const searchToggle = testPage.getByTestId("mobile-search-toggle");
+    const searchBar = testPage.getByTestId("tasks-list-filters");
 
     await expect(taskList.getByText("List Alpha Task")).toBeVisible();
     await expect(taskList.getByText("List Beta Task")).toBeVisible();
-    await expect(searchBar).not.toBeVisible();
-
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await searchToggle.click();
     await expect(searchBar).toBeVisible();
-    await expect(searchBar.getByPlaceholder("Search tasks...")).toBeFocused();
 
     const searched = waitForHttp(testPage, "GET", listPath, {
       predicate: (r) => new URL(r.url()).searchParams.get("query") === "Alpha",
@@ -46,10 +36,9 @@ test.describe("Mobile task list search", () => {
     const cleared = waitForHttp(testPage, "GET", listPath, {
       predicate: (r) => !new URL(r.url()).searchParams.has("query"),
     });
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await searchToggle.tap();
+    await testPage.getByRole("button", { name: "Clear search", exact: true }).tap();
     await cleared;
-    await expect(searchBar).not.toBeVisible();
+    await expect(searchBar).toBeVisible();
     await expect(taskList.getByText("List Alpha Task")).toBeVisible();
     await expect(taskList.getByText("List Beta Task")).toBeVisible();
   });
@@ -80,13 +69,11 @@ test.describe("Mobile task list search", () => {
 
     await testPage.goto("/tasks?group=none");
     await expect(testPage.getByTestId("mobile-topbar-page-context")).toBeVisible();
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await testPage.getByTestId("mobile-search-toggle").click();
     const searched = waitForHttp(testPage, "GET", listPath, {
       predicate: (r) => new URL(r.url()).searchParams.get("query") === "mobile sort",
     });
     await testPage
-      .getByTestId("mobile-search-bar")
+      .getByTestId("tasks-list-filters")
       .getByPlaceholder("Search tasks...")
       .fill("mobile sort");
     await searched;
@@ -109,7 +96,9 @@ test.describe("Mobile task list search", () => {
     await expect(
       testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
     ).toHaveCount(0);
-    await menu.getByTestId("mobile-tasks-list-show-archived").tap();
+    await testPage.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await testPage.getByTestId("tasks-list-archive-all").tap();
     await expect(
       testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
     ).toBeVisible();
@@ -143,8 +132,7 @@ test.describe("Mobile task list search", () => {
   });
 
   // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.14
-  // @covers AC-UI-MOBILE-MENU-005.3
-  test("hide cancels queued phone search and reopening stays empty", async ({
+  test("clear cancels queued phone search and keeps the input visible", async ({
     testPage,
     apiClient,
     seedData,
@@ -154,10 +142,10 @@ test.describe("Mobile task list search", () => {
       workflow_step_id: seedData.startStepId,
     });
     await testPage.goto("/tasks?group=none");
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await testPage.getByTestId("mobile-search-toggle").tap();
-    const bar = testPage.getByTestId("mobile-search-bar");
-    const input = bar.getByRole("textbox");
+    await expect(testPage.getByTestId("tasks-list-row-title")).toContainText("Queued phone task");
+    const bar = testPage.getByTestId("tasks-list-filters");
+    const input = testPage.getByTestId("tasks-list-search");
+    await input.tap();
     await expect(input).toBeFocused();
     await testPage.clock.install();
     await testPage.clock.pauseAt(new Date());
@@ -167,16 +155,14 @@ test.describe("Mobile task list search", () => {
       if (listPath.test(url.pathname)) queries.push(url.searchParams.get("query") ?? "");
     });
     await input.fill("Cancelled phone input");
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await testPage.getByTestId("mobile-search-toggle").tap();
+    await testPage.getByRole("button", { name: "Clear search", exact: true }).tap();
     await testPage.clock.runFor(32);
-    await expect(bar).toHaveCount(0);
+    await expect(bar).toBeVisible();
     await testPage.clock.runFor(1000);
     expect(queries).not.toContain("Cancelled phone input");
     await testPage.clock.resume();
-    await testPage.getByTestId("mobile-topbar-page-context").tap();
-    await testPage.getByTestId("mobile-search-toggle").tap();
     await expect(input).toHaveValue("");
+    await input.tap();
     await expect(input).toBeFocused();
     await expect(
       testPage.getByTestId("tasks-list").getByText("Queued phone task", { exact: true }),
@@ -204,17 +190,16 @@ test.describe("Mobile task list search", () => {
         );
       }
       await testPage.goto("/tasks?sort=title_asc&group=none");
-      await testPage.getByTestId("mobile-topbar-page-context").tap();
-      await expandDisplaySettingsGroup(testPage, "filters", "mobile");
-      await testPage.getByTestId("mobile-display-repository-filter").tap();
-      await testPage
-        .getByRole("listbox")
-        .getByRole("option", { name: "E2E Repo", exact: true })
-        .tap();
-      await testPage.getByTestId("mobile-tasks-list-show-archived").tap();
-      await testPage.getByTestId("mobile-search-toggle").tap();
-      const bar = testPage.getByTestId("mobile-search-bar");
-      const input = bar.getByRole("textbox");
+      await testPage.getByTestId("tasks-list-filters-trigger").tap();
+      const drawer = testPage.getByTestId("tasks-list-filters-drawer");
+      const workflowName = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )!.name;
+      await selectTaskListFilter(testPage, "workflow", workflowName, true);
+      await selectTaskListFilter(testPage, "repository", "E2E Repo", true);
+      await drawer.getByRole("button", { name: "Done", exact: true }).tap();
+      await testPage.getByTestId("tasks-list-archive-all").tap();
+      const input = testPage.getByTestId("tasks-list-search");
       const loaded = waitForHttp(testPage, "GET", listPath, {
         predicate: (r) => new URL(r.url()).searchParams.get("query") === "Phone search",
       });
@@ -249,7 +234,7 @@ test.describe("Mobile task list search", () => {
       const cleared = waitForHttp(testPage, "GET", listPath, {
         predicate: (r) => !new URL(r.url()).searchParams.has("query"),
       });
-      await bar.getByRole("button").tap();
+      await testPage.getByRole("button", { name: "Clear search", exact: true }).tap();
       await cleared;
       await expect(input).toHaveValue("");
       await expect(pagination).toContainText("1 to 25 of");

@@ -1,7 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 async function selectListOption(page: Page, testId: string, optionLabel: string) {
   await page.getByTestId(testId).click();
@@ -61,7 +60,7 @@ test.describe("Task List", () => {
     await expect(
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
-    await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
+    await expect(testPage.getByTestId("tasks-list-search")).toBeVisible();
     // The bar names the page through the shared title crumb.
     await expect(testPage.locator('[data-slot="breadcrumb-page"]')).toHaveText("Tasks");
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
@@ -118,10 +117,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Hierarchy");
+    await testPage.getByTestId("tasks-list-search").fill("Hierarchy");
 
     const taskList = testPage.getByTestId("tasks-list");
     const parentRow = taskList
@@ -161,10 +157,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_desc&group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("sort task");
+    await testPage.getByTestId("tasks-list-search").fill("sort task");
 
     await expect(testPage.getByTestId("tasks-list-sort")).toContainText("Title Z-A");
     await expect(testPage.getByTestId("tasks-list-group")).toContainText("None");
@@ -216,10 +209,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=workflow");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Duplicate group");
+    await testPage.getByTestId("tasks-list-search").fill("Duplicate group");
 
     const sections = testPage.getByTestId("tasks-list-section");
     await expect(sections).toHaveCount(2);
@@ -356,7 +346,6 @@ test.describe("Task List", () => {
     await testPage.goto("/tasks?sort=title_asc&group=none");
     await testPage.waitForLoadState("networkidle");
     const searchApplied = waitForHttp(testPage, "GET", /\/api\/v1\/workspaces\/[^/]+\/tasks$/, {
-      timeout: 5_000,
       predicate: (response) => {
         const params = new URL(response.url()).searchParams;
         return (
@@ -364,10 +353,7 @@ test.describe("Task List", () => {
         );
       },
     });
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Paged list task");
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task");
     await searchApplied;
 
     const pagination = testPage.getByTestId("tasks-pagination");
@@ -386,6 +372,10 @@ test.describe("Task List", () => {
     await testPage.getByRole("listbox").getByRole("option", { name: "10" }).click();
     await expect(pagination).toContainText("Showing 1 to 10 of 26 results");
     await expect(testPage.getByTestId("tasks-pagination-page-size")).toContainText("10");
+
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task 26");
+    await expect(pagination).toContainText("Showing 1 to 1 of 1 result");
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Paged list task 26"]);
   });
 
   // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.15
@@ -408,17 +398,13 @@ test.describe("Task List", () => {
         );
       }
       await testPage.goto("/tasks?sort=title_asc&group=none");
-      await testPage.getByTestId("display-button").click();
-      await expandDisplaySettingsGroup(testPage, "filters");
-      await testPage.getByTestId("display-repository-filter").click();
-      await testPage
-        .getByRole("listbox")
-        .getByRole("option", { name: "E2E Repo", exact: true })
-        .click();
-      await testPage.getByTestId("display-button").click({ force: true });
-      await expect(testPage.getByTestId("display-settings-content")).toHaveCount(0);
-      await testPage.getByRole("checkbox", { name: "Show archived", exact: true }).check();
-      const input = testPage.getByTestId("kanban-header-search").getByRole("textbox");
+      const workflowName = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )!.name;
+      await selectListOption(testPage, "tasks-list-workflow-filter", workflowName);
+      await selectListOption(testPage, "tasks-list-repository-filter", "E2E Repo");
+      await testPage.getByTestId("tasks-list-archive-all").click();
+      const input = testPage.getByTestId("tasks-list-search");
       const listPath = /\/api\/v1\/workspaces\/[^/]+\/tasks$/;
       const loaded = waitForHttp(testPage, "GET", listPath, {
         predicate: (r) => new URL(r.url()).searchParams.get("query") === "Scoped search",
@@ -454,7 +440,7 @@ test.describe("Task List", () => {
       const cleared = waitForHttp(testPage, "GET", listPath, {
         predicate: (r) => !new URL(r.url()).searchParams.has("query"),
       });
-      await testPage.getByTestId("kanban-header-search").getByRole("button").click();
+      await testPage.getByRole("button", { name: "Clear search", exact: true }).click();
       const emptyParams = new URL((await cleared).url()).searchParams;
       expect(emptyParams.get("repository_id")).toBe(seedData.repositoryId);
       expect(emptyParams.get("workflow_id")).toBe(seedData.workflowId);

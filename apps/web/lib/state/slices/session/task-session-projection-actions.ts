@@ -1,10 +1,9 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { TaskSession } from "@/lib/types/http";
 import type { PendingActionOrphanProjection, PendingActionProjection, SessionSlice } from "./types";
 
-type ImmerSet = Parameters<
-  StateCreator<SessionSlice, [["zustand/immer", never]], [], SessionSlice>
->[0];
+type ImmerSet = Parameters<SliceCreator<SessionSlice>>[0];
 
 function parseEpoch(epoch: string): bigint | null {
   if (!/^\d+$/.test(epoch)) return null;

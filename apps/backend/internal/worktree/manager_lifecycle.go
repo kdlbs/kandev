@@ -629,13 +629,6 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 	return SanitizeBranchSlug(req.BranchSlug)
 }
 
-func recreateSourceBranch(existingBranch, checkoutBranch string) string {
-	if checkoutBranch != "" {
-		return checkoutBranch
-	}
-	return existingBranch
-}
-
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally
 // pulling from origin first, and falling back to req.FallbackBaseBranch when the
 // requested base branch is missing. When the fallback path is taken, req.BaseBranch

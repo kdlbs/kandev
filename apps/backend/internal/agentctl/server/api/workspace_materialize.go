@@ -254,10 +254,6 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, nil)
 }
 
-func materializeRepositoryWithDestination(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
-	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, contributionDestination)
-}
-
 func materializeRepositoryInternal(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
 	return materializeRepositoryWithOptions(ctx, locator, destination, baseBranch, checkoutBranch, binding, contributionDestination, nil)
 }

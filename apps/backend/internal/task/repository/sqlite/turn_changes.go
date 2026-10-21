@@ -633,7 +633,9 @@ func (r *Repository) FinalizeTurnChangeSet(
 	if err != nil {
 		return false, turnChangeSetLockError(err)
 	}
-	if !canFinalizeTurnChangeSet(changeSet, expectedRevision) {
+	unavailable := finalization.Availability == models.TurnChangeAvailabilityUnavailable &&
+		!finalization.Complete && !finalization.SummaryComplete && !finalization.ContentComplete
+	if !canFinalizeTurnChangeSet(changeSet, expectedRevision, unavailable) {
 		return false, nil
 	}
 	overlapJSON, err := encodeTurnChangeOverlaps(finalization.OverlapIntervals)
@@ -649,12 +651,12 @@ func (r *Repository) FinalizeTurnChangeSet(
 			final_assistant_message_id = ?, file_count = ?, added_lines = ?, deleted_lines = ?,
 			binary_file_count = ?, unknown_count_file_count = ?, repository_count = ?, retain_until = ?,
 			expiry_reason = ?, content_bytes = ?, overlap_intervals_json = ?, updated_at = ?
-		WHERE id = ? AND revision = ? AND (start_accepted = ? OR capture_enabled = ?) AND terminal_at IS NULL
+		WHERE id = ? AND revision = ? AND (start_accepted = ? OR capture_enabled = ? OR ?) AND terminal_at IS NULL
 	`), finalization.Availability, finalization.Reason, finalization.Complete, finalization.SummaryComplete,
 		finalization.ContentComplete, finalization.TerminalAt, finalization.TerminalOutcome,
 		finalization.FinalAssistantMessageID, finalization.FileCount, finalization.AddedLines, finalization.DeletedLines,
 		finalization.BinaryFileCount, finalization.UnknownCountFileCount, finalization.RepositoryCount, finalization.RetainUntil,
-		finalization.ExpiryReason, finalization.ContentBytes, overlapJSON, finalization.TerminalAt, changeSetID, expectedRevision, true, false)
+		finalization.ExpiryReason, finalization.ContentBytes, overlapJSON, finalization.TerminalAt, changeSetID, expectedRevision, true, false, unavailable)
 	if err != nil {
 		return false, err
 	}
@@ -691,8 +693,8 @@ func hasNegativeValue(values ...int64) bool {
 	return false
 }
 
-func canFinalizeTurnChangeSet(changeSet *models.TurnChangeSet, expectedRevision int64) bool {
-	return changeSet.Revision == expectedRevision && (changeSet.StartAccepted || !changeSet.CaptureEnabled) && changeSet.TerminalAt == nil
+func canFinalizeTurnChangeSet(changeSet *models.TurnChangeSet, expectedRevision int64, unavailable bool) bool {
+	return changeSet.Revision == expectedRevision && (changeSet.StartAccepted || !changeSet.CaptureEnabled || unavailable) && changeSet.TerminalAt == nil
 }
 
 func finalizeTurnChangeRepositories(

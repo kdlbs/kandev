@@ -12,6 +12,108 @@ legacy_specs: []
 
 ## Overview
 
+Task 03 is complete. It lets phone status icons and transcript
+utilities share a row when their targets fit. The workflow action remains
+above that row. Tasks 01 and 02 remain completed historical records.
+The user authorized Task 03 implementation after the design handoff. Its checks
+and screenshots are recorded in the work order. Earlier PR evidence below
+applies to Tasks 01 and 02.
+
+## Task 03 scope and approach
+
+UI owns the independent responsive composition. Task and provider state remain
+with their existing owners. The user confirmed shared rows when space permits.
+The implementation choice is natural CSS wrapping with existing spacing and
+44px phone targets. No material question blocks the design.
+
+Revise `ChatStatusBar`'s layout ownership so status, workflow, and utility
+groups can retain stable instances while changing order at the phone boundary.
+Remove forced full-width status/utility rows. Keep the eligible workflow action
+in its own upper row. Place bounded status and utility groups below it, using
+natural widths and trailing utility alignment. Preserve terminal banners first.
+See the paired design for the mobile contract and component boundaries.
+
+Exclude passthrough and Threads auto-hide CI placement. No provider logic,
+new strings, preference writes, dependencies, animations, or API changes.
+Use the existing icon components, gaps, colors, and press behavior.
+
+## Task 03 UI preview
+
+UI-03: Task Chat, above the composer. Row descriptions are a structural preview.
+They replace an ASCII drawing for this request. All rows stay outside transcript
+scrolling and above the existing safe-area clearance.
+
+| State | Rows from top to bottom |
+| --- | --- |
+| Current phone, eligible action | Status icons; right-aligned workflow action; right-aligned utilities; composer |
+| Proposed phone, controls fit | Right-aligned workflow action; status icons left and utilities right on one row; composer |
+| Proposed phone, controls exceed width | Right-aligned workflow action; status icons and utilities wrap as complete controls; composer |
+| Proposed phone, action hidden | Shared or wrapping status/utility row; composer, with no empty action row |
+| Proposed phone, moving | Disabled workflow action retains its upper row; shared or wrapping controls; composer |
+| Desktop, sufficient width | Status icons, utilities, workflow action on one line; composer |
+
+Any terminal notice precedes these rows in its existing full-width region.
+Control order, conditional sharing, fallback wrapping, and 44px phone targets
+are requirements. Labels and spacing in the preview are illustrative.
+Maps to AC-UI-COMPOSER-ACTION-WRAP-001.1 through .7.
+
+## Task 03 tests and E2E
+
+Extend `chat-status-bar.test.tsx` to cover responsive instance preservation,
+empty groups, and hidden/moving actions. Use rendered geometry to prove fit.
+Add `shares status and transcript controls when they fit` and
+`wraps status and transcript controls without shrinking targets` to
+`e2e/tests/chat/mobile-chat-status-bar.spec.ts` under `mobile-chrome`.
+Map these to .6/.7. Use open-PR and todo fixtures, visible transcript controls,
+393px fitting content, 320px dense content, 640/767px, and narrow fine pointers.
+Assert actual bounds and actions, not class names. Restore changed settings.
+
+Run existing workflow suites for .1 through .5, including 768px and wide
+desktop, keyboard order, disabled/hidden states, and real movement.
+Retain terminal-notice tests from the companion mobile-task-action-bar plan.
+Its completed results remain historical. No companion work order requires
+reopening because shared banner behavior is unchanged.
+Use the exact commands in Task 03, sequential browser projects, and a fresh
+managed build. Inspect phone fit/wrap and desktop captures against UI-03.
+
+## Task 03 work order and risks
+
+- [x] [Task 03: Share status and utility rows](task-03-share-status-utility-row.md)
+
+Task 03 follows completed Task 02. Execute it as one sequential change.
+Risks: reparenting can reset disclosures, empty wrappers can leave gaps,
+and dense provider or goal content can consume the available width.
+Browser geometry and instance-preservation tests cover these risks.
+Public documentation remains unchanged during planning. During implementation,
+add the shared-row behavior to the existing phone-controls paragraph in
+`docs/public/mobile-remote-access.md` using the docs-maintainer skill.
+
+## Task 03 package validation
+
+Design-package checks passed on 2026-10-20:
+
+- `python3 scripts/list-docs.py validate`: 384 decisions and 1616 specifications.
+- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
+- `python3 scripts/lint-spec-files.py --all`: all files passed.
+- `.github/scripts/pr-docs.cjs` `validateCoverage`: covered, zero errors, using
+  the four changed documents and proposed `chat-status-bar.tsx` change.
+- `git diff --check`: passed. `git status --short` confirms three modified
+  documents and the new untracked work order, all unstaged.
+
+The design checkpoint ended before code changes. The later implementation
+request authorized Task 03. Requirements are now active and the design is current.
+
+Task 03 verification: 61 component tests, six desktop scenarios, and ten mobile
+scenarios passed. One mobile geometry measurement required an atomic snapshot
+correction; both affected desktop/mobile cases then passed. Typecheck with a
+6144MiB heap, lint, formatting, 63 public-doc tests, public-doc validation,
+specification checks, documentation coverage, and diff checks passed.
+Phone fit/wrap and desktop screenshots match UI-03. The work order records
+exact commands and local environment adjustments. Earlier results below remain
+historical.
+
+## Historical Task 02 delivery
+
 Task 01 completed the earlier right-alignment correction. The 2026-10-14 user
 correction places the phone workflow action above the floating transcript icons.
 One follow-up work order implements this revised composition and replaces the

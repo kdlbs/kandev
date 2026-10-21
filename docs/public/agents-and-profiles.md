@@ -711,6 +711,25 @@ classification and a bounded, sanitized stderr tail while their response stays
 generic. A line cut off at the beginning of the retained tail is omitted to
 avoid exposing part of a credential.
 
+### Handle a quiet agent turn
+
+After five minutes without turn output, Chat shows **Still waiting for the
+agent.** or identifies the tool it is waiting on. The turn stays active.
+Silence alone does not mean the agent failed or that it is safe to repeat the
+instruction.
+
+Select **Cancel turn** to request cancellation. The control stays disabled and
+shows a progress indicator until the request settles, including after a page reload.
+When cancellation is confirmed, you can continue the conversation. If Kandev
+cannot confirm the outcome, delivery remains blocked and Chat shows the
+existing recovery controls. Kandev does not automatically replay the instruction.
+
+Select **Resume** to check the saved conversation. If received events are still
+being applied, Resume can wait up to 10 seconds. Its control stays busy during
+the check. If the wait expires or the evidence cannot be verified, delivery
+stays blocked. You can try Resume again after the connection or storage issue
+is resolved.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.

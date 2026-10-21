@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -15,7 +17,7 @@ import (
 // run-lifecycle integration tests can verify per-run event emission.
 func (s *Service) ListRunEventsForTest(
 	ctx context.Context, runID string,
-) ([]*models.RunEvent, error) {
+) ([]*runsmodels.RunEvent, error) {
 	return s.repo.ListRunEvents(ctx, runID, -1, 0)
 }
 
@@ -32,7 +34,7 @@ func (s *Service) GetContinuationSummaryForTest(
 // loadContinuationSummary so tests can drive the real reader path
 // (as assembleAgentPrompt calls it) without duplicating its scope logic.
 func (si *SchedulerIntegration) LoadContinuationSummaryForTest(
-	ctx context.Context, run *models.Run, agentID, taskID string,
+	ctx context.Context, run *runsmodels.Run, agentID, taskID string,
 ) string {
 	return si.loadContinuationSummary(ctx, run, agentID, taskID)
 }
@@ -174,7 +176,7 @@ func RunSchedulerTick(svc *Service, ctx context.Context) {
 // agent-inactive race window, where ClaimNextRun's own query already
 // excludes non-idle/working agents so the run must be claimed first and the
 // agent paused afterward, then handed to processRun directly.
-func ProcessRunForTest(svc *Service, ctx context.Context, run *models.Run) {
+func ProcessRunForTest(svc *Service, ctx context.Context, run *runsmodels.Run) {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	si.processRun(ctx, run)
 }
@@ -210,7 +212,7 @@ func ResolveRunProjectForTest(svc *Service, ctx context.Context, payload string)
 // "structurally unreachable via the full pipeline, but a real and correctly
 // implemented branch of the function itself" situation already recorded for
 // resolveRunProject's task-not-found and lookup-error outcomes.
-func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance) bool {
+func AdmitRunForTest(svc *Service, ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance) bool {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	return si.admitRun(ctx, run, agent)
 }
@@ -220,7 +222,7 @@ func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *
 // lost-race path (another writer already made the run terminal before
 // this call's FailRun runs) can be driven without reproducing a transient
 // GetAgentFromConfig lookup error through the full scheduler pipeline.
-func DeferWorkspaceLookupFailureForTest(svc *Service, ctx context.Context, run *models.Run) {
+func DeferWorkspaceLookupFailureForTest(svc *Service, ctx context.Context, run *runsmodels.Run) {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	si.deferWorkspaceLookupFailure(ctx, run)
 }
@@ -229,7 +231,7 @@ func DeferWorkspaceLookupFailureForTest(svc *Service, ctx context.Context, run *
 // packages, so the lost-race path (another writer already made the run
 // terminal before this call runs) can be driven without the scheduler's
 // atomic claim+launch pipeline standing in the way.
-func FailTasklessRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string) {
+func FailTasklessRunForTest(svc *Service, ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, msg string) {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	si.failTasklessRun(ctx, run, agent, msg)
 }
@@ -250,7 +252,7 @@ func LogPolicyObservabilityForTest(
 // BuildEnvVarsForTest exposes buildEnvVars for external test packages.
 func BuildEnvVarsForTest(
 	si *SchedulerIntegration,
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	jwt, workspaceID string,
 ) map[string]string {

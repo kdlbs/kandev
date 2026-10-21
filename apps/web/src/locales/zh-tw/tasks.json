@@ -59,5 +59,22 @@
   "noWorkflowStep": "無工作流程步驟",
   "loadingWorkflowStep": "正在載入工作流程步驟...",
   "unknownWorkflowStep": "未知工作流程步驟",
-  "workflowStepSection": "{{workflow}} / {{step}}"
+  "workflowStepSection": "{{workflow}} / {{step}}",
+  "activeTasks": "未歸檔",
+  "allTasks": "全部",
+  "archiveFilter": "歸檔狀態",
+  "clearFilters": "清除篩選條件",
+  "clearSearch": "清除搜尋",
+  "removeWorkflowFilter": "移除工作流程篩選條件",
+  "removeRepositoryFilter": "移除儲存庫篩選條件",
+  "workflowUnavailable": "工作流程不可用",
+  "repositoryUnavailable": "儲存庫不可用",
+  "noArchivedTasks": "沒有已歸檔任務",
+  "noMatchingTasks": "沒有任務符合這些篩選條件",
+  "filteredCount_one": "{{count}} 個任務",
+  "filteredCount_other": "{{count}} 個任務",
+  "filtersButton_one": "篩選（{{count}}）",
+  "filtersButton_other": "篩選（{{count}}）",
+  "appliedWorkflow": "工作流程：{{name}}",
+  "appliedRepository": "儲存庫：{{name}}"
 }

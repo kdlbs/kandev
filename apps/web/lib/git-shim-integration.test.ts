@@ -44,6 +44,7 @@ describe("E2E git shim", () => {
       delayFile,
       JSON.stringify({ subcommand: "diff", requiredArgs: ["--numstat"], startedFile, releaseFile }),
     );
+    fs.writeFileSync(`${delayFile}.command`, "diff\n");
     const child = spawn(createGitLauncher(repoDir), ["diff", "--numstat"], {
       cwd: repoDir,
       shell: process.platform === "win32",

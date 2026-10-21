@@ -36,6 +36,7 @@ closure. No common coordinator or responsive layout change is introduced.
 | `AC-UI-FILE-EDITOR-MUTATION-001.7` | Workspace refresh admission and ordering |
 | `AC-UI-FILE-EDITOR-MUTATION-001.8` | Refresh consumer lifetime |
 | `AC-UI-FILE-EDITOR-MUTATION-001.9` | Live refresh reconciliation; Refresh verification and surfaces |
+| `AC-UI-FILE-EDITOR-MUTATION-001.10` | Save receipt and workspace observation reconciliation |
 
 ## Components and current lifecycle
 
@@ -92,8 +93,8 @@ completions settle their promises without publishing or retrying.
 Build the save diff/request from the captured dirty buffer and use its session
 and stored repository. After acceptance, reread only the still-owned buffer.
 Publish the saved snapshot/hash as baseline; derive dirty state from the latest
-buffer versus that saved snapshot. Preserve the existing remote-indication
-clearing and overwritten-save feedback for owned success. Pass the captured
+buffer versus that saved snapshot, subject to the newer workspace observation
+rule below. Preserve overwritten-save feedback for owned success. Pass the captured
 disk text and the owned live text to LSP. Only a clean result clears panel dirty
 state/title through the existing panel helper. Suppress LSP entirely for a
 retired owner, rather than combining one session's disk boundary with another
@@ -285,3 +286,50 @@ removal handlers. Include session navigation, return, replacement, unmount,
 same-session typing, clean success, active/retired failures, repo independence,
 replacement saving cleanup and current remote reload. Inspect real state,
 panel effects, persistence and LSP arguments rather than isolated predicates.
+
+## Save receipt and workspace observation reconciliation
+
+`FileEditorState.workspaceSnapshot` holds the latest changed workspace
+observation as a transient immutable content/hash object. Refresh installs a
+new object when publishing changed content, baseline or remote state; equal
+no-ops keep their object. `acceptedWorkspaceSnapshot` separately identifies the
+last observation actually accepted into the baseline by clean/matching refresh
+or explicit Reload. A conflicting refresh changes only the observation pointer,
+so a later warning cannot erase evidence of an earlier acceptance. Reload reuses
+the observed object, or constructs one when preparing a legacy missing-hash
+snapshot. Typing preserves both pointers. Neither pointer enters persisted tab
+descriptors or wire requests.
+
+Save admission captures both pointers with its existing buffer owner. At
+publication, `buildSavedFileState` compares the live observation with admission:
+a changed observation distinct from submitted text retains remote content/hash
+and Reload. Baseline retention independently requires a changed acceptance
+pointer whose text differs from submitted text and whose content/hash still
+match the live baseline. This retains acceptance even beneath a later warning,
+or when the accepted bytes happen to equal the admission-time baseline. Equality
+of original bytes/hash alone never establishes acceptance.
+
+Retain that accepted baseline when the latest observation is the accepted
+snapshot itself or is a distinct post-admission observation. A later matching
+save echo supersedes an earlier accepted baseline and uses the acknowledged
+saved text/hash without keeping an obsolete warning. Otherwise install the
+acknowledged saved text/hash. Derive dirtiness against the selected baseline and
+retain live typing. LSP still receives submitted disk text and live buffer text,
+not an assertion that the save receipt is the newest disk observation. The local
+helper separates this reconciliation from LSP, panel and feedback publication;
+there is no coordinator, backend ordering or API change.
+
+Revalidate the owner immediately before publication and before panel/feedback
+sinks after synchronous store subscribers. Reload's optional hash preparation
+must also verify that the selected remote content/hash and workspace snapshot
+still match before applying them; a same-buffer newer snapshot is not permission
+to apply the older selection. There is no await between this check and update.
+
+This is a local extension of the existing baseline/refresh contract. Preserving
+all warnings would retain pre-save conflicts and save echoes; unconditional
+clearing loses newer observations. Object identity plus content equality states
+the bounded policy without claiming physical filesystem transaction chronology.
+The requirement/design and regression tests preserve this rationale; no ADR is
+needed. The separate tablet tabs and phone viewer are unchanged. Desktop E2E
+proves Reload after a delayed successful receipt with real disk content; the
+existing mobile file viewer scenario proves the separate Files entry path.

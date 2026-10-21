@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/executor"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -55,7 +57,7 @@ func TestRemoteDockerRejectsDaemonURL(t *testing.T) {
 func TestRemoteDockerReportsRuntimeIdentity(t *testing.T) {
 	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
 
-	if got := exec.Name(); got != executorNameRemoteDocker() {
+	if got := exec.Name(); got != executor.NameRemoteDocker {
 		t.Fatalf("Name() = %q, want the remote docker runtime", got)
 	}
 	if !exec.RequiresCloneURL() {

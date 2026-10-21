@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -597,7 +598,7 @@ func (s *Store) backfillRepositoryModes() error {
 
 // CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
-	a.CreatedByUserID = executorCreatorUserID(ctx)
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}

@@ -2070,6 +2070,7 @@ func registerSecondaryRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService

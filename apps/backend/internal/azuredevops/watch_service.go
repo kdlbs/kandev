@@ -3,6 +3,7 @@ package azuredevops
 import (
 	"context"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"time"
 
 	"go.uber.org/zap"
@@ -223,7 +224,7 @@ func (s *Service) CreateWorkItemWatch(ctx context.Context, req *CreateWorkItemWa
 		MaxInflightTasks: req.MaxInflightTasks,
 	}
 
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreateWorkItemWatch(ctx, watch); err != nil {
@@ -328,7 +329,7 @@ func (s *Service) CreatePullRequestWatch(ctx context.Context, req *CreatePullReq
 		MaxInflightTasks: req.MaxInflightTasks,
 	}
 
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), watch.ExecutorProfileID, watch.WorkspaceID); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreatePullRequestWatch(ctx, watch); err != nil {

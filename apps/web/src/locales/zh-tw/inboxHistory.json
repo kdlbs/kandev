@@ -4,7 +4,7 @@
   "emptyTitleUnnamedWorkspace": "此工作區中沒有歷史記錄。",
   "emptyDescription": "此標籤列出了代理提出但無人回答的問題：因後續工作被取代、工作階段結束時被遺留，或無法讀取。這是隻讀的審計證據，不是待清理的佇列。",
   "errorTitle": "無法載入歷史記錄",
-  "errorDescription": "載入此工作區歷史記錄中的問題時出錯。",
+  "errorDescription": "無法載入此工作區的問題歷史記錄。",
   "retry": "重試",
   "reasonSuperseded": "已被後續工作取代",
   "reasonSessionEnded": "工作階段結束時未獲回答",

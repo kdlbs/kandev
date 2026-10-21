@@ -474,11 +474,6 @@ func (t *promptTurnState) cursorRetriableFailure() bool {
 	return failure
 }
 
-func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
-	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
-	return failure, occurredAt
-}
-
 func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
 		return false, "", time.Time{}, false

@@ -1370,16 +1370,6 @@ func (s *Service) resolveAdmissionAutoMergePolicy(
 	return nil
 }
 
-func (s *Service) autoMergeCandidate(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	candidate *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	policy *AutoMergePolicy,
-) (*QueuedMessage, bool, error) {
-	return s.autoMergeCandidateAtWorkflowEntry(ctx, identity, nil, candidate, claim, policy)
-}
-
 func (s *Service) autoMergeCandidateAtWorkflowEntry(
 	ctx context.Context,
 	identity *QueueSessionIdentity,
@@ -1552,17 +1542,6 @@ func (s *Service) finalizeAutoMerge(
 		return merged
 	}
 	return source
-}
-
-func (s *Service) insertQueueMessage(
-	ctx context.Context,
-	identity *QueueSessionIdentity,
-	msg *QueuedMessage,
-	claim *QueueAttachmentClaim,
-	maxPerSession int,
-	policy *AutoMergePolicy,
-) error {
-	return s.insertQueueMessageAtWorkflowEntry(ctx, identity, nil, msg, claim, maxPerSession, policy)
 }
 
 func (s *Service) insertQueueMessageAtWorkflowEntry(

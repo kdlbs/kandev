@@ -121,6 +121,19 @@ without redundant reads or data from another navigation context.
   before a later refresh completes. Desktop and phone SHALL retain their
   existing composition and interaction paths.
 
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.17:** Dev-server Start/Stop
+  pending state SHALL belong to the originating session. Both desktop controls
+  SHALL show the same pending command. Switching sessions or clearing selection
+  SHALL NOT inherit another session's pending indication; returning to a session
+  with an outstanding command SHALL still indicate pending. Late success or
+  failure SHALL NOT clear a different session's command.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.18:** The desktop controls SHALL admit only
+  one dev-server command per session while its request is outstanding, including same-tick
+  calls and multiple consumers. Additional calls SHALL await that command
+  without queuing another Start or Stop. Commands SHALL survive consumer unmount
+  and settle independently between sessions and app stores. Settlement SHALL
+  retain existing failure and process-status reconciliation semantics.
+
 ## Compatibility
 
 These criteria supplement existing [column visibility](board-step-visibility-filter.md),
@@ -144,3 +157,4 @@ Comparable isolated measurements assess actual navigation improvement.
 - [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)
 - [Session file-review reader ownership](../../../plans/session-file-review-reader-ownership/plan.md)
 - [Preserve successful file moves](../../../plans/preserve-successful-file-moves/plan.md)
+- [Dev-server command ownership](../../../plans/dev-server-command-ownership/plan.md)

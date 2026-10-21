@@ -183,6 +183,30 @@ choices from the navigation design and finish with Open sidebar layout settings.
 Resolve the existing Layout settings route and its URL-persisted `sidebar` tab;
 use guarded router navigation rather than creating another editor route.
 
+### Dialog event isolation
+
+`SidebarCustomizeMenu` owns only gestures from its navigation DOM subtree.
+`AppSidebarNewTaskItem` renders `TaskCreateDialog` beneath that component in the
+React tree. A portal changes DOM placement but retains React event ancestry.
+Reject an activation when its target is outside the trigger DOM element.
+Apply this boundary before Radix receives `pointerdown` or `contextmenu`.
+A guard in only the menu's target-selection callback is insufficient because
+Radix independently opens the menu and schedules its touch timer.
+
+Use a local ref-forwarding trigger element with `ContextMenuTrigger asChild`.
+It forwards injected activation handlers only for DOM-contained targets.
+Preserve the remaining props, ref, and pointer cleanup handlers. Rejected portal
+events must retain browser defaults, including editor focus, selection, and
+native context menus. Do not cancel their default actions or disable the shared
+context-menu primitive. Keep legitimate sidebar and explicit phone customization
+entry points working. This boundary does not change dialog lifetime or layout.
+
+Cover a portaled contenteditable with the real menu primitive in component tests.
+Check context events, held touch, short tap, pointer cancellation, and legitimate
+sidebar activation. Browser regressions open the actual create-task dialog from
+phone navigation and desktop New Task, edit its prompt, and assert that sidebar
+settings stays closed. Existing customization tests retain positive coverage.
+
 Use the installed `@dnd-kit` primitives and existing `moveSection` operation for
 top-level row order. Apply sortable listeners to the row's own interactive label
 region, never a rendered drag handle. Set an activation distance so normal clicks
@@ -476,3 +500,5 @@ saving. Scroll/expanded state follows authoritative updates. Do not activate the
 split in Office, the collapsed rail, phone navigation, or Settings takeover.
 
 - [Flagged sidebar entries update](../../../plans/flagged-sidebar-entries/plan.md)
+
+- [Sidebar dialog event isolation](../../../plans/sidebar-dialog-event-isolation/plan.md)

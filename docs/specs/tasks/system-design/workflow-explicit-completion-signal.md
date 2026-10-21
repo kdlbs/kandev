@@ -117,6 +117,25 @@ An error does not grant an agent new authority to use `move_task_kandev`.
 
 ## Persistence and compatibility
 
+### Watchdog scan projection
+
+The periodic stuck-signal watchdog uses `ListStepSignalWatchdogSessions`, a
+read-only projection of session ID, task ID, state, passthrough status, and only
+the `pending_step_completion_signal` metadata entry. It retains the general
+active-session reader's CREATED, STARTING, RUNNING, and WAITING_FOR_INPUT scope
+and start-time ordering, including sessions on archived and automation tasks.
+It does not join workspace/execution tables or load configuration snapshots,
+worktrees, MCP attachments, or model catalogs. The general active-session
+reader continues returning full sessions for its other consumers.
+
+SQLite and PostgreSQL extract the pending metadata entry in SQL. This bounds
+payload transfer and Go decoding by the signal size; database JSON evaluation
+can still read the original metadata. No schema, index, retention, or archive
+policy changes. The projected sessions are observations only: recovery still
+re-reads full sessions and turns under the existing cancellation, generation,
+liveness, and delivery guards. Office detection and deduplication retain the
+same pending-signal population and never gain transition authority.
+
 There is no schema change, new response envelope, or new MCP argument.
 `workflow_step_id_at_start` remains an immutable historical fact.
 The task-at-step conditional signal claim and duplicate handling remain intact.

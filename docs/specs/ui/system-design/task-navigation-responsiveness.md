@@ -523,3 +523,14 @@ change. The mobile-parity exception permits targeted hook/component tests and
 this note; browser/build/E2E/full-suite work is unnecessary for this boundary.
 
 - [Reader ownership delivery plan](../../../plans/session-file-review-reader-ownership/plan.md)
+
+## Dev-server command ownership
+
+For `.5`, `.17`, `.18`, `useDevServerPreview` shares transient pending promises
+per app store and session. Admit before transport; overlapping calls join.
+Selection/unmount retain admitted work. Settlement deletes its entry. Preserve
+originating-store publication, process freshness, failure returns and panels.
+`PreviewController` restoration remains a separate request path.
+Phone/tablet do not mount this Dockview control; the mobile-parity state/data
+exception applies. Real-consumer tests and managed browser checks cover this
+boundary. See [design details and verification](../../../plans/dev-server-command-ownership/plan.md).

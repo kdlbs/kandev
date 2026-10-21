@@ -258,7 +258,9 @@ export async function assertRetentionRecoveryControls(
   expect(promptCount).toBe(1);
   const submissionsBeforeRetry = retentionEvidence(backend, sessionId).prompts.map((row) => row.id);
   const retry = banner.getByTestId("recovery-retry-connection-button");
-  await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
+  await expect(banner).toContainText(
+    "The connection was interrupted. Kandev cannot confirm whether the agent processed your message.",
+  );
   await expect(retry).toBeVisible();
   if (touch) {
     const box = await retry.boundingBox();

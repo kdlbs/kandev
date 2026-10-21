@@ -309,7 +309,7 @@ func restoreInitialPromptSubmission(
 	// gives Stop and replay one exact peer-owned target; arbitrary peer
 	// submissions without SQL evidence remain blocked below.
 	execution.setDeliverySubmissionID(activePeer[0].ID)
-	return true, restoreRecoveredPromptTurnBinding(execution, activePeer[0].ID)
+	return true, restoreRecoveredPromptTurnBinding(execution, activePeer[0])
 }
 
 func (m *Manager) restoreRecoveredBackendSubmission(
@@ -547,7 +547,7 @@ func (m *Manager) restoreRecoveredSubmissionRecord(
 		return fmt.Errorf("%w: retained terminal submission %q is not replayable", ErrDurableAdoptionBlocked, peer.ID)
 	}
 	execution.setDeliverySubmissionID(submission.ID)
-	return restoreRecoveredPromptTurnBinding(execution, submission.ID)
+	return restoreRecoveredPromptTurnBinding(execution, peer)
 }
 
 func adoptionReplayCursor(

@@ -288,7 +288,7 @@ test.describe("mobile PR CI automation options", () => {
     );
     await drawer.getByTestId("ci-auto-fix-round-help").tap();
     await expect(drawer.getByTestId("ci-auto-fix-round-explanation")).toContainText(
-      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
+      "If the agent reports no outcome, Kandev may retry the same feedback",
     );
     await testPage.keyboard.press("Escape");
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);

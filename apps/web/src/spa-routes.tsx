@@ -15,6 +15,7 @@ import { StatsPageClient } from "@/app/stats/stats-page-client";
 import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
+import { TasksWorkspaceError } from "@/app/tasks/tasks-workspace-error";
 import { AutomationDetailPage } from "@/components/runs/automation-detail-page";
 import { RunsListPage } from "@/components/runs/runs-list-page";
 import { RunsPageClient } from "@/components/runs/runs-page-client";
@@ -69,6 +70,7 @@ import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { generateUUID } from "@/lib/utils";
+import { canUseTasksListBootData, type TasksListMetadataReady } from "@/lib/tasks/tasks-list-query";
 import { isIntegratedControlPath } from "@/lib/navigation/integrated-control";
 const IntegratedControlPage = lazy(() =>
   import("@/components/integrated-control/integrated-control-page").then((mod) => ({
@@ -90,6 +92,8 @@ const ThreadsPageClient = lazy(() =>
   })),
 );
 const EMPTY_REPOSITORIES: Repository[] = [];
+const EMPTY_TASKS_METADATA: TasksListMetadataReady = { workflows: false, repositories: false };
+const READY_TASKS_METADATA: TasksListMetadataReady = { workflows: true, repositories: true };
 
 type SpaRoute =
   | {
@@ -158,6 +162,11 @@ type RouteDataState = {
   workflows: Workflow[];
   steps: WorkflowStep[];
   repositories: Repository[];
+};
+
+type RouteBootstrapState = RouteDataState & {
+  workspaceStatus: "loading" | "ready" | "not_found" | "error";
+  metadataLoaded: TasksListMetadataReady;
 };
 
 type SpaRouteOptions = {
@@ -375,6 +384,7 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   // load) re-resolves without requiring a navigation.
   usePluginRegistry();
   const route = useResolvedSpaRoute();
+  const tasksPage = useTasksBootPage(route, routeData?.tasksPage);
   if (route.kind === "integratedControl") {
     return (
       <Suspense fallback={<RouteLoading routeNameKey="sidebar:integratedControl.title" />}>
@@ -382,7 +392,21 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
       </Suspense>
     );
   }
-  return <StandardSpaRoutes route={route} routeData={routeData} />;
+  return <StandardSpaRoutes route={route} routeData={routeData && { ...routeData, tasksPage }} />;
+}
+
+function useTasksBootPage(route: SpaRoute, tasksPage: BootRouteData["tasksPage"]) {
+  const bootPage = useRef(tasksPage);
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const requestedWorkspaceId = useSearchParams().get("workspace");
+  if (
+    route.kind !== "tasks" ||
+    bootPage.current?.activeWorkspaceId !== activeWorkspaceId ||
+    (requestedWorkspaceId !== null && requestedWorkspaceId !== activeWorkspaceId)
+  ) {
+    bootPage.current = undefined;
+  }
+  return bootPage.current;
 }
 
 function StandardSpaRoutes({
@@ -490,8 +514,10 @@ function DataBackedRoute({
 }) {
   const tasksPage = route.kind === "tasks" ? routeData?.tasksPage : undefined;
   const routeContext = routeData?.routeContext;
+  const searchParams = useSearchParams();
   const bootstrapped = useRouteData({
-    skipBootstrap: Boolean(tasksPage || routeContext),
+    skipBootstrap: Boolean(tasksPage || (route.kind !== "tasks" && routeContext)),
+    requestedWorkspaceId: route.kind === "tasks" ? searchParams.get("workspace") : null,
   });
   if (route.kind === "tasks") {
     return <TasksDataRoute bootstrapped={bootstrapped} tasksPage={tasksPage} />;
@@ -505,7 +531,7 @@ function TasksDataRoute({
   bootstrapped,
   tasksPage,
 }: {
-  bootstrapped: RouteDataState;
+  bootstrapped: RouteBootstrapState;
   tasksPage?: BootRouteData["tasksPage"];
 }) {
   const searchParams = useSearchParams();
@@ -515,9 +541,25 @@ function TasksDataRoute({
     tasksPage,
     userSettings,
   );
-  const initialData = resolveTasksDataRouteInitialData(bootstrapped, tasksPage, initialSort);
+  const initialData = resolveTasksDataRouteInitialData(
+    bootstrapped,
+    tasksPage,
+    initialSort,
+    searchParams,
+  );
+  if (bootstrapped.workspaceStatus === "error" || bootstrapped.workspaceStatus === "not_found") {
+    return <TasksWorkspaceError missing={bootstrapped.workspaceStatus === "not_found"} />;
+  }
+  const requestedWorkspaceId = searchParams.get("workspace");
+  if (
+    bootstrapped.workspaceStatus !== "ready" ||
+    (requestedWorkspaceId !== null && requestedWorkspaceId !== bootstrapped.activeWorkspaceId)
+  ) {
+    return <RouteLoading routeNameKey="common:tasks" />;
+  }
   return (
     <TasksPageClient
+      key={initialData.initialWorkspaceId}
       workspaces={[]}
       {...initialData}
       initialSort={initialSort}
@@ -542,18 +584,26 @@ function resolveTasksDataRoutePreferences(
 }
 
 function resolveTasksDataRouteInitialData(
-  bootstrapped: RouteDataState,
+  bootstrapped: RouteBootstrapState,
   tasksPage: BootRouteData["tasksPage"] | undefined,
   initialSort: ReturnType<typeof parseTasksListSort>,
+  searchParams: URLSearchParams,
 ) {
+  const seed = tasksPage ?? bootstrapped;
+  const workspaceId = searchParams.get("workspace") ?? seed.activeWorkspaceId;
+  const eligible =
+    tasksPage !== undefined &&
+    canUseTasksListBootData(searchParams, seed.activeWorkspaceId, workspaceId);
+  const tasks = eligible ? (tasksPage.tasks ?? []) : [];
   return {
-    initialWorkspaceId: tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined,
-    initialRepositories: tasksPage?.repositories ?? bootstrapped.repositories,
+    initialWorkspaceId: seed.activeWorkspaceId ?? undefined,
+    initialRepositories: seed.repositories ?? bootstrapped.repositories,
     initialTasks: isTaskListFacetOption(initialSort)
-      ? [...(tasksPage?.tasks ?? [])]
-      : sortTasksForList(tasksPage?.tasks ?? [], initialSort),
-    initialTotal: tasksPage?.total ?? 0,
-    initialDataLoaded: Boolean(tasksPage),
+      ? [...tasks]
+      : sortTasksForList(tasks, initialSort),
+    initialTotal: eligible ? (tasksPage.total ?? 0) : 0,
+    initialDataLoaded: eligible,
+    initialMetadataLoaded: tasksPage ? READY_TASKS_METADATA : bootstrapped.metadataLoaded,
   };
 }
 
@@ -640,9 +690,11 @@ function resolveEffectiveRouteData(
 // eslint-disable-next-line max-lines-per-function, complexity -- route bootstrap owns one guarded async lifecycle
 function useRouteData({
   skipBootstrap = false,
+  requestedWorkspaceId = null,
 }: {
   skipBootstrap?: boolean;
-} = {}): RouteDataState {
+  requestedWorkspaceId?: string | null;
+} = {}): RouteBootstrapState {
   const store = useAppStoreApi();
   const bootstrappedRef = useRef(false);
   const [workflows, setRouteWorkflows] = useState<Workflow[]>([]);
@@ -651,6 +703,12 @@ function useRouteData({
   const workspaceContextRetryVersion = useAppStore(
     (state) => state.workspaceContextRead.retryVersion,
   );
+  const [resolution, setResolution] = useState({
+    requestedWorkspaceId,
+    retryVersion: workspaceContextRetryVersion,
+    status: "loading" as RouteBootstrapState["workspaceStatus"],
+    metadataLoaded: EMPTY_TASKS_METADATA,
+  });
   const repositories = useAppStore((state) =>
     activeWorkspaceId
       ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? EMPTY_REPOSITORIES)
@@ -678,6 +736,22 @@ function useRouteData({
       ]);
       if (cancelled) return;
 
+      const nextResolution = {
+        requestedWorkspaceId,
+        retryVersion: workspaceContextRetryVersion,
+        metadataLoaded: EMPTY_TASKS_METADATA,
+      };
+      if (requestedWorkspaceId !== null) {
+        if (!workspacesResponse) {
+          setResolution({ ...nextResolution, status: "error" });
+          return;
+        }
+        if (!workspacesResponse.workspaces.some((item) => item.id === requestedWorkspaceId)) {
+          setResolution({ ...nextResolution, status: "not_found" });
+          return;
+        }
+      }
+
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
       const storeWorkspaceId = store.getState().workspaces.activeId;
@@ -690,14 +764,15 @@ function useRouteData({
       // later boots are decoupled (legacy name itself stays untouched).
       promoteLegacyWorkspaceSelection(workspaceItems);
       const workspaceId =
-        workspaceItems.length > 0
+        requestedWorkspaceId ??
+        (workspaceItems.length > 0
           ? resolveActiveId(
               workspaceItems,
               storeWorkspaceId,
               cookieWorkspaceId,
               settingsWorkspaceId,
             )
-          : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
+          : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId));
       const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
         workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
@@ -707,7 +782,10 @@ function useRouteData({
       if (workspaceId !== workspaceBeforeHydration) {
         store.getState().setActiveWorkspace(workspaceId);
       }
-      if (!workspaceId) return;
+      if (!workspaceId) {
+        setResolution({ ...nextResolution, status: "ready" });
+        return;
+      }
 
       const generation = store.getState().workspaceContextGeneration;
       for (const collection of ["workflows", "repositories", "steps"] as const) {
@@ -786,6 +864,11 @@ function useRouteData({
         store.getState().setRepositories(workspaceId, repositoriesResult.value.repositories);
       }
       if (stepsResult.ok) setSteps(stepsResult.value.steps);
+      setResolution({
+        ...nextResolution,
+        status: "ready",
+        metadataLoaded: { workflows: workflowsResult.ok, repositories: repositoriesResult.ok },
+      });
     }
 
     void bootstrap();
@@ -805,9 +888,25 @@ function useRouteData({
       }
       bootstrappedRef.current = false;
     };
-  }, [skipBootstrap, store, workspaceContextRetryVersion]);
+  }, [skipBootstrap, requestedWorkspaceId, store, workspaceContextRetryVersion]);
 
-  return { activeWorkspaceId, workflows, steps, repositories };
+  const currentResolution =
+    resolution.requestedWorkspaceId === requestedWorkspaceId &&
+    resolution.retryVersion === workspaceContextRetryVersion;
+  let workspaceStatus: RouteBootstrapState["workspaceStatus"] = "loading";
+  let metadataLoaded = EMPTY_TASKS_METADATA;
+  if (currentResolution) workspaceStatus = resolution.status;
+  if (currentResolution) metadataLoaded = resolution.metadataLoaded;
+  if (skipBootstrap) workspaceStatus = "ready";
+  if (skipBootstrap) metadataLoaded = READY_TASKS_METADATA;
+  return {
+    activeWorkspaceId,
+    workflows,
+    steps,
+    repositories,
+    workspaceStatus,
+    metadataLoaded,
+  };
 }
 
 type RouteReadResult<T> = { ok: true; value: T } | { ok: false; error: unknown };

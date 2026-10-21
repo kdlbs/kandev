@@ -574,7 +574,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       timeout: 60_000,
     });
     await expect(recoveryCard.getByRole("heading")).toHaveText(
-      /^(Saved model unavailable|Session startup needs attention)$/,
+      /^(Saved model unavailable|The agent could not start)$/,
     );
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.activeChat().getByTestId("provider-restored-resume-success")).toHaveCount(

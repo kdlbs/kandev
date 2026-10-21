@@ -922,10 +922,6 @@ func freshSessionModelCatalogReady(state *CachedModelState) bool {
 	return state != nil && (len(state.Models) > 0 || len(state.ConfigOptions) > 0 || state.ConfigOptionsSettled)
 }
 
-func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
-	return m.captureSessionRuntimeConfigForReset(ctx, execution).Model
-}
-
 func (m *Manager) captureSessionRuntimeConfigForReset(
 	ctx context.Context,
 	execution *AgentExecution,

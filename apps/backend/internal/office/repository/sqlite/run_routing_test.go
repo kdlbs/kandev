@@ -9,7 +9,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
@@ -453,7 +452,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassPeriodic,
+		PriorityClass:  runsmodels.PriorityClassPeriodic,
 	}
 	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
@@ -461,7 +460,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassHuman,
+		PriorityClass:  runsmodels.PriorityClassHuman,
 	}
 	if err := repo.CreateRun(ctx, periodic); err != nil {
 		t.Fatalf("create periodic: %v", err)
@@ -482,16 +481,16 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 	if err != nil {
 		t.Fatalf("get periodic: %v", err)
 	}
-	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
-		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	if gotPeriodic.PriorityClass != runsmodels.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, runsmodels.PriorityClassRecovery)
 	}
 
 	gotHuman, err := repo.GetRunByID(ctx, human.ID)
 	if err != nil {
 		t.Fatalf("get human: %v", err)
 	}
-	if gotHuman.PriorityClass != models.PriorityClassHuman {
-		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
+	if gotHuman.PriorityClass != runsmodels.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, runsmodels.PriorityClassHuman)
 	}
 }
 
@@ -511,7 +510,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 		Payload:        `{}`,
 		Status:         "claimed",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassPeriodic,
+		PriorityClass:  runsmodels.PriorityClassPeriodic,
 	}
 	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
@@ -519,7 +518,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 		Payload:        `{}`,
 		Status:         "claimed",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassHuman,
+		PriorityClass:  runsmodels.PriorityClassHuman,
 	}
 	if err := repo.CreateRun(ctx, periodic); err != nil {
 		t.Fatalf("create periodic: %v", err)
@@ -539,16 +538,16 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 	if err != nil {
 		t.Fatalf("get periodic: %v", err)
 	}
-	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
-		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	if gotPeriodic.PriorityClass != runsmodels.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, runsmodels.PriorityClassRecovery)
 	}
 
 	gotHuman, err := repo.GetRunByID(ctx, human.ID)
 	if err != nil {
 		t.Fatalf("get human: %v", err)
 	}
-	if gotHuman.PriorityClass != models.PriorityClassHuman {
-		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
+	if gotHuman.PriorityClass != runsmodels.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, runsmodels.PriorityClassHuman)
 	}
 }
 
@@ -569,7 +568,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassPeriodic,
+		PriorityClass:  runsmodels.PriorityClassPeriodic,
 	}
 	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
@@ -577,7 +576,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 		Payload:        `{}`,
 		Status:         "queued",
 		CoalescedCount: 1,
-		PriorityClass:  models.PriorityClassHuman,
+		PriorityClass:  runsmodels.PriorityClassHuman,
 	}
 	if err := repo.CreateRun(ctx, periodic); err != nil {
 		t.Fatalf("create periodic: %v", err)
@@ -600,15 +599,15 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 	if err != nil {
 		t.Fatalf("get periodic: %v", err)
 	}
-	if gotPeriodic.PriorityClass != models.PriorityClassRecovery {
-		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, models.PriorityClassRecovery)
+	if gotPeriodic.PriorityClass != runsmodels.PriorityClassRecovery {
+		t.Errorf("periodic run priority_class = %v, want %v", gotPeriodic.PriorityClass, runsmodels.PriorityClassRecovery)
 	}
 
 	gotHuman, err := repo.GetRunByID(ctx, human.ID)
 	if err != nil {
 		t.Fatalf("get human: %v", err)
 	}
-	if gotHuman.PriorityClass != models.PriorityClassHuman {
-		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
+	if gotHuman.PriorityClass != runsmodels.PriorityClassHuman {
+		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, runsmodels.PriorityClassHuman)
 	}
 }

@@ -703,33 +703,6 @@ func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID strin
 	return nil, status.Error(codes.PermissionDenied, "native_human_confirmation_required")
 }
 
-func (h *pluginHost) rejectMixedOwnershipDelete(ctx context.Context, ownedTasks []*taskmodels.Task) error {
-	if len(ownedTasks) == 0 {
-		return nil
-	}
-	ownedIDs := make(map[string]struct{}, len(ownedTasks))
-	for _, task := range ownedTasks {
-		ownedIDs[task.ID] = struct{}{}
-	}
-	workspaceTasks, err := h.fetchTasksForWorkspaces(ctx, []string{ownedTasks[0].WorkspaceID}, true, true)
-	if err != nil {
-		return err
-	}
-	for _, task := range workspaceTasks {
-		if _, parentWillBeDeleted := ownedIDs[task.ParentID]; !parentWillBeDeleted {
-			continue
-		}
-		if _, childWillBeDeleted := ownedIDs[task.ID]; childWillBeDeleted {
-			continue
-		}
-		return status.Error(
-			codes.FailedPrecondition,
-			"plugin-owned task tree contains adopted or user-owned children; detach them before deleting",
-		)
-	}
-	return nil
-}
-
 func (h *pluginHost) pluginOwnedTaskTree(ctx context.Context, rootTaskID string) ([]*taskmodels.Task, error) {
 	if !h.capabilities.CanWrite(resourceTasks) {
 		return nil, permissionDenied(apiWriteCapability(resourceTasks))

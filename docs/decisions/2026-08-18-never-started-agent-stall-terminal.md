@@ -1,6 +1,6 @@
 # ADR-2026-08-18-never-started-agent-stall-terminal: Treat Never-Started Agent Stalls as Terminal
 
-**Status:** accepted
+**Status:** superseded by [2026-10-20-silent-prompt-acceptance](2026-10-20-silent-prompt-acceptance.md)
 **Date:** 2026-08-18
 **Area:** backend, frontend, protocol
 

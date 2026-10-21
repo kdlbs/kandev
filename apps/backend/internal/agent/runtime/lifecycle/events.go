@@ -100,9 +100,8 @@ func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
-// neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, and activityEpoch lets the consumer revalidate that
-// classification before applying a terminal transition.
+// Acceptance and output are independent. The activity epoch lets the consumer
+// reject a stale snapshot before writing an advisory notice.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -111,6 +110,7 @@ func (p *EventPublisher) PublishAgentStalled(
 	stalledFor time.Duration,
 	activityEpoch uint64,
 	neverStarted bool,
+	accepted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -124,6 +124,8 @@ func (p *EventPublisher) PublishAgentStalled(
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,
+		PromptAccepted:   accepted,
+		OutputObserved:   !neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID

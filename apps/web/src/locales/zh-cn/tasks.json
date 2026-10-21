@@ -59,5 +59,22 @@
   "noWorkflowStep": "无工作流步骤",
   "loadingWorkflowStep": "正在加载工作流步骤...",
   "unknownWorkflowStep": "未知工作流步骤",
-  "workflowStepSection": "{{workflow}} / {{step}}"
+  "workflowStepSection": "{{workflow}} / {{step}}",
+  "activeTasks": "未归档",
+  "allTasks": "全部",
+  "archiveFilter": "归档状态",
+  "clearFilters": "清除筛选条件",
+  "clearSearch": "清除搜索",
+  "removeWorkflowFilter": "移除工作流筛选条件",
+  "removeRepositoryFilter": "移除仓库筛选条件",
+  "workflowUnavailable": "工作流不可用",
+  "repositoryUnavailable": "仓库不可用",
+  "noArchivedTasks": "没有已归档任务",
+  "noMatchingTasks": "没有任务符合这些筛选条件",
+  "filteredCount_one": "{{count}} 个任务",
+  "filteredCount_other": "{{count}} 个任务",
+  "filtersButton_one": "筛选（{{count}}）",
+  "filtersButton_other": "筛选（{{count}}）",
+  "appliedWorkflow": "工作流：{{name}}",
+  "appliedRepository": "仓库：{{name}}"
 }

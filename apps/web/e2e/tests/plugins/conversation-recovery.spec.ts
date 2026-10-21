@@ -130,12 +130,13 @@ test.describe("Conversation recovery", () => {
       seedData,
       "Plugin source recovery",
     );
+    const seededMessageIds: string[] = [];
     for (const [index, content] of [
       "plugin recovery oldest prompt",
       "plugin recovery middle prompt",
       "plugin recovery newest prompt",
     ].entries()) {
-      await apiClient.seedSessionMessage(sessionId, {
+      const seeded = await apiClient.seedSessionMessage(sessionId, {
         type: "message",
         content,
         authorType: "user",
@@ -143,6 +144,7 @@ test.describe("Conversation recovery", () => {
         turnStartedAt: `2026-09-14T12:0${index}:00Z`,
         turnCompletedAt: `2026-09-14T12:0${index}:01Z`,
       });
+      seededMessageIds.push(seeded.messageId);
     }
 
     await testPage.goto(`/t/${taskId}`);
@@ -195,6 +197,19 @@ test.describe("Conversation recovery", () => {
       timeout: 15_000,
     });
     await panel.getByTestId("fixture-prompt-history-load-more").click();
-    await expect(panel.getByTestId("fixture-prompt-history-row")).toHaveCount(4);
+    await expect(panel.locator(`[data-message-id="${seededMessageIds[1]}"]`)).toBeVisible();
+    await expect(panel.locator(`[data-message-id="${skipped.messageId}"]`)).toBeVisible();
+    await expect(panel.locator(`[data-message-id="${laterLive.messageId}"]`)).toBeVisible();
+    // A live projection may already have added a row beyond the recovered page.
+    const loadMore = panel.getByTestId("fixture-prompt-history-load-more");
+    if (await loadMore.isVisible()) await loadMore.click();
+    const rows = panel.getByTestId("fixture-prompt-history-row");
+    await expect(rows).toHaveCount(5);
+    const messageIds = await rows.evaluateAll((items) =>
+      items.map((row) => row.getAttribute("data-message-id")),
+    );
+    expect(messageIds.sort()).toEqual(
+      [...seededMessageIds, skipped.messageId, laterLive.messageId].sort(),
+    );
   });
 });
