@@ -136,6 +136,8 @@ test.describe("Mobile task transient read recovery", () => {
     );
     if (!task.session_id) throw new Error("Task fixture has no session");
 
+    const foregroundTime = Date.now();
+    await testPage.clock.setFixedTime(new Date(foregroundTime));
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
@@ -164,6 +166,8 @@ test.describe("Mobile task transient read recovery", () => {
     };
     await testPage.route(taskPath, temporaryFailure);
     try {
+      // Start a new foreground episode after the initial connection refresh.
+      await testPage.clock.setFixedTime(new Date(foregroundTime + 1_000));
       const firstTaskRead = waitForHttp(testPage, "GET", taskPath);
       await testPage.evaluate(() => window.dispatchEvent(new Event("online")));
       const firstFailure = await firstTaskRead;

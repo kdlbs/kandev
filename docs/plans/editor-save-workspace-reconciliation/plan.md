@@ -138,3 +138,33 @@ scenario passed 3 tests with retries disabled (23.3s). The desktop browser regre
 receipt is pending, then typing and a later warning; typing back to the accepted
 baseline must disable Save after the delayed receipt, proving its dirty baseline
 through the actual UI. Final browser/review/CI results are recorded externally.
+
+
+### CI test-contract remediation
+
+Current-head E2E exposed two preexisting test assumptions in the failed shard.
+The mobile task recovery test dispatched `online` about 217 ms after an initial
+refresh, within the intentional 250 ms foreground coalescing episode. Freezing
+browser Date before navigation reproduced the missing-GET failure with retries
+disabled. Moving Date into a new episode before the synthetic event passed;
+timers and production refresh behavior remain unchanged.
+
+The plugin recovery test expected exactly four rows after one continuation,
+although live message projection can retain a fifth independently of the
+page size. Its CI screenshot showed all five legitimate prompts; production
+merges by message ID. The scoped test correction checks the older seeded
+message, retention of recovered/live messages, and complete continuation to
+all five unique seeded IDs. No plugin production behavior, public contract, requirement or system
+design changes are needed. Final local and delivery checks are recorded below
+and in the PR rather than waived by an isolated pass.
+
+
+Local CI remediation validation: the exact selected 34-test partition ran
+sequentially with retries disabled. Both corrected cases passed; a separate
+sidebar reveal-cue assertion failed, so this is recorded as 33 passed/1 failed,
+not a green partition. The cue case then passed alone (6.3s), and its complete
+8-test sidebar file passed without retries (28.1s). No sidebar source or test
+was changed and the local intermittent result remains a delivery limitation.
+Changed-file ESLint, spec/catalog validation, whitespace checks and trusted-base
+documentation preflight (`covered`, no errors) passed. Fresh remote CI for the
+remediation head is still required.
