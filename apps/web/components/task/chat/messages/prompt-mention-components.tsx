@@ -15,6 +15,7 @@ import {
   type MouseEvent,
   type ReactElement,
   type ReactNode,
+  type ComponentType,
 } from "react";
 import type { Components, ExtraProps } from "react-markdown";
 import { useTranslation } from "react-i18next";
@@ -41,12 +42,64 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
 import type { TaskMentionReference } from "@/lib/tasks/task-mention-references";
 import { TaskMentionChip } from "./task-mention-components";
+import { protectTaskMentionMarkdown } from "@/lib/tasks/task-mention-markdown";
+import { normalizeCached } from "@/lib/markdown/normalize-cache";
 
 const EMPTY_TASK_REFERENCES: readonly TaskMentionReference[] = [];
 type MentionPresentation = {
   interactive: boolean;
   tasks?: ReadonlyMap<string, TaskMentionReference>;
 };
+
+export function prepareTaskMentionContent(
+  source: string,
+  references: readonly TaskMentionReference[] = EMPTY_TASK_REFERENCES,
+) {
+  const normalized = references.length ? normalizeCached(source) : source;
+  const names = buildPromptMentionNames(references.map((reference) => reference.title));
+  return protectTaskMentionMarkdown(
+    normalized,
+    names.length ? splitMarkdownPromptMentionSegments(normalized, names) : [],
+    references,
+  );
+}
+
+type MentionBlockProps = { children?: ReactNode; node?: ExtraProps["node"] };
+
+export function withTaskMentionTokens(
+  components: Components | undefined,
+  tokens: ReadonlyMap<string, TaskMentionReference>,
+): Components | undefined {
+  if (tokens.size === 0) return components;
+  const base = components ?? buildEntityReferenceMarkdownComponents([]);
+  const result: Record<string, (props: MentionBlockProps) => ReactNode> = {};
+  const names = buildPromptMentionNames([...tokens.keys()]);
+  for (const tag of [
+    "p",
+    "li",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "blockquote",
+    "td",
+    "th",
+  ] as const) {
+    const Renderer = (base[tag] ?? tag) as ComponentType<MentionBlockProps> | string;
+    result[tag] = ({ children, node, ...props }: MentionBlockProps) => {
+      const rendered = renderChildrenWithPromptMentions(children, names, `task-${tag}`, {
+        interactive: true,
+        tasks: tokens,
+      });
+      return typeof Renderer === "string"
+        ? createElement(Renderer, props, rendered)
+        : createElement(Renderer, { ...props, node }, rendered);
+    };
+  }
+  return { ...base, ...result };
+}
 
 type PromptMentionMarkdownTag =
   | "a"
@@ -108,21 +161,15 @@ export function usePromptMentionNames() {
 export function usePromptMentionMarkdownComponents(
   promptNames: string[],
   entityReferences: readonly EntityReference[],
-  taskReferences: readonly TaskMentionReference[] = EMPTY_TASK_REFERENCES,
 ): Components | undefined {
   return useMemo(() => {
     const mentionNames = buildPromptMentionNames(promptNames);
-    const tasks = new Map(taskReferences.map((reference) => [reference.title, reference]));
-    const allNames = buildPromptMentionNames([...tasks.keys(), ...mentionNames]);
     const baseComponents = buildEntityReferenceMarkdownComponents(entityReferences);
-    if (allNames.length === 0) {
+    if (mentionNames.length === 0) {
       return entityReferences.length === 0 ? undefined : baseComponents;
     }
     const renderChildren = (children: ReactNode, keyPrefix: string, interactive = true) =>
-      renderChildrenWithPromptMentions(children, interactive ? allNames : mentionNames, keyPrefix, {
-        interactive,
-        tasks,
-      });
+      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix, { interactive });
     return {
       ...baseComponents,
       a: ({ children, node, ...props }: MarkdownChildrenProps<"a">) => {
@@ -178,7 +225,7 @@ export function usePromptMentionMarkdownComponents(
         return <th {...props}>{renderChildren(children, "th")}</th>;
       },
     };
-  }, [promptNames, entityReferences, taskReferences]);
+  }, [promptNames, entityReferences]);
 }
 
 function renderChildrenWithPromptMentions(
@@ -236,7 +283,10 @@ function getVisibleText(node: ReactNode): string {
     return String(node);
   }
   if (!isValidElement(node)) return "";
-  const element = node as ReactElement<{ children?: ReactNode }>;
+  const element = node as ReactElement<{ children?: ReactNode; reference?: TaskMentionReference }>;
+  if (element.type === TaskMentionChip && element.props.reference) {
+    return `@${element.props.reference.title}`;
+  }
   return Children.toArray(element.props.children).map(getVisibleText).join("");
 }
 
@@ -583,6 +633,10 @@ function matchMarkdownPromptMention(
     return null;
   }
   const closingMarker = marker === "[" ? "]" : marker;
+  const whole = matchPromptMention(` ${content.slice(index)}`, 1, promptNames);
+  if (whole && content[index + whole.end - 1] === closingMarker) {
+    return { start: index, end: index + whole.end - 1, name: whole.name };
+  }
   for (let closingIndex = index + 1; closingIndex < content.length; closingIndex += 1) {
     if (content[closingIndex] !== closingMarker) continue;
     if (isEscapedMarkdownCharacter(content, closingIndex)) continue;

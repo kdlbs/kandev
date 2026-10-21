@@ -410,7 +410,8 @@ creation until you choose another profile or reset the row.
 Type `@` in the chat composer and select a task from the suggestions. After
 sending, its mention appears as a task chip with an icon. Click the chip, focus
 it and press Enter, or tap it on your phone to open that task. The reference
-keeps pointing to the same task after its title changes.
+keeps pointing to the same task after its title changes. Markdown characters
+in a task title display as part of its name.
 
 Ordinary typed `@text` is not turned into a task link. Older messages without
 a usable task reference, or references with ambiguous titles, remain plain text.

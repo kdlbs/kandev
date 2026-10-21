@@ -66,7 +66,7 @@ Run from repository root, with dependencies installed from `apps/` if absent.
 E2E commands run sequentially and rebuild through the managed runner.
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/tasks/task-mention-references.test.ts components/task/chat/messages/task-mention-components.test.tsx components/task/chat/messages/user-message-body.test.tsx components/task/chat/messages/prompt-mention-components.round2.test.tsx components/task/chat/messages/chat-message.test.tsx components/task/chat/messages/chat-message.woken-by.test.tsx)
+(cd apps/web && pnpm exec vitest run lib/tasks/task-mention-markdown.test.ts lib/tasks/task-mention-references.test.ts components/task/chat/messages/task-mention-components.test.tsx components/task/chat/messages/user-message-body.test.tsx components/task/chat/messages/prompt-mention-components.round2.test.tsx components/task/chat/messages/chat-message.test.tsx components/task/chat/messages/chat-message.woken-by.test.tsx)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=6144 pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm exec eslint --max-warnings 0 lib/tasks/task-mention-references.ts components/task/chat/messages/task-mention-components.tsx components/task/chat/messages/chat-message.tsx components/task/chat/messages/prompt-mention-components.tsx)
@@ -85,10 +85,12 @@ through `.github/scripts/pr-docs.cjs` against the final changed paths.
 ## Files likely touched
 
 - `apps/web/lib/tasks/task-mention-references.ts` and `.test.ts` (new)
+- `apps/web/lib/tasks/task-mention-markdown.ts` and `.test.ts` (new)
+- `apps/web/package.json` and `apps/pnpm-lock.yaml` (explicit CommonMark parser dependency)
 - `apps/web/components/task/chat/messages/task-mention-components.tsx` and `.test.tsx` (new)
 - `apps/web/components/task/chat/messages/chat-message.tsx`
 - `apps/web/components/task/chat/messages/prompt-mention-components.tsx`
-- `apps/web/components/task/chat/messages/user-message-body.test.tsx`
+- `apps/web/components/task/chat/messages/user-message-body.tsx` and `.test.tsx`
 - `apps/web/e2e/tests/chat/chat-task-mentions.spec.ts` (new)
 - `apps/web/e2e/tests/chat/mobile-chat-task-mentions.spec.ts` (new)
 - Locale catalogs if accessible helper copy is added; public chat documentation
@@ -120,7 +122,11 @@ solve these without revisiting the design.
   message tests failed on missing task links; real desktop submission failed
   with zero chips instead of two. A rendered regression also reproduced the
   global Markdown underline overriding chip styling.
-- Final targeted Vitest command above: **90 tests passed across six suites**.
+- Final targeted Vitest command above: **107 tests passed across seven suites**.
+- Review regressions: literal Markdown task titles, shared normalization, real
+  math versus literal-dollar prose, ambiguous serialized records, pointer styling,
+  and UTF-8 byte budgets are covered. The desktop and phone fixtures select a
+  task title containing literal Markdown.
 - Typecheck: passed with `NODE_OPTIONS=--max-old-space-size=6144`. The initial
   default 4 GiB Node heap exhausted; the retry stayed within the guarded 8 GiB
   process-group budget. A test-only Testing Library option was corrected.

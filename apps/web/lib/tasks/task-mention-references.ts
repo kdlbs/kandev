@@ -4,6 +4,7 @@ const MAX_SOURCE_BYTES = 262_144;
 const MAX_REFERENCES = 200;
 const MAX_TITLE_LENGTH = 512;
 const MAX_ID_LENGTH = 256;
+const RECORD_PREFIX = / \(id: [a-zA-Z0-9_-]{1,256}, workflow_id: [^,]+, step: /;
 
 function parseReference(line: string): TaskMentionReference | null {
   const match = /^- (.+) \(id: ([^,]+), workflow_id: [^,]+, step: .+\)$/.exec(line);
@@ -11,6 +12,7 @@ function parseReference(line: string): TaskMentionReference | null {
   const [, title, taskId] = match;
   if (
     title.length > MAX_TITLE_LENGTH ||
+    RECORD_PREFIX.test(title) ||
     /[\p{Cc}<>]/u.test(title) ||
     taskId.length > MAX_ID_LENGTH ||
     !/^[a-zA-Z0-9_-]+$/.test(taskId)

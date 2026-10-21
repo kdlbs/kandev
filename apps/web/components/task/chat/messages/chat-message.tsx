@@ -305,7 +305,8 @@ function useUserMentionComponents(comment: Message) {
     () => taskMentionReferences(comment.raw_content || comment.content),
     [comment.raw_content, comment.content],
   );
-  return usePromptMentionMarkdownComponents(promptNames, entityReferences, taskMentions);
+  const components = usePromptMentionMarkdownComponents(promptNames, entityReferences);
+  return { components, taskMentions };
 }
 
 function UserMessageContent({
@@ -319,7 +320,7 @@ function UserMessageContent({
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const taskOrigin = useMessageTaskOrigin();
-  const promptMentionComponents = useUserMentionComponents(comment);
+  const { components: promptMentionComponents, taskMentions } = useUserMentionComponents(comment);
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   const {
     imageAttachments,
@@ -368,6 +369,7 @@ function UserMessageContent({
             content: comment.content,
             rawContent: comment.raw_content,
             promptMentionComponents,
+            taskMentions,
             taskId: comment.task_id,
             worktreePath,
             onOpenFile,

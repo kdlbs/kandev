@@ -31,6 +31,8 @@ assistant messages, previews, and task lifecycle changes.
 - Add `components/task/chat/messages/task-mention-components.tsx` using
   `TaskLink`; integrate in `chat-message.tsx` and the existing prompt/entity
   Markdown composition. Preserve `user-message-body.tsx` preview/raw behavior.
+- Protect recorded task aliases with render-only tokens after source
+  range checks; preserve authored code and links through the CommonMark parser.
 - Use original message context for identity, never the currently loaded task
   list. Skip conflicting title mappings and invalid records.
 - Include translated accessibility copy only if needed. During implementation

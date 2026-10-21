@@ -42,6 +42,11 @@ limits: 256 KiB of source, 200 references, 512 code units per title, 256 per ID)
 When source exceeds the limit, skip task decoration rather than truncate into
 a partial record. Ignore malformed records. Deduplicate identical pairs; discard
 every mapping for a title associated with conflicting IDs in the message.
+Also reject a record when its parsed title contains another complete reference
+prefix with an eligible task ID: that prefix can be an earlier task record or
+record-shaped step text, so the legacy string cannot identify one task safely.
+Incomplete prefixes and ineligible embedded IDs in that parsed title do not
+introduce a second candidate.
 No live task lookup or per-bubble network request is needed. Existing messages
 with usable context can render immediately; absent context stays plain text.
 
@@ -54,19 +59,41 @@ passes them into the Markdown mention composition currently implemented by
 rather than grow the existing large prompt module.
 
 Match literal `@` plus the recorded title, longest title first, using the
-existing whitespace-start and Unicode name-boundary conventions. Use submitted
-titles, preserving links after renames without querying current task titles.
-Only matching plain text nodes in supported Markdown blocks become task chips.
-Do not rewrite Markdown source or use string replacement to inject links.
-Never decorate code, link labels/destinations, or raw content. When a saved
-prompt shares a task title, a valid message-local task mapping takes priority
-for that token. Preserve the current prompt and entity-reference components
-for remaining content. Ensure component memoization includes task references.
+existing raw Markdown mention splitter and Unicode name-boundary conventions.
+Use submitted titles, preserving links after renames without querying current
+task titles. All verified task aliases use the same task-specific mapping,
+independent of the saved-prompt name budget.
 
-`renderUserMessageBody` and its bounded previews continue controlling normal
-and raw presentation. Extract references once from the full original message,
-then decorate only visible preview content; previews do not expand hidden
-context or bypass existing size limits.
+`prepareTaskMentionContent` calls
+`lib/tasks/task-mention-markdown.ts` after the visible preview is bounded and
+normalized with the renderer's shared `normalizeCached` helper.
+The existing Unified/Remark parsing stack, now declared as direct dependencies
+where used, applies the renderer's CommonMark, GFM, math, and math-compatibility
+transform to identify code, authored link, image, HTML, and math source ranges.
+Whitespace-delimited dollar prose retains the renderer's literal-text semantics.
+Matches beginning inside those ranges remain untouched. Other
+recognized aliases become render-only alphanumeric tokens, with a prefix absent
+from the original source and a map back to the recorded references. Repeated
+mentions reuse their task token. No HTML or URLs are inserted into Markdown.
+
+`withTaskMentionTokens` composes block renderers over the existing prompt/entity
+component map. It renders protected tokens as `TaskMentionChip` before delegating
+remaining children to those existing components. Title punctuation, inline code
+characters, link syntax, and emoji aliases within the task name therefore stay
+literal. Authored code and links retain their existing behavior. Visible-text
+boundary tracking includes the chip's original title, preventing an adjacent
+prompt alias from becoming a separate mention without whitespace.
+
+When a saved prompt shares a task title, a valid message-local task mapping
+takes priority for that token. Preserve the current prompt and external entity
+components for other content. Component and preparation memoization include the
+task references and visible preview source.
+
+`useUserMentionComponents` supplies both components and references to
+`renderUserMessageBody`. Its normal Markdown path prepares only the visible
+preview; raw view, copied/downloaded source, persisted messages, and agent input
+continue using the original content. Hidden context never becomes visible and
+render-only tokens never enter storage or message actions.
 
 ## Navigation and responsive behavior
 

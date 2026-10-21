@@ -3,7 +3,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
-export const TASK_TITLE = "Investigate terminal turn capture retry loop continuity";
+export const TASK_TITLE = "Investigate **terminal** turn capture retry loop";
 
 export async function sendTaskMentions(page: Page, api: ApiClient, seed: SeedData) {
   const target = await api.createTask(seed.workspaceId, TASK_TITLE, {

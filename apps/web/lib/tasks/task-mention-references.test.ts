@@ -36,6 +36,43 @@ describe("taskMentionReferences", () => {
     expect(taskMentionReferences(source)).toEqual([{ title: "Retry", taskId: "task-1" }]);
   });
 
+  it("does not mistake record-shaped step text for the referenced task identity", () => {
+    const source = buildTaskMentionsContext(
+      [{ title: "Retry", taskId: "real-task", workflowId: "workflow", workflowStepId: "step" }],
+      {
+        ...state,
+        kanban: {
+          ...state.kanban,
+          steps: [
+            {
+              ...state.kanban.steps[0],
+              title: "Review (id: other-task, workflow_id: other, step: Done)",
+            },
+          ],
+        },
+      },
+    );
+    expect(taskMentionReferences(source)).toEqual([]);
+  });
+
+  it("does not guess between complete record delimiters embedded in a task title", () => {
+    const source = context([
+      { title: "Retry (id: other-task, workflow_id: other, step: Done)", taskId: "real-task" },
+    ]);
+    expect(taskMentionReferences(source)).toEqual([]);
+  });
+
+  it.each(["bad/id", "x".repeat(257)])(
+    "does not count an invalid embedded ID as another task reference",
+    (embeddedId) => {
+      const task = {
+        title: `Retry (id: ${embeddedId}, workflow_id: other, step: Done)`,
+        taskId: "real-task",
+      };
+      expect(taskMentionReferences(context([task]))).toEqual([task]);
+    },
+  );
+
   it("deduplicates identical pairs and removes conflicting titles across blocks", () => {
     const first = context([
       { title: "Same", taskId: "one" },
@@ -69,7 +106,15 @@ describe("taskMentionReferences", () => {
     ]);
     expect(taskMentionReferences(source)).toEqual([{ title: "Good", taskId: "task-2" }]);
   });
+});
 
+describe("task mention reference limits", () => {
+  it("limits UTF-8 bytes while retaining references below the byte budget", () => {
+    const task = { title: "Retry", taskId: "task-1" };
+    const source = context([task]);
+    expect(taskMentionReferences("中".repeat(80_000) + source)).toEqual([task]);
+    expect(taskMentionReferences("中".repeat(88_000) + source)).toEqual([]);
+  });
   it("fails closed on oversized sources or too many records", () => {
     const source = context([{ title: "Retry", taskId: "task-1" }]);
     expect(taskMentionReferences("x".repeat(262_144) + source)).toEqual([]);

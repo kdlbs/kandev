@@ -25,7 +25,7 @@ retains task identity, access, and lifecycle ownership.
 - **AC-UI-CHAT-TASK-MENTION-001.1:** When a sent user message contains an
   `@title` mention backed by an unambiguous persisted task reference, the normal
   chat bubble shall display a distinct task chip with a task icon and the
-  submitted title. Its appearance shall distinguish it from ordinary text and
+  submitted title, with Markdown punctuation displayed literally. Its appearance shall distinguish it from ordinary text and
   saved-prompt mentions in light and dark themes.
 - **AC-UI-CHAT-TASK-MENTION-001.2:** Clicking, keyboard-activating, or tapping
   the chip shall navigate to the referenced task by its recorded identity,

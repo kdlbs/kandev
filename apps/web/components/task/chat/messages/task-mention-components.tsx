@@ -13,7 +13,7 @@ export function TaskMentionChip({ reference }: { reference: TaskMentionReference
       taskId={reference.taskId}
       data-testid="task-mention-chip"
       className={cn(
-        "inline-flex max-w-full items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 align-middle text-[0.88em] font-medium text-sky-950! no-underline! hover:no-underline! hover:bg-sky-500/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-sky-100!",
+        "inline-flex max-w-full cursor-pointer items-center gap-1 rounded-md border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 align-middle text-[0.88em] font-medium text-sky-950! no-underline! hover:no-underline! hover:bg-sky-500/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 dark:text-sky-100!",
         isMobile || !isFinePointer ? "min-h-11" : "min-h-6",
       )}
     >
