@@ -125,4 +125,3 @@ sessions were created. Source changes stayed in the supplied isolated worktree;
 E2Es used disposable fixture checkouts and repository records, preserving the
 shared seed repository. Initial selector-only E2E timeout and default-heap
 exhaustion were corrected at the fixture/environment boundaries, respectively.
-
