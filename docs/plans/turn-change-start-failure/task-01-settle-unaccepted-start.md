@@ -110,6 +110,9 @@ must use real repository behavior; fake-only tests missed the invariant.
   terminal retry, immutable endpoint, disabled capture, and successor fences.
 - SQL guard passed. Persistence store conformance passed under race (57.624s).
 - Changed-package lint passed with zero issues for all three changed Go files.
+- Review follow-up adds explicit rejection of `failed` availability without an
+  accepted start. `go test -trimpath -race ./internal/task/repository/sqlite
+  -run TurnChangeUnavailableWithoutAcceptedStart -count=1` passed (1.413s).
 - Documentation catalog, specification lint, PR documentation coverage
   preflight, and diff whitespace checks passed.
 - PostgreSQL regression is included but skipped locally because

@@ -68,6 +68,8 @@ PR documentation coverage preflight, and diff checks passed.
 
 The complete SQLite suite reached its ten-minute global timeout during an
 unrelated walkthrough fixture setup, with no assertion failure reported.
+Review follow-up explicitly covers rejected `failed` availability without an
+accepted start; the repository regression passed again under race.
 PostgreSQL cases are included but not run locally without the test DSN.
 [Task 01 results](task-01-settle-unaccepted-start.md#results) record commands,
 results, and coverage limits. CI still owns complete-suite validation.

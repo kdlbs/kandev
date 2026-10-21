@@ -43,6 +43,7 @@ func runTurnChangeUnavailableWithoutAcceptedStart(t *testing.T, repo *Repository
 		{name: "unavailable", availability: models.TurnChangeAvailabilityUnavailable, wantAccepted: true},
 		{name: "stale", availability: models.TurnChangeAvailabilityUnavailable, stale: true},
 		{name: "ready", availability: models.TurnChangeAvailabilityReady},
+		{name: "failed", availability: models.TurnChangeAvailabilityFailed},
 		{name: "complete", availability: models.TurnChangeAvailabilityUnavailable, complete: true},
 		{name: "summary", availability: models.TurnChangeAvailabilityUnavailable, summary: true},
 		{name: "content", availability: models.TurnChangeAvailabilityUnavailable, content: true},
