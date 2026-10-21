@@ -51,6 +51,7 @@ it("preserves a portaled editor context event without opening sidebar settings",
   expect(event.defaultPrevented).toBe(false);
 });
 
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-006.9
 it.each(["touch", "pen"])("ignores held %s input in a portaled editor", (pointerType) => {
   vi.useFakeTimers();
   const { prompt } = mount();
