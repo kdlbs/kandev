@@ -85,11 +85,11 @@ const (
 )
 
 // stuckSignalSessionLister is implemented by the durable repository via
-// ListActiveTaskSessions. A narrow optional interface — mirrors
+// ListStepSignalWatchdogSessions. A narrow optional interface — mirrors
 // idleExecutorCandidateLister in idle_session_reaper.go — so lightweight
 // test doubles that don't exercise this scan stay compatible.
 type stuckSignalSessionLister interface {
-	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
+	ListStepSignalWatchdogSessions(ctx context.Context) ([]*models.TaskSession, error)
 }
 
 // reclaimStuckSignalSessionsOnce is the per-tick scan, called from the
@@ -102,7 +102,7 @@ func (s *Service) reclaimStuckSignalSessionsOnce(ctx context.Context) {
 	if !ok {
 		return
 	}
-	sessions, err := lister.ListActiveTaskSessions(ctx)
+	sessions, err := lister.ListStepSignalWatchdogSessions(ctx)
 	if err != nil {
 		s.logger.Warn("stuck-signal watchdog: list active sessions failed; tick skipped", zap.Error(err))
 		return
