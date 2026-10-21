@@ -13,9 +13,28 @@ owners:
 
 ## Scope and requirement mapping
 
-This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .14 and
+This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .15 and
 REQ-WORKSPACES-REPOSITORY-SECRETS-002 (all six acceptance criteria).
 The existing repository-secrets requirement retains the other runtime and storage contracts during specification migration.
+
+## Workspace secret update persistence
+
+`Service.UpdateWorkspaceSecret` and `Service.UpdateForWorkspace` in
+`apps/backend/internal/secrets/service.go` authorize the request through a
+workspace-scoped read, then route the write through the optional
+`WorkspaceSecretUpdater` store surface (`UserVisibleStore.UpdateForWorkspace`
+re-authorizes before delegating) instead of the global `Update`, whose
+`UserVisibleStore` wrapper accepts Global secrets only. The post-update
+read-back uses the same workspace scope, so an acknowledged edit returns the
+updated row rather than a missing-secret error. This satisfies
+AC-WORKSPACES-REPOSITORY-SECRETS-001.15's persistence clause.
+
+`SecretsSettings` in `apps/web/components/settings/secrets-settings.tsx` filters
+the edited secret's row out of the list while its edit is open or in flight, so
+the edit form replaces the row. Unmounting the row discards its local reveal
+state, which prevents a revealed pre-edit value from surviving the save; a
+reveal after the save settles fetches through the workspace-scoped endpoint and
+returns the updated value.
 
 ## Metadata list lifetimes
 
