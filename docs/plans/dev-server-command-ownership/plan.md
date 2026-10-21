@@ -117,9 +117,27 @@ checked against the committed head with the repository helper.
 - Mobile: state/data exception, no new mobile E2E. Actual phone/tablet alternate
   paths were inspected and do not consume this hook. Existing composition and
   saved-preview restoration are unchanged.
-- `git diff --check`, package status/untracked-file inspection: passed.
-- Normal hooked commit: see the parent handoff's exact receipt. Parent validation
-  and all delivery actions remain pending; no push or PR is authorized yet.
+- Working-tree diff check and package status/untracked-file inspection: passed.
+  Parent validation later identified committed trailing whitespace, corrected below.
+- Initial normal hooked commit: see the parent handoff's exact receipt.
+
+## Parent validation and delivery authorization
+
+The parent inspected every changed path at the implementation head and
+independently ran the same three focused suites: 29 tests passed (1.99 seconds),
+terminal exit 0. No product blocker was found. Its full base-to-head whitespace
+check found an extra blank line at the end of the work order; this documentation
+cleanup removes it. A working-tree-only check had not detected the committed
+whitespace. Subsequent diff checks use the complete base-to-head range.
+
+The parent separately authorized push, template-based PR publication, exact-head
+CI and substantive semantic review, scoped remediation, and ordinary protected
+squash merge after the gates pass. No bypass, admin merge, status/provider or
+workflow change is authorized. Delivery evidence remains external until its
+exact final head and current-base merge result are verified. Parent retains
+archive, accounting and next-selection ownership. No product suites were repeated
+solely for this documentation correction; capture and merge-result validation
+remain separate delivery checks.
 
 
 ## Risks
