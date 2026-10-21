@@ -51,7 +51,7 @@ test('upgrade jobs always publish migration identity and test summaries, includi
     const summary=job.steps.find(s => s.name === 'Publish upgrade summary');
     assert.equal(summary.if,'always()');
     assert.equal(summary.run,'node scripts/upgrade/summary.mjs');
-    assert.ok(summary.env.UPGRADE_JOB_OUTCOME.includes('outcome'));
+    assert.equal(summary.env.UPGRADE_JOB_OUTCOME,'${{ job.status }}');
   }
   assert.ok(workflow.jobs.rehearse.steps.find(s => s.name === 'Check harness contracts').run.includes('scripts/upgrade/summary.test.mjs'));
 });

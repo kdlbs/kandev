@@ -54,7 +54,7 @@ jobs:
         if: always()
         env:
           UPGRADE_CANDIDATE_SHA: ${{ steps.identity.outputs.candidate_sha || github.sha }}
-          UPGRADE_JOB_OUTCOME: ${{ failure() && 'failure' || cancelled() && 'cancelled' || steps.baseline.outcome }}
+          UPGRADE_JOB_OUTCOME: ${{ job.status }}
         run: node scripts/upgrade/summary.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -130,7 +130,7 @@ jobs:
           UPGRADE_CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
           UPGRADE_ENGINE: ${{ matrix.engine }}
           UPGRADE_PROJECT: ${{ matrix.project }}
-          UPGRADE_JOB_OUTCOME: ${{ failure() && 'failure' || cancelled() && 'cancelled' || steps.rehearsal.outcome }}
+          UPGRADE_JOB_OUTCOME: ${{ job.status }}
         run: node scripts/upgrade/summary.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
