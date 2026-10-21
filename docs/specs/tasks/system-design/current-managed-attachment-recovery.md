@@ -90,19 +90,32 @@ linked worktrees and is not a managed-clone validator.
 
 Admission requires:
 
-1. Compare canonical absolute paths using existing platform-aware path rules.
+1. Compare exact lexical absolute paths using existing platform-aware path rules.
    Saved missing paths must equal the exact current destination. No prefix,
    name-only, alternate-workspace or merely-under-managed-root match suffices.
    Propagate permission, I/O and cancellation errors; only confirmed absence
    allows cloning.
-2. Validate existing ancestors and the target's inspected `Lstat` evidence;
-   reject links/reparse redirection, files, occupied non-Git directories and
-   changed identities before any clone/fetch/worktree command. Carry inspected
+2. The expanded operator-configured clone base is the control-root boundary.
+   Keep the exact lexical current/allowed-legacy derivation authoritative; do not
+   canonicalize registration or clone placement. Permit aliases in parents above
+   that base for compatibility. Inspect the base itself and its descendants with
+   `Lstat`; reject links/reparse redirection there, files, occupied non-Git
+   directories and changed identities before any clone/fetch/worktree command. Carry inspected
    evidence into revalidation rather than treating a second stat as the original
-   proof. Keep inspection within this derived path and its Git control paths.
+   proof. Retain observed physical base/object identity in the existing operation
+   guard, including the resolved target of an observed outside-base parent alias
+   when the base does not yet exist. Refuse alias-target/base replacement during
+   authentication before mutation. This is bounded operation evidence, not a
+   guarantee against arbitrary external filesystem writers.
 3. For an existing managed clone, require a standalone `.git` directory, actual
    top level equal to the admitted checkout and Git directory/common directory
-   equal to its `.git`. Reject `.git` file or link, `commondir`, redirected
+   equal to its `.git`. After the checkout passes path/control inspection, compare
+   Git's physical results with `filepath.EvalSymlinks` of that inspected checkout
+   to reconcile trusted outside-base parent aliases. Resolution grants no new
+   candidate authority. Query each `rev-parse` path separately; remove only Git's
+   terminal record newline, preserving embedded and trailing whitespace/newlines.
+   Do not split multi-path output or trim legitimate path bytes.
+   Reject `.git` file or link, `commondir`, redirected
    `core.worktree`, object alternates and symlinked Git control descendants
    (including nested refs/logs/worktrees/objects). Do not fetch to discover trust.
 4. Read origin through the existing sanitized Git command path. Compare the
@@ -133,7 +146,9 @@ provider/origin and older owner/name paths for its supported unscoped built-in
 providers. Require the saved source to exist and pass the same standalone Git,
 canonical path and full origin proof; keep its saved path and do not clone,
 fetch, relocate or redirect it merely because a current destination differs.
-Scoped/plugin identities cannot borrow an unscoped legacy layout. No directory
+Scoped/plugin identities cannot borrow an unscoped legacy layout. Enforce this
+in attachment admission even though the global relocation path helper can return
+built-in legacy candidates for a scoped row; do not alter that helper's contract. No directory
 scan, fallback to another registration or legacy inference from a branch name.
 
 A missing exact legacy source returns an actionable diagnostic: re-import the
@@ -157,17 +172,40 @@ An unavailable inspection/authentication lane fails closed.
 For a recoverable current-absent path, invoke existing authenticated cloning
 without its existing early path-persistence side effect. Reuse/factor the
 private clone/auth helper so the host-attachment path can validate output first;
-do not change normal launch's best-effort persistence contract. Only then use the attachment-specific
-`UpdateVerifiedRepositoryLocalPath` capability of `repoLocalPathUpdater`, with
-`UpdateRepositoryRequest.ExpectedUpdatedAt` from the repository snapshot whose
-identity was validated. This uses the existing conditional update primitive to
-refuse a changed repository registration before publishing the path; it adds
-no schema or independent persistence model. Ordinary `RepoUpdater.UpdateRepositoryLocalPath`
-retains its launch behavior. Treat a missing updater or update error as fatal when a
-new path must be saved. Set in-memory `LocalPath` after successful validation
-and required persistence. For an unchanged existing current/legacy path, reuse
-needs no path rewrite. A newly recreated current clone still performs the
-conditional verified-path write even when the saved path string is unchanged. A new schema or recovery record is unnecessary.
+do not change normal launch's best-effort persistence contract. Only then use the
+attachment-specific `repoLocalPathUpdater.UpdateVerifiedRepositoryLocalPath`,
+which calls the service-owned internal Go entrypoint
+`Service.UpdateVerifiedManagedRepositoryPath` with the admitted snapshot/path.
+Only this adapter may call it after repoclone/executor admission. It is not a
+public editing option, HTTP/MCP request flag or generic validation bypass.
+
+The service checks nonlocal/provider eligibility, complete identity, nonzero
+version and a clean absolute existing directory path without canonicalizing
+lexical bytes. Explicit-local sources and nonprovider rows with a saved local
+path are refused. Eligible pathless nonlocal rows remain supported. Scoped
+identity requires its paired immutable ID; built-ins retain host/owner/name
+identity. Missing or invalid input fails before use.
+
+Load the current persisted repository and authorize its workspace with existing
+repository-manage scope. Match the admitted workspace/source/local-path and full
+provider identity, including remote locator, and the exact observed version.
+Use existing `UpdateRepositoryIfUnchanged` so a change between read and write is
+also refused. Mutate only path/version on that loaded row; preserve all settings,
+secret bindings and checkout values rather than copying caller snapshot fields.
+Publish `RepositoryUpdated` only after the exact write, through the existing
+publisher with its ordinary delivery semantics. Read/validation/cancellation and
+write failures are fatal; unavailable version fencing cannot fall back to a
+non-exact write. No schema, registry or separate persistence model is needed.
+
+This internal entry preserves the already-admitted lexical path across parent
+aliases. Ordinary `Service.UpdateRepository`, explicit-local canonicalization and
+launch `RepoUpdater.UpdateRepositoryLocalPath` keep their existing behavior.
+Set in-memory `LocalPath` only after successful validation and required
+persistence. Unchanged existing current/legacy reuse needs no path rewrite. A
+newly recreated current clone still performs the conditional verified-path write
+even when its saved path string is unchanged. No opaque capability/token
+infrastructure is introduced; trusted caller provenance is documented at the
+narrow internal entrypoint.
 
 ## Session selection, branch wiring and environments
 
@@ -222,6 +260,11 @@ Exact source retries reuse the current clone and do not duplicate links,
 attachments or inventory. Legacy add-branch retains its existing duplicate-key
 behavior; a failed call must be safely retryable without a stranded new row.
 Do not change global association replacement or corruption-recovery policy.
+A post-clone verification failure does not authorize deleting unverified
+content. Task-owned compensation grants no `RemoveAll` authority over a shared
+clone. Automatic invalid-clone deletion requires a demonstrated producer and
+operation-owned deletion evidence; absent that proof, fail closed and preserve
+the path instead of inventing a cleanup journal, registry or recovery policy.
 
 ## Evidence, compatibility and release limits
 

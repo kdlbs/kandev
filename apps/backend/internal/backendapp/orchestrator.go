@@ -1309,8 +1309,7 @@ func (u *repoLocalPathUpdater) UpdateVerifiedRepositoryLocalPath(ctx context.Con
 	if repository == nil || repository.ID == "" || localPath == "" {
 		return fmt.Errorf("verified repository identity and path are required")
 	}
-	_, err := u.svc.UpdateRepository(ctx, repository.ID, &taskservice.UpdateRepositoryRequest{LocalPath: &localPath, ExpectedUpdatedAt: &repository.UpdatedAt})
-	return err
+	return u.svc.UpdateVerifiedManagedRepositoryPath(ctx, repository, localPath)
 }
 
 func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {

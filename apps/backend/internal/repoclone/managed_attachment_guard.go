@@ -11,8 +11,9 @@ import (
 
 type managedAttachmentContextKey struct{}
 type attachmentAncestor struct {
-	path string
-	info os.FileInfo
+	path   string
+	info   os.FileInfo
+	target os.FileInfo
 }
 type managedAttachmentGuard struct {
 	repository models.Repository
@@ -32,7 +33,14 @@ func (c *Cloner) ManagedAttachmentContext(ctx context.Context, repository *model
 	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
 		if err == nil {
-			guard.ancestors = append(guard.ancestors, attachmentAncestor{path: current, info: info})
+			ancestor := attachmentAncestor{path: current, info: info}
+			if info.Mode()&os.ModeSymlink != 0 {
+				ancestor.target, err = os.Stat(current)
+				if err != nil {
+					return nil, err
+				}
+			}
+			guard.ancestors = append(guard.ancestors, ancestor)
 		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
@@ -53,6 +61,15 @@ func (c *Cloner) validateManagedAttachmentMutation(ctx context.Context, path str
 		current, err := os.Lstat(ancestor.path)
 		if err != nil {
 			return err
+		}
+		if ancestor.target != nil {
+			target, err := os.Stat(ancestor.path)
+			if err != nil {
+				return err
+			}
+			if !os.SameFile(ancestor.target, target) {
+				return fmt.Errorf("managed attachment path identity changed")
+			}
 		}
 		if !os.SameFile(ancestor.info, current) {
 			return fmt.Errorf("managed attachment path identity changed")

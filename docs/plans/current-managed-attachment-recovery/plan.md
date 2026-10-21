@@ -203,7 +203,7 @@ unverified.
 - Native path/reparse semantics and real-provider authentication need explicitly
   qualified evidence. A complete implementation does not close all of #4426.
 
-## Implementation checkpoint
+## Original implementation checkpoint (superseded by PR remediation)
 
 Task01 completed with causal registered-consumer RED and scoped GREEN/race/lint.
 Task02 then completed with guarded MCP consumer RED/GREEN, shared identity
@@ -212,3 +212,148 @@ receipts. Status: `validation_ready`; no delivery authorization or issue closure
 is implied. Base and HEAD remain `ce6ed5c971137a3c1d1360d75c111b51fde980d5`,
 branch `feature/investigate-missing-vg2`. Final patch/hash/inventory are external
 in `../4426-investigation/validation-ready-manifest.json`.
+
+## Historical PR remediation checkpoint: persistence seam gap
+
+Parent authorized scoped remediation implementation only after PR review of
+head `df32a003d6336d78e523ce95c6a00b831bd7eb4b`. Original completed receipts
+above are historical; both work orders are reopened for this bounded remediation.
+No remediation commit or push is authorized before parent actual-diff validation.
+
+Permanent compatibility regressions were captured RED before production edits:
+`remediation-red.log`, registered HTTP/MCP Local/Worktree sources and guarded MCP
+branches, plus path/control-root and alias identity tests. Space cases and
+in-root-link/unpaired-scope refusal controls passed on the prior head. Scoped
+legacy admission, parent aliases and newline cases failed behaviorally.
+
+The uncommitted patch excludes scoped legacy candidates only in attachment
+admission; bounds link rejection to configured base and descendants; compares
+Git physical paths only after inspection; queries one path per supported
+`rev-parse` invocation and strips only the record newline. The existing operation
+guard additionally retains the resolved target identity of observed parent links.
+A replaced alias target is refused even when the configured base was absent.
+Global relocation, clone placement and ordinary local-path registration remain
+unchanged. No schema, registry, journal or general lock/capability model added.
+
+The second focused run (`remediation-green02.log`) passes all 11 new path/auth
+cases and 30/35 compatibility consumer cases, without skips. Five missing-alias
+consumer cases remain RED. They successfully clone and conditionally persist,
+but `repoLocalPathUpdater.UpdateVerifiedRepositoryLocalPath` delegates to
+`Service.UpdateRepository`, which always calls `canonicalRepositoryLocalPath`
+for `LocalPath` and resolves its parent alias to a physical path. Worktree/branch
+admission then rejects that physical registration path; Local consumers can
+report success with the wrong stored path. Readback assertions independently
+show the lexical saved path changed. Existing service tests explicitly require
+canonicalization for ordinary explicit-local updates; do not weaken them.
+
+Exact missing primitive: service-owned authenticated/version-fenced verified
+managed-path persistence that preserves the already-admitted lexical path while
+retaining repository event publication. The current public update seam cannot
+carry that distinction. Return this gap before adding an internal method/typed
+attestation or changing persistence policy. A narrow candidate could reuse the
+existing exact updater and workspace authorization/event publication in a separate
+internal verified-managed-path service entry; it needs parent boundary/diff review.
+Persisting physical paths or changing global clone layout would contradict the
+selected lexical ownership rule. No bypass was added.
+
+Final scoped race/lint/docs receipts and complete uncommitted patch/hash are
+external under `../4426-investigation/remediation-*`; the final report records
+actual failures rather than claiming remediation GREEN. Status is blocked on
+that precise helper gap, not ready for commit/push/merge. Review threads stay
+unresolved until reviewed corrections. Codex's failed current-head review remains
+explicit; bounded retry belongs after an eventual validated remediation push.
+
+Decline aggregate automatic invalid-clone deletion without a demonstrated
+producer and operation-owned deletion proof: see
+[the requirement](../../specs/tasks/requirements/managed-source-attachment.md#req-tasks-attach-workspace-sources-008-recover-current-managed-sources)
+and [shared clone lifetime](../../specs/tasks/system-design/current-managed-attachment-recovery.md#failure-retries-and-resource-lifetime).
+Task-owned compensation grants no deletion authority over unverified shared
+content. No `RemoveAll` or cleanup policy change was made. Partial #4426 only;
+no issue closure, final public issue reply, native/provider/server-Docker or
+release acceptance claim. Parent validation remains the next barrier.
+
+Exact final scoped checks from repo root:
+
+```bash
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp -run '^(TestManagedAttachmentPathAdmission|TestManagedAttachmentPathCompatibility|TestManagedAttachmentAliasIdentityDuringAuthentication|TestManagedAttachmentCompatibilityConsumers|TestHostAttachmentRepositoryRecovery.*|TestEnsureRepositoryCloned_ReturnsOnlyLocalPath|TestManagedSourceAttachmentConsumers|TestManagedSourceAttachmentReimportRegistration|TestManagedBranchAttachmentConsumers|TestRepositoryHostClonerRequiresExactSessionScope|TestWorkspaceSourceMaterializer_(Remote.*|PrelaunchReturnsExplicitDeferredResult|UnprovisionedEnvironmentDefers)|TestWorkspaceSourceMaterializerKubernetesUsesRemoteMaterialization|TestWorkspaceSourceMaterializerRejectsUnknownExecutor|TestBranchMaterializer_(Inherited.*|LiveSessionBindingOverridesStaleOwnedEnvironment|RejectsSessionReboundBeforeCreate))$' -count=1 -v)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/backendapp -run '^TestManagedAttachmentCompatibilityConsumers$' -count=1 -v)
+bash scripts/lint-go-changed apps/backend/internal/repoclone/managed_attachment_path.go apps/backend/internal/repoclone/managed_attachment_guard.go apps/backend/internal/repoclone/managed_attachment_compatibility_test.go apps/backend/internal/backendapp/managed_source_attachment_test.go apps/backend/internal/backendapp/managed_attachment_compatibility_test.go
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+/home/jcfs/.local/share/mise/installs/node/24/bin/node scripts/validate-public-docs.mjs
+git diff --check
+```
+
+The first combined run included 35 remediation cases; its only five failures
+were saved-missing alias cases. The targeted follow-up extended the matrix to
+40 cases, adding empty saved paths under parent aliases: 30 pass, 10 fail, none
+skipped. A lint-driven private helper extraction reduced inspector complexity
+without changing the boundary. The final combined run covers that refactor and
+the 40-case matrix. Actual counts and limits are recorded in the external report;
+no failing run is represented as full GREEN.
+
+Documentation assessment: the published repair/re-import flow is unchanged by
+this internal ownership clarification. Owning requirement, design and ADR carry
+the selected base/alias/path-byte boundary. Existing published pages still pass
+the validator; no new public arguments, UI copy or screenshots are introduced.
+
+## Approved internal persistence seam implementation
+
+The parent inspected the helper gap and explicitly authorized the narrow internal
+`Service.UpdateVerifiedManagedRepositoryPath` entrypoint. Only the attachment
+adapter may call it after repoclone/executor admission. Reuse persisted-workspace
+authorization, full admitted identity/version comparison, existing exact updater
+and repository event publication. Preserve current unrelated fields, bindings
+and checkout values; reject explicit-local, invalid/stale/missing input. Ordinary
+`UpdateRepository` canonicalization remains unchanged. No public bypass field,
+HTTP/MCP flag, schema, registry, token model or direct backendapp database write.
+
+Implementation and service RED/GREEN plus the same actual 40-case consumer matrix
+are complete and uncommitted for parent validation. The historical blocker above is settled
+by this exact boundary, not a change to clone layout or realpath admission.
+Return the complete uncommitted remediation for parent actual-diff validation
+before any commit/push or valid review-thread resolution. Codex retry belongs
+after a later validated push. No merge, issue reply/closure or release claim.
+
+## Verified internal write results
+
+Implemented the parent-authorized internal write without changing ordinary
+repository canonicalization. Service tests: 5 preservation/compatibility,
+32 invalid/local/denied/stale admission and 6 persistence/CAS/cancellation cases
+PASS. The ordinary explicit-local canonicalization control remains PASS.
+All 40 actual compatibility consumers now PASS, including exact lexical SQLite
+readback for empty/saved-missing parent aliases and trailing whitespace/newlines.
+Existing source68/branch20/path11 plus new path9/auth2 and executor8/denied2
+cases PASS, no skips. The historical ten alias failures above are corrected.
+
+The final combined race selector ran after the last production edit and is
+retained in `verified-service-final-race.log` with its exit0 receipt and parsed
+`verified-service-final-test-summary.json`. Final lint covers all 19 Go paths
+in the full PR candidate, not only this increment; exact command/exit is in
+`verified-service-checks.json`. Source/test hashes are frozen across checks.
+Final documentation coverage, catalog/spec/public-doc and whitespace receipts
+are in that same external evidence directory.
+
+Caller provenance is narrow: the only production call is the attachment-specific
+`repoLocalPathUpdater` after repoclone/executor admission. No public request flag,
+direct backendapp storage write or general validation bypass was added. The
+service authorizes the current persisted workspace, compares full identity and
+observed version, updates path/version through existing exact CAS and publishes
+through the ordinary repository event helper. Current settings, bindings and
+checkout values survive; unrelated caller snapshot fields are ignored. Existing
+publisher delivery semantics remain unchanged; read/validation/cancellation and
+write errors are fatal. No schema, token, registry or cleanup model was added.
+
+Status: `remediation_validation_ready`, pending parent actual-diff validation.
+No remediation commit/push, valid-thread resolution, Codex retry, merge or public
+issue reply has occurred. Valid review corrections and bounded Codex retry await
+an eventual approved push. Partial #4426 only, no closing keywords. Linux/offline
+Git/SQLite evidence only; native Windows/macOS, real provider/JSON-RPC/agent,
+isolated server-in-Docker and release acceptance remain unverified. Shared build
+admission serialized the checks; it was not bypassed.
+
+Final combined race command from `apps/backend`:
+
+```bash
+go test -trimpath -race -tags fts5 ./internal/repoclone ./internal/orchestrator/executor ./internal/backendapp ./internal/task/service -run '^(TestVerifiedManagedRepositoryPath.*|TestService_UpdateRepositoryCanonicalizesExplicitLocalPath|TestManagedAttachmentPathAdmission|TestManagedAttachmentPathCompatibility|TestManagedAttachmentAliasIdentityDuringAuthentication|TestManagedAttachmentCompatibilityConsumers|TestHostAttachmentRepositoryRecovery.*|TestEnsureRepositoryCloned_ReturnsOnlyLocalPath|TestManagedSourceAttachmentConsumers|TestManagedSourceAttachmentReimportRegistration|TestManagedBranchAttachmentConsumers|TestRepositoryHostClonerRequiresExactSessionScope|TestWorkspaceSourceMaterializer_(Remote.*|PrelaunchReturnsExplicitDeferredResult|UnprovisionedEnvironmentDefers)|TestWorkspaceSourceMaterializerKubernetesUsesRemoteMaterialization|TestWorkspaceSourceMaterializerRejectsUnknownExecutor|TestBranchMaterializer_(Inherited.*|LiveSessionBindingOverridesStaleOwnedEnvironment|RejectsSessionReboundBeforeCreate))$' -count=1 -v
+```

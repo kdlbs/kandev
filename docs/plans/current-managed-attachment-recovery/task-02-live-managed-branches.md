@@ -205,3 +205,79 @@ Credential tests prove existing request/control seams with offline local Git and
 denied/fake resolvers, not external provider availability. Existing operation
 clone locks and ancestor inspection do not promise protection against arbitrary
 external filesystem writers. Contributor provenance remains in the focused design.
+
+## Historical PR remediation checkpoint: persistence seam gap
+
+Reopened under implementation-only parent authorization. The new compatibility
+matrix covers registered HTTP/MCP sources on Local/Worktree and guarded MCP
+branches, with physical content and lexical path readback. Scoped legacy refusal,
+existing parent aliases and exact whitespace/newline cases now pass. Missing
+alias clones are created, but the verified updater's general service entry
+canonicalizes their saved path. Worktree/branch consumers then reject that path;
+Local consumers can report success while storing the wrong lexical identity.
+The added empty-alias cases demonstrate why merely omitting an unchanged saved
+path from the update would not complete recovery.
+
+The existing source68/branch20 consumer suites remain GREEN. The remediation
+matrix remains partially RED on the persistence gap; do not claim merge readiness.
+See the [plan checkpoint](plan.md#historical-pr-remediation-checkpoint-persistence-seam-gap)
+for exact receipts/commands and the narrow missing primitive. Valid review threads
+remain unresolved pending reviewed corrections; Codex retry remains deferred until
+an eventual validated push. No automatic invalid-clone deletion or new cleanup
+policy: see [shared clone lifetime](../../specs/tasks/system-design/current-managed-attachment-recovery.md#failure-retries-and-resource-lifetime).
+No remediation commit/push, issue closure or public issue reply authorized yet.
+
+## Approved internal persistence seam implementation
+
+The parent inspected the helper gap and explicitly authorized the narrow internal
+`Service.UpdateVerifiedManagedRepositoryPath` entrypoint. Only the attachment
+adapter may call it after repoclone/executor admission. Reuse persisted-workspace
+authorization, full admitted identity/version comparison, existing exact updater
+and repository event publication. Preserve current unrelated fields, bindings
+and checkout values; reject explicit-local, invalid/stale/missing input. Ordinary
+`UpdateRepository` canonicalization remains unchanged. No public bypass field,
+HTTP/MCP flag, schema, registry, token model or direct backendapp database write.
+
+Implementation and service RED/GREEN plus the same actual 40-case consumer matrix
+are complete and uncommitted for parent validation. The historical blocker above is settled
+by this exact boundary, not a change to clone layout or realpath admission.
+Return the complete uncommitted remediation for parent actual-diff validation
+before any commit/push or valid review-thread resolution. Codex retry belongs
+after a later validated push. No merge, issue reply/closure or release claim.
+
+## Verified internal write results
+
+Implemented the parent-authorized internal write without changing ordinary
+repository canonicalization. Service tests: 5 preservation/compatibility,
+32 invalid/local/denied/stale admission and 6 persistence/CAS/cancellation cases
+PASS. The ordinary explicit-local canonicalization control remains PASS.
+All 40 actual compatibility consumers now PASS, including exact lexical SQLite
+readback for empty/saved-missing parent aliases and trailing whitespace/newlines.
+Existing source68/branch20/path11 plus new path9/auth2 and executor8/denied2
+cases PASS, no skips. The historical ten alias failures above are corrected.
+
+The final combined race selector ran after the last production edit and is
+retained in `verified-service-final-race.log` with its exit0 receipt and parsed
+`verified-service-final-test-summary.json`. Final lint covers all 19 Go paths
+in the full PR candidate, not only this increment; exact command/exit is in
+`verified-service-checks.json`. Source/test hashes are frozen across checks.
+Final documentation coverage, catalog/spec/public-doc and whitespace receipts
+are in that same external evidence directory.
+
+Caller provenance is narrow: the only production call is the attachment-specific
+`repoLocalPathUpdater` after repoclone/executor admission. No public request flag,
+direct backendapp storage write or general validation bypass was added. The
+service authorizes the current persisted workspace, compares full identity and
+observed version, updates path/version through existing exact CAS and publishes
+through the ordinary repository event helper. Current settings, bindings and
+checkout values survive; unrelated caller snapshot fields are ignored. Existing
+publisher delivery semantics remain unchanged; read/validation/cancellation and
+write errors are fatal. No schema, token, registry or cleanup model was added.
+
+Status: `remediation_validation_ready`, pending parent actual-diff validation.
+No remediation commit/push, valid-thread resolution, Codex retry, merge or public
+issue reply has occurred. Valid review corrections and bounded Codex retry await
+an eventual approved push. Partial #4426 only, no closing keywords. Linux/offline
+Git/SQLite evidence only; native Windows/macOS, real provider/JSON-RPC/agent,
+isolated server-in-Docker and release acceptance remain unverified. Shared build
+admission serialized the checks; it was not bypassed.

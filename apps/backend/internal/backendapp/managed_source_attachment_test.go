@@ -72,31 +72,31 @@ func managedAttachment(t *testing.T, route, scenario string) {
 	eventBus := bus.NewMemoryEventBus(log)
 	t.Cleanup(eventBus.Close)
 	svc := taskservice.NewService(taskservice.Repos{Workspaces: repo, Tasks: repo, TaskRepos: repo, WorkspaceFolders: repo, Workflows: repo, Turns: repo, Sessions: repo, RepoEntities: repo, TaskEnvironments: repo, BackgroundWork: repo, Messages: repo, GitSnapshots: repo, Executors: repo, Environments: repo, Usage: repo}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
-	cloner := repoclone.NewCloner(repoclone.Config{BasePath: canonicalTempDir(t)}, repoclone.ProtocolHTTPS, "", log)
-	managed, err := cloner.WorkspaceProviderRepoPath("ws-1", "gitlab", "https://gitlab.example", "acme", "added")
+	cloner := repoclone.NewCloner(repoclone.Config{BasePath: managedAttachmentCloneBase(t, scenario)}, repoclone.ProtocolHTTPS, "", log)
+	managed, err := cloner.WorkspaceProviderRepoPath("ws-1", "gitlab", "https://gitlab.example", "acme", managedAttachmentProviderName(scenario))
 	if err != nil {
 		t.Fatal(err)
 	}
 	saved := managed
 	sourceType := "provider"
 	switch scenario {
-	case "empty", "persistence", "late-failure", "pathless-legacy", "rebound-session", "changed-environment", "active", "inherited", "persistence-retry", "cloner-unavailable", "repository-changed":
+	case "empty", "alias-empty", "persistence", "late-failure", "pathless-legacy", "rebound-session", "changed-environment", "active", "inherited", "persistence-retry", "cloner-unavailable", "repository-changed":
 		saved = ""
 		if scenario == "pathless-legacy" {
 			sourceType = ""
 		}
-	case "legacy-valid", "legacy-missing":
+	case "legacy-valid", "legacy-missing", "scoped-legacy":
 		saved, err = cloner.ProviderRepoPath("gitlab", "https://gitlab.example", "acme", "added")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if scenario == "legacy-valid" {
+		if scenario == "legacy-valid" || scenario == "scoped-legacy" {
 			if err := os.MkdirAll(filepath.Dir(saved), 0755); err != nil {
 				t.Fatal(err)
 			}
 			runGit(t, origin, "clone", origin, saved)
 		}
-	case "valid":
+	case "valid", "alias-valid", "space-valid", "newline-valid":
 		if err := os.MkdirAll(filepath.Dir(managed), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -131,10 +131,18 @@ func managedAttachment(t *testing.T, route, scenario string) {
 		}
 	}
 	var foreignSnapshot map[string]string
-	if scenario == "foreign" {
+	if scenario == "foreign" || scenario == "scoped-legacy" {
 		foreignSnapshot = managedAttachmentSnapshot(t, saved)
 	}
-	entity := &models.Repository{ID: "probe-added", WorkspaceID: "ws-1", Name: "added", SourceType: sourceType, Provider: "gitlab", ProviderHost: "https://gitlab.example", ProviderOwner: "acme", ProviderName: "added", RemoteURL: origin, LocalPath: saved, DefaultBranch: "main"}
+	entity := &models.Repository{ID: "probe-added", WorkspaceID: "ws-1", Name: "added", SourceType: sourceType, Provider: "gitlab", ProviderHost: "https://gitlab.example", ProviderOwner: "acme", ProviderName: managedAttachmentProviderName(scenario), RemoteURL: origin, LocalPath: saved, DefaultBranch: "main"}
+	if scenario == "scoped-legacy" {
+		entity.ProviderScope = "connection-scope"
+		entity.ProviderRepoID = "immutable-project"
+		managed, err = cloner.WorkspaceProviderRepositoryPath("ws-1", entity.Provider, entity.ProviderHost, entity.ProviderScope, entity.ProviderRepoID, entity.ProviderOwner, entity.ProviderName)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if scenario == "scoped-missing" {
 		entity.ProviderScope = "connection-scope"
 		entity.ProviderRepoID = "immutable-project"
@@ -353,11 +361,11 @@ func managedAttachment(t *testing.T, route, scenario string) {
 		}
 	}
 	switch scenario {
-	case "empty", "missing", "persistence", "late-failure", "pathless-legacy", "rebound-session", "changed-environment", "active", "inherited", "persistence-retry", "scoped-missing", "repository-changed", "repository-changed-missing":
+	case "empty", "missing", "persistence", "late-failure", "pathless-legacy", "rebound-session", "changed-environment", "active", "inherited", "persistence-retry", "scoped-missing", "repository-changed", "repository-changed-missing", "alias-empty", "alias-missing", "space-missing", "newline-missing":
 		if len(observedCloner.requests) != 1 {
 			t.Fatalf("scoped clone requests=%d, want one", len(observedCloner.requests))
 		}
-	case "valid", "local-valid", "local-missing", "foreign", "legacy-valid", "legacy-missing", "cloner-unavailable":
+	case "valid", "local-valid", "local-missing", "foreign", "legacy-valid", "legacy-missing", "cloner-unavailable", "scoped-legacy", "alias-valid", "space-valid", "newline-valid":
 		if len(observedCloner.requests) != 0 {
 			t.Fatalf("unexpected clone requests=%d", len(observedCloner.requests))
 		}
@@ -368,7 +376,7 @@ func managedAttachment(t *testing.T, route, scenario string) {
 	t.Logf("clone_requests=%d", len(observedCloner.requests))
 	t.Logf("success=%v attachments=%d inventory=%d saved_changed=%v readable=%v response=%s", success, len(rows), len(inventory), stored.LocalPath != saved, readable, response)
 	verifyFailure := func() {
-		if scenario == "local-missing" || scenario == "foreign" || scenario == "legacy-missing" {
+		if scenario == "local-missing" || scenario == "foreign" || scenario == "legacy-missing" || scenario == "scoped-legacy" {
 			if _, err := os.Lstat(managed); !os.IsNotExist(err) {
 				t.Fatalf("refused source created managed destination: %v", err)
 			}
@@ -382,7 +390,7 @@ func managedAttachment(t *testing.T, route, scenario string) {
 		if scenario == "legacy-missing" && !strings.Contains(response, "POST /api/v1/workspaces/") {
 			t.Fatalf("missing actionable re-import route: %s", response)
 		}
-		if scenario == "foreign" && !reflect.DeepEqual(foreignSnapshot, managedAttachmentSnapshot(t, saved)) {
+		if (scenario == "foreign" || scenario == "scoped-legacy") && !reflect.DeepEqual(foreignSnapshot, managedAttachmentSnapshot(t, saved)) {
 			t.Fatal("foreign repository tree mutated")
 		}
 		if scenario == "foreign" {
@@ -392,7 +400,7 @@ func managedAttachment(t *testing.T, route, scenario string) {
 			}
 		}
 	}
-	if scenario == "local-missing" || scenario == "foreign" || scenario == "clone-failure" || scenario == "legacy-missing" || scenario == "persistence" || scenario == "rebound-session" || scenario == "changed-environment" || scenario == "cloner-unavailable" || scenario == "repository-changed" || scenario == "repository-changed-missing" {
+	if scenario == "scoped-legacy" || scenario == "local-missing" || scenario == "foreign" || scenario == "clone-failure" || scenario == "legacy-missing" || scenario == "persistence" || scenario == "rebound-session" || scenario == "changed-environment" || scenario == "cloner-unavailable" || scenario == "repository-changed" || scenario == "repository-changed-missing" {
 		verifyFailure()
 		return
 	}
@@ -402,6 +410,7 @@ func managedAttachment(t *testing.T, route, scenario string) {
 	if scenario == "legacy-valid" && (stored.LocalPath != saved || len(observedCloner.requests) != 0) {
 		t.Fatal("existing legacy source redirected or cloned")
 	}
+	verifyManagedAttachmentCompatibility(t, scenario, stored.LocalPath, managed, origin, contentPath)
 	if route == "mcp-branch" {
 		var result struct {
 			WorktreePath      string `json:"worktree_path"`

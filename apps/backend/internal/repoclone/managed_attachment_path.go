@@ -33,7 +33,7 @@ func (c *Cloner) InspectManagedAttachmentPath(ctx context.Context, repo *models.
 	if err := c.validateAttachmentCandidate(repo, path, destination); err != nil {
 		return false, err
 	}
-	if err := checkAttachmentPathAncestors(path); err != nil {
+	if err := c.inspectAttachmentAncestors(path); err != nil {
 		return false, err
 	}
 	info, err := os.Lstat(path)
@@ -70,6 +70,9 @@ func sameAttachmentPath(left, right string) bool {
 }
 
 func (c *Cloner) isLegacyAttachmentPath(repo *models.Repository, path string) bool {
+	if repo.ProviderScope != "" {
+		return false
+	}
 	_, providerPath, legacy, _, ok, err := c.ManagedCloneRelocationPaths(repo)
 	return err == nil && ok && (sameAttachmentDerivedPath(path, providerPath) || sameAttachmentDerivedPath(path, legacy))
 }
@@ -79,7 +82,19 @@ func sameAttachmentDerivedPath(saved, derived string) bool {
 	return err == nil && sameAttachmentPath(saved, absolute)
 }
 
-func checkAttachmentPathAncestors(path string) error {
+func (c *Cloner) inspectAttachmentAncestors(path string) error {
+	base, err := c.ExpandedBasePath()
+	if err != nil {
+		return err
+	}
+	base, err = filepath.Abs(base)
+	if err != nil {
+		return err
+	}
+	return checkAttachmentPathAncestors(path, base)
+}
+
+func checkAttachmentPathAncestors(path, base string) error {
 	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
 		info, err := os.Lstat(current)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -88,8 +103,11 @@ func checkAttachmentPathAncestors(path string) error {
 		if err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
 			return ErrRepositoryOwnershipMismatch
 		}
-		if filepath.Dir(current) == current {
+		if sameAttachmentPath(current, base) {
 			return nil
+		}
+		if filepath.Dir(current) == current {
+			return ErrRepositoryOwnershipMismatch
 		}
 	}
 }
@@ -115,20 +133,19 @@ func checkAttachmentGitDirectory(path string) error {
 }
 
 func (c *Cloner) verifyAttachmentCheckout(ctx context.Context, repo *models.Repository, path string) error {
-	cmd := subproc.NewGitCommand(ctx, "-C", path, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
-	cleanup, err := configureGitCommand(cmd, nil)
+	physical, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return err
 	}
-	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
-	cleanup()
-	if err != nil {
-		return formatGitOriginError(path, output, err)
-	}
-	paths := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(paths) != 3 || !sameAttachmentPath(paths[0], path) ||
-		!sameAttachmentPath(paths[1], filepath.Join(path, ".git")) || !sameAttachmentPath(paths[1], paths[2]) {
-		return ErrRepositoryOwnershipMismatch
+	wantPaths := []string{physical, filepath.Join(physical, ".git"), filepath.Join(physical, ".git")}
+	for i, option := range []string{"--show-toplevel", "--absolute-git-dir", "--git-common-dir"} {
+		got, err := attachmentGitPath(ctx, path, option)
+		if err != nil {
+			return err
+		}
+		if !sameAttachmentPath(got, wantPaths[i]) {
+			return ErrRepositoryOwnershipMismatch
+		}
 	}
 	want := strings.TrimSpace(repo.RemoteURL)
 	if want == "" {
@@ -188,4 +205,19 @@ func (c *Cloner) managedAttachmentDestination(repo *models.Repository) (string, 
 		return "", err
 	}
 	return filepath.Abs(path)
+}
+
+func attachmentGitPath(ctx context.Context, path, option string) (string, error) {
+	cmd := subproc.NewGitCommand(ctx, "-C", path, "rev-parse", "--path-format=absolute", option)
+	cleanup, err := configureGitCommand(cmd, nil)
+	if err != nil {
+		return "", err
+	}
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	cleanup()
+	if err != nil {
+		return "", formatGitOriginError(path, output, err)
+	}
+	// Each query emits one path followed by Git's record newline.
+	return strings.TrimSuffix(string(output), "\n"), nil
 }
