@@ -42,6 +42,10 @@ func TestRegisteredWorkspaceUpdate(t *testing.T) {
 			dispatcher := ws.NewDispatcher()
 			RegisterRoutes(router, dispatcher, svc, log)
 			update := registeredUpdate(t, transport, router, dispatcher, created.ID)
+			// The first case is rejected by the store's user_id ownership filter
+			// (the secret was created with "owner", so "foreign" does not match),
+			// not by the authorizer mock, which allows workspace-a while allowed is
+			// true. The authorizer covers the remaining three cases.
 			for _, denied := range []struct {
 				ctx       context.Context
 				workspace string
