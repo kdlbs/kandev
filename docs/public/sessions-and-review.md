@@ -415,6 +415,11 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
+Content search retries briefly while repositories become available. If polling
+finishes successfully with no collected matches, it shows **No content matches found.**
+If the final attempt fails and no matches were collected, it shows a retryable
+failure instead. Matches already found remain available during retries.
+
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
 
 In the **Integrations** group, click **Unbound** beside an integration, press a
