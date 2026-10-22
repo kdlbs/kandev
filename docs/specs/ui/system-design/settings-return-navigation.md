@@ -44,7 +44,9 @@ Store root-relative `pathname + search + hash` without reconstructing task URLs.
 This preserves session selection, repeated parameters, layout, and fragments.
 
 Initialize from the actual browser location. A mount on Settings has no origin.
-Subscribe to committed history mutations and normal `popstate` and hash changes.
+Subscribe to committed history mutations and guard-approved `popstate` events.
+Do not use `hashchange` to commit departures: it can accompany a blocked traversal.
+The actual source URL at a committed mutation still preserves its fragment.
 The existing `trackNativeHistoryMutations` wrapper is the mutation authority.
 Capture the actual source URL immediately before its native mutation. Notify
 subscribers with source and destination only after that mutation succeeds.

@@ -152,3 +152,13 @@ commands, logs, environment overrides, and visual evidence.
 
 The design and requirement now describe the implemented behavior. The user
 requested commit, push, and a ready PR on 2026-10-22. No delegation was requested.
+
+### Review follow-up
+
+The cancelled Back/fragment regression belongs to AC-UI-SETTINGS-RETURN-001.3.
+Run the existing targeted verification commands with the added provider test.
+The focused regression failed on the original provider and passed after removing
+its hashchange listener. The complete targeted unit selection passed 73 tests.
+
+Post-remediation typecheck, lint, specification validation, and all 12 targeted
+browser tests passed. See the plan for exact results and log paths.

@@ -162,3 +162,21 @@ Missing or inaccessible tasks retain existing destination error handling.
 Updated the Settings section in `docs/public/use-kandev.md` (how-to guide).
 It explains desktop and phone close actions, task/session restoration, unsaved
 changes, and direct-load/refresh fallback. Public validation passed.
+
+## PR review remediation
+
+Greptile identified a cancelled multi-entry history traversal whose separate
+fragment event could overwrite the Settings origin. The regression drives the
+real navigation guard, holds restoration at the history boundary, and models
+the fragment event that happy-dom omits. RED selected Task B instead of Task A.
+The provider now accepts guard-approved popstate events and committed history
+mutations, without accepting hashchange as departure evidence. The actual
+source URL continues to preserve fragments when Settings opens.
+
+The regression and existing targeted unit tests pass (73 tests). Typecheck
+with the 8 GiB heap, focused ESLint, catalog validation, and specification lint
+passed. A fresh managed build passed all 6 phone tests
+(`/tmp/kandev-run.e2e.OYKePFbC.log`), and the same assets passed all 6 desktop
+tests (`/tmp/kandev-run.e2e.Y7kZQiwv.log`). No rendered layout changed, so the
+existing desktop/phone captures remain representative. Public documentation
+needs no change because this preserves the existing guarded-navigation contract.

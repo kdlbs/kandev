@@ -21,12 +21,11 @@ export function SettingsNavigationProvider({ children }: { children: ReactNode }
     };
     const unsubscribe = subscribeHistoryCommit(committed);
     const traversed = () => committed(previousHref, locationHref());
+    // Only guard-approved traversals can commit a departure.
     window.addEventListener("popstate", traversed);
-    window.addEventListener("hashchange", traversed);
     return () => {
       unsubscribe();
       window.removeEventListener("popstate", traversed);
-      window.removeEventListener("hashchange", traversed);
     };
   }, []);
 

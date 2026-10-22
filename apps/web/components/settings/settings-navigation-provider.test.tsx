@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { replaceTaskUrl } from "@/lib/links";
 import { useRouter } from "@/lib/routing/client-router";
 import {
@@ -98,6 +98,40 @@ describe("Settings navigation lifetime", () => {
       result.current.router.push("/settings/agents");
     });
     expect(result.current.href).toBe("/t/task-b?sessionId=second#plan");
+  });
+
+  // @covers AC-UI-SETTINGS-RETURN-001.3
+  it("preserves the origin after cancelling Back across a fragment entry", async () => {
+    window.history.replaceState({}, "", "/t/task-b#plan");
+    const { result } = setup();
+    act(() => {
+      result.current.router.push(INITIAL_TASK_HREF);
+      result.current.router.push("/settings");
+    });
+    let intent: NavigationIntent | undefined;
+    const unblock = setNavigationBlocker((pending) => {
+      intent = pending;
+    });
+    const traverse = window.history.go.bind(window.history);
+    let restorationDelta = 0;
+    const go = vi.spyOn(window.history, "go").mockImplementation((delta = 0) => {
+      if (delta > 0) restorationDelta = delta;
+      else traverse(delta);
+    });
+    try {
+      act(() => window.history.go(-2));
+      await waitFor(() => expect(intent).toBeDefined());
+      expect(window.location.pathname + window.location.hash).toBe("/t/task-b#plan");
+      // happy-dom does not emit the native traversal's separate hashchange.
+      act(() => window.dispatchEvent(new HashChangeEvent("hashchange")));
+      act(() => traverse(restorationDelta));
+      await waitFor(() => expect(window.location.pathname).toBe("/settings"));
+      act(() => intent!.cancel());
+      expect(result.current.href).toBe(INITIAL_TASK_HREF);
+    } finally {
+      go.mockRestore();
+      unblock();
+    }
   });
 
   it("tracks browser Back and Forward without a Settings loop", async () => {
