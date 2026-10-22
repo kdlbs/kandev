@@ -58,7 +58,7 @@ workflow instead of being refused.
   the status the move produced, and the user shall be told that the task moved
   to the named step without being completed. When the final step's WIP limit
   queues the move, the user shall be told that the task is queued for that step
-  and finishes when the step has room.
+  and is waiting for room, without promising that admission will complete it.
 - **AC-OFFICE-HUMAN-DONE-001.3:** When the move is refused (pending approvers,
   an unmet completion gate, an active session that also blocks a manual move, a
   pending move, or any other move refusal), the task's status, step, decisions and queued runs shall be
@@ -66,26 +66,30 @@ workflow instead of being refused.
   to its original column and the user shall see the reason. A pending-approver
   refusal shall name the pending approvers.
 - **AC-OFFICE-HUMAN-DONE-001.4:** An agent request to set `done` from a
-  non-final step shall keep redirecting the task to `in_review`. A Done request
-  on a task already on the final step, and on a task with no workflow step,
-  shall keep the existing approver gate.
+  non-final step shall keep redirecting the task to `in_review`. A human Done request
+  on the final step, including a step that does not complete automatically,
+  and a legacy request with no workflow step shall respect the same atomic
+  approver refusal as other human completions. A refusal shall not redirect
+  the human task to in_review.
 - **AC-OFFICE-HUMAN-DONE-001.5:** The board and the status picker shall give
   the same outcomes on desktop and phone. On a phone, a press-and-hold drag and
   the status picker shall both reach Done. Every outcome message shall be
   visible text, not hover-only content.
 
-### REQ-OFFICE-HUMAN-DONE-002: Human step moves respect Office approvers
+### REQ-OFFICE-HUMAN-DONE-002: Human completion respects Office approvers
 
-**Intent:** No human step move completes an Office task that its approvers
-have not approved.
+**Intent:** No human completion of an Office task bypasses its approvers,
+including when approval eligibility changes concurrently.
 
 #### Acceptance criteria
 
-- **AC-OFFICE-HUMAN-DONE-002.1:** A human move of an Office task into a
-  completing step shall be refused before any write when the task has at least
-  one pending approver, counting the destination step's template approvers. The refusal shall be HTTP 409 with code
+- **AC-OFFICE-HUMAN-DONE-002.1:** A genuine human completion of an Office
+  task, whether a step move, same-step state completion, session approval or
+  Office Done status request, shall be refused before any write when the task
+  has at least one pending approver at completion, counting the destination
+  step's template approvers. The refusal shall be HTTP 409 with code
   `task_approvals_pending` and shall list the pending approvers.
-- **AC-OFFICE-HUMAN-DONE-002.2:** A refused move shall leave the task's step,
+- **AC-OFFICE-HUMAN-DONE-002.2:** A refused human completion shall leave the task's step,
   state, decisions and step-entry actions unchanged, and shall publish no task
   event.
 - **AC-OFFICE-HUMAN-DONE-002.3:** Moves by the workflow engine, agents and
@@ -96,11 +100,17 @@ have not approved.
   approvers shall see a translated message saying that approval is pending, on
   desktop and phone.
 
+- **AC-OFFICE-HUMAN-DONE-002.5:** An approver assignment, template change or
+  approval revocation that takes effect before completion shall be included
+  in that completion decision. A change that follows an accepted completion
+  shall not retroactively undo it. A task that actually remains queued without
+  completing shall retain its existing queued behavior.
+
 ## Exclusions
 
-- A human Done request on a task already on the final step still writes the
-  status directly and does not evaluate the completion gate. That path is
-  unchanged here.
+- The existing generic task completion-criteria exclusion for the Office
+  direct Done status path is retained. Office approver checks are atomic on
+  that path; this exclusion does not exempt it from REQ-OFFICE-HUMAN-DONE-002.
 - The board does not reorder workflow steps or skip steps' entry actions: the
   move runs the final step's entry actions as any human move does. The Review
   and Approval agents do not run for steps the task skips; approvers still

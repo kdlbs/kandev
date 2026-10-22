@@ -1397,6 +1397,9 @@ func (r *Repository) updateTaskTx(
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(stateQuery), task.ID).Scan(&currentState); err != nil {
 		return "", 0, err
 	}
+	if err := r.guardOfficeHumanCompletionTx(ctx, tx, task); err != nil {
+		return "", 0, err
+	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
 		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
 		return "", 0, err
@@ -2244,6 +2247,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	// plain UpdateTask instead. So the caller-supplied task.Position is
 	// always overwritten here (REQ-TASKS-KANBAN-TASK-REORDERING-001.28).
 	if err := r.assignArrivalPosition(ctx, tx, task, targetStepID); err != nil {
+		return false, false, err
+	}
+	limit, err = r.refreshOfficeAdmissionLimitTx(ctx, tx, task, limit)
+	if err != nil {
 		return false, false, err
 	}
 	occupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, task.ID)

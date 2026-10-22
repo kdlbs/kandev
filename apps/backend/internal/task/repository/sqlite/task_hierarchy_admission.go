@@ -47,7 +47,26 @@ func (r *Repository) lockTaskHierarchy(ctx context.Context, tx internaldb.TaskHi
 	if errors.Is(err, internaldb.ErrTaskHierarchyWorkspaceNotFound) {
 		return repoerrors.ErrWorkspaceNotFound
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	intent, human := models.OfficeHumanCompletionIntentFromContext(ctx)
+	if !human {
+		return nil
+	}
+	for _, id := range taskIDs {
+		if id != intent.TaskID {
+			continue
+		}
+		var workspace, workflow, step string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(workspace_id,''),COALESCE(workflow_id,''),COALESCE(workflow_step_id,'') FROM tasks WHERE id=?`), id).Scan(&workspace, &workflow, &step); err != nil {
+			return err
+		}
+		if workspace != intent.ExpectedWorkspaceID || (intent.Kind != officeHumanFieldsIntent && (workflow != intent.ExpectedWorkflowID || step != intent.ExpectedStepID)) {
+			return repoerrors.ErrWorkflowChangeConflict
+		}
+	}
+	return nil
 }
 func (r *Repository) ValidateTaskParent(ctx context.Context, id, parent string, validate hierarchy.TaskParentValidator) error {
 	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())

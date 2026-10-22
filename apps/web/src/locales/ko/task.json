@@ -303,7 +303,7 @@
   "cannotMarkDoneCompletionCriteria": "완료로 표시할 수 없습니다: 작업의 완료 기준이 검증되지 않았습니다",
   "cannotMarkDoneMoveRefused": "완료로 표시할 수 없습니다: 작업을 워크플로의 마지막 단계로 이동할 수 없습니다",
   "movedToFinalStepNotCompleted": "\"{{step}}\"(으)로 이동했습니다. 이 단계에서는 작업이 완료되지 않습니다.",
-  "movedToFinalStepQueued": "\"{{step}}\" 대기열에 추가했습니다. 단계에 여유가 생기면 작업이 완료됩니다.",
+  "movedToFinalStepQueued": "\"{{step}}\" 대기열에 추가했습니다. 여유 공간을 기다리는 중입니다.",
   "cannotPreviewThisFile": "이 파일을 미리 볼 수 없습니다",
   "changeGithubIssue": "GitHub 이슈 변경",
   "changes": "변경 사항",

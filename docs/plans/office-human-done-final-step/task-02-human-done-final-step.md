@@ -51,7 +51,8 @@ back with the reason when the move is refused.
 
 ## Out of scope
 
-- The agent path and the final-step Done gate (kept, AC-OFFICE-HUMAN-DONE-001.4).
+- The agent path remains unchanged. Human final-step atomicity is reopened
+  under the amended Task01; it is no longer excluded from the overall package.
 - The move approver guard itself (Task 01).
 
 ## Acceptance

@@ -176,3 +176,26 @@ func TestMoveTask_OfficeHumanWithoutGuard_Completes(t *testing.T) {
 	}
 	f.mustState(t, "step-done", string(v1.TaskStateCompleted))
 }
+
+// @covers AC-OFFICE-HUMAN-DONE-002.1
+func TestOfficeHumanCompletionLegacyScalarGuard(t *testing.T) {
+	guard := &fakeOfficeApprovalGuard{pending: []PendingApprover{{AgentProfileID: "ceo", Name: "CEO"}}}
+	f, eventTypes := newApprovalGuardFixture(t, true, guard)
+	_, err := f.svc.UpdateTaskStateAsHuman(context.Background(), "task-guard", v1.TaskStateCompleted)
+	var pending *ApprovalsPendingMoveError
+	if !errors.As(err, &pending) {
+		t.Fatalf("legacy scalar error = %v, want pending approvers", err)
+	}
+	f.mustState(t, "step-source", string(v1.TaskStateTODO))
+	if types := eventTypes(); len(types) != 0 {
+		t.Fatalf("refused scalar published %v", types)
+	}
+	guard.pending = nil
+	if _, err := f.svc.UpdateTaskStateAsHuman(context.Background(), "task-guard", v1.TaskStateCompleted); err != nil {
+		t.Fatal(err)
+	}
+	f.mustState(t, "step-source", string(v1.TaskStateCompleted))
+	if len(eventTypes()) != 1 {
+		t.Fatalf("successful scalar events = %v, want one", eventTypes())
+	}
+}

@@ -70,6 +70,9 @@ func (s *DashboardService) UpdateTaskStatusAsHuman(
 		return nil, fmt.Errorf("human done: resolve workflow step: %w", err)
 	}
 	if !hasStep || terminal {
+		if s.humanDoneCompleter != nil {
+			return s.completeHumanDone(ctx, req)
+		}
 		return nil, s.UpdateTaskStatus(ctx, req)
 	}
 	result, err := s.finalStepMover.MoveTaskToFinalStep(ctx, req.TaskID)
@@ -78,5 +81,38 @@ func (s *DashboardService) UpdateTaskStatusAsHuman(
 	}
 	result.Status = dbStateToOfficeStatus(result.State)
 	s.maybeCreateStatusComment(ctx, req)
+	return result, nil
+}
+
+// TaskHumanDoneCompleter applies explicit human Done under task admission.
+type TaskHumanDoneCompleter interface {
+	CompleteOfficeTaskAsHuman(context.Context, string, string) (*FinalStepMoveResult, error)
+}
+
+func (s *DashboardService) SetTaskHumanDoneCompleter(c TaskHumanDoneCompleter) {
+	s.humanDoneCompleter = c
+}
+
+func (s *DashboardService) completeHumanDone(ctx context.Context, req TaskStatusUpdateRequest) (*FinalStepMoveResult, error) {
+	stepID, err := s.repo.GetTaskWorkflowStepID(ctx, req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	preStatus := ""
+	if fields, err := s.repo.GetTaskExecutionFields(ctx, req.TaskID); err == nil && fields != nil {
+		preStatus = fields.State
+	}
+	result, err := s.humanDoneCompleter.CompleteOfficeTaskAsHuman(ctx, req.TaskID, stepID)
+	if err != nil {
+		return nil, err
+	}
+	result.Status = dbStateToOfficeStatus(result.State)
+	commentID := s.maybeCreateStatusComment(ctx, req)
+	if !req.SuppressStatusActivity {
+		s.logTaskStatusChangeActivity(ctx, req)
+	}
+	s.publishTaskStatusChanged(ctx, req)
+	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
+	s.runReactivityForStatus(ctx, req, commentID, preStatus)
 	return result, nil
 }

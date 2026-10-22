@@ -54,13 +54,13 @@ the board's Done drop cannot complete an unapproved task.
 
 ### Out of scope
 
-- The agent Done path, the engine/automation move paths, and the existing
-  final-step Done gate (AC-OFFICE-HUMAN-DONE-001.4, -002.3).
-- Evaluating the completion gate on the final-step PATCH path (exclusion in the
+- The agent Done path and engine/automation move paths (AC-OFFICE-HUMAN-DONE-002.3).
+  The selected review amendment includes human final-step and same-step completion.
+- Adding generic task completion-criteria evaluation on the final-step PATCH path (exclusion in the
   requirement).
 - Making the Done column a disabled drop target.
 
-## Technical approach
+## Original implementation (superseded at review checkpoint)
 
 See the [system design](../../specs/office/system-design/human-done-final-step.md).
 
@@ -151,7 +151,7 @@ toasts match desktop.
 | AC-OFFICE-HUMAN-DONE-001.2 | `TestUpdateTaskStatusAsHuman_FinalStepDoesNotComplete_ReturnsMovedStatus`; `TestUpdateTaskEndpoint_HumanDoneQueued_ReportsQueued`; `TestOfficeFinalStepMover_ReportsWIPQueuedMove`; `use-board-drag-final-step.test.ts` "explains a move queued behind the final step's WIP limit"; `office-status-gate.test.ts` "returns the status and step the backend moved the task to", `finalStepMoveNotice`; `use-board-drag-final-step.test.ts` "settles on a non-done move result and reports the step"; `use-optimistic-task-mutation-settled-status.test.tsx` |
 | AC-OFFICE-HUMAN-DONE-001.3 | `TestUpdateTaskStatusAsHuman_DoneAtWork_MoveRefused_NoStateChangeNoWake`, `TestUpdateTaskEndpoint_HumanDoneRefused_409WithoutStatus`, `TestUpdateTaskEndpoint_HumanDoneRefusedMoveConflict_CarriesCode`, `TestOfficeFinalStepMover_TranslatesRefusals`; `office-status-gate.test.ts` refusals; `use-board-drag-final-step.test.ts` "rolls a refused human done back to the original column" |
 | AC-OFFICE-HUMAN-DONE-001.1 (determinism, overlap) | `TestFinalWorkflowStep_BreaksPositionTiesByID`; `use-board-drag-final-step.test.ts` "does not apply an older move result while a newer drop is still in flight"; `use-optimistic-task-mutation-settled-status.test.tsx` "ignores an older reported status while a newer status write is pending" |
-| AC-OFFICE-HUMAN-DONE-001.4 | `TestUpdateTaskStatusAsHuman_TerminalStep_KeepsDirectGate`; existing `approval_gate_step_test.go` agent cases |
+| AC-OFFICE-HUMAN-DONE-001.4 | Historical direct-gate test and existing agent cases; Task01 must add the amended atomic final-step coverage before completion. |
 
 ## E2E tests
 
@@ -164,7 +164,7 @@ toasts match desktop.
 
 ## Work orders
 
-- [x] [Task 01: Human step moves respect Office approvers](task-01-move-approver-guard.md)
+- [x] [Task 01: Atomic human Office completion](task-01-move-approver-guard.md)
 - [x] [Task 02: Human Done moves the task to the final step](task-02-human-done-final-step.md)
 
 ## Verification results
@@ -196,9 +196,52 @@ Go packages (`office/dashboard`, `office/repository/sqlite`, `task/service`,
   before Task 02 and update them in that work order.
 - The Office DTO has no workflow fields. The final step is resolved on the
   backend only; the UI learns the step name from the PATCH response.
-- The approver guard has a read-then-write window (system design, *Human
-  move approver guard*).
+- The delivered preflight window is closed by the local atomic candidate;
+  local validation passed; independent actual-diff acceptance remains pending.
 
-## Open questions
+## Review checkpoint
 
-None.
+The selected amendment completed independent V6 design review. A later explicit
+request authorizes implementation; delivery still requires actual-diff review.
+
+## Selected review amendment, reviewed for implementation
+
+Task01 implementation and scoped verification are complete for atomic human
+completion across moves, same-step state completion, session approval and
+final-step Office PATCH. Its work order
+now contains the concrete API/file/order/test plan. Atomic implementation is authorized by the later explicit instruction.
+Preserve only existing bounded retries that already repeat authorization;
+other locator races roll back and conflict without new retry policy. The delivered preflight-only implementation does not satisfy the hard
+before-write guarantee; the uncommitted candidate implements this boundary.
+
+Use workspace exclusion and a transaction-local canonical gate. The necessary
+extra task-system boundary change is transfer-only workspace-first complete
+EXCLUSIVE NOWAIT reservation with existing conflict on contention. Real
+PostgreSQL lock-shape probes reject table-before-hierarchy and workspace-first
+SRE NOWAIT cycles; they are not product RED/GREEN. The linked transfer
+requirements/design define the stronger reservation/conflict
+tradeoff, accepted in V6 independent review; preserving blocking SRE is not a safe fallback.
+
+UI-01's existing pending-refusal rendering also covers final-step human Done:
+
+```text
+Before: desktop card / phone picker Todo -> In review
+After:  desktop card / phone picker Todo -> Todo
+        existing localized pending-approver message
+```
+
+No new control, layout, copy key or permissions is proposed. The owning amended
+work order specifies native phone press-and-hold and picker parity and the
+required scalar/final-step success/refusal checks. Bounded HTTP/copy changes
+remain accepted implementation content but have no delivery authorization.
+
+
+## Local validation handoff
+
+The reviewed atomic package is implemented and uncommitted. Causal product
+RED/GREEN, final SQLite/PostgreSQL race controls, scoped Go lint and docs checks
+passed. On the recorded actual-main combined tree, 20 focused API tests,
+localization checks, three desktop and five Pixel-5 phone browser flows passed.
+Task01 records the exact scope and retained limits. Independent parent
+actual-diff acceptance is required before any commit, push or public disposition;
+CI, semantic review and protected merge remain separate delivery gates.

@@ -174,6 +174,18 @@ describe("updateTaskStatusOrTranslateGate refusals", () => {
 });
 
 describe("finalStepMoveNotice", () => {
+  it("reports a queued Done request without promising completion", async () => {
+    updateTaskMock.mockResolvedValueOnce({
+      ok: true,
+      status: "todo",
+      queued: true,
+      workflow_step: { id: "ship", name: "Ship" },
+    });
+    const outcome = await updateTaskStatusOrTranslateGate("t-1", "done");
+    expect(outcome).toEqual({ status: "todo", queued: true, workflowStepName: "Ship" });
+    expect(finalStepMoveNotice("done", outcome)).toBe('Queued for "Ship". Waiting for room.');
+  });
+
   it("is null when the task reached the requested status", () => {
     expect(finalStepMoveNotice("done", { status: "done", workflowStepName: "Done" })).toBeNull();
   });

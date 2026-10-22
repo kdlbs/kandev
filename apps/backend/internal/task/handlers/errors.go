@@ -37,6 +37,11 @@ const (
 const errorDetailKeyErrorCode = "error_code"
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+	var approvalsErr *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvalsErr) || errors.Is(err, service.ErrWorkflowChangeConflict) {
+		handleSelectedMoveError(c, log, err)
+		return
+	}
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
 		return
@@ -349,4 +354,16 @@ func pendingApproversBody(pending []service.PendingApprover) []gin.H {
 		out = append(out, gin.H{"agent_profile_id": p.AgentProfileID, "name": p.Name})
 	}
 	return out
+}
+
+// humanCompletionWSError preserves the existing refusal shapes on state edits.
+func humanCompletionWSError(msg *ws.Message, err error) (*ws.Message, error) {
+	var approvals *service.ApprovalsPendingMoveError
+	if errors.As(err, &approvals) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvals.Error(), map[string]interface{}{"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvals.Pending)})
+	}
+	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), map[string]interface{}{"error_code": moveConflictCodeWorkflowChange})
+	}
+	return nil, nil
 }

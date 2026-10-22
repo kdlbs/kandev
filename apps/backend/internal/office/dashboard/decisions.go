@@ -644,19 +644,7 @@ func (s *DashboardService) pendingApproversAtStep(ctx context.Context, taskID, s
 	if err != nil {
 		return nil, err
 	}
-	approvedBy := make(map[string]struct{}, len(decisions))
-	for _, dec := range decisions {
-		if dec.Decision == models.DecisionApproved {
-			approvedBy[dec.DeciderID] = struct{}{}
-		}
-	}
-	pending := make([]string, 0, len(approvers))
-	for _, ap := range approvers {
-		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
-			pending = append(pending, ap.AgentProfileID)
-		}
-	}
-	return pending, nil
+	return PendingApproverIDs(approvers, decisions), nil
 }
 
 // supersedeAndLog clears all active decisions for a task and emits an
@@ -710,4 +698,26 @@ func (s *DashboardService) resolveDeciderName(
 		return ""
 	}
 	return agent.Name
+}
+
+// PendingApproverIDs compares the canonical slate with active approvals.
+func PendingApproverIDs(approvers []sqlite.Participant, decisions []*workflowmodels.WorkflowStepDecision) []string {
+	approvedBy := make(map[string]struct{}, len(decisions))
+	for _, dec := range decisions {
+		if dec.Decision == models.DecisionApproved {
+			approvedBy[dec.DeciderID] = struct{}{}
+		}
+	}
+	pending := make([]string, 0, len(approvers))
+	for _, ap := range approvers {
+		if _, ok := approvedBy[ap.AgentProfileID]; !ok {
+			pending = append(pending, ap.AgentProfileID)
+		}
+	}
+	return pending
+}
+
+// ResolvePendingApproverNames resolves only display data after admission rollback.
+func (s *DashboardService) ResolvePendingApproverNames(ctx context.Context, ids []string) []PendingApproverDTO {
+	return s.resolvePendingApprovers(ctx, ids)
 }

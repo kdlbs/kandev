@@ -1896,6 +1896,11 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
+	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
+	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+		panic("Office completion gate not configured")
+	}
+	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
 	// Wire the event bus into the dashboard service for status-change events.
 	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
 	services.OfficeSvcs.Channels.SetEventBus(eventBus)

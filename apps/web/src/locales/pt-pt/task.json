@@ -292,7 +292,7 @@
   "cannotMarkDoneCompletionCriteria": "Não é possível marcar como concluída: os critérios de conclusão da tarefa não estão verificados",
   "cannotMarkDoneMoveRefused": "Não é possível marcar como concluída: não foi possível mover a tarefa para o último passo do fluxo de trabalho",
   "movedToFinalStepNotCompleted": "Movida para \"{{step}}\". Este passo não conclui a tarefa.",
-  "movedToFinalStepQueued": "Em fila para \"{{step}}\". A tarefa é concluída quando o passo tiver espaço.",
+  "movedToFinalStepQueued": "Em fila para \"{{step}}\". A aguardar espaço.",
   "cannotPreviewThisFile": "Não é possível pré-visualizar este ficheiro",
   "changeGithubIssue": "Alterar a issue do GitHub",
   "changes": "Alterações",

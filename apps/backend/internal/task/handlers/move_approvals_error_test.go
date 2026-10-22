@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -85,5 +86,104 @@ func TestWSMoveTask_PendingApproversRefuseWithConflictDetails(t *testing.T) {
 	}
 	if repo.task.WorkflowStepID != "work" || repo.task.State != v1.TaskStateTODO {
 		t.Fatalf("refused move wrote task: %+v", repo.task)
+	}
+}
+
+type approvalHTTPTestSteps struct {
+	reorderHandlerStepGetter
+}
+
+func (g *approvalHTTPTestSteps) GetNextStepByPosition(_ context.Context, _ string, position int) (*wfmodels.WorkflowStep, error) {
+	if position == 0 {
+		return g.steps["approval-done"], nil
+	}
+	return nil, nil
+}
+
+func TestHTTPApproveSessionPendingOfficeApproversPreservesReview(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newReorderHandlerTest(t, "approval-review", "approval-task")
+	ctx := context.Background()
+	if _, err := repo.DB().Exec(`UPDATE workspaces SET owner_id = 'approval-owner', office_workflow_id = 'wf-reorder-http' WHERE id = 'ws-reorder-http'`); err != nil {
+		t.Fatal(err)
+	}
+	task, err := repo.GetTask(ctx, "approval-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.State = v1.TaskStateTODO
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB().Exec(`INSERT INTO workflow_steps (id, workflow_id, name, position, complete_task_on_enter, created_at, updated_at) SELECT 'approval-done', workflow_id, 'Done', 1, 1, created_at, updated_at FROM workflow_steps WHERE id = 'approval-review'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "approval-session", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput, IsPrimary: true, ReviewStatus: models.ReviewStatusPending}); err != nil {
+		t.Fatal(err)
+	}
+	h.service.SetWorkflowStepGetter(&approvalHTTPTestSteps{reorderHandlerStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"approval-review": {ID: "approval-review", WorkflowID: task.WorkflowID, Position: 0},
+		"approval-done":   {ID: "approval-done", WorkflowID: task.WorkflowID, Position: 1, CompleteTaskOnEnter: true},
+	}}})
+	h.service.SetOfficeApprovalGuard(pendingMoveApprover{})
+	beforeTask, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSession, err := repo.GetTaskSession(ctx, "approval-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign, foreignRec := requestAs(t, "foreign-user", "approval-session")
+	h.httpApproveSession(foreign)
+	if foreignRec.Code != http.StatusNotFound {
+		t.Fatalf("foreign status=%d: %s", foreignRec.Code, foreignRec.Body)
+	}
+	owner, rec := requestAs(t, "approval-owner", "approval-session")
+	h.httpApproveSession(owner)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("owner status=%d, want409: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Code    string `json:"code"`
+		Pending []struct {
+			AgentID string `json:"agent_profile_id"`
+			Name    string `json:"name"`
+		} `json:"pending_approvers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "task_approvals_pending" || len(body.Pending) != 1 || body.Pending[0].AgentID != "agent-ceo" || body.Pending[0].Name != "CEO" {
+		t.Errorf("pending response=%s", rec.Body)
+	}
+	persisted, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.GetTaskSession(ctx, "approval-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(persisted, beforeTask) || !reflect.DeepEqual(session, beforeSession) {
+		t.Fatalf("refusal wrote task=%+v session=%+v", persisted, session)
+	}
+	// With the same move prerequisites and no pending guard, approval is reachable.
+	h.service.SetOfficeApprovalGuard(nil)
+	allowed, allowedRec := requestAs(t, "approval-owner", "approval-session")
+	h.httpApproveSession(allowed)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("positive control status=%d: %s", allowedRec.Code, allowedRec.Body)
+	}
+	persisted, err = repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err = repo.GetTaskSession(ctx, "approval-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.WorkflowStepID != "approval-done" || persisted.State != v1.TaskStateCompleted || session.ReviewStatus != models.ReviewStatusApproved {
+		t.Fatalf("positive control task=%+v session=%+v", persisted, session)
 	}
 }

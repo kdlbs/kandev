@@ -323,7 +323,7 @@
   "cannotMarkDoneCompletionCriteria": "Ćàńńōţ ḿàŕķ ďōńē: ţĥē ţàśķ'ś ćōḿƥĺēţĩōń ćŕĩţēŕĩà àŕē ńōţ vēŕĩƒĩēď",
   "cannotMarkDoneMoveRefused": "Ćàńńōţ ḿàŕķ ďōńē: ţĥē ţàśķ ćōũĺď ńōţ ƀē ḿōvēď ţō ţĥē ƒĩńàĺ ŵōŕķƒĺōŵ śţēƥ",
   "movedToFinalStepNotCompleted": "Ḿōvēď ţō \"{{step}}\". Ţĥĩś śţēƥ ďōēśń'ţ ćōḿƥĺēţē ţĥē ţàśķ.",
-  "movedToFinalStepQueued": "Ǫũēũēď ƒōŕ \"{{step}}\". Ţĥē ţàśķ ƒĩńĩśĥēś ŵĥēń ţĥē śţēƥ ĥàś ŕōōḿ.",
+  "movedToFinalStepQueued": "Qũēũēď ƒōŕ \"{{step}}\". Ŵàĩţĩńĝ ƒōŕ ŕōōḿ.",
   "cannotPreviewThisFile": "Ćàńńōţ ƥŕēvĩēŵ ţĥĩś ƒĩĺē",
   "changeGithubIssue": "Ćĥàńĝē ĜĩţĤũƀ ĩśśũē",
   "changes": "Ćĥàńĝēś",
