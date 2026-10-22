@@ -13,9 +13,10 @@ UI owns the reusable route-level interaction in
 [Settings Manual Save](../requirements/settings-manual-save.md).
 [ADR 0046](../../../decisions/0046-settings-route-save-coordinator.md) assigns
 coordination to the settings shell and drafts, validation, and API payloads to
-domain contributors. This design records that boundary and the terminal-font
-editor's registration contract. Backend settings schemas, font rendering and
-library loading, and unrelated contributor reconciliation remain outside it.
+domain contributors. This design records that boundary, the terminal-font
+editor's registration contract, and Jira baseline publication. Backend settings
+schemas, font rendering and library loading, and unrelated contributor
+reconciliation remain outside it.
 
 ## Requirement mapping
 
@@ -90,6 +91,37 @@ no PATCH. A failed request leaves the complete draft registered and retryable;
 it does not normalize live raw text or advance the saved baseline. Existing
 route guard and failure presentation continue using the shared contributor.
 
+## Jira configuration read publication
+
+`apps/web/components/jira/jira-settings.tsx` owns the mounted workspace's Jira
+configuration baseline and draft. The existing `getJiraConfig` producer maps
+GET `/api/v1/jira/config?workspace_id=...` 204 responses to null. Initial/OAuth
+loads seed the form; the actual 90-second background read updates configuration
+and auth-health metadata without replacing the draft. Its 90-second interval
+starts after the current form-seeding load settles, preventing background reads
+from superseding initial or OAuth form initialization.
+
+For AC-UI-SETTINGS-MANUAL-SAVE-001.4 and the existing Reset guarantee, reads
+capture their mounted owner, request sequence, and acknowledged-write revision
+before awaiting the API. Only the latest read from that live owner and revision
+may publish. Successful Save and removal advance the revision before admitting
+the canonical POST result or null baseline, fencing every read already started.
+A failed mutation leaves this revision and the accepted baseline unchanged.
+Reads started after an acknowledgement remain eligible, including fresh null
+and auth-health results; transient background errors retain the current baseline.
+
+Write acknowledgements retain their existing semantics: successful writes are
+admitted independently of read sequence. An unchanged submitted form is seeded
+through `configToForm`; edits made during Save remain intact and dirty. Reset
+uses the latest accepted baseline. Read ownership ends on workspace replacement
+or unmount, including StrictMode effect cleanup. This is local response
+publication, with no server ordering, cross-tab guarantee, shared cache, retained
+response history, backend/API change, or credential-policy change.
+
+Desktop and phone reuse the existing Jira settings card and shared Save/Reset
+surface with identical state semantics. The state-only correction introduces no
+new responsive composition, navigation, scrolling, or touch interaction.
+
 ## Desktop and phone
 
 `/settings/preferences/terminal-editors` reuses the existing terminal cards and
@@ -110,6 +142,7 @@ rendered action, store, and PATCH payloads; no new telemetry is needed.
 
 ## Implementation records
 
+- [Jira baseline freshness repair](../../../plans/jira-settings-refresh-ordering/plan.md)
 - [Original rollout](../../../plans/settings-manual-save/plan.md)
 - [Save-surface refinement](../../../plans/settings-save-action-redesign/plan.md)
 - [Custom-font draft repair](../../../plans/preserve-custom-terminal-font/plan.md)
