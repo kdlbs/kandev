@@ -42,6 +42,12 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
+	pinCanonicalWorktreeIdentities(req, env)
+	if len(req.Repositories) > 0 {
+		specs = req.Repositories
+	} else if spec, ok := topLevelLaunchRepoSpec(req); ok {
+		specs = []RepoSpec{spec}
+	}
 	for _, spec := range specs {
 		if got := canonicalInventoryMatches(spec, rows, req.UseWorktree); got != 1 {
 			return fmt.Errorf("%w: canonical workspace repository inventory has no matching entry for repository %q branch %q",
@@ -358,6 +364,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if !req.UseWorktree {
 		return
 	}
+	pinCanonicalWorktreeIdentities(req, env)
 	repoSpecs := req.Repositories
 	usingTopLevelRepo := false
 	if len(repoSpecs) == 0 {
