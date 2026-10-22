@@ -1,112 +1,20 @@
-import type { ReactNode } from "react";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
-import { ToastProvider } from "@/components/toast-provider";
 import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
-import { toKanbanTask } from "@/lib/kanban/map-task";
-import type { AppState } from "@/lib/state/store";
-import type { StoreApi } from "zustand";
-import { useCrossStepMove } from "./use-swimlane-kanban-dnd";
-
-const WORKFLOW_ID = "workflow-a";
-const ORIGINAL_SESSION = "session-original";
-const STALE_STEP = "stale-stage";
-const STALE_UPDATED_AT = "2026-10-22T09:00:00Z";
-const wireTask = {
-  task_id: "task-a",
-  workflow_id: WORKFLOW_ID,
-  workflow_step_id: "source",
-  title: "Original",
-  description: "",
-  state: "CREATED",
-  position: 7,
-  primary_session_id: ORIGINAL_SESSION,
-  created_at: "2026-10-22T10:00:00Z",
-  updated_at: "2026-10-22T10:00:00Z",
-};
-const original = toKanbanTask(wireTask);
-const sibling = { ...original, id: "task-b", title: "Sibling" };
-const snapshot = {
-  workflowId: WORKFLOW_ID,
-  workflowName: "Workflow",
-  steps: [],
-  tasks: [original, sibling],
-};
-function Wrapper({ children }: { children: ReactNode }) {
-  return (
-    <StateProvider
-      initialState={{
-        kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [original, sibling] },
-        kanbanMulti: { snapshots: { [WORKFLOW_ID]: snapshot }, isLoading: false },
-      }}
-    >
-      <ToastProvider>{children}</ToastProvider>
-    </StateProvider>
-  );
-}
-function current(store: StoreApi<AppState>, taskId = "task-a") {
-  return store.getState().kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === taskId);
-}
-function update(store: StoreApi<AppState>, patch: Record<string, unknown>) {
-  act(() =>
-    registerTasksHandlers(store)["task.updated"]!({
-      id: "authoritative",
-      type: "notification",
-      action: "task.updated",
-      payload: { ...wireTask, ...patch },
-    }),
-  );
-}
-function setup() {
-  const responses: Array<(response: Response) => void> = [];
-  const requests: unknown[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn((value: string, init?: RequestInit) => {
-      expect(new URL(value, "http://localhost").pathname).toMatch(
-        /\/api\/v1\/tasks\/task-[ab]\/move$/,
-      );
-      expect(init?.method).toBe("POST");
-      requests.push(JSON.parse(init?.body as string));
-      return new Promise<Response>((resolve) => responses.push(resolve));
-    }),
-  );
-  const onMoveError = vi.fn();
-  const hook = renderHook(
-    (props: { workflowId: string; onError: typeof onMoveError }) => ({
-      store: useAppStoreApi(),
-      move: useCrossStepMove(props.workflowId, props.onError),
-    }),
-    { wrapper: Wrapper, initialProps: { workflowId: WORKFLOW_ID, onError: onMoveError } },
-  );
-  function start(task = original, target = "optimistic") {
-    let pending!: Promise<void>;
-    act(() => {
-      pending = hook.result.current.move(task.id, target, task);
-    });
-    return pending;
-  }
-  async function settle(pending: Promise<void>, index = 0, success = false) {
-    await act(async () => {
-      responses[index](
-        new Response(JSON.stringify(success ? {} : { error: "Original move rejected" }), {
-          status: success ? 200 : 500,
-        }),
-      );
-      await pending;
-    });
-  }
-  return {
-    ...hook,
-    start,
-    settle,
-    requests,
-    responses,
-    onMoveError,
-    store: hook.result.current.store,
-  };
-}
+import {
+  setup,
+  current,
+  update,
+  WORKFLOW_ID,
+  ORIGINAL_SESSION,
+  STALE_STEP,
+  STALE_UPDATED_AT,
+  original,
+  sibling,
+  wireTask,
+} from "./use-cross-step-move.test-helpers";
+const NEWER_STEP = "newer-step";
+const OLDER_FIRST = "older-first";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -486,5 +394,195 @@ it("does not claim an unchanged task when a sibling snapshot row is replaced", a
   await h.settle(pending);
   expect(current(h.store)).toMatchObject({ workflowStepId: "source", position: 7 });
   expect(current(h.store, "task-b")).toMatchObject({ title: "Snapshot sibling", position: 24 });
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+it.each([OLDER_FIRST, "newer-first"])(
+  "returns to the source after both admitted moves fail: %s",
+  async (order) => {
+    const h = setup();
+    const older = h.start();
+    const newer = h.start(current(h.store)!, NEWER_STEP);
+    expect(current(h.store)?.workflowStepId).toBe(NEWER_STEP);
+    if (order === OLDER_FIRST) {
+      await h.settle(older, 0);
+      await h.settle(newer, 1);
+    } else {
+      await h.settle(newer, 1);
+      await h.settle(older, 0);
+    }
+    expect(h.onMoveError).toHaveBeenCalledTimes(2);
+    expect(current(h.store)).toMatchObject({ workflowStepId: "source", position: 7 });
+    expect(h.store.getState().taskOverview.reads).toEqual({});
+  },
+);
+
+it.each([OLDER_FIRST, "newer-first"])(
+  "preserves accepted later stage across both failed moves: %s",
+  async (order) => {
+    const h = setup();
+    const older = h.start();
+    const newer = h.start(current(h.store)!, NEWER_STEP);
+    update(h.store, { workflow_step_id: NEWER_STEP, title: "Accepted stage", position: 35 });
+    if (order === OLDER_FIRST) {
+      await h.settle(older, 0);
+      await h.settle(newer, 1);
+    } else {
+      await h.settle(newer, 1);
+      await h.settle(older, 0);
+    }
+    expect(current(h.store)).toMatchObject({
+      workflowStepId: NEWER_STEP,
+      title: "Accepted stage",
+      position: 35,
+    });
+    expect(h.onMoveError).toHaveBeenCalledTimes(2);
+    expect(h.store.getState().taskOverview.reads).toEqual({});
+  },
+);
+
+it("does not chain through an accepted identical stage before the next move", async () => {
+  const h = setup();
+  const older = h.start();
+  update(h.store, { workflow_step_id: "optimistic", title: "Accepted baseline", position: 36 });
+  const newer = h.start(current(h.store)!, NEWER_STEP);
+  await h.settle(newer, 1);
+  await h.settle(older, 0);
+  expect(current(h.store)).toMatchObject({
+    workflowStepId: "optimistic",
+    title: "Accepted baseline",
+    position: 36,
+  });
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+it.each([
+  [2, 1, 0],
+  [0, 1, 2],
+  [1, 2, 0],
+])("removes failed intermediate stages across three admitted moves: %j", async (...order) => {
+  const h = setup();
+  const pending = [h.start()];
+  pending.push(h.start(current(h.store)!, "second-step"));
+  pending.push(h.start(current(h.store)!, "third-step"));
+  for (const index of order) await h.settle(pending[index], index);
+  expect(current(h.store)?.workflowStepId).toBe("source");
+  expect(h.onMoveError).toHaveBeenCalledTimes(3);
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+it("never re-arms ownership after bounded overflow invalidates the chain", async () => {
+  const h = setup();
+  const older = h.start();
+  const oldRead = Object.keys(h.store.getState().taskOverview.reads)[0];
+  const newer = h.start(current(h.store)!, NEWER_STEP);
+  act(() =>
+    h.store.setState((state) => ({
+      taskOverview: {
+        ...state.taskOverview,
+        reads: {
+          ...state.taskOverview.reads,
+          [oldRead]: { ...state.taskOverview.reads[oldRead], bytes: 1024 * 1024 },
+        },
+      },
+    })),
+  );
+  update(h.store, { task_id: "task-b", title: "Overflow sibling" });
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+  await h.settle(newer, 1);
+  await h.settle(older, 0);
+  expect(current(h.store)?.workflowStepId).toBe(NEWER_STEP);
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+it("retiring an old request cannot remove another pending chain after a successful move", async () => {
+  const h = setup();
+  const older = h.start();
+  const accepted = h.start(current(h.store)!, "accepted-step");
+  await h.settle(accepted, 1, true);
+  const third = h.start(current(h.store)!, "third-step");
+  await h.settle(older, 0);
+  const fourth = h.start(current(h.store)!, "fourth-step");
+  await h.settle(fourth, 3);
+  await h.settle(third, 2);
+  expect(current(h.store)?.workflowStepId).toBe("accepted-step");
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+it.each(["after-optimism", "before-optimism", "stale-response"])(
+  "admits only current HTTP snapshot stage evidence: %s",
+  async (schedule) => {
+    const h = setup(true);
+    let pending!: Promise<void>;
+    const enable = () => {
+      const live = h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID];
+      act(() =>
+        h.store.getState().setWorkflowSnapshot(WORKFLOW_ID, { ...live, isPlaceholder: true }),
+      );
+      h.rerender({ workflowId: WORKFLOW_ID, onError: h.onMoveError, snapshotEnabled: true });
+    };
+    if (schedule === "before-optimism") {
+      enable();
+      await waitFor(() => expect(h.snapshotResponses).toHaveLength(1));
+      pending = h.start();
+    } else {
+      pending = h.start();
+      enable();
+    }
+    try {
+      await waitFor(() => expect(h.snapshotResponses).toHaveLength(1));
+      await act(async () =>
+        h.snapshotResponses[0](
+          new Response(
+            JSON.stringify({
+              workflow: { id: WORKFLOW_ID, name: "Workflow" },
+              steps: ["source", "optimistic"].map((id, position) => ({
+                id,
+                name: id,
+                color: null,
+                position,
+              })),
+              tasks: [
+                {
+                  ...wireTask,
+                  workflow_step_id: "optimistic",
+                  ...(schedule === "stale-response"
+                    ? {
+                        updated_at: STALE_UPDATED_AT,
+                        status_summary: { revision: 3, updated_at: "2026-10-22T11:00:00Z" },
+                      }
+                    : {}),
+                },
+                { ...wireTask, task_id: "task-b" },
+              ],
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      await waitFor(() =>
+        expect(h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID].steps).toHaveLength(2),
+      );
+      await h.settle(pending);
+      expect(current(h.store)?.workflowStepId).toBe(
+        schedule === "after-optimism" ? "optimistic" : "source",
+      );
+      if (schedule === "stale-response") expect(current(h.store)?.statusSummary?.revision).toBe(3);
+      expect(h.store.getState().taskOverview.reads).toEqual({});
+    } finally {
+      await h.settle(pending);
+    }
+  },
+);
+
+it("cannot resurrect a predecessor journal that was already closed", async () => {
+  const h = setup();
+  const older = h.start();
+  const oldRead = Object.keys(h.store.getState().taskOverview.reads)[0];
+  const newer = h.start(current(h.store)!, NEWER_STEP);
+  act(() => h.store.getState().finishTaskOverviewRead(oldRead));
+  await h.settle(newer, 1);
+  await h.settle(older, 0);
+  expect(current(h.store)?.workflowStepId).toBe("optimistic");
   expect(h.store.getState().taskOverview.reads).toEqual({});
 });

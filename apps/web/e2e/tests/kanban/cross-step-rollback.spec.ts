@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import { expect } from "../../fixtures/test-base";
-import { test, proveRollback, withRollbackFixture } from "../../helpers/cross-step-rollback";
+import {
+  test,
+  proveRejectedMoveChain,
+  proveRollback,
+  withRollbackFixture,
+} from "../../helpers/cross-step-rollback";
 
 // @covers AC-TASKS-KANBAN-TASK-REORDERING-001.13, AC-TASKS-KANBAN-TASK-REORDERING-001.28
 for (const sameTarget of [false, true]) {
@@ -54,3 +59,14 @@ test("disposable rollback fixture cleans up after a callback failure", async ({
     (await apiClient.listWorkspaces()).workspaces.some((workspace) => workspace.id === workspaceId),
   ).toBe(false);
 });
+
+for (const newerFirst of [true, false]) {
+  test(`two rejected desktop drag moves return to source: ${newerFirst ? "newer-first" : "older-first"}`, async ({
+    page,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    await proveRejectedMoveChain({ page, apiClient, backend, seedData }, false, newerFirst);
+  });
+}

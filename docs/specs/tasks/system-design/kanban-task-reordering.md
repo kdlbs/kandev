@@ -29,10 +29,8 @@ covering ordering, arrivals and client reconciliation.
 
 ## Prior art
 
-External prior-art discovery yielded no board-ordering guidance: the wiki
-index returned product-method notes, direct vault reads were unavailable, and
-the cross-vendor documentation tool was unavailable. No external position is
-overridden.
+External discovery supplied no board-ordering guidance. No external position
+is overridden.
 
 **In-repo prior art, which is the load-bearing one.** Kandev has already solved
 this problem once, for the session message queue:
@@ -357,29 +355,32 @@ phone card-menu movement. Read the original task from the captured workflow
 snapshot; absent tasks and same-step targets do not submit. Do not compute or
 send an arrival position.
 
-After the optimistic write, open an existing bounded task-overview change
-journal (`beginTaskOverviewRead`). While the request is pending, accepted task
-events and replacement snapshot rows enter that journal, including equal stage
-values. Snapshot rows retained by identity do not assert another task's stage.
-Freshness rules reject stale stage fields; independently fresh status
-summaries remain admissible. Omitted WS stage fields do not assert a stage.
-On failure, rollback
-only if the journal still belongs to the current scope, has no stage write or
-deletion for this task, and the task still occupies the captured workflow
-snapshot and target stage. A newer accepted stage projection owns its stage even
-when equal to the optimistic target. This uses accepted client evidence, without
-assuming timestamp or transport ordering. Other tasks and partial unrelated
-fields do not revoke ownership. The rollback changes only the stage in the
-current snapshot. Track membership until settlement so a removed and reinserted
-row cannot reclaim ownership. Close the journal and membership subscription in
-`finally`; missing journals (scope replacement, recovery or bounded overflow)
-fail closed. Keep the original
-request and error callback's task/session identity after rerenders.
+After each optimistic write, open the existing bounded task-overview journal.
+Accepted events and replacement snapshot rows assert stages, including equal
+values; identity-retained sibling rows and omitted WS fields do not. Existing
+freshness rules discard stale task fields but admit independently fresh status
+summaries. Successful HTTP read completion journals original admitted stages
+despite canonical identity reuse; stage fields superseded in flight confer no
+authority. Cached-row retention alone asserts nothing. Rollback requires a
+current-scope journal with no accepted stage or
+deletion, retained membership, and the captured workflow/workspace/target.
 
-The existing phone focused-column and visible card-menu composition is unchanged.
-Regression tests exercise the real store, action, HTTP client and registered
-`task.updated` handler with a deferred fetch, plus desktop drag and phone taps
-through the shipped board against disposable managed browser fixtures.
+Pending writes may link only when the predecessor still owns the current stage
+before the next optimism. Rejection skips failed linked intermediates and
+restores the preceding pending/successful stage or original baseline. After
+removing its own optimism, it may re-arm a pending predecessor's still-valid
+journal. Never re-arm missing, overflowed or out-of-scope evidence. Successful
+moves and external stages remain authoritative. A store-scoped weak map tracks
+pending requests. Release records, journals and subscriptions at settlement,
+including after unmount; add no revisions, ordering guarantee or move suppression.
+
+Change only the current row's stage; preserve positions and unrelated fields.
+Membership departure is sticky through reinsertion. Missing journals fail closed.
+Keep captured request/error task and session identity across rerenders.
+
+Phone composition is unchanged. Regression tests use real providers, HTTP/WS
+producers and deferred fetches, plus native desktop drag and phone taps against
+disposable managed browser fixtures.
 
 ## Ordering keys and the promotion comparators
 

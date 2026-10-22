@@ -136,24 +136,28 @@ async function showStep(page: Page, stepIndex: number, mobile: boolean) {
   await expect(page.getByTestId("mobile-board-navigator-drawer")).toHaveCount(0);
 }
 
-async function startMove(page: Page, owned: Owned, mobile: boolean) {
+async function startMove(page: Page, owned: Owned, mobile: boolean, targetIndex = 1) {
   const card = page.getByTestId(`task-card-${owned.taskId}`);
   await expect(card).toHaveCount(1);
   await expect(card).toBeVisible();
   if (mobile) {
     await card.getByRole("button", { name: "More options" }).tap();
     await page.getByTestId("task-context-move-to").tap();
-    await page.getByTestId(`task-context-step-${owned.steps[1]}`).tap();
+    await page.getByTestId(`task-context-step-${owned.steps[targetIndex]}`).tap();
     return;
   }
   const from = await settledBoundingBox(card);
-  const to = await settledBoundingBox(page.getByTestId(`kanban-column-${owned.steps[1]}`));
   const x = from.x + from.width / 2;
   const y = from.y + from.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 12, y, { steps: 3 });
-  await page.mouse.move(to.x + to.width / 2, to.y + 100, { steps: 12 });
+  const to = await settledBoundingBox(
+    page
+      .getByTestId(`kanban-column-${owned.steps[targetIndex]}`)
+      .getByRole("heading", { level: 2 }),
+  );
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -251,6 +255,85 @@ export async function proveRollback(
         ).toBe(true);
     } finally {
       if (held) await held.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+      await page.unroute(movePath, routeHandler);
+      await page.goto("about:blank");
+    }
+  });
+}
+
+export async function proveRejectedMoveChain(
+  inputs: Inputs & { page: Page },
+  mobile: boolean,
+  newerFirst: boolean,
+) {
+  const { page, backend, apiClient } = inputs;
+  await withRollbackFixture(inputs, async (owned) => {
+    await page.addInitScript(
+      ({ port }) => {
+        localStorage.setItem("kandev.onboarding.completed", "true");
+        window.__KANDEV_API_PORT = port;
+      },
+      { port: String(backend.port) },
+    );
+    await page.goto(`${backend.frontendUrl}/?workflowId=${owned.workflowId}`);
+    await expect(page.getByTestId("kanban-board")).toBeVisible();
+    const held: Array<Route | undefined> = [];
+    const movePath = `**/api/v1/tasks/${owned.taskId}/move`;
+    const routeHandler = async (route: Route) => {
+      held.push(route);
+    };
+    await page.route(movePath, routeHandler);
+    try {
+      await startMove(page, owned, mobile);
+      await expect.poll(() => held.length).toBe(1);
+      await showStep(page, 1, mobile);
+      await expect(
+        page
+          .getByTestId(`kanban-column-${owned.steps[1]}`)
+          .getByTestId(`task-card-${owned.taskId}`),
+      ).toBeVisible();
+      await startMove(page, owned, mobile, 2);
+      await expect.poll(() => held.length).toBe(2);
+      for (const [index, route] of held.entries())
+        expect(route!.request().postDataJSON()).toEqual({
+          workflow_id: owned.workflowId,
+          workflow_step_id: owned.steps[index + 1],
+        });
+      for (const index of newerFirst ? [1, 0] : [0, 1]) {
+        const route = held[index]!;
+        const failed = page.waitForResponse(
+          (response) =>
+            response.url().endsWith(`/tasks/${owned.taskId}/move`) &&
+            response.status() === 500 &&
+            response.request().postDataJSON().workflow_step_id === owned.steps[index + 1],
+        );
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Move rejected" }),
+        });
+        held[index] = undefined;
+        await failed;
+        await expect(page.getByRole("alertdialog")).toBeVisible();
+      }
+      const dismiss = page.getByRole("button", { name: "Dismiss", exact: true });
+      if (mobile) await dismiss.tap();
+      else await dismiss.click();
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await showStep(page, 0, mobile);
+      const restored = page
+        .getByTestId(`kanban-column-${owned.steps[0]}`)
+        .getByTestId(`task-card-${owned.taskId}`);
+      await expect(restored).toBeVisible();
+      await expect(restored).toBeInViewport();
+      expect((await apiClient.getTask(owned.taskId)).workflow_step_id).toBe(owned.steps[0]);
+    } catch (error) {
+      await page.screenshot({ path: test.info().outputPath("rollback-chain-before-cleanup.png") });
+      throw error;
+    } finally {
+      for (const route of held)
+        if (route)
+          await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
       await page.unroute(movePath, routeHandler);
       await page.goto("about:blank");
     }

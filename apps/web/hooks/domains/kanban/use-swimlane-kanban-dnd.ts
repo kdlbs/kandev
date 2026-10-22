@@ -15,7 +15,7 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isOrphanMoveTarget } from "@/components/kanban/swimlane-orphan-display";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { beginCrossStepMove } from "./cross-step-move-ownership";
 import { classifyDrop } from "@/lib/kanban/drop-classification";
 import { useStepReorder } from "@/hooks/domains/kanban/use-step-reorder";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
@@ -35,48 +35,6 @@ export type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
-type CrossStepMoveOwnership = {
-  workflowId: string;
-  taskId: string;
-  targetStepId: string;
-  originalStepId: string;
-  readId: string;
-  retained: boolean;
-  workspaceId?: string;
-};
-
-function restoreOwnedStep(
-  store: ReturnType<typeof useAppStoreApi>,
-  ownership: CrossStepMoveOwnership,
-) {
-  const { workflowId, taskId, targetStepId, originalStepId, readId, retained, workspaceId } =
-    ownership;
-  const current = store.getState();
-  const snapshot = current.kanbanMulti.snapshots[workflowId];
-  const task = snapshot?.tasks.find((item) => item.id === taskId);
-  const read = current.taskOverview.reads[readId];
-  const change = read?.changes[taskId];
-  // Accepted stage writes supersede this write even when their stage is equal.
-  // Missing journals and departed membership cannot regain rollback ownership.
-  if (
-    !retained ||
-    !snapshot ||
-    task?.workflowId !== workflowId ||
-    task.workflowStepId !== targetStepId ||
-    task.workspaceId !== workspaceId ||
-    read?.scope !== current.taskOverview.scope ||
-    change === null ||
-    (change !== undefined && Object.hasOwn(change, "workflowStepId"))
-  )
-    return;
-  current.setWorkflowSnapshot(workflowId, {
-    ...snapshot,
-    tasks: snapshot.tasks.map((item) =>
-      item.id === taskId ? { ...item, workflowStepId: originalStepId } : item,
-    ),
-  });
-}
-
 export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskError) => void) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
@@ -88,46 +46,19 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
       const originalTask = snapshot?.tasks.find((item) => item.id === taskId);
       if (!snapshot || !originalTask || originalTask.workflowStepId === targetStepId) return;
 
-      const originalStepId = originalTask.workflowStepId;
-
-      // The server always computes a cross-step arrival's position itself
-      // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: it sorts last in the
-      // destination), so there is no locally-computed position to apply
-      // here — the eventual task.updated/task.moved event carries the real
-      // one. Until then the card just needs to show the right step.
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId } : t,
-        ),
-      });
-
-      const ownership: CrossStepMoveOwnership = {
-        workflowId,
-        taskId,
-        targetStepId,
-        originalStepId,
-        readId: store.getState().beginTaskOverviewRead(),
-        retained: true,
-        workspaceId: originalTask.workspaceId,
-      };
-      const unsubscribe = store.subscribe((next) => {
-        if (!next.kanbanMulti.snapshots[workflowId]?.tasks.some((item) => item.id === taskId)) {
-          ownership.retained = false;
-        }
-      });
+      const ownership = beginCrossStepMove(store, workflowId, taskId, targetStepId, originalTask);
       try {
         await moveTaskById(taskId, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
         });
+        ownership.succeed();
       } catch (error) {
-        restoreOwnedStep(store, ownership);
+        ownership.rollback();
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
       } finally {
-        unsubscribe();
-        store.getState().finishTaskOverviewRead(ownership.readId);
+        ownership.dispose();
       }
     },
     [workflowId, store, moveTaskById, onMoveError],

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-22
-status: done
+status: completed
 requirements:
   - REQ-TASKS-KANBAN-TASK-REORDERING-001
 system_design:
@@ -124,3 +124,34 @@ waits for the actual authoritative move event and explicitly deletes its owned
 executor profile. Public guidance is limited to cross-step failures.
 Detailed RED/GREEN and final local receipts are in Task 01. Delivery still
 requires fresh exact-head checks/reviews and current-base combined validation.
+
+
+## Pending-request rollback chain correction
+
+Parent real-provider proof found that two admitted same-task moves, both rejected,
+leave an optimistic intermediate stage. The newer-first schedule passed with the
+original producer and regresses with the journal ownership guard. Keep both native
+moves admitted. Link only pending producer writes that still own the displayed
+stage before the next write. On rejection, skip failed linked writes, preserve
+successful or accepted external stages, and re-arm a still-valid predecessor
+journal after removing the rejected optimism. Never re-arm missing/overflowed or
+out-of-scope evidence. This is bounded request-local ownership, with all records,
+journals and subscriptions released at settlement; no global revision framework.
+Add both rejection orders, later accepted/successful-stage controls and lifetime
+coverage before the production correction. Original a8cc delivery evidence is
+historical after the next normal-hook commit. No CI waiter currently active.
+
+
+Real HTTP producer RED also confirms equal-stage response identity reuse hides
+admission. Extend existing read completion with optional original admitted rows;
+record stage-only claims after existing freshness/in-flight guards, despite
+canonical reuse, for the board snapshot readers and successful sidebar reads.
+Cached retention, cancellation/finally closure and mobile context-switch rejection
+remain unchanged. Test pre-optimism shadowed reads and stale responses as controls.
+
+
+Pending-chain local implementation is complete: both rejection orders pass via
+actual desktop drags and phone card-menu taps (5 desktop and 4 phone cases,
+retries zero). Shared unit and causal HTTP/sidebar controls pass; see Task 01.
+Final exact-head delivery evidence remains external until fresh remote reviews,
+checks and current-base combined validation complete under the retained grant.

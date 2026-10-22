@@ -540,9 +540,9 @@ export const createKanbanSlice: (
       }
       draft.workflows.items = reordered;
     }),
-  setWorkflowSnapshot: (workflowId, data) =>
+  setWorkflowSnapshot: (workflowId, data, options) =>
     set((draft) => {
-      if (draft.taskOverview)
+      if (draft.taskOverview && !options?.stageClaimsReconciled)
         draft.taskOverview = journalSnapshotTaskStages(
           draft.taskOverview,
           data.tasks,

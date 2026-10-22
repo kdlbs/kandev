@@ -417,7 +417,11 @@ export type KanbanSliceActions = {
   ) => void;
   releaseTaskRemoval: (token: string) => void;
   advanceTaskNavigationRevision: () => void;
-  setWorkflowSnapshot: (workflowId: string, data: WorkflowSnapshotData) => void;
+  setWorkflowSnapshot: (
+    workflowId: string,
+    data: WorkflowSnapshotData,
+    options?: { stageClaimsReconciled?: boolean },
+  ) => void;
   setKanbanMultiLoading: (loading: boolean) => void;
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;

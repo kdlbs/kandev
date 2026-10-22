@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-current-step"
 title: "Preserve current step after a superseded cross-step move"
-status: done
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -90,7 +90,13 @@ per-check outcomes, actual diff, clean HEAD and resource closure for the parent.
 ## Files likely touched
 
 - `apps/web/hooks/domains/kanban/use-swimlane-kanban-dnd.ts`
+- `apps/web/hooks/domains/kanban/{cross-step-move-ownership,workflow-snapshot-overviews}.ts`
 - `apps/web/hooks/domains/kanban/use-cross-step-move.test.tsx`
+- `apps/web/hooks/domains/kanban/use-cross-step-move.test-helpers.tsx`
+- `apps/web/hooks/domains/kanban/use-all-workflow-snapshots.ts`
+- `apps/web/hooks/use-workflow-snapshot.ts`
+- `apps/web/lib/sidebar/sidebar-task-page-cache{,.test}.ts`
+- `apps/web/lib/state/slices/task-overview{,-types}.ts`
 - Existing `use-cross-step-move.test.ts` and `use-swimlane-kanban-dnd.test.ts` fixtures
 - `docs/public/tasks-and-workflows.md`
 - `apps/web/e2e/helpers/cross-step-rollback.ts`
@@ -214,3 +220,52 @@ head results, not final-head signoff. Fresh final-head reviews/checks, exact
 current-base combined validation and protected merge remain delivery gates.
 Current base advanced by a disjoint agents planning package; its actual patch
 was inspected. Do not infer publication or merge success from these local results.
+
+
+## Pending-request chain results
+
+- Parent real-provider RED confirmed both rejection orders. Replaying the
+  published producer through two actual desktop pointer drags also failed at
+  the final Source-card assertion after both exact stage-only POSTs returned
+  HTTP 500. The producer was restored byte-for-byte with unchanged HEAD and
+  full raw source status. Earlier pointer-target helper failures did not reach
+  the second request and are not causal RED evidence.
+- Request-local links now skip rejected intermediate optimism and restore a
+  still-valid predecessor claim. Later accepted WS/snapshot stages, successful
+  moves, independent tasks, original error identity, membership/scope departure
+  and journal overflow remain protected. No admitted move is suppressed.
+- Real HTTP producer RED exposed equal-row identity reuse losing stage admission.
+  Existing read completion now receives original admitted rows and records only
+  accepted stage claims. Stale task fields and in-flight superseded stages do
+  not gain authority; independent fresh status summaries still merge. The
+  existing legacy lifecycle backfill cannot inflate a stale HTTP timestamp into
+  fresh stage evidence. Successful sidebar reads use the same boundary; cached
+  retention and finally/cancellation closure assert no stage.
+- Shared GREEN before the sidebar control: 600 tests across 70 files. Final
+  causal and sidebar producer
+  control: 57 tests across two files passed, including equal HTTP admission,
+  cache reuse and rejected stale rows. The new test helper is fully typed and
+  keeps the permanent causal test below the repository line limit.
+- Fresh production build and native browser GREEN: desktop 5/5, phone 4/4,
+  one worker/shard and retries zero. Both rejection orders pass through real
+  desktop drags and phone card-menu taps. Existing authoritative different/equal
+  stage cases and injected fixture-failure cleanup pass. Phone screenshot
+  inspected; no physical-device or zero-flake claim.
+- Final focused run: 556 tests across 63 files passed after the typed helper
+  and sidebar control edits. The Kanban slice file additionally passed
+  all 16 tests. Final ESLint, i18n/full ratchet, 63 public-doc tests,
+  54 public pages, 396-decision/1707-spec catalog, full specification lint,
+  documentation-coverage preflight and whitespace checks all passed.
+- Final Node 24 typecheck and rich-output catalog passed at the documented 8 GiB
+  cap after fixture-type corrections. A root pnpm invocation selected the wrong
+  package-manager context; the documented apps/web invocation then passed.
+- Current-main incoming production/docs patches were inspected, including VCS
+  dialog ownership, parent workflow effect and SSH diagnostics. No Kanban owning
+  file overlap was found. Fresh exact final-head/current-base frozen-install
+  combined proof, normal-hook receipt, remote checks/reviews, assets and merge
+  evidence remain external delivery gates, not implied by historical results.
+
+The first pending-chain commit attempt failed its new-code i18n hook because the
+extracted test-helper suffix is not excluded by that scanner. Fixture-only title
+values now have explicit non-product-copy exemption comments. No hook was bypassed
+and no product copy was introduced.
