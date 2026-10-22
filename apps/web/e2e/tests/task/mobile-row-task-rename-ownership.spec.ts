@@ -7,8 +7,9 @@ for (const tablet of [false, true]) {
     testPage,
     apiClient,
     seedData,
+    backend,
   }, testInfo) => {
-    await checkRenameOwnership({ testPage, apiClient, seedData }, testInfo, {
+    await checkRenameOwnership({ testPage, apiClient, seedData, backend }, testInfo, {
       entry: "commands",
       sameTask: true,
       touch: true,

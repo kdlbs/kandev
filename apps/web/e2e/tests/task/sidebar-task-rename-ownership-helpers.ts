@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import type { BackendContext } from "../../fixtures/backend";
+import { withIsolatedRenameFixture } from "./sidebar-task-rename-fixture";
 
 type Scenario = {
   entry: "sidebar" | "commands";
@@ -11,12 +12,6 @@ type Scenario = {
   tablet?: boolean;
   failure?: boolean;
 };
-
-function repositorySnapshot(repositoryPath: string) {
-  return ["rev-parse HEAD", "status --porcelain"].map((command) =>
-    execFileSync("git", ["-C", repositoryPath, ...command.split(" ")], { encoding: "utf8" }),
-  );
-}
 
 async function activate(control: Locator, touch?: boolean) {
   if (touch) await control.tap();
@@ -43,12 +38,21 @@ async function openRename(page: Page, title: string, scenario: Scenario) {
 
 // Real mounted caller, real backend; only the original PATCH transport is held.
 export async function checkRenameOwnership(
+  fixtures: { testPage: Page; apiClient: ApiClient; seedData: SeedData; backend: BackendContext },
+  testInfo: TestInfo,
+  scenario: Scenario,
+) {
+  await withIsolatedRenameFixture(fixtures, async (seedData) => {
+    await checkOwnedRenameOwnership({ ...fixtures, seedData }, testInfo, scenario);
+  });
+}
+
+async function checkOwnedRenameOwnership(
   fixtures: { testPage: Page; apiClient: ApiClient; seedData: SeedData },
   testInfo: TestInfo,
   scenario: Scenario,
 ) {
   const { testPage: page, apiClient, seedData } = fixtures;
-  const before = repositorySnapshot(seedData.repositoryPath);
   const options = {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
@@ -155,6 +159,5 @@ export async function checkRenameOwnership(
   } finally {
     release();
     await page.unrouteAll({ behavior: "wait" });
-    expect(repositorySnapshot(seedData.repositoryPath)).toEqual(before);
   }
 }

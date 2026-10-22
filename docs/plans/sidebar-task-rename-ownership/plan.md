@@ -84,7 +84,7 @@ After checks, use normal active hooks and produce a clean local commit, send the
 queued parent validation checkpoint, and stop before push/PR. Separate same-session
 delivery authorization is required.
 
-## Results
+## Original implementation results
 
 - Frozen install passed before permanent tests/production.
 - Causal component RED: 6 ownership failures after settlement, 4 ordinary/current
@@ -121,4 +121,42 @@ delivery authorization is required.
 - All receipts are outside checkout at
   `/home/jcfs/.kandev/tasks/preserve-newer-sideb_kd5ueztx/receipts/attempt23`.
   Normal active hooks, clean commit and terminal handles precede the queued
-  parent validation checkpoint. No push/PR is authorized there.
+  parent validation checkpoint. That original checkpoint did not authorize push/PR. Parent review subsequently
+  granted same-session delivery; fresh hosted gates remain required.
+
+## Hosted fixture safety remediation
+
+The first hosted run at the original implementation head passed required checks,
+but its retry audit found one new sidebar case failing the worker-seed HEAD
+guard (clean status; HEAD changed from f4640337 to ee5e472e). Rename UI and
+persisted-title checks reached the final state. Local retries-zero reproduction
+passed all four cases; this does not disposition the source safety observation.
+Hosted artifacts retain only the SHA pair, context/screenshots and retry trace,
+not the Git objects/subjects or full writer process history. Prior file-tree
+content proves worker reuse but cannot identify the writer.
+
+Bound this test family to an owned temporary source repository/offline origin,
+workspace and workflow, with explicit worktree executor and existing agent.
+Retained own-source and worker-seed HEAD/status guards. Cleanup runs in finally,
+deletes only owned resources, and preserves original/cleanup failures. Added a
+real-backend failure-path cleanup control. Keep the application correction, mobile
+guard, sibling files and six other recovered retry surfaces untouched.
+
+Causal RED is the native source-safety assertion above. Verification uses the
+existing scoped browser commands (desktop now includes the cleanup control),
+phone/tablet compatibility, scoped lint/static/docs gates and normal hooks.
+A new test-only remediation head requires fresh CI and substantive reviews.
+Local remediation results: 5 desktop cases passed (26.2s), including the real
+failure-path cleanup control; 5 phone/tablet cases passed (29.7s), including the
+3 unchanged distinct mobile-picker cases. All runs use one worker and retries
+zero. The first mobile command selected a nonexistent project and stopped before
+tests; its setup error remains separate from the corrected run. Owned source and
+worker seed guards passed; source cleanup was exercised on success and failure.
+The existing 25 focused component/caller tests, scoped zero-warning lint,
+Node 24 typecheck/catalog with 8 GiB cap, i18n, full specification/catalog checks
+and full-base documentation coverage are rechecked for this test-only change.
+Hosted resource snapshots add only CPU/memory counters, not writer lineage.
+The prior seed writer remains unattributed. The fixture boundary is the bounded
+safety disposition; a local nonreproduction is not root-cause evidence.
+Fresh exact-head CI/review and normal protected merge evidence are recorded
+externally after the test-only commit. No other retry surface is changed.
