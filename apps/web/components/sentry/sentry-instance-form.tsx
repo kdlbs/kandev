@@ -310,7 +310,7 @@ function useCoordinatedInstanceSave({
       if (mounted.current && (instance === null || latestRevision.current === submittedRevision)) {
         onSaved(saved);
       }
-      await onPersisted?.();
+      void onPersisted?.();
     },
     discard: () => setForm(baseline),
   });

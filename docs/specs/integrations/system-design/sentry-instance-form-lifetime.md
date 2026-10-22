@@ -37,7 +37,9 @@ and serialized field values. Cancel invalidates it immediately. Captured
 completion and dirty callbacks may close or mark clean only their own current
 opening. Successful completion always retains list refresh through the independent
 `onPersisted` callback, even after form unmount. `onSaved` closes only a mounted
-form with its captured opening still current. Callback identities
+form with its captured opening still current. The list refresh runs independently
+of coordinator completion, so a pending GET does not keep a newer draft busy
+after the accepted write has settled. Callback identities
 remain stable during ordinary field changes so effect cleanup does not clear
 current dirty state. A section remount starts a separate owner. A polling removal/restoration can
 remount a form without another explicit opening; the form mount guard also

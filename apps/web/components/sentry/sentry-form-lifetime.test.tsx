@@ -370,3 +370,45 @@ it("preserves a new form mount after polling removes and restores the same insta
   expect(screen.getByTestId("sentry-edit-name-input")).toHaveProperty("value", newer.name);
   expect(coordinator.hasDirty).toBe(true);
 });
+
+// @covers AC-INTEGRATIONS-SENTRY-FORM-LIFETIME-001.1
+it("makes the newer draft saveable while an older save's list refresh is pending", async () => {
+  const f = fixture();
+  const fetchWrites = globalThis.fetch;
+  const refresh = Promise.withResolvers<Response>();
+  let holdRefresh = false;
+  let refreshStarted = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((value: string, init?: RequestInit) => {
+      if (holdRefresh && !init?.method) {
+        refreshStarted = true;
+        return refresh.promise;
+      }
+      return fetchWrites(value, init);
+    }),
+  );
+  render(<Harness />);
+  await screen.findAllByTestId(INSTANCE_CARD);
+  open("add");
+  fill("add", submitted);
+  const pending = beginSave();
+  await waitFor(() => expect(f.writes).toHaveLength(1));
+  fireEvent.click(screen.getByTestId("sentry-add-cancel-button"));
+  open("add");
+  fill("add", newer);
+  holdRefresh = true;
+  try {
+    await act(async () => {
+      f.settle(true);
+    });
+    await waitFor(() => expect(refreshStarted).toBe(true));
+    expect(screen.getByRole("button", { name: "Save changes" })).toHaveProperty("disabled", false);
+    expect(screen.getByTestId("sentry-add-name-input")).toHaveProperty("value", newer.name);
+  } finally {
+    await act(async () => {
+      refresh.resolve(new Response(JSON.stringify({ instances: [instance, other] })));
+      await pending;
+    });
+  }
+});

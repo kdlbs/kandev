@@ -83,7 +83,7 @@ Retain external receipts and every process handle to terminal. No push/PR yet.
 - Poll-remount RED: one intended failure after list removal, restoration and new
   field entry; the old ACK then removes the remounted form. Earlier fixture-only
   errors are separate from this behavioral evidence.
-- Final focused Vitest: 3 files, 34 tests passed (22 lifetime cases and 12 existing
+- Final focused Vitest: 3 files, 35 tests passed (23 lifetime cases and 12 existing
   form/section controls). Covers success/failure, same-instance and identical-text
   reopen, unmount/remount, polling remount, next Save/Cancel and stale test results.
 - Desktop production browser: 2 passed, 1 worker, zero retries, fresh build.
@@ -119,3 +119,13 @@ Retain external receipts and every process handle to terminal. No push/PR yet.
 
 An identical replacement can fool text-only checks. Old errors must still be
 reported without tagging the replacement. Phone evidence is browser emulation.
+
+### Save availability during list refresh
+
+Greptile identified that awaiting the post-write list GET held the shared Save
+action busy for a replacement draft. A causal real-consumer test holds that GET
+after the accepted write succeeds: RED leaves the current action in Saving;
+the one-line correction starts the existing error-handled refresh independently.
+The focused suites pass 35/35, including this pending-refresh control. Browser,
+static, native CI and exact-head review results are recorded in the external
+delivery receipts after the correction. No shared coordinator behavior changed.
