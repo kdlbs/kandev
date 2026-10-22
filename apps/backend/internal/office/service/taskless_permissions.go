@@ -73,6 +73,11 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 	if s.runPermissions == nil {
 		return errors.New("taskless permission handling requires a run permission resolver")
 	}
+	if request.AutoApprovedOptionID != "" && !request.AutoApprovalPending {
+		// agentctl already delivered this auto-approval; the event is a record.
+		s.recordTasklessPermissionDecision(ctx, run.ID, request, permissionDecisionApproved, request.AutoApprovedOptionKind)
+		return nil
+	}
 	decision, optionID, optionKind := decideTasklessPermission(request)
 	s.recordTasklessPermissionDecision(ctx, run.ID, request, decision, optionKind)
 	s.deliverTasklessPermissionAnswer(ctx, run.ID, request, decision, optionID)

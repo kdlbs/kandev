@@ -341,6 +341,7 @@ have selected ([agents-03](agents-03.md)).
 
 | Request | Decision |
 | --- | --- |
+| auto-approval already delivered by agentctl (option set, not pending; older agentctl) | record `approved`; deliver nothing |
 | auto-approval pending (the launched execution profile auto-approves; agentctl marks the request) | resolve with the offered auto-approval option |
 | otherwise, a reject option is offered | resolve with the first reject option |
 | otherwise | cancel the request |

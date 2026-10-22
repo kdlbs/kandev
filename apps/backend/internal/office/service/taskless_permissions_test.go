@@ -290,3 +290,24 @@ func TestTasklessPermission_AnswersAndLogsWhenDecisionRecordFails(t *testing.T) 
 		t.Fatalf("record-failure log = %v, want one entry naming the decision", entries)
 	}
 }
+
+// An auto-approval agentctl already delivered arrives as a record, not a
+// pending request: Office records it and must not answer it again.
+func TestTasklessPermission_RecordsAlreadyAnsweredAutoApproval(t *testing.T) {
+	f := newTasklessPermissionFixture(t)
+
+	f.publish(t, f.request(func(p *lifecycle.PermissionRequestEventPayload) {
+		p.AutoApprovedOptionID = "allow-once"
+		p.AutoApprovedOptionKind = "allow_once"
+		p.AutoApprovalPending = false
+	}))
+
+	if len(f.resolver.resolved) != 0 || len(f.resolver.canceled) != 0 || len(f.stopper.executionIDs) != 0 {
+		t.Fatalf("already-answered request was answered again: resolved=%v canceled=%v stopped=%v",
+			f.resolver.resolved, f.resolver.canceled, f.stopper.executionIDs)
+	}
+	decisions := f.decisions(t)
+	if len(decisions) != 1 || decisions[0]["decision"] != "approved" || decisions[0]["option_kind"] != "allow_once" {
+		t.Fatalf("decision events = %v, want one recorded approval", decisions)
+	}
+}

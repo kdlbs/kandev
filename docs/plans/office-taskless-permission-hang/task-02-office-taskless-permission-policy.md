@@ -42,7 +42,8 @@ decision is a run event written before delivery.
   cancels; superseded attempt, unclaimed run and task-owned events are
   ignored; the run event is appended even when delivery fails; a transient
   delivery failure is retried; an undeliverable answer stops the execution; a
-  failed decision record still answers and logs the decision.
+  failed decision record still answers and logs the decision; an auto-approval
+  agentctl already delivered is recorded and not answered again.
 - `TestTasklessPermission_RejectsAndRunFinishesOnReady` uses the real event bus
   and Office subscribers: the request is answered, and the following
   AgentReady finishes the run.
@@ -96,3 +97,6 @@ Done 2026-10-20.
 - PR review remediation (Greptile, 2026-10-22): added retry-then-stop delivery and
   the strict decision record; `go test ./internal/office/service/ -run TasklessPermission`
   8/8 pass (the three new tests failed first), `golangci-lint run ./internal/office/service/...` 0 issues.
+- PR review remediation (Claude review, 2026-10-22): already-delivered auto-approvals are
+  recorded only; `TestTasklessPermission_RecordsAlreadyAnsweredAutoApproval` failed first,
+  9/9 now pass.
