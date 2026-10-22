@@ -555,3 +555,7 @@ second retry inside the same request is not part of this amendment.
   owner's finalization must roll back its inventory deletion and replacement.
   Shared-group ownership round trips through the real INTEGER schema on both
   versions. CI guards against skipped or unmatched PostgreSQL 18 tests.
+
+## Proposed bootstrap recovery extension
+
+[Bootstrap attempt recovery](bootstrap-attempt-recovery.md) defines the draft extension for failed attempts without executor records.

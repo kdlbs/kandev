@@ -170,6 +170,29 @@ Terms used below:
   guidance shall name the task environment reset action, instead of asking the
   caller to retry after the initial launch or to restore the workspace.
 
+## Proposed bootstrap recovery amendment
+
+The following requirement is draft for the [Nono follow-up design](../../../plans/nono-sandbox-integration/plan.md).
+It extends generic task recovery. It does not depend on a sandbox provider.
+Existing requirements above retain their current lifecycle status.
+
+### REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005: Failed bootstrap attempts without executor records
+
+**Intent:** Users can recover an identified failed bootstrap without losing conversation or queued work.
+
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.1:** A failed bootstrap shall retain its safe cause and attempt identity even when cleanup removes its executor record.
+  Authentication, policy denial, missing executable, and unsupported transport shall remain distinguishable.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.2:** Explicit recovery of a verified failed attempt can reconstruct an execution from authoritative session snapshots without an executor record.
+  It shall preserve the session and its sandbox policy. Missing or ambiguous evidence shall block recovery without creating a replacement conversation.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.3:** An absent executor record shall not by itself mean launch is in progress.
+  A prompt for a failed attempt shall remain durably blocked with a visible reason, instead of entering repeated automatic dispatch.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.4:** Successful recovery shall clear only the recovered attempt's active error after runtime readiness.
+  It shall preserve error history and release each admitted queued prompt at most once.
+- **AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.5:** A successful sibling session shall not clear the failed session's error, consume its queue, or count as recovery.
+  Desktop and phone shall identify the affected session and expose the same retry, queue, and error outcomes.
+
+See the [bootstrap recovery design](../system-design/bootstrap-attempt-recovery.md).
+
 ## Out of scope
 
 - A background poller for all repository defaults.
