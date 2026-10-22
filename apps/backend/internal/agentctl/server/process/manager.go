@@ -112,9 +112,10 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg             *config.InstanceConfig
-	logger          *logger.Logger
-	managedGitTools installedManagedGitTools
+	cfg                      *config.InstanceConfig
+	logger                   *logger.Logger
+	managedGitTools          installedManagedGitTools
+	materializeGitHelperPath string
 
 	// deliveryJournal is opened before any agent process starts. A configured
 	// but unreadable journal is an admission error, never a legacy fallback.
@@ -443,6 +444,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
 		managedGitTools:            installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
+		materializeGitHelperPath:   installedMaterializeGitHelperPath(),
 		updatesCh:                  make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:         make(map[string]*PendingPermission),
 		lifetimeCtx:                lifetimeCtx,
