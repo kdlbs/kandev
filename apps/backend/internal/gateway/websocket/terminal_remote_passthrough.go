@@ -12,11 +12,12 @@ import (
 func (h *TerminalHandler) handleRemoteAgentTerminal(c *gin.Context, execution *runtimeapi.AgentExecution) {
 	upstream, err := h.lifecycleMgr.StreamRemotePassthrough(c.Request.Context(), execution)
 	if err != nil {
+		safeError := securityutil.SanitizeError(err)
 		h.logger.Warn("failed to acquire remote passthrough stream",
 			zap.String("stage", "remote_stream_acquisition"),
 			zap.String("session_id", execution.SessionID),
-			zap.Error(securityutil.SanitizeError(err)))
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+			zap.Error(safeError))
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": safeError.Error()})
 		return
 	}
 	defer func() { _ = upstream.Close() }()

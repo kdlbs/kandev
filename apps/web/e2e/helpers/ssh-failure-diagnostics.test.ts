@@ -133,6 +133,10 @@ describe("captureSSHInterruptionLogs", () => {
       `{"token":"${credential}"}`,
       `{\\"auth_token\\":\\"${credential}\\"}`,
       `--password ${credential}`,
+      `AWS_SECRET_ACCESS_KEY=${credential}`,
+      `{"clientSecretAccessKey":"${credential}"}`,
+      `service.authTokenValue = ${credential}`,
+      `export MY_PRIVATE_KEY_CONTENT=${credential}`,
       `wss://user:${credential}@localhost/path?access=${credential}`,
       "-----BEGIN PRIVATE KEY-----",
       credential,
@@ -151,6 +155,14 @@ describe("captureSSHInterruptionLogs", () => {
       expect(captured).toContain("retained recovery event");
       expect(captured).toContain("retained final event");
       expect(captured).not.toContain(credential);
+      for (const key of [
+        "AWS_SECRET_ACCESS_KEY",
+        "clientSecretAccessKey",
+        "service.authTokenValue",
+        "MY_PRIVATE_KEY_CONTENT",
+      ]) {
+        expect(captured).not.toContain(key);
+      }
       expect(captured).not.toContain("dXNlcjpwYXNz");
       expect(captured).not.toContain("QUJDREVGR0hJSktMTU5PUA==");
       expect(captured).not.toContain("wss://");
