@@ -53,6 +53,9 @@ export function diffViewModeScenario(mobile: boolean) {
     backend,
     prCapture,
   }) => {
+    const seedGit = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+    const seedHead = seedGit.getCurrentSha();
+    const seedStatus = seedGit.exec("git status --porcelain=v1 --untracked-files=all");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Diff mode controls",
@@ -62,10 +65,12 @@ export function diffViewModeScenario(mobile: boolean) {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
     await waitForSessionDone(apiClient, task.id, task.session_id!, "Diff mode fixture settled");
     const workspace = await waitForWorkspacePath(apiClient, task.id, task.session_id!);
+    expect(fs.realpathSync(workspace)).not.toBe(fs.realpathSync(seedData.repositoryPath));
     const git = new GitHelper(workspace, makeGitEnv(backend.tmpDir));
     const gateway = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
@@ -82,6 +87,8 @@ export function diffViewModeScenario(mobile: boolean) {
     try {
       git.createFile(fileName, "export const value = 1;\n");
       git.stageFile(fileName);
+      expect(seedGit.getCurrentSha()).toBe(seedHead);
+      expect(seedGit.exec("git status --porcelain=v1 --untracked-files=all")).toBe(seedStatus);
       await published;
       if (mobile) {
         await testPage
@@ -166,6 +173,8 @@ export function diffViewModeScenario(mobile: boolean) {
     } finally {
       git.exec(`git reset -- "${fileName}"`);
       fs.rmSync(path.join(workspace, fileName), { force: true });
+      expect(seedGit.getCurrentSha()).toBe(seedHead);
+      expect(seedGit.exec("git status --porcelain=v1 --untracked-files=all")).toBe(seedStatus);
     }
   });
 }

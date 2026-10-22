@@ -142,3 +142,31 @@ reconcile existing handles after an interruption before new runs. Upward parent
 messages use `delivery_mode=queued`. No delegation or extra tasks/sessions.
 Stop at clean committed `ready_for_parent_validation`; parent independently
 reviews/reruns before separate delivery authorization. No push or PR this turn.
+
+## Parent validation correction: fixture isolation
+
+The parent accepted the production diff and independently reran all 39 focused
+tests, then identified that the browser fixture omitted `executor_profile_id`.
+The worker-scoped seed exposes `worktreeExecutorProfileId` for explicit task
+isolation; ApiClient forwards no default. Runtime executor resolution can use the
+workspace default, so source ownership was not established by cleanup alone.
+Add a path assertion before fixture writes, prove its failure with the omitted
+profile, then explicitly select the seeded worktree profile. Capture seed HEAD
+and complete porcelain status before task creation and assert both unchanged
+after fixture cleanup. Keep production files byte-identical to `a9844280da07`.
+Rerun the existing managed desktop/phone scenarios with one shard/worker and
+zero retries, scoped ESLint/typecheck and documentation/diff checks, then make a
+normal hooked commit and stop for parent validation. No push/PR is authorized.
+
+Correction results: ownership RED confirmed the omitted selection returned the
+shared source path `/tmp/kandev-e2e-0-pvoCYt/repos/e2e-repo`; the guard failed
+before any file write/staging. Explicit worktree selection then passed both real
+managed flows: desktop 1/1 (12.1s total) and phone 1/1 (14.6s total), strict WS,
+one worker/shard, retries zero. Both assert real-path separation, unchanged seed
+HEAD/full porcelain status while the task file is staged, and unchanged seed
+HEAD/status after cleanup. Scoped ESLint, Node24/8GiB typecheck/catalog, full
+specification lint, local PR documentation coverage and diff checks pass.
+Production bytes remain identical to `a9844280da07`. Correction receipts live
+outside checkout under `loop-receipts/attempt19/fixture-isolation/`. The prior
+checkpoint's E2E proof covered independent managed runtimes, but did not prove
+per-task source isolation; this correction supplies that missing evidence.
