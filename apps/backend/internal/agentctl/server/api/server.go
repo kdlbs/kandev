@@ -4,6 +4,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"io"
 	"net/http"
@@ -139,6 +140,8 @@ func (s *Server) setupRoutes() {
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
 		api.GET("/agent/launch-wrapper", s.handleLaunchWrapper)
+		api.POST("/agent/opencode/credentials", s.handleOpenCodeCredentials)
+		api.GET("/agent/opencode/credentials", s.handleOpenCodeCredentialStatus)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -539,13 +542,14 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
-	Command         string             `json:"command"`
-	AgentArgs       optionalArgs       `json:"agent_args"`
-	ContinueCommand string             `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs       `json:"continue_args"`
-	Env             map[string]string  `json:"env,omitempty"`
-	ReplaceEnv      bool               `json:"replace_env,omitempty"`
+	OpenCodeRuntime managedruntime.OpenCodeRuntime `json:"opencode_runtime,omitzero"`
+	LaunchWrapper   launchwrapper.Spec             `json:"launch_wrapper,omitzero"`
+	Command         string                         `json:"command"`
+	AgentArgs       optionalArgs                   `json:"agent_args"`
+	ContinueCommand string                         `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs                   `json:"continue_args"`
+	Env             map[string]string              `json:"env,omitempty"`
+	ReplaceEnv      bool                           `json:"replace_env,omitempty"`
 	// ProjectMCPDelivery carries execution-bound project-file delivery
 	// evidence. It is trusted only on an authenticated control request and is
 	// validated against this instance before accepted configuration changes.
@@ -614,17 +618,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	var configureErr error
-	switch {
-	case req.ReplaceEnv && req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	case req.ReplaceEnv:
-		configureErr = s.procMgr.ConfigureWithEnvironmentAndProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	case req.InstallContext != nil:
-		configureErr = s.procMgr.ConfigureWithProjectDeliveryAndInstallContext(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.InstallContext, req.LaunchWrapper)
-	default:
-		configureErr = s.procMgr.ConfigureWithProjectDelivery(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ProjectMCPDelivery, req.LaunchWrapper)
-	}
+	configureErr := s.procMgr.ConfigureRuntime(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present, req.ReplaceEnv, req.ProjectMCPDelivery, req.InstallContext, req.OpenCodeRuntime, req.LaunchWrapper)
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent",
 			append(s.agentConfigureFailureFields(configureErr), zap.Error(configureErr))...)
