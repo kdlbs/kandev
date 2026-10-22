@@ -159,3 +159,16 @@ reapplied after an uncertain response.
   reopening for the same task. Successful operations retain success feedback;
   failures remain visible through application feedback when their form is gone.
   A current form closes on success and stays open with its error on failure.
+
+- **AC-TASKS-TASK-ACTIONS-MENU-004.8:** Each native GitLab task-MR link
+  opening owns its completion close and pending state on desktop and phone.
+  Dismissal, unmount, task or workspace replacement, and changing the selected
+  repository retire that authority. An admitted link may finish and publish the
+  association to its original task, workspace, and repository, but shall not
+  close, reset, disable, or change the error state of a later form, including a
+  same-task reopening with equal input. Late failure feedback remains visible
+  through the existing application feedback. A current success closes its form;
+  a current failure preserves its raw URL and selected repository for retry.
+  A later form retains its exact raw URL, repository selection, focus and caret,
+  and explicit submission and dismissal remain usable. Ordinary repository
+  metadata refresh and initial default hydration retain their existing rules.
