@@ -210,3 +210,61 @@ Follow-up results:
 
 The production Unicode fix is unchanged. Parent retains the separate touch-menu
 candidate; no third task, session, agent, push or PR is created by this package.
+
+## Delivery CI and review remediation
+
+The owned PR waiter for PR4672 at 8fa4fd2232219aef709cf81f4bd7cf5052e54541
+completed terminal exit 1 after 16 polls / 1042 seconds. The phone assertion in
+E2E job 119550443162 and its dependent aggregate failed. Full raw logs, artifacts,
+phase evidence and waiter output are preserved under
+`/tmp/kandev-attempt15-unicode/delivery/`. The observed launch was the documented
+`sendSessionFocus` / `handleVisibleFocus` request, with intent `resume` and
+activation source `session_focus`, targeting the live primary fixture session.
+It was not the separately reproduced menu restart (stop plus non-focus launch).
+The screenshot's update notice came from `useUpdateAvailableToast`, using the
+default information icon and canonical Kandev update copy, not an error variant.
+
+Per the parent's explicit correction, the phone test captures full outgoing
+lifecycle payloads and permits only the exact four-field automatic focus shape
+for the expected task and live session. Negative transport controls retain explicit
+restart, unclassified launches, wrong identities/intents and additional prompt or
+attachment fields as failures. Toast classification allows only the known
+informational update title/body/icon; error and unclassified feedback fail. Real
+touch selection, canonical names, selected row and actual selected-session
+subscription assertions remain. There is no blanket launch/toast exclusion,
+error dismissal, mocked UI action, lifecycle product repair or clean-menu claim.
+The historical zero-launch/zero-toast local runs above remain attributed to their
+original heads and observed runs.
+
+Greptile thread 4343116203 identified a valid insertion regression at the name
+limit. Focused RED produced 3 intended failures / 18 passes: beginning and middle
+insertion clipped the existing ending, and a partial paste removed an unselected
+suffix. A first attempted common-prefix/suffix inference failed two existing
+replacement controls and was discarded. The final domain limiter instead uses
+the browser insertion-end position, preserving the actual unselected suffix.
+The shared input forwards that position only to its optional domain limiter;
+ordinary terminal maxlength semantics remain unchanged. New desktop controls use
+real keyboard insertion at the beginning and middle of a full mixed name.
+The unused constant export and canonical animation-helper review nits are also
+addressed. Production scope remains Unicode rename editing only.
+
+Post-correction verification receipts are under
+`/tmp/kandev-attempt15-unicode/remediation/`; final commands and outcomes are
+recorded with the hooked commit and delivery evidence.
+
+Remediation local results before the normal follow-up commit:
+
+- `pnpm exec vitest run components/task/use-session-rename.test.tsx
+  components/task/tab-rename-input.test.tsx components/task/preview-session-tabs.test.tsx
+  e2e/helpers/session-selection-observation.test.ts`: 82 passed / 4 suites (2.96s).
+- Managed host desktop run, chromium, one shard/worker, retries 0, fresh production
+  build with `GOMAXPROCS=2 GOFLAGS=-p=2`: 2 passed (17.6s).
+- Managed host native phone run, mobile-chrome, same bundle, one shard/worker,
+  retries 0: passed. Final run adds a JSON attachment of complete lifecycle
+  observations and rendered toast classification for artifact inspection.
+- Changed-file ESLint with `--max-warnings 0` and full typecheck with the documented
+  CI 8 GiB heap passed. Catalog: 396 decisions / 1693 specifications valid; full
+  spec lint passed. Public-doc validator tests: 63 passed; 54 pages validated.
+- No default input maxlength, lifecycle, backend, menu, workflow or provider
+  configuration changes. Combined-current-main and new-head CI/review validation
+  follow the normal commit; historical evidence above is not relabeled.

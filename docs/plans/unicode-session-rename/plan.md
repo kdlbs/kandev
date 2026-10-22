@@ -109,3 +109,23 @@ requires a real selected-session subscription, zero lifecycle mutation requests,
 zero toasts and no horizontal overflow; it omits the unrelated lifecycle menu.
 Rename absence is source-traced only. Fresh phone evidence and captures replace
 the invalid menu-flow evidence; no mobile menu/Radix production change is made.
+
+## Delivery remediation: focus protocol and insertion preservation
+
+Delivery was separately authorized after the parent checkpoint. CI at 8fa4fd22
+failed the phone test's overly broad launch assertion: the existing resumption
+hook sent a promptless `session_focus` request for the known live primary session.
+A normal informational Kandev update notice was also visible. Earlier zero-launch
+and zero-toast local results remain historical observations, not universal product
+invariants. The corrected test retains complete outgoing lifecycle payloads and
+permits only that exact focus shape and fixture identity. Explicit/unclassified
+launches, stops, restarts, deletes and primary changes remain failures. Only the
+source-supported default informational update notice is allowed; lifecycle errors
+and other feedback remain failures. The separate native menu defect remains known
+and outside this package.
+
+Exact-head review also identified that inserting into a full name clipped its
+existing ending. The limiter now uses the browser's insertion-end position to
+constrain inserted text and preserve the unselected suffix. The shared terminal
+input keeps native maxlength behavior. Focused actual input/API/store regressions
+and shipped desktop typing checks cover beginning and middle insertion.

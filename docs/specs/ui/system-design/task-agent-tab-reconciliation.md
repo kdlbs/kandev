@@ -85,7 +85,8 @@ Both `SessionTab` and `PreviewSessionTabs` pass the limiter to
 The shared input accepts an optional value limiter on change; its ordinary
 `maxLength` and unbounded defaults remain intact for terminal/custom consumers.
 Loaded legal names remain intact at edit entry. Length limiting does not trim
-the editing draft. Existing focus classification, Enter/blur completion,
+the editing draft. At the limit, inserted text is constrained without removing
+the existing prefix or suffix outside the edit. Existing focus classification, Enter/blur completion,
 Escape cancellation, and error handling remain as defined in
 [inline edit focus continuity](inline-edit-focus-continuity.md).
 

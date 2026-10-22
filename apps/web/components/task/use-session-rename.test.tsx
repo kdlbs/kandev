@@ -86,6 +86,35 @@ describe("actual session rename Unicode boundary", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
+  it.each([0, 60, 120])("preserves the ending for an overflowing insertion at %i", async (at) => {
+    const initial = `${"漢".repeat(119)}🧭`;
+    const points = Array.from(initial);
+    const input = mount(initial);
+    fireEvent.change(input, {
+      target: {
+        value: [...points.slice(0, at), "Z", ...points.slice(at)].join(""),
+        selectionStart: points.slice(0, at).join("").length + 1,
+      },
+    });
+    expect(input.value).toBe(initial);
+    await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+    expect(request).not.toHaveBeenCalled();
+    expect(currentStore.getState().taskSessions.items[SESSION_ID].name).toBe(initial);
+  });
+
+  it("limits only inserted text while preserving the unselected ending", async () => {
+    const initial = `${"漢".repeat(118)}🧭`;
+    const input = mount(initial);
+    fireEvent.change(input, { target: { value: `AB${initial}`, selectionStart: 2 } });
+    expect(input.value).toBe(`A${initial}`);
+    await act(async () => fireEvent.keyDown(input, { key: "Enter" }));
+    expect(request).toHaveBeenCalledExactlyOnceWith(RENAME_ACTION, {
+      session_id: SESSION_ID,
+      name: `A${initial}`,
+    });
+    expect(currentStore.getState().taskSessions.items[SESSION_ID].name).toBe(`A${initial}`);
+  });
+
   it("keeps an unchanged ASCII name without a write", async () => {
     const input = mount("Reviewer");
     await act(async () => {

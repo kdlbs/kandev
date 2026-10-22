@@ -74,7 +74,8 @@ workbench commands attached to the surrounding tab.
   the server session-name limit. Opening a legal existing name and submitting
   it unchanged shall preserve it without a rename request. Truncation of edited
   names shall preserve complete surrogate pairs; the limit counts code points,
-  not grapheme clusters.
+  not grapheme clusters. Insertions at the limit shall preserve existing text
+  outside the edited range.
 - **AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.6:** Session rename shall retain
   trimming, empty-name reset, Enter and internal-blur commit, Escape cancel,
   at-most-once completion, and failure behavior. The submitted name and local

@@ -1,7 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
-import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import {
+  isBackgroundUpdateNotice,
+  observeSessionSelection,
+  readSelectionToasts,
+  unexpectedSelectionRequests,
+} from "../../helpers/session-selection-observation";
 import { SessionPage } from "../../pages/session-page";
 
 // Native phone controls expose selection and labels, but no session rename action.
@@ -35,6 +41,7 @@ test("mobile: canonical Unicode session names survive native picker selection", 
   await apiClient.renameSession(task.session_id, initial);
   await apiClient.renameSession(secondary.session_id, mixed);
   const traffic = attachGatewayTrafficCapture(testPage);
+  const lifecycle = observeSessionSelection(testPage);
   await testPage.goto(`/t/${task.id}`);
   await new SessionPage(testPage).waitForLoad();
   const pill = testPage.getByTestId("mobile-task-layout").getByTestId("mobile-sessions-pill");
@@ -64,21 +71,13 @@ test("mobile: canonical Unicode session names survive native picker selection", 
     "negative-assertion",
     "Touch session selection has no lifecycle completion event; observe for an unintended action",
   );
-  expect(
-    traffic.frames.filter(
-      (frame) =>
-        frame.direction === "sent" &&
-        [
-          "session.stop",
-          "session.launch",
-          "session.resume",
-          "session.restart",
-          "session.delete",
-          "session.set_primary",
-        ].includes(frame.action ?? ""),
-    ),
-  ).toEqual([]);
-  await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+  const toasts = await readSelectionToasts(testPage);
+  await test.info().attach("session-selection-observation", {
+    body: JSON.stringify({ taskId: task.id, liveSessionId: task.session_id, lifecycle, toasts }),
+    contentType: "application/json",
+  });
+  expect(unexpectedSelectionRequests(lifecycle, task.id, task.session_id)).toEqual([]);
+  expect(toasts.filter((toast) => !isBackgroundUpdateNotice(toast))).toEqual([]);
   await expect(testPage.getByTestId("session-tab-rename-input")).toHaveCount(0);
   await expect(testPage.getByTestId("preview-session-tab-rename-input")).toHaveCount(0);
   expect(
