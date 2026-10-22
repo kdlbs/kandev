@@ -23,6 +23,9 @@ identity, observations, and capabilities belong here; task storage and UI consum
 them without owning protocol semantics. Existing prompt admission and public
 session-activity authority remain with Tasks and Platform.
 
+The optional [sandbox policy contract](requirements/sandbox-policies.md) keeps effective policy and operator authority here.
+The [plugin system](../plugins/README.md) owns sandbox extension negotiation.
+
 ## Exclusions
 
 - Durable work items and workflow transitions belong to the [task and workflow
