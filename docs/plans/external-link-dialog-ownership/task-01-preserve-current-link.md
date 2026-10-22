@@ -181,3 +181,31 @@ bounded target inspection, not an unrestricted review of those PRs.
 
 Implementation complete. Stop after clean normal-hook commit and queued parent
 checkpoint; no push/PR without separate same-session delivery grant.
+
+
+## Review remediation: portable fixture ownership guard
+
+The aggregate review identified that the E2E source-root assertion assumed
+`/tmp`, while `backend.ts` creates `backend.tmpDir` beneath `os.tmpdir()`.
+A managed same-task desktop run with an owned custom `TMPDIR` failed exactly at
+that assertion before any repository/task mutation. The helper now derives its
+expected prefix from the same system temporary-directory producer.
+
+Focused custom-TMPDIR desktop and native-tap phone scenarios pass (2 each,
+retries 0, one worker), retaining original writes and later Save/Cancel checks.
+Scoped ESLint and Node 24 typecheck with the 8 GiB cap pass. Production form
+source and rendered UI are unchanged, so the existing production-build proof,
+35 focused tests, and published captures remain applicable.
+
+Reproduce with an owned temporary directory:
+
+```bash
+(cd apps/web && TMPDIR=/path/to/owned/temp GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/external-link-ownership.spec.ts --retries=0)
+(cd apps/web && TMPDIR=/path/to/owned/temp GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-external-link-ownership.spec.ts --retries=0)
+```
+
+The configured root must exist and belong to the test invocation. The actual
+run's root and causal RED/GREEN/static receipts are recorded outside checkout
+in `receipts/custom-tmp-root.txt` and `receipts/portability-*` under this task's
+working directory. Post-push CI/review and merge evidence remain external and
+pending until the final head's checks and dispositions settle.

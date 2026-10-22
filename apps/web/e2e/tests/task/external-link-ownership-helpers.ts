@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -71,7 +73,7 @@ export async function preserveExternalLinkDraft(
         url: `https://fixture.atlassian.net/browse/${key}`,
       })),
     );
-    expect(seed.repositoryPath).toMatch(/^\/tmp\/kandev-e2e-/);
+    expect(seed.repositoryPath.startsWith(join(tmpdir(), "kandev-e2e-"))).toBe(true);
     const repository = await api.createRepository(workspace.id, seed.repositoryPath);
     const options = {
       workflow_id: workflow.id,
