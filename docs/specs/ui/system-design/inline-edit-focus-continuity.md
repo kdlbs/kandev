@@ -141,6 +141,15 @@ Save/Cancel against a disposable backend; browser device emulation does not
 establish physical phone or runtime incident evidence. See the
 [Rename ownership plan](../../../plans/mobile-task-rename-ownership/plan.md).
 
+The separate `useTaskRowActions` producer in `task-session-sidebar.tsx` uses
+the same captured edit-object comparison at request completion. Each row Rename
+open already creates a fresh object. `SidebarDialogs` preserves immediate
+dismissal through `TaskRenameDialog`. `TaskSessionSidebar` and `TaskCommands`
+compose this producer; TaskCommands also serves phone entry points, so this is
+not a viewport-exclusive handler. Its existing failure logging remains outside
+the ownership check. The distinct mobile picker hook remains unchanged. See the
+[sidebar Rename ownership plan](../../../plans/sidebar-task-rename-ownership/plan.md).
+
 ## Consumers and responsive behavior
 
 Task top-bar and Office titles use the focus hook. The Rename dialog uses
