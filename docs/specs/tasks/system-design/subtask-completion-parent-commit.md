@@ -48,6 +48,11 @@ returns `false` before step history, data patch, terminal completion, and
 `on_enter`. `processOnChildrenCompleted` marks the operation applied only after
 a successful transition, so a later child state change can retry the parent.
 
+A commit that admits the task to a queue for the target step (WIP limit
+reached) writes the task row and returns `applied=true`. The lifecycle records
+history and leaves destination state and `on_enter` to queue promotion, as for
+any queued move.
+
 `workflowStore.ApplyTransition`, which implements the engine's `Store`
 interface, keeps its error-only signature.
 
