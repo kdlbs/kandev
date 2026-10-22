@@ -157,4 +157,3 @@ Sentry settings/form tests, API and desktop page object. No new ADR is warranted
   OS keyboard, real provider, cross-tab or transport exactly-once claim.
   Browser screenshot capture was disabled; behavior and selection assertions
   ran on the shipped production surface. No rendered layout changed.
-
