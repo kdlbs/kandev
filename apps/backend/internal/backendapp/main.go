@@ -567,6 +567,9 @@ func startServices( //nolint:cyclop
 				agentRuntimeAvailability, repos.Task, repos.Secrets, agentctlProvisionOptions{
 					onRuntimeLoss:        onRuntimeLoss,
 					requireControlRecord: true,
+					// attemptCtx is cancelled as soon as this attempt returns;
+					// the replacement's renewal loop must outlive it.
+					lifetimeCtx: ctx,
 				})
 			if err != nil {
 				return err
