@@ -43,6 +43,33 @@ type agentctlLauncherResult struct {
 	peerCapabilities []string
 }
 
+// managedAgentctl is the part of a launched agentctl process that
+// spawnFreshAgentctl reads back.
+type managedAgentctl interface {
+	BinaryPath() string
+	Port() int
+	Pid() int
+	ProcessIdentity() processidentity.Identity
+	AuthToken() string
+}
+
+// startManagedAgentctl launches the agentctl binary. Tests replace it so the
+// fresh-spawn wiring can run without a real binary.
+var startManagedAgentctl = func(ctx context.Context, cfg launcher.Config, log *logger.Logger) (managedAgentctl, func() error, error) {
+	l, cleanup, err := launcher.Provide(ctx, cfg, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	return l, cleanup, nil
+}
+
+// ownershipRenewalInterval and adoptedMonitorInterval are the loop cadences;
+// tests shorten them.
+var (
+	ownershipRenewalInterval = ownershipperiod.RenewalInterval
+	adoptedMonitorInterval   = 5 * time.Second
+)
+
 type agentctlProvisionOptions struct {
 	onRuntimeLoss        agentctlclient.RuntimeLossHandler
 	requireControlRecord bool
@@ -90,7 +117,7 @@ func provideAgentctlLauncher(
 			probe := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
 				agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 			adoptedMonitor = agentctlclient.NewAdoptedRuntimeMonitor(probe, result.serverIdentity,
-				result.processIdentity, 5*time.Second, cfg.Agentctl.RecoveryReadTimeout,
+				result.processIdentity, adoptedMonitorInterval, cfg.Agentctl.RecoveryReadTimeout,
 				cfg.Agentctl.RecoveryReadRetries, nil, func(observation agentctlclient.RuntimeObservation) {
 					log.Warn("adopted agentctl runtime requires recovery action",
 						zap.String("evidence", string(observation.Evidence)))
@@ -303,7 +330,7 @@ func spawnFreshAgentctl(
 			current.Stop()
 		}
 	}
-	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
+	l, cleanup, err := startManagedAgentctl(ctx, launcher.Config{
 		Host:          cfg.Agent.StandaloneHost,
 		Port:          cfg.Agent.StandalonePort,
 		StartupConfig: cfg.ManagedAgentctlStartupConfig(),
@@ -430,7 +457,7 @@ func startOwnershipRenewal(
 	}
 	client := agentctlclient.NewControlClient(host, port, log)
 	client.SetAuthToken(credential)
-	renewer := agentruntime.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
+	renewer := agentruntime.NewOwnershipRenewer(client, ownershipRenewalInterval(period), log)
 	renewer.Start(ctx)
 	return renewer
 }
