@@ -129,6 +129,12 @@ grouped by area; selecting a specific control opens its owning page, scrolls it 
 it, and briefly highlights it without changing the saved value. The same search is available in
 the Settings menu on phones.
 
+To return to the page that opened Settings, select **Close settings** in the desktop
+sidebar or the **X** in the phone header. This preserves the task and selected
+session, even after visiting several Settings pages. Unsaved changes still require
+a choice before leaving. Opening Settings directly or refreshing it uses Home as
+the close destination.
+
 From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
