@@ -56,6 +56,7 @@ export function useVcsDialogs() {
 
 type VcsDialogsProviderProps = {
   sessionId: string | null;
+  taskId?: string | null;
   baseBranch?: string;
   pullRequestBaseBranch?: string;
   pullRequestTargetsByRepository?: Record<string, string>;
@@ -306,13 +307,14 @@ export function pickRepoLabel(
 }
 
 // eslint-disable-next-line max-lines-per-function -- Coordinates the shared commit and change-request surfaces.
-function useVcsDialogsState(
-  sessionId: string | null,
-  taskTitle: string | undefined,
-  baseBranch: string | undefined,
-  pullRequestBaseBranch: string | undefined,
-  pullRequestTargetsByRepository: Record<string, string> | undefined,
-) {
+function useVcsDialogsState({
+  sessionId,
+  taskId,
+  taskTitle,
+  baseBranch,
+  pullRequestBaseBranch,
+  pullRequestTargetsByRepository,
+}: Omit<VcsDialogsProviderProps, "children" | "displayBranch">) {
   const { t } = useTranslation();
   const commitScope = useSessionGitPendingScope(sessionId);
   const cs = useCommitDialogState(sessionId, commitScope);
@@ -340,6 +342,7 @@ function useVcsDialogsState(
   const creationTaskId = useAppStore(
     (state) =>
       (sessionId ? state.taskSessions.items[sessionId]?.task_id : undefined) ??
+      taskId ??
       state.tasks.activeTaskId,
   );
   const creationScope = useMemo(
@@ -437,6 +440,7 @@ function useVcsDialogsState(
 
 export function VcsDialogsProvider({
   sessionId,
+  taskId,
   baseBranch,
   pullRequestBaseBranch,
   pullRequestTargetsByRepository,
@@ -445,13 +449,14 @@ export function VcsDialogsProvider({
   children,
 }: VcsDialogsProviderProps) {
   const { t } = useTranslation();
-  const state = useVcsDialogsState(
+  const state = useVcsDialogsState({
     sessionId,
+    taskId,
     taskTitle,
     baseBranch,
     pullRequestBaseBranch,
     pullRequestTargetsByRepository,
-  );
+  });
   const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
   const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName, t);
   const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName, t);

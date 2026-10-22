@@ -81,7 +81,7 @@ an isolated backend/offline repository and mock provider for .2/.5.
 ## Verification results
 
 Package created before permanent tests/production edits. The work order records
-60 passing focused tests, passing rebuilt desktop and Pixel 5 touch scenarios,
+63 passing focused tests after bounded task-identity review remediation, passing rebuilt desktop and Pixel 5 touch scenarios,
 static/i18n/docs checks, causal RED and controls, and cleanup. External receipts
 retain exact logs, package timestamps and the full commit diff. Local completion
 stops at parent validation, without push or PR. Numeric instrumented coverage

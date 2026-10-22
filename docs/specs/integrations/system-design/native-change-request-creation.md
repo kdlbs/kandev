@@ -38,7 +38,11 @@ previous owners, including away/back transitions. Admission captures that owner,
 the raw draft, and the current creation callback and scope. The callback already
 captures session, provider target, repository, and base; feedback and URL
 association retain the admitted task, never the task active at completion.
-Changes to the resolved base/provider scope also revoke form mutation authority.
+While the session row is loading, the task page and Office dockview pass their
+known task identity into the provider. Task resolution prefers the session's
+hydrated owner, then this caller identity, then the legacy global fallback for
+consumers without an explicit task. Changes to the resolved base/provider scope
+also revoke form mutation authority.
 Changing creation scope clears retained pushed state so a different session or
 provider cannot skip its own push.
 

@@ -101,7 +101,7 @@ owned handles until terminal and remove only owned tasks/worktrees/resources.
 - Causal transport RED: 2 intended failures and 1 owned-partial control passed.
   Expanded RED also exposes equal-value/scope-round-trip ownership failures.
   A later dedicated RED proves retained retry state crosses session changes.
-- Final focused run: 5 files, 60 tests passed, including 19 creation ownership
+- Initial focused run: 5 files, 60 tests passed, including 19 creation ownership
   tests, real registered-provider retry/push consumers, unchanged commit tests,
   provider-target resolution and native split-menu callbacks.
 - Browser causal RED: real mock GitLab success clears the reopened raw title.
@@ -124,3 +124,18 @@ owned handles until terminal and remove only owned tasks/worktrees/resources.
   preserved separately and do not count as causal RED.
 - Publication is pending parent validation and a separate same-session grant.
   The local commit/hook receipt and exact full diff are supplied externally.
+
+## PR review remediation
+
+CodeRabbit identified that the global active task can differ from the caller's
+known task while the session row loads. Pass that known task from the task page
+and Office dockview into the native provider; resolve hydrated session owner,
+then known caller, then the legacy fallback. This extends the same admitted
+identity boundary under AC-INTEGRATIONS-NATIVE-CREATE-001.1 and .3.
+
+Regression RED: two intended failures (URL associated with unrelated active task;
+old partial completion reopens after known-owner away/back), with 20 controls
+passing. The final focused suite has 63 tests, including 22 creation ownership
+cases. Final static, rendered desktop/phone checks and hooked remediation commit
+are recorded in the external delivery receipt; earlier 60-test evidence and
+screenshots are historical for the initial head.

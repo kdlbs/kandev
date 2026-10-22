@@ -58,7 +58,7 @@ function Openers() {
     </>
   );
 }
-function mount() {
+function mount(owningTaskId?: string) {
   const held = deferred();
   pending.push(held);
   const create = vi.fn().mockReturnValueOnce(held.promise).mockResolvedValue(success);
@@ -79,13 +79,14 @@ function mount() {
     });
     return children;
   }
-  const tree = (sessionId = SESSION, baseBranch = "main") => (
+  const tree = (sessionId = SESSION, baseBranch = "main", taskId = owningTaskId) => (
     <StateProvider>
       <Initialize>
         <ToastProvider>
           <TooltipProvider>
             <VcsDialogsProvider
               sessionId={sessionId}
+              taskId={taskId}
               taskTitle="Original task"
               baseBranch={baseBranch}
             >
@@ -104,6 +105,7 @@ function mount() {
     store,
     unmount: view.unmount,
     changeScope: (sid: string, base = "main") => view.rerender(tree(sid, base)),
+    changeOwner: (taskId: string) => view.rerender(tree(SESSION, "main", taskId)),
   };
 }
 function open(name = "Original") {
@@ -437,4 +439,48 @@ it("does not reuse retained provider push state in another session", async () =>
   await waitFor(() => expect(callback).toHaveBeenCalledTimes(2));
   expect(pushes(f)).toHaveLength(2);
   expect(pushes(f)[1][1]).toMatchObject({ session_id: "session-other", repo: "original" });
+});
+
+// @covers AC-INTEGRATIONS-NATIVE-CREATE-001.1, .3
+it.each([false, true])(
+  "keeps known task ownership while session metadata ready=%s",
+  async (ready) => {
+    const f = mount(TASK);
+    const items: AppState["taskSessions"]["items"] = {};
+    if (ready) items[SESSION] = { task_id: "hydrated-task" } as never;
+    act(() =>
+      f.store.setState((state) => ({
+        tasks: { ...state.tasks, activeTaskId: "unrelated-active-task" },
+        taskSessions: {
+          ...state.taskSessions,
+          items,
+        },
+      })),
+    );
+    open();
+    fill();
+    submit();
+    await waitFor(() => expect(f.create).toHaveBeenCalledTimes(1));
+    await act(async () => f.resolve({ ...success, pr_url: URL }));
+    expect(f.store.getState().pendingPrUrlByTaskId.byTaskId).toEqual({
+      [ready ? "hydrated-task" : TASK]: { original: URL },
+    });
+  },
+);
+
+it("retires a known task owner across away/back before session hydration", async () => {
+  const f = mount(TASK);
+  act(() =>
+    f.store.setState((state) => ({
+      tasks: { ...state.tasks, activeTaskId: "unrelated-active-task" },
+    })),
+  );
+  open();
+  fill();
+  submit();
+  await waitFor(() => expect(f.create).toHaveBeenCalledTimes(1));
+  f.changeOwner("other-known-task");
+  f.changeOwner(TASK);
+  await act(async () => f.resolve(partial));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
