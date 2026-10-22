@@ -436,5 +436,17 @@
   "profileDragStart": "Ƥŕōƒĩĺē {{name}} ƥĩćķēď ũƥ. Ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragOver": "Ƥŕōƒĩĺē {{name}} ḿōvēď ţō ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragEnd": "Ƥŕōƒĩĺē {{name}} ďŕōƥƥēď àţ ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
-  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď."
+  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď.",
+  "sessionRuntimeManaged": "Śēśśĩōń ŕũńţĩḿē: Ḿàńàĝēď ƀŷ Ķàńďēv",
+  "sessionRuntimeNative": "Śēśśĩōń ŕũńţĩḿē: Ńàţĩvē ĆĹĨ",
+  "sessionRuntimeHarness": "Śēśśĩōń ŕũńţĩḿē: Ĥàŕńēśś-ōŵńēď ĆĹĨ",
+  "sessionRuntimeCustom": "Śēśśĩōń ŕũńţĩḿē: Ćũśţōḿ ćōḿḿàńď",
+  "sessionRuntimeUnknown": "Śēśśĩōń ŕũńţĩḿē: Ũńķńōŵń",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "Ũńķńōŵń vēŕśĩōń",
+  "sessionRuntimeNewSessions": "Ƒōŕ ńēŵ śēśśĩōńś",
+  "runtimeDiagnostics": "Ďĩàĝńōśţĩćś",
+  "runtimeDetectedLocalCLI": "Ďēţēćţēď ĺōćàĺ ĆĹĨ: {{path}}",
+  "runtimeLocalCLIVersion": "Ĺōćàĺ ĆĹĨ: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "Ĺōćàĺ ĆĹĨ: {{name}}, vēŕśĩōń ũńķńōŵń ({{reason}})"
 }

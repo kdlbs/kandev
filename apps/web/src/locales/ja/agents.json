@@ -436,5 +436,17 @@
   "profileDragStart": "プロフィール {{name}} を選びました。{{total}} 件中 {{position}} 番目です。",
   "profileDragOver": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に移動しました。",
   "profileDragEnd": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に配置しました。",
-  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。"
+  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。",
+  "sessionRuntimeManaged": "セッションランタイム：Kandev が管理",
+  "sessionRuntimeNative": "セッションランタイム：ネイティブ CLI",
+  "sessionRuntimeHarness": "セッションランタイム：エージェント管理の CLI",
+  "sessionRuntimeCustom": "セッションランタイム：カスタムコマンド",
+  "sessionRuntimeUnknown": "セッションランタイム：不明",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "バージョン不明",
+  "sessionRuntimeNewSessions": "新しいセッションに適用",
+  "runtimeDiagnostics": "診断情報",
+  "runtimeDetectedLocalCLI": "検出されたローカル CLI：{{path}}",
+  "runtimeLocalCLIVersion": "ローカル CLI：{{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "ローカル CLI：{{name}}、バージョン不明（{{reason}}）"
 }

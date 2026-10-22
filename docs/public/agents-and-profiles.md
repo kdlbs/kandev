@@ -122,12 +122,16 @@ portable credentials. No provider or account fallback is injected on failure.
 
 ### Claude Code and Codex CLI version and model discovery
 
-For Claude and Codex, the agent card shows the installed vendor CLI's version
-next to the detected path (for example "Claude Code 2.1.220" or "Codex CLI
-0.155.1"), or a muted "version unknown" line with a short reason when the
-version command fails or times out. Reinstalling or upgrading through the
-card's install action re-detects the version automatically, without a
-backend restart.
+Agent cards show the **Session runtime** selected for new structured sessions. For a
+runtime managed by Kandev, the card names the npm package and selected version.
+A native CLI or custom command is identified separately; unavailable identity or
+version information is shown as unknown. This label does not confirm authentication
+or a successful launch, and does not describe existing sessions or passthrough commands.
+
+Expand **Diagnostics** to see the detected local CLI path. For Claude and Codex,
+this also shows the installed vendor CLI version, or an unknown version with the
+reason discovery failed. This local installation may differ from the session runtime.
+The card's install action refreshes discovery without a backend restart.
 
 The profile editor's Start model dropdown includes suggestions from the host CLI. The Codex
 CLI publishes a model list (`codex app-server`), so its dropdown shows that
