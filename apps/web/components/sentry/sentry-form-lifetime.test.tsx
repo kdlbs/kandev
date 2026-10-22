@@ -203,7 +203,6 @@ describe.each(["add", "edit"] as const)("old %s", (oldKind) => {
         expect(
           screen.getByRole("button", {
             name: success ? "Save changes" : "Retry save",
-            exact: true,
           }),
         ).toHaveProperty("disabled", false);
         await act(async () => {

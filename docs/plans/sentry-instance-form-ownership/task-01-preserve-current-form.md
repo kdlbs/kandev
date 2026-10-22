@@ -157,3 +157,12 @@ Sentry settings/form tests, API and desktop page object. No new ADR is warranted
   OS keyboard, real provider, cross-tab or transport exactly-once claim.
   Browser screenshot capture was disabled; behavior and selection assertions
   ran on the shipped production surface. No rendered layout changed.
+
+### Delivery validation correction
+
+The fresh current-main worktree exposed a type-only test assertion error:
+Testing Library role lookups do not accept Playwright's `exact` option. Removed
+that option without changing the asserted accessible name or product behavior.
+Focused unit checks passed 34/34 and the 8 GiB web typecheck passed after the
+correction; final-head
+CI/review and combined-result evidence remain external delivery receipts.
