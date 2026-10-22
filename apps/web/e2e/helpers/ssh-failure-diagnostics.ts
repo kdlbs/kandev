@@ -29,7 +29,7 @@ function redactLog(text: string): string {
     )
     .split("\n")
     .map((line) =>
-      /bearer\s|authorization|(?:token|secret|password|private[_-]?key|api[_-]?key)[\\"'\s]*[:=]|--(?:auth-token|token|password|api-key)\b/i.test(
+      /\bbasic\s|bearer\s|authorization|(?:token|secret|password|private[_-]?key|api[_-]?key)[\\"'\s]*[:=]|--(?:auth-token|token|password|api-key)\b/i.test(
         line,
       ) || /^[A-Za-z0-9+/=]{8,}\r?$/.test(line)
         ? "[REDACTED credential-bearing line]"

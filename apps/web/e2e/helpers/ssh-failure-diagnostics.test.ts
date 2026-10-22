@@ -128,6 +128,8 @@ describe("captureSSHInterruptionLogs", () => {
     const payload = [
       "retained recovery event",
       `Authorization: Bearer ${credential}`,
+      "Basic dXNlcjpwYXNz",
+      "  bAsIc\tdXNlcjpwYXNz\r",
       `{"token":"${credential}"}`,
       `{\\"auth_token\\":\\"${credential}\\"}`,
       `--password ${credential}`,
@@ -149,6 +151,7 @@ describe("captureSSHInterruptionLogs", () => {
       expect(captured).toContain("retained recovery event");
       expect(captured).toContain("retained final event");
       expect(captured).not.toContain(credential);
+      expect(captured).not.toContain("dXNlcjpwYXNz");
       expect(captured).not.toContain("QUJDREVGR0hJSktMTU5PUA==");
       expect(captured).not.toContain("wss://");
     }
