@@ -346,13 +346,18 @@ have selected ([agents-03](agents-03.md)).
 | otherwise | cancel the request |
 
 Office appends a `permission.decision` run event naming the decision, the
-option kind and the request title before it delivers the answer, so a delivery failure still leaves
-evidence on the run. Delivery goes through execution-keyed runtime calls
-(`ResolveRunPermission`, `CancelRunPermission`), because a run-owned execution
-has no task session ID to look up. A stale request (attempt superseded, run no
-longer claimed, execution already stopped) is dropped without delivery. After
-the answer, the turn reaches its own outcome through the normal AgentReady or
-failure path; this rule adds no new terminal path.
+option kind and the request title before it delivers the answer, so a delivery
+failure still leaves evidence on the run. If that write fails, Office still
+delivers the answer and logs the full decision at error level: withholding the
+answer would block the turn again. Delivery goes through execution-keyed runtime
+calls (`ResolveRunPermission`, `CancelRunPermission`), because a run-owned
+execution has no task session ID to look up. A stale request (attempt
+superseded, run no longer claimed, execution already stopped) is dropped
+without delivery, and a not-found answer is not retried. Any other delivery
+failure is retried twice with short backoff; if it still fails, Office stops
+the execution with reason `office_permission_answer_failed`, and the run
+settles through the existing stop path. Otherwise the turn reaches its own
+outcome through the normal AgentReady or failure path.
 
 A turn that hangs for a reason other than a permission request remains a known
 gap, tracked with the outstanding lifecycle work below; the generic stale-claim

@@ -5,8 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -14,20 +20,31 @@ import (
 	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
+// fakeRunPermissionResolver fails its first `failures` calls with err, or
+// every call when failures is negative.
 type fakeRunPermissionResolver struct {
 	resolved []string
 	canceled []string
 	err      error
+	failures int
+}
+
+func (f *fakeRunPermissionResolver) result() error {
+	calls := len(f.resolved) + len(f.canceled)
+	if f.err != nil && (f.failures < 0 || calls <= f.failures) {
+		return f.err
+	}
+	return nil
 }
 
 func (f *fakeRunPermissionResolver) ResolveRunPermission(_ context.Context, executionID, requestID, pendingID, optionID string) error {
 	f.resolved = append(f.resolved, executionID+"|"+requestID+"|"+pendingID+"|"+optionID)
-	return f.err
+	return f.result()
 }
 
 func (f *fakeRunPermissionResolver) CancelRunPermission(_ context.Context, executionID, requestID, pendingID string) error {
 	f.canceled = append(f.canceled, executionID+"|"+requestID+"|"+pendingID)
-	return f.err
+	return f.result()
 }
 
 type tasklessPermissionFixture struct {
@@ -43,7 +60,13 @@ type tasklessPermissionFixture struct {
 // running as execution "execution-run-session-1".
 func newTasklessPermissionFixture(t *testing.T) *tasklessPermissionFixture {
 	t.Helper()
-	svc, eb := newTestServiceWithBus(t)
+	return newTasklessPermissionFixtureWithLogger(t, logger.Default())
+}
+
+func newTasklessPermissionFixtureWithLogger(t *testing.T, log *logger.Logger) *tasklessPermissionFixture {
+	t.Helper()
+	svc, eb := newTestServiceWithBusLogger(t, log)
+	svc.SetTasklessPermissionRetryDelaysForTest([]time.Duration{time.Millisecond, time.Millisecond})
 	ctx := context.Background()
 	f := &tasklessPermissionFixture{
 		svc: svc, eb: eb, resolver: &fakeRunPermissionResolver{}, stopper: &fakeRunExecutionStopper{},
@@ -196,14 +219,74 @@ func TestTasklessPermission_IgnoresStaleAndTaskOwnedRequests(t *testing.T) {
 	}
 }
 
-func TestTasklessPermission_RecordsDecisionWhenDeliveryFails(t *testing.T) {
+func TestTasklessPermission_RetriesTransientAnswerFailure(t *testing.T) {
 	f := newTasklessPermissionFixture(t)
-	f.resolver.err = errors.New("agentctl unavailable")
+	f.resolver.err = errors.New("agent stream reconnecting")
+	f.resolver.failures = 2
 
 	f.publish(t, f.request(nil))
 
+	if len(f.resolver.resolved) != 3 {
+		t.Fatalf("answer attempts = %d, want 3 (two failures, then success)", len(f.resolver.resolved))
+	}
+	if len(f.stopper.executionIDs) != 0 {
+		t.Fatalf("stopped executions = %v, want none after a delivered answer", f.stopper.executionIDs)
+	}
+}
+
+// An answer that can never be delivered must not leave the agent waiting:
+// Office stops the execution so the run settles and frees the agent's slot.
+func TestTasklessPermission_StopsExecutionWhenAnswerCannotBeDelivered(t *testing.T) {
+	f := newTasklessPermissionFixture(t)
+	f.resolver.err = errors.New("agentctl unavailable")
+	f.resolver.failures = -1
+
+	f.publish(t, f.request(nil))
+
+	if len(f.resolver.resolved) != 3 {
+		t.Fatalf("answer attempts = %d, want 3", len(f.resolver.resolved))
+	}
+	if len(f.stopper.executionIDs) != 1 || f.stopper.executionIDs[0] != "execution-run-session-1" {
+		t.Fatalf("stopped executions = %v, want the run's execution", f.stopper.executionIDs)
+	}
 	decisions := f.decisions(t)
 	if len(decisions) != 1 || decisions[0]["decision"] != "rejected" {
 		t.Fatalf("decision events = %v, want the decision recorded before delivery", decisions)
+	}
+}
+
+func TestTasklessPermission_DoesNotRetryOrStopWhenExecutionIsGone(t *testing.T) {
+	f := newTasklessPermissionFixture(t)
+	f.resolver.err = lifecycle.ErrExecutionNotFound
+	f.resolver.failures = -1
+
+	f.publish(t, f.request(nil))
+
+	if len(f.resolver.resolved) != 1 || len(f.stopper.executionIDs) != 0 {
+		t.Fatalf("attempts = %d stopped = %v, want one attempt and no stop", len(f.resolver.resolved), f.stopper.executionIDs)
+	}
+}
+
+// Withholding the answer would hang the turn again, so a failed decision
+// record still answers the request and logs the full decision instead.
+func TestTasklessPermission_AnswersAndLogsWhenDecisionRecordFails(t *testing.T) {
+	core, logs := observer.New(zapcore.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("observer logger: %v", err)
+	}
+	f := newTasklessPermissionFixtureWithLogger(t, log)
+	if _, err := f.svc.RepoForTest().ReaderDB().Exec(`DROP TABLE run_events`); err != nil {
+		t.Fatalf("drop run_events: %v", err)
+	}
+
+	f.publish(t, f.request(nil))
+
+	if len(f.resolver.resolved) != 1 {
+		t.Fatalf("answer attempts = %d, want the request answered despite the record failure", len(f.resolver.resolved))
+	}
+	entries := logs.FilterMessage("taskless permission decision not recorded").All()
+	if len(entries) != 1 || entries[0].ContextMap()["decision"] != "rejected" || entries[0].ContextMap()["title"] != "Run ls" {
+		t.Fatalf("record-failure log = %v, want one entry naming the decision", entries)
 	}
 }

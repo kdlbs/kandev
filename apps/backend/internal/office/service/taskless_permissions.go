@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -73,25 +74,81 @@ func (s *Service) handleTasklessPermissionRequest(ctx context.Context, event *bu
 		return errors.New("taskless permission handling requires a run permission resolver")
 	}
 	decision, optionID, optionKind := decideTasklessPermission(request)
-	s.AppendRunEvent(ctx, run.ID, runEventTypePermissionDecision, "info", map[string]interface{}{
+	s.recordTasklessPermissionDecision(ctx, run.ID, request, decision, optionKind)
+	s.deliverTasklessPermissionAnswer(ctx, run.ID, request, decision, optionID)
+	return nil
+}
+
+// recordTasklessPermissionDecision writes the decision before delivery. A
+// failed write still lets the answer go out, because withholding it would
+// block the turn again; the decision is logged instead.
+func (s *Service) recordTasklessPermissionDecision(
+	ctx context.Context, runID string, request *tasklessPermissionRequest, decision, optionKind string,
+) {
+	err := s.appendRunEventStrict(ctx, runID, runEventTypePermissionDecision, "info", map[string]interface{}{
 		"decision":       decision,
 		"option_kind":    optionKind,
 		"title":          request.Title,
-		"run_session_id": data.RunSessionID,
-		"execution_id":   data.AgentExecutionID,
+		"run_session_id": request.RunSessionID,
+		"execution_id":   request.AgentExecutionID,
 		"pending_id":     request.PendingID,
 	})
+	if err != nil {
+		s.logger.Error("taskless permission decision not recorded",
+			zap.String("run_id", runID), zap.String("run_session_id", request.RunSessionID),
+			zap.String("execution_id", request.AgentExecutionID), zap.String("pending_id", request.PendingID),
+			zap.String("decision", decision), zap.String("option_kind", optionKind),
+			zap.String("title", request.Title), zap.Error(err))
+	}
+}
+
+var defaultTasklessPermissionRetryDelays = []time.Duration{500 * time.Millisecond, 2 * time.Second}
+
+// deliverTasklessPermissionAnswer retries a failed answer and, when it still
+// cannot be delivered, stops the execution: agentctl would otherwise hold the
+// request open and the run would stay claimed.
+func (s *Service) deliverTasklessPermissionAnswer(
+	ctx context.Context, runID string, request *tasklessPermissionRequest, decision, optionID string,
+) {
+	delays := s.permissionRetryDelays
+	if delays == nil {
+		delays = defaultTasklessPermissionRetryDelays
+	}
+	err := s.answerTasklessPermission(ctx, request, decision, optionID)
+	for _, delay := range delays {
+		if err == nil || runtimeapi.IsNotFound(err) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		err = s.answerTasklessPermission(ctx, request, decision, optionID)
+	}
+	if err == nil || runtimeapi.IsNotFound(err) {
+		return
+	}
+	s.logger.Warn("taskless permission answer failed; stopping execution",
+		zap.String("run_id", runID), zap.String("run_session_id", request.RunSessionID),
+		zap.String("decision", decision), zap.Error(err))
+	if s.runStopper == nil {
+		return
+	}
+	if stopErr := s.runStopper.Stop(ctx, request.AgentExecutionID, "office_permission_answer_failed"); stopErr != nil &&
+		!runtimeapi.IsNotFound(stopErr) {
+		s.logger.Error("stop execution after undeliverable permission answer failed",
+			zap.String("run_id", runID), zap.String("execution_id", request.AgentExecutionID), zap.Error(stopErr))
+	}
+}
+
+func (s *Service) answerTasklessPermission(
+	ctx context.Context, request *tasklessPermissionRequest, decision, optionID string,
+) error {
 	if decision == permissionDecisionCancelled {
-		err = s.runPermissions.CancelRunPermission(ctx, data.AgentExecutionID, request.RequestID, request.PendingID)
-	} else {
-		err = s.runPermissions.ResolveRunPermission(ctx, data.AgentExecutionID, request.RequestID, request.PendingID, optionID)
+		return s.runPermissions.CancelRunPermission(ctx, request.AgentExecutionID, request.RequestID, request.PendingID)
 	}
-	if err != nil && !runtimeapi.IsNotFound(err) {
-		s.logger.Warn("taskless permission answer failed",
-			zap.String("run_id", run.ID), zap.String("run_session_id", data.RunSessionID),
-			zap.String("decision", decision), zap.Error(err))
-	}
-	return nil
+	return s.runPermissions.ResolveRunPermission(ctx, request.AgentExecutionID, request.RequestID, request.PendingID, optionID)
 }
 
 // decideTasklessPermission approves an auto-approval candidate, otherwise

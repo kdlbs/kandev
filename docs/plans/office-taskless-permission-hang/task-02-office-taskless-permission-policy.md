@@ -40,7 +40,9 @@ decision is a run event written before delivery.
 - Unit tests cover: auto-approval pending resolves with the offered option;
   non-auto request resolves with the first reject option; no reject option
   cancels; superseded attempt, unclaimed run and task-owned events are
-  ignored; the run event is appended even when delivery fails.
+  ignored; the run event is appended even when delivery fails; a transient
+  delivery failure is retried; an undeliverable answer stops the execution; a
+  failed decision record still answers and logs the decision.
 - `TestTasklessPermission_RejectsAndRunFinishesOnReady` uses the real event bus
   and Office subscribers: the request is answered, and the following
   AgentReady finishes the run.
@@ -91,3 +93,6 @@ Done 2026-10-20.
   The whole backendapp package exceeds 20 minutes on this host; it had 415
   passing tests and no failures before the timeout.
 - `go build ./...` and `make lint`: pass, 0 issues.
+- PR review remediation (Greptile, 2026-10-22): added retry-then-stop delivery and
+  the strict decision record; `go test ./internal/office/service/ -run TasklessPermission`
+  8/8 pass (the three new tests failed first), `golangci-lint run ./internal/office/service/...` 0 issues.
