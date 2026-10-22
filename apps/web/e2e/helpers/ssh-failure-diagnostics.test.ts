@@ -94,6 +94,35 @@ describe("captureSSHInterruptionLogs", () => {
     }
   });
 
+  it("retains the newest failure event when redaction expands short credential lines", async () => {
+    const state = fixture();
+    const newest = "newest failure event: SSH stream acquisition rejected";
+    const payload = "password=Q7\n".repeat(70_000) + newest + "\n";
+    for (const source of state.sources) fs.writeFileSync(source, payload);
+    await captureSSHInterruptionLogs(state.info, state.backend, state.remote);
+    const metadata = state.metadata();
+    for (const capture of metadata.captures) {
+      expect(capture.originalBytes).toBeLessThan(metadata.perLogByteCap);
+      expect(capture.readBytes).toBe(capture.originalBytes);
+      expect(capture.truncated).toBe(true);
+      const retained = fs.readFileSync(path.join(state.output, capture.name), "utf8");
+      expect(retained.endsWith(newest + "\n")).toBe(true);
+      expect(retained).not.toContain("Q7");
+      expect(retained).not.toContain("password=");
+      expect(Buffer.byteLength(retained)).toBe(capture.attachedBytes);
+    }
+    const retainedBytes = [state.output, state.copies].reduce(
+      (sum, directory) =>
+        sum +
+        fs
+          .readdirSync(directory)
+          .filter((name) => name !== "attachments")
+          .reduce((bytes, name) => bytes + fs.statSync(path.join(directory, name)).size, 0),
+      0,
+    );
+    expect(retainedBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  });
+
   it("redacts credential forms while retaining useful recovery events", async () => {
     const state = fixture();
     const payload = [

@@ -57,10 +57,11 @@ async function attachLog(testInfo: TestInfo, source: string, capture: Capture): 
     const body = Buffer.from(redactLog(text));
     capture.originalBytes = stat.size;
     capture.readBytes = read;
-    capture.attachedBytes = Math.min(body.length, LOG_BYTES);
+    const retained = body.subarray(Math.max(0, body.length - LOG_BYTES));
+    capture.attachedBytes = retained.length;
     capture.truncated = offset > 0 || body.length > LOG_BYTES;
     const output = testInfo.outputPath(capture.name);
-    fs.writeFileSync(output, body.subarray(0, LOG_BYTES));
+    fs.writeFileSync(output, retained);
     await testInfo.attach(capture.name, { path: output, contentType: "text/plain" });
   } catch (error) {
     capture.error = errorCode(error);
