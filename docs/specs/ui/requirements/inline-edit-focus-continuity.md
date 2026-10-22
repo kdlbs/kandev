@@ -60,6 +60,12 @@ dialog also shares the selection behavior.
 - **AC-UI-EDIT-FOCUS-001.6:** Desktop and phone entry points shall preserve
   unfinished input across external focus changes. Returning shall not force
   focus or reopen the phone keyboard over another control.
+- **AC-UI-EDIT-FOCUS-001.7:** When an earlier task Rename save succeeds or
+  fails after a later edit opens, its completion shall preserve the later
+  dialog and exact draft, including a reopened edit of the same task.
+  The submitted save shall retain its original target and normalized title,
+  immediate dialog dismissal, and existing failure feedback. The later edit
+  shall remain available for explicit Save or Cancel.
 
 ## Compatibility
 

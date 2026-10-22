@@ -115,6 +115,32 @@ The Rename dialog already seeds on form mount. Preserve that lifetime and
 explicit dismissal behavior. Its mobile consumer uses a captured rename
 target. No global draft registry or persistent storage is introduced.
 
+### Rename request completion
+
+For `AC-UI-EDIT-FOCUS-001.7`, `useMobileTaskRename` owns the transient edit
+identity independently of task identity. Each `handleRenameTask` call creates
+a fresh target object, including reopening the same task. A submission captures
+that object. Its `finally` may clear only that exact object through a functional
+state update; another object or a dismissed edit is left unchanged. Task ID
+comparison alone cannot distinguish two edits of the same task.
+
+`TaskRenameDialog` still trims and validates the title, invokes submission,
+and closes immediately through `TaskSwitcherDialogs`. The mounted
+`SessionTaskSwitcherSheet` can admit another edit while the PATCH is pending.
+`ResponsiveTaskPicker` retains this consumer across phone-to-tablet presentation
+changes. The navigation provider also mounts it independently of its portal.
+The guard applies wherever that consumer remains mounted; it is not gated by
+viewport width. Desktop sidebar and top-bar editors retain separate handlers.
+Failure logging and toast publication remain outside the ownership guard;
+`useTaskActions` and the API retain mutation, response, cache, and WebSocket
+responsibility. No request cancellation or global queue is introduced.
+
+The regression uses real providers, dialog, action hook and API with only
+fetch held. A shipped picker browser scenario checks touch reentry and later
+Save/Cancel against a disposable backend; browser device emulation does not
+establish physical phone or runtime incident evidence. See the
+[Rename ownership plan](../../../plans/mobile-task-rename-ownership/plan.md).
+
 ## Consumers and responsive behavior
 
 Task top-bar and Office titles use the focus hook. The Rename dialog uses
