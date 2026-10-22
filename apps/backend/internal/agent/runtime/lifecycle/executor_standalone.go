@@ -395,7 +395,11 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	metadata["standalone_port"] = resp.Port
 	if worktreeID != "" {
 		metadata["worktree_id"] = worktreeID
-		metadata["worktree_path"] = req.WorkspacePath
+		worktreePath := getMetadataString(req.Metadata, MetadataKeyWorktreePath)
+		if worktreePath == "" {
+			worktreePath = req.WorkspacePath
+		}
+		metadata[MetadataKeyWorktreePath] = worktreePath
 		metadata["worktree_branch"] = worktreeBranch
 	}
 
@@ -916,7 +920,7 @@ func (r *StandaloneExecutor) discoverDeliveryStatus(
 		status, err := client.GetDeliveryStatus(attemptCtx, "")
 		cancel()
 		if err == nil {
-			if status.Version != journal.CurrentVersion {
+			if !journal.SupportsDeliveryVersion(status.Version) {
 				return nil, false, fmt.Errorf("unsupported durable delivery version %d", status.Version)
 			}
 			if status.Durable {

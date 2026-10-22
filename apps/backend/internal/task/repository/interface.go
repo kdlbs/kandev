@@ -17,6 +17,10 @@ import (
 var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTurnChangeSetNotFound = repoerrors.ErrTurnChangeSetNotFound
+var ErrTurnChangeSetIdentityConflict = repoerrors.ErrTurnChangeSetIdentityConflict
+var ErrTurnChangeRelationship = repoerrors.ErrTurnChangeRelationship
+var ErrTurnChangeContentNotFound = repoerrors.ErrTurnChangeContentNotFound
 var ErrTaskVersionConflict = repoerrors.ErrTaskVersionConflict
 var ErrTaskManagementClaimConflict = repoerrors.ErrTaskManagementClaimConflict
 var ErrTaskManagementClaimOwned = repoerrors.ErrTaskManagementClaimOwned

@@ -13,6 +13,7 @@ import {
   type SessionId,
   type TaskId,
   type TaskSessionState,
+  type SessionRecoveryBlockProjection,
 } from "@/lib/types/http";
 import {
   runtimeCleanupFailureCauses,
@@ -104,6 +105,7 @@ export type ResumeStateSetter = {
     updated_at: string;
     queue_incarnation_id?: string;
     resume_projection_id?: string;
+    session_recovery_blocks?: SessionRecoveryBlockProjection[];
   }) => void;
   /** Updates the captured session row even when the active view has changed. */
   setTaskSessionUnscoped?: ResumeStateSetter["setTaskSession"];
@@ -126,6 +128,7 @@ export type SessionLike = {
   state?: string;
   queue_incarnation_id?: string;
   resume_projection_id?: string;
+  session_recovery_blocks?: SessionRecoveryBlockProjection[];
 } | null;
 
 const TASK_SESSION_STATES = new Set<TaskSessionState>([

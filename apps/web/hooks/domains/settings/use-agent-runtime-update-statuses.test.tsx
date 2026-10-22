@@ -9,7 +9,7 @@ import type { AgentUpdateJob } from "@/lib/api";
 
 const listAgentUpdateStatusesMock = vi.fn();
 function newStore() {
-  return create<SettingsSlice>()(immer((set, get, api) => createSettingsSlice(set, get, api)));
+  return create<SettingsSlice>()(immer((set, get) => createSettingsSlice(set, get)));
 }
 let mockStore = newStore();
 vi.mock("@/components/state-provider", () => ({

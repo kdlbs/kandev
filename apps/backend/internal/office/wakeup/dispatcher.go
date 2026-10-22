@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -208,7 +210,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, requestID string) error {
 // route the event to its own fresh run instead of trusting the stale
 // in-memory status.
 func (d *Dispatcher) coalesceIntoInflightRun(
-	ctx context.Context, req *officesqlite.WakeupRequest, inflight *models.Run,
+	ctx context.Context, req *officesqlite.WakeupRequest, inflight *runsmodels.Run,
 ) error {
 	reason := effectiveReason(req)
 	if reason != "" &&

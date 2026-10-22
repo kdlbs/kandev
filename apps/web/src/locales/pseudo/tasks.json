@@ -59,5 +59,22 @@
   "noWorkflowStep": "Ńō ŵōŕķƒĺōŵ śţēƥ",
   "loadingWorkflowStep": "Ĺōàďĩńĝ ŵōŕķƒĺōŵ śţēƥ...",
   "unknownWorkflowStep": "Ũńķńōŵń ŵōŕķƒĺōŵ śţēƥ",
-  "workflowStepSection": "{{workflow}} / {{step}}"
+  "workflowStepSection": "{{workflow}} / {{step}}",
+  "activeTasks": "Àćţĩvē",
+  "allTasks": "Àĺĺ",
+  "archiveFilter": "Àŕćĥĩvē śţàţũś",
+  "clearFilters": "Ćĺēàŕ ƒĩĺţēŕś",
+  "clearSearch": "Ćĺēàŕ śēàŕćĥ",
+  "removeWorkflowFilter": "Ŕēḿōvē ŵōŕķƒĺōŵ ƒĩĺţēŕ",
+  "removeRepositoryFilter": "Ŕēḿōvē ŕēƥōśĩţōŕŷ ƒĩĺţēŕ",
+  "workflowUnavailable": "Ŵōŕķƒĺōŵ ũńàvàĩĺàƀĺē",
+  "repositoryUnavailable": "Ŕēƥōśĩţōŕŷ ũńàvàĩĺàƀĺē",
+  "noArchivedTasks": "Ńō àŕćĥĩvēď ţàśķś",
+  "noMatchingTasks": "Ńō ţàśķś ḿàţćĥ ţĥēśē ƒĩĺţēŕś",
+  "filteredCount_one": "{{count}} ţàśķ",
+  "filteredCount_other": "{{count}} ţàśķś",
+  "filtersButton_one": "Ƒĩĺţēŕś ({{count}})",
+  "filtersButton_other": "Ƒĩĺţēŕś ({{count}})",
+  "appliedWorkflow": "Ŵōŕķƒĺōŵ: {{name}}",
+  "appliedRepository": "Ŕēƥōśĩţōŕŷ: {{name}}"
 }

@@ -25,7 +25,7 @@ const capacityContinuationInstruction = "Your previous turn stopped because the 
 func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sessionID, execID string, entry *transientRetryEntry) {
 	if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
 		if entry.retainedRuntime != nil {
-			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
 			return
 		}
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
@@ -37,11 +37,11 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 			return
 		}
 		if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
-			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
 			return
 		}
 		if !s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry, capacityContinuationInstruction) {
-			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
 		}
 		return
 	}
@@ -52,7 +52,7 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 				return
 			}
 		case retainedRuntimeRetryBlocked:
-			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
 			return
 		}
 	}
@@ -127,6 +127,9 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	entry *transientRetryEntry,
 	instruction string,
 ) bool {
+	if entry.continuation != nil && entry.continuation.initiatorKnown {
+		ctx = authn.WithIdentity(ctx, entry.continuation.initiator)
+	}
 	if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
 		return false
 	}
@@ -185,11 +188,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
 			return err
 		}
-		admissionCtx := ctx
-		if entry.continuation != nil && entry.continuation.initiatorKnown {
-			admissionCtx = authn.WithIdentity(ctx, entry.continuation.initiator)
-		}
-		if err := s.authorizeSessionPrompt(admissionCtx, sessionID); err != nil {
+		if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 			return err
 		}
 		return s.validateContinuationOwner(ctx, taskID, sessionID, entry)
@@ -225,7 +224,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	}
 	s.logger.Warn("retained-runtime continuation could not dispatch",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routingerr.SanitizeError(err)))
-	s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+	s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, s.retainedRetryRefusal(entry))
 	return true
 }
 
@@ -339,6 +338,9 @@ func (s *Service) validatePromptExecutionMap(sessionID, executionID string) erro
 func (s *Service) validateContinuationOwner(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if entry.policy.expired(s.transientRetryNow()) {
+		return ErrResumeAttemptCancelled
 	}
 	current, ok := s.transientRetries.Load(sessionID)
 	if !ok || current != entry || entry.continuation == nil || entry.continuationPolicy != entry.continuation.policy {
@@ -486,4 +488,11 @@ func (s *Service) closeInterruptedTurn(ctx context.Context, sessionID string) er
 		s.activeTurns.CompareAndDelete(sessionID, turn.ID)
 	}
 	return nil
+}
+
+func (s *Service) retainedRetryRefusal(entry *transientRetryEntry) string {
+	if entry.policy.expired(s.transientRetryNow()) {
+		return recoveryDispositionWindowExpired
+	}
+	return recoveryDispositionRefused
 }

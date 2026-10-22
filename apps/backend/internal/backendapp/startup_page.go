@@ -51,18 +51,23 @@ type startupStepView struct {
 	PercentDoneStr string
 	Stalled        bool
 	StalledText    string
+	Elapsed        string
 }
 
 // startupPageView is the html/template data for startupPageTemplate.
 type startupPageView struct {
-	Locale     string
-	Title      string
-	PhaseLabel string
-	Elapsed    string
-	HasStep    bool
-	Step       startupStepView
-	DataJSON   template.JS
+	Locale       string
+	Title        string
+	PhaseLabel   string
+	Elapsed      string
+	HasStep      bool
+	Step         startupStepView
+	Timings      []startupTimingView
+	TimingsTitle string
+	DataJSON     template.JS
 }
+
+type startupTimingView struct{ Label, Duration, State string }
 
 func buildStartupPageView(locale string, snap startup.Snapshot) startupPageView {
 	view := startupPageView{
@@ -75,12 +80,20 @@ func buildStartupPageView(locale string, snap startup.Snapshot) startupPageView 
 		view.HasStep = true
 		view.Step = buildStepView(locale, snap.Step)
 	}
+	view.TimingsTitle = i18n.T(locale, "startup.page.timings")
+	for _, step := range snap.CompletedSteps {
+		state := ""
+		if !step.Completed {
+			state = i18n.T(locale, "startup.page.interrupted")
+		}
+		view.Timings = append(view.Timings, startupTimingView{Label: i18n.T(locale, step.LabelKey), Duration: formatTimingDuration(locale, step.ElapsedMS), State: state})
+	}
 	view.DataJSON = marshalStartupData(locale, snap)
 	return view
 }
 
 func buildStepView(locale string, step *startup.StepSnapshot) startupStepView {
-	view := startupStepView{Label: i18n.T(locale, step.LabelKey)}
+	view := startupStepView{Label: i18n.T(locale, step.LabelKey), Elapsed: formatElapsed(locale, step.ElapsedMS)}
 	switch step.Measure {
 	case startup.MeasureOpaque:
 		view.Progress = i18n.T(locale, "startup.page.progressUnavailable")
@@ -174,6 +187,13 @@ func formatElapsed(locale string, ms int64) string {
 	return i18n.Tf(locale, "startup.page.elapsed", map[string]any{tfVarDuration: formatDuration(locale, ms)})
 }
 
+func formatTimingDuration(locale string, ms int64) string {
+	if ms < 1000 {
+		return i18n.Tf(locale, "startup.duration.milliseconds", map[string]any{tfVarCount: ms})
+	}
+	return formatDuration(locale, ms)
+}
+
 // startupPageKeys lists every catalog key the page's initial render or its
 // client-side re-poll can need. Keeping it explicit (rather than embedding
 // the whole catalog) means the translations island carries only what this
@@ -181,6 +201,7 @@ func formatElapsed(locale string, ms int64) string {
 func startupPageKeys() []string {
 	keys := []string{
 		"startup.page.title", "startup.page.waiting", "startup.page.lastKnown",
+		"startup.page.timings", "startup.page.interrupted", "startup.duration.milliseconds_one", "startup.duration.milliseconds_other",
 		"startup.page.progressUnavailable", "startup.page.countedProgress",
 		"startup.page.countingProgress", "startup.page.elapsed", "startup.page.eta",
 		"startup.page.stalled",
@@ -241,10 +262,18 @@ const startupPageTemplateSource = `<!DOCTYPE html>
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     display: flex; align-items: center; justify-content: center;
-    min-height: 100vh; margin: 0; padding: 1.5rem; box-sizing: border-box;
+    height: 100dvh; margin: 0; padding: max(1.5rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left)); box-sizing: border-box; overflow: hidden;
     background: Canvas; color: CanvasText;
   }
-  main { max-width: 26rem; width: 100%; text-align: center; }
+  main { max-width: 26rem; width: 100%; max-height: 100%; display: flex; flex-direction: column; min-height: 0; text-align: center; }
+ #startup-status,h1 { flex-shrink: 0; }
+ #startup-timings { min-height: 0; overflow-y: auto; overscroll-behavior: contain; text-align: left; margin-top: 1rem; }
+ #startup-timings h2 { font-size: 0.9rem; margin: 0 0 0.6rem; }
+ #startup-timings dl { margin: 0; }
+ .timing { display:flex; flex-wrap:wrap; justify-content:space-between; gap:0.2rem 0.75rem; margin:0.6rem 0; }
+ .timing dt { overflow-wrap:anywhere; }
+ .timing dd { margin:0; opacity:0.7; font-variant-numeric:tabular-nums; }
+ .timing small { display:block; opacity:0.7; }
   h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }
   p { margin: 0.35rem 0; opacity: 0.85; }
   .bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, CanvasText 15%, transparent); overflow: hidden; margin-top: 1rem; }
@@ -261,12 +290,17 @@ const startupPageTemplateSource = `<!DOCTYPE html>
   <p id="startup-phase">{{.PhaseLabel}}</p>
   <p id="startup-elapsed">{{.Elapsed}}</p>
   <p id="startup-step-label" class="{{if not .HasStep}}hidden{{end}}">{{.Step.Label}}</p>
+  <p id="startup-step-elapsed" class="{{if not .HasStep}}hidden{{end}}">{{.Step.Elapsed}}</p>
   <p id="startup-progress" class="{{if not .HasStep}}hidden{{end}}">{{.Step.Progress}}</p>
   <p id="startup-eta" class="{{if not .Step.HasETA}}hidden{{end}}">{{.Step.ETA}}</p>
   <div id="startup-bar" class="bar {{if not .Step.HasBar}}hidden{{end}}"><span id="startup-bar-fill" style="width:{{.Step.PercentDoneStr}}%"></span></div>
   <p id="startup-stalled" class="{{if not .Step.Stalled}}hidden{{end}}">{{.Step.StalledText}}</p>
   <p id="startup-last-known" class="last-known hidden"></p>
 </div>
+<section id="startup-timings" tabindex="0" class="{{if not .Timings}}hidden{{end}}" aria-label="{{.TimingsTitle}}">
+ <h2>{{.TimingsTitle}}</h2>
+ <dl id="startup-timing-list">{{range .Timings}}<div class="timing"><dt>{{.Label}}{{if .State}}<small>{{.State}}</small>{{end}}</dt><dd>{{.Duration}}</dd></div>{{end}}</dl>
+</section>
 </main>
 <script id="startup-data" type="application/json">{{.DataJSON}}</script>
 <script>` + startupPageScript + `</script>
@@ -387,12 +421,14 @@ const startupPageScript = `
 
   function renderStep(step) {
     toggle("startup-step-label", !!step);
+    toggle("startup-step-elapsed", !!step);
     toggle("startup-progress", !!step);
     toggle("startup-eta", false);
     toggle("startup-bar", false);
     toggle("startup-stalled", false);
     if (!step) return;
     setText("startup-step-label", t[step.label_key]);
+    setText("startup-step-elapsed",interpolate(t["startup.page.elapsed"],{duration:durationLabel(step.elapsed_ms)}));
     setText("startup-progress", progressText(step));
     if (step.measure === "counted" && step.eta_ms != null) {
       setText("startup-eta", interpolate(t["startup.page.eta"], { duration: durationLabel(step.eta_ms) }));
@@ -410,10 +446,31 @@ const startupPageScript = `
     }
   }
 
+  function validTiming(step) {
+    return step && typeof step.id === "string" && step.id.length > 0 && typeof step.label_key === "string" && step.label_key.indexOf("startup.step.") === 0 &&
+      nonNegativeInteger(step.activation_seq) && step.activation_seq > 0 && phases[step.phase] && nonNegativeInteger(step.elapsed_ms) && typeof step.completed === "boolean";
+  }
+  function renderTimings(history) {
+    var valid = Array.isArray(history) && history.length <= 32 && history.every(validTiming);
+    var list = el("startup-timing-list");
+    if (!list) return;
+    list.replaceChildren();
+    toggle("startup-timings",valid && history.length > 0);
+    if (!valid) return;
+    history.forEach(function(step) {
+      var row = document.createElement("div"); row.className="timing";
+      var label=document.createElement("dt"); label.textContent=t[step.label_key] || "";
+      if (!step.completed) { var state=document.createElement("small");state.textContent=t["startup.page.interrupted"];label.appendChild(state); }
+      var duration=document.createElement("dd");duration.textContent=step.elapsed_ms < 1000 ? interpolate(pluralLookup("startup.duration.milliseconds",step.elapsed_ms),{count:step.elapsed_ms}) : durationLabel(step.elapsed_ms);
+      row.append(label,duration);list.appendChild(row);
+    });
+  }
+
   function render(snapshot) {
     setText("startup-phase", t["startup.phase." + snapshot.phase]);
     setText("startup-elapsed", interpolate(t["startup.page.elapsed"], { duration: durationLabel(snapshot.elapsed_ms) }));
     renderStep(snapshot.step || null);
+    renderTimings(snapshot.completed_steps);
   }
 
   function markLastKnown(isLastKnown) {

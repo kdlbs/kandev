@@ -2,6 +2,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
+import { registerSilentPromptStallTests } from "../../helpers/silent-prompt-stall";
+
+registerSilentPromptStallTests();
 
 // @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.6
 test("a phone compaction notice has a touch target and clears live and after reload", async ({

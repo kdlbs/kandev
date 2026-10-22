@@ -711,6 +711,25 @@ classification and a bounded, sanitized stderr tail while their response stays
 generic. A line cut off at the beginning of the retained tail is omitted to
 avoid exposing part of a credential.
 
+### Handle a quiet agent turn
+
+After five minutes without turn output, Chat shows **Still waiting for the
+agent.** or identifies the tool it is waiting on. The turn stays active.
+Silence alone does not mean the agent failed or that it is safe to repeat the
+instruction.
+
+Select **Cancel turn** to request cancellation. The control stays disabled and
+shows a progress indicator until the request settles, including after a page reload.
+When cancellation is confirmed, you can continue the conversation. If Kandev
+cannot confirm the outcome, delivery remains blocked and Chat shows the
+existing recovery controls. Kandev does not automatically replay the instruction.
+
+Select **Resume** to check the saved conversation. If received events are still
+being applied, Resume can wait up to 10 seconds. Its control stays busy during
+the check. If the wait expires or the evidence cannot be verified, delivery
+stays blocked. You can try Resume again after the connection or storage issue
+is resolved.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
@@ -779,6 +798,8 @@ Kandev has two secret scopes:
 - **Workspace** secrets belong to one workspace and can be selected by that workspace's repositories. They are not available to shared agent or executor profiles.
 
 The General page manages Global secrets. Manage Workspace secrets from **Settings > Workspaces > _workspace_ > Secrets**. Agent and executor profile selectors intentionally show Global secrets only; a Workspace reference saved through an older or direct API path is rejected when the profile is saved or launched.
+
+To rotate a secret, choose **Edit**, change the name or value, and save. The edit form replaces that secret’s row, hiding any previously revealed value. After saving, choose **Reveal** to fetch the current value. These controls are also available on phones. Saving does not change the environment of an already-running process or an open terminal. To use the new value in a task, stop its sessions, preserve uncommitted work, use **Reset Environment**, and launch a new session; a restart or warm resume can retain the old environment snapshot. For Sprites, verify the old sandbox was destroyed.
 
 Copy or move a secret between scopes from the **Copy/Move** action on any secret row. The dialog picks Copy or Move, chooses a destination (Global or another workspace), and lets you edit the target name; it is pre-filled as `<name> (from Global)` or `<name> (from <workspace name>)` so copied secrets keep their origin visible. Moving removes the original after the copy is safely in place, and the value is transferred server-side between encrypted rows. It is never shown or copied through the browser. A target name that already exists in the destination blocks the action until you rename it.
 

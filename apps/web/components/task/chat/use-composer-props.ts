@@ -17,6 +17,7 @@ type ComposerPropsArgs = {
   workspaceResolutionFailed: boolean;
   onRetryWorkspaceResolution: () => void;
   isMoving: boolean;
+  isRestarting?: boolean;
   implementPlanHandler: ((fresh: boolean) => Promise<void> | Promise<boolean>) | undefined;
   executor: { unavailable: boolean; reason?: string };
   placeholder: string;
@@ -96,6 +97,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     workspaceResolutionFailed,
     onRetryWorkspaceResolution,
     isMoving,
+    isRestarting = false,
     implementPlanHandler,
     executor,
     placeholder,
@@ -151,6 +153,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     canQueueWhileStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
+    isRestarting,
     isSending,
     launchErrorOwned,
     onCancel: handleCancelTurn,

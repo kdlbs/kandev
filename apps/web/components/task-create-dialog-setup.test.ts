@@ -39,28 +39,28 @@ vi.mock("@/hooks/use-prompt-result-delivery", () => ({
   }),
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
-vi.mock("@/components/state-provider", () => ({
-  useAppStoreApi: () => ({
-    getState: () => ({
-      repositoryBranchPolicies: { revisionByRepositoryId: {} },
-    }),
-  }),
-  useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      userSettings: { agentGeneratedTaskTitles: mocks.agentGeneratedTaskTitles },
-      upsertRepository: vi.fn(),
-      setRepositoryBranchPolicies: vi.fn(),
-      setRepositoryBranchPoliciesLoading: vi.fn(),
-      repositorySets: {
-        itemsByWorkspaceId: {},
-        loadingByWorkspaceId: {},
-        loadedByWorkspaceId: {},
-        revisionByWorkspaceId: {},
-      },
-      setRepositorySets: vi.fn(),
-      setRepositorySetsLoading: vi.fn(),
-    }),
-}));
+vi.mock("@/components/state-provider", () => {
+  const getState = () => ({
+    userSettings: { agentGeneratedTaskTitles: mocks.agentGeneratedTaskTitles },
+    upsertRepository: vi.fn(),
+    setRepositoryBranchPolicies: vi.fn(),
+    setRepositoryBranchPoliciesLoading: vi.fn(),
+    repositorySets: {
+      itemsByWorkspaceId: { "workspace-1": [] },
+      loadingByWorkspaceId: {},
+      loadedByWorkspaceId: { "workspace-1": true },
+      revisionByWorkspaceId: {},
+    },
+    setRepositorySets: vi.fn(),
+    setRepositorySetsLoading: vi.fn(),
+    repositoryBranchPolicies: { revisionByRepositoryId: {} },
+  });
+  const store = { getState };
+  return {
+    useAppStoreApi: () => store,
+    useAppStore: (selector: (state: unknown) => unknown) => selector(getState()),
+  };
+});
 vi.mock("@/components/task-create-dialog-submit", () => ({
   useTaskSubmitHandlers: (deps: Record<string, unknown>) => {
     mocks.submitDeps = deps;

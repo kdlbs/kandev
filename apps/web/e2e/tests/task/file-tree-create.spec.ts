@@ -1,3 +1,4 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { type Page } from "@playwright/test";
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -6,6 +7,8 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+
+test.use({ channel: "chromium" });
 
 // File creation lives in file-browser-toolbar.tsx ("New file" button) +
 // inline-file-input.tsx (InlineFileInput) + file-browser.tsx
@@ -118,6 +121,11 @@ test.describe("File tree create file", () => {
 
     const input = await startCreateAtRoot(testPage);
     await input.fill("brand-new.ts");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("brand-new.ts");
+      expect(fs.existsSync(path.join(repoDir, "brand-new.ts"))).toBe(false);
+    });
     await input.press("Enter");
 
     await expect(session.fileTreeNode("brand-new.ts")).toBeVisible({ timeout: 10_000 });

@@ -45,6 +45,7 @@ import {
   supportsCustomHighlights,
   useMessageCommentDecorations,
   useMessageCommentShortcut,
+  useMessageCommentMouseSelection,
 } from "./use-message-comment-dom";
 import {
   MessageCommentDecorationOverlay,
@@ -359,6 +360,8 @@ function useCommentTargetState(
     if (selection) setNewSelection(selection, false);
   }, [isSelectable, rootRef, setNewSelection]);
 
+  useMessageCommentMouseSelection(rootRef, isSelectable && !composerOpen, captureSelection);
+
   const openFromShortcut = useCallback(
     (selection: MessageSelection) => setNewSelection(selection, true),
     [setNewSelection],
@@ -531,7 +534,6 @@ export function MessageCommentSurface({
         data-agent-message-body="true"
         data-message-id={message.id}
         data-agent-message-highlight-name={highlightName}
-        onMouseUp={captureSelection}
         onTouchEnd={captureSelection}
         onClick={handleDecorationClick}
       >

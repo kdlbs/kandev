@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
@@ -1196,11 +1197,12 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// Check for workflow transition based on session's current step.
 		// Uses the engine when available; falls back to legacy evaluation.
 		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
+		transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
 		cause := turnCompletionCauseAgentTurn
 		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
 			cause = turnCompletionCauseUserCancellation
 		}
-		transitioned := s.processOnTurnCompleteViaEngineWithCause(completionCtx, data.TaskID, session, cause)
+		transitioned := s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 		if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
 			s.logger.Warn("failed to reconcile terminal delivery after workflow evaluation",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -2793,6 +2795,7 @@ func (s *Service) finishAgentCompleted(
 		return
 	}
 
+	transitionCtx := agentCompletionTransitionAttribution(completionCtx, data)
 	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to prepare terminal delivery settlement before completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
@@ -2808,13 +2811,37 @@ func (s *Service) finishAgentCompleted(
 		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
 			cause = turnCompletionCauseUserCancellation
 		}
-		transitioned = s.processOnTurnCompleteViaEngineWithCause(completionCtx, data.TaskID, session, cause)
+		transitioned = s.processOnTurnCompleteViaEngineWithCause(transitionCtx, data.TaskID, session, cause)
 	}
 	if err := s.reconcileAgentDeliverySettlements(completionCtx, data.SessionID); err != nil {
 		s.logger.Warn("failed to reconcile terminal delivery after completed workflow evaluation",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 	}
 	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
+}
+
+// agentCompletionTransitionAttribution carries the immutable run identity
+// from the lifecycle event into the transition ledger. Task-owned Office
+// launches carry CausingRunID; run-owned executions use their owner RunID.
+// An explicit outer attribution still wins.
+func agentCompletionTransitionAttribution(ctx context.Context, data watcher.AgentEventData) context.Context {
+	if steptelemetry.HasTrigger(ctx) {
+		return ctx
+	}
+	causingRunID := data.CausingRunID
+	if causingRunID == "" && data.OwnerKind == string(lifecycle.ExecutionOwnerRun) {
+		causingRunID = data.RunID
+	}
+	if causingRunID == "" {
+		return ctx
+	}
+	return steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger:      steptelemetry.TriggerEngineTransition,
+		ActorKind:    steptelemetry.ActorAgent,
+		ActorID:      data.SessionID,
+		SessionID:    data.SessionID,
+		CausingRunID: causingRunID,
+	})
 }
 
 // finishAgentCompletedTurn runs the settle steps after

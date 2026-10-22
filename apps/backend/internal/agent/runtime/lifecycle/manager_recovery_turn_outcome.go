@@ -138,12 +138,11 @@ func (m *Manager) publishRecoveredExecutionRunning(ctx context.Context, executio
 	if !m.runtimeExecutionCurrent(execution) {
 		return
 	}
-	// Nothing was retained, so any turn still in flight across the restart
-	// carries a PromptGeneration this freshly reconstructed execution object
-	// has never seen (its own counter was recreated from zero). Let the first
-	// live completion adopt it instead of being rejected as superseded --
-	// see recoveredPromptGenerationPending.
-	execution.recoveredPromptGenerationPending.Store(true)
+	// Only an unknown generation can be adopted from a live completion.
+	// Authenticated restored generations retain their stale-event fence.
+	execution.promptLifecycleMu.Lock()
+	execution.recoveredPromptGenerationPending.Store(execution.promptGeneration == 0)
+	execution.promptLifecycleMu.Unlock()
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentRunning, execution)
 }
 

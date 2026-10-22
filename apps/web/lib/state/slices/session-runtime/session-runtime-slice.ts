@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { SessionRuntimeSlice, SessionRuntimeSliceState, SessionPollMode } from "./types";
 import { normalizeGitStatusEntry } from "./git-status-normalizer";
 import { applyGitStatus } from "./git-status-state";
@@ -546,12 +547,7 @@ function buildWorkspaceRestorationActions(set: ImmerSet) {
   };
 }
 
-export const createSessionRuntimeSlice: StateCreator<
-  SessionRuntimeSlice,
-  [["zustand/immer", never]],
-  [],
-  SessionRuntimeSlice
-> = (set) => ({
+export const createSessionRuntimeSlice: SliceCreator<SessionRuntimeSlice> = (set) => ({
   ...defaultSessionRuntimeState,
   ...buildTerminalShellProcessActions(set),
   // Returns whether the git state meaningfully changed so callers (the WS

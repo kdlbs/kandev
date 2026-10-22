@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-03
-updated: 2026-10-08
+updated: 2026-10-21
 owners:
   - Kandev
 ---
@@ -92,9 +92,11 @@ It permits completed tool effects under the confirmed policy described below.
   Recovery shall preserve the transcript, completed tool results, execution, process, connection, native conversation, workspace, selected model, and permissions.
   It shall not resend the original prompt or its attachments.
   Loss of runtime continuity shall stop this recovery instead of creating or restoring a conversation automatically.
-- **AC-PLATFORM-TURN-CONTINUITY-003.3:** Recovery shall share the existing transient episode owner and at most five additional automatic attempts.
-  Nominal delays shall be 5, 10, 20, 40, and 60 seconds.
-  Valid short provider reset hints shall retain the existing timing policy.
+- **AC-PLATFORM-TURN-CONTINUITY-003.3:** Eligible model-capacity recovery on a retained usable runtime shall share one episode with at most eleven additional automatic attempts and a thirty-minute admission window beginning at the first capacity failure.
+  Nominal delays shall be 5, 10, 20, 40, 60, 120, 240, 300, 300, 300, and 300 seconds, measured from each preceding failure settlement.
+  Valid short provider reset hints shall retain the existing timing policy for the first five attempts only.
+  No retry shall start at or after the window deadline, including when a delayed callback fires late.
+  The deadline shall not interrupt an already dispatched turn.
   Output or completed tools shall not replenish the budget.
   Success shall end the episode. A later independent capacity failure shall receive a new budget.
 - **AC-PLATFORM-TURN-CONTINUITY-003.4:** Cancel, stop, archive, deletion, reset, a new user prompt, queued user work, and configuration changes shall supersede automatic recovery.
@@ -102,20 +104,26 @@ It permits completed tool effects under the confirmed policy described below.
   An ambiguous dispatch outcome shall require manual continuation.
   Failure settlement shall not report success or advance the workflow.
 - **AC-PLATFORM-TURN-CONTINUITY-003.5:** Desktop and phone Chat shall reuse one current retry notice with its reason, attempt, countdown, and Cancel action.
+  The notice shall show the recovery-window deadline during capacity recovery and the correct maximum attempt count.
   Success, refusal, cancellation, and exhaustion shall retire the actionable notice.
   Refusal shall report zero started attempts when no dispatch occurred.
   Exhaustion shall report actual started attempts.
+  Feedback shall distinguish an expired recovery window, an exhausted attempt budget, a safety refusal, and cancellation.
   A retained usable runtime shall leave the normal composer available.
 - **AC-PLATFORM-TURN-CONTINUITY-003.6:** Initial support shall cover tested Codex ACP capacity evidence in concrete-profile interactive task sessions.
   The capacity path shall operate independently of transport-loss continuation's
   native restoration capability and admission evidence.
-  Original-prompt replay, other error classes, unsupported providers, older components, Office, dynamic routing, automation, and passthrough shall retain their existing policies.
+  Eligible pre-result replay for the same capacity condition on a retained usable runtime shall use the same extended timing and episode budget, retaining its existing no-output/no-effects admission fence.
+  Other error classes, unsupported providers, older components, Office, dynamic routing, automation, and passthrough shall retain their existing policies.
+- **AC-PLATFORM-TURN-CONTINUITY-003.7:** Backend shutdown shall cancel waiting capacity recovery. Backend restart shall retire its actionable notice and require manual continuation, even when the runtime survives independently. Browser reload and additional viewers shall retain the latest notice without starting another retry.
+- **AC-PLATFORM-TURN-CONTINUITY-003.8:** Every capacity retry shall revalidate current recovery eligibility. A different error class, ambiguous dispatch, uncertain work, or lost runtime continuity shall end the extended episode without granting another capacity budget. Output, completed tools, and changes between eligible replay and continuation shall not reset the original deadline or attempt count.
 
 ## Compatibility and exclusions
 
 This changes the lifetime of supported interactive ACP runtimes after transient errors.
 It does not make interrupted work successful or permit replay after writes.
-It does not change models automatically, add a scheduler, or change retry limits.
+It does not change models automatically or add a separate scheduler.
+The extended timing applies only to eligible capacity failures on a retained usable runtime; other transient recovery retains its existing limits.
 Transport-loss continuation availability is owned by the
 [interruption continuation contract](provider-interruption-continuation.md).
 Capacity continuation does not guarantee exactly-once agent actions or preservation of an interrupted model invocation.
@@ -127,3 +135,4 @@ Older remote components without the new evidence retain conservative existing re
 - [System design](../system-design/transient-turn-runtime-continuity.md)
 - [Implementation plan](../../../plans/transient-turn-runtime-continuity/plan.md)
 - [Capacity continuation amendment](../../../plans/model-capacity-continuation/plan.md)
+- [Delayed capacity retries](../../../plans/delayed-capacity-retries/plan.md) (October 21 timing amendment)

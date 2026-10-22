@@ -174,6 +174,7 @@ export async function selectAgentReplyText(
         const selection = window.getSelection();
         selection?.removeAllRanges();
         selection?.addRange(range);
+        element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
         element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
         return;
       }

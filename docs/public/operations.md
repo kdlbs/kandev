@@ -31,6 +31,8 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
 
+Provider startup can take longer when network requests time out. Native startup has a two-minute budget for each automatic restore attempt. If startup fails, Kandev verifies that the failed runtime stopped before allowing a replacement. Missing execution evidence keeps recovery blocked.
+
 The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
 
 If an older crash left journal acknowledgments ahead of saved output, Kandev
@@ -241,6 +243,33 @@ Canvas removal creates an artifact cleanup job before release ownership is
 deleted. The worker runs after the database transaction and retries after a
 restart. Do not delete `<home>/plugins/webapps/` files while their release rows
 or cleanup jobs still exist.
+
+### Incremental shell delivery
+
+New compatible agentctl runtimes use delivery protocol v2 for supported foreground
+ACP shell output. Incremental output and progress-based checkpoints reduce repeated
+journal, inbox and canonical-output writes while preserving the existing output
+viewer on desktop and phones. Retained v1 runtimes continue using their original
+snapshot contract and storage cost. Backend delivery cleanup still uses the existing
+payload grace and projection proof; unacknowledged output does not expire.
+
+A new agentctl validates and upgrades an owned v1 journal to format v2 atomically.
+Existing event bytes, sequence numbers and submission evidence remain unchanged.
+An old backend cannot consume compact records: v2 data and submission endpoints
+require explicit reader support. Status and Stop remain available when a reader
+is incompatible. Do not delete recovery evidence or resend an uncertain prompt
+as a workaround.
+
+Use forward repair with compatible binaries for recovery. There is no transparent
+in-place downgrade: older backends do not understand the new canonical output
+chunks, and older agentctl binaries reject the newer journal format. Rollback
+requires an offline, verified, matched pre-upgrade database and journal backup.
+That backup restores only the state it captured; work accepted afterward and
+external tool effects need explicit reconciliation.
+
+The change reduces new repeated writes. It does not shrink existing SQLite files:
+free pages can remain allocated after cleanup. Physical file reclamation and
+manual database compaction are separate maintenance operations.
 
 ## Storage maintenance
 

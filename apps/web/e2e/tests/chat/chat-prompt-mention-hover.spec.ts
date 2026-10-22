@@ -61,7 +61,8 @@ test.describe("Chat prompt-mention hover", () => {
 
     // The mention chip renders once the prompts slice has loaded on the
     // session page (via useCustomPrompts) and matched the persisted @mention.
-    const chip = session.activeChat().getByTestId(CHIP).first();
+    const chip = session.activeChat().getByTestId("user-message-bubble").getByTestId(CHIP);
+    await expect(chip).toHaveCount(1);
     await expect(chip).toBeVisible({ timeout: 30_000 });
     await expect(chip).toHaveAttribute("data-prompt-name", PROMPT_NAME);
 
@@ -75,5 +76,62 @@ test.describe("Chat prompt-mention hover", () => {
     await expect(testPage.getByText(PROMPT_CONTENT, { exact: false })).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  // @covers AC-UI-PROMPT-ALIAS-001.1, AC-UI-PROMPT-ALIAS-002.4
+  test("honors dismissal of pending opens and accepts fresh pointer and keyboard intent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await apiClient.createPrompt(PROMPT_NAME, PROMPT_CONTENT);
+    const taskId = await createTaskMentioningPrompt(apiClient, seedData);
+    const session = await openTaskChat(testPage, taskId);
+    const chip = session.activeChat().getByTestId("user-message-bubble").getByTestId(CHIP);
+    await expect(chip).toHaveCount(1);
+    await expect(chip).toHaveAttribute("data-slot", "hover-card-trigger");
+    await chip.scrollIntoViewIfNeeded();
+    await testPage.mouse.move(0, 0);
+    const bounds = await chip.boundingBox();
+    if (!bounds) throw new Error("Prompt chip has no bounds");
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await testPage.clock.install();
+    await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now()));
+    try {
+      // Real pointer and keyboard events with the older hover callback held pending.
+      await testPage.mouse.move(x, y);
+      await testPage.mouse.click(x, y);
+      await expect(chip).toHaveAttribute("aria-expanded", "true");
+      await testPage.keyboard.press("Escape");
+      await expect(chip).toHaveAttribute("aria-expanded", "false");
+      await testPage.clock.runFor(1_000);
+      await expect(chip).toHaveAttribute("aria-expanded", "false");
+      await expect(testPage.getByText(PROMPT_CONTENT, { exact: true })).toBeHidden();
+
+      await testPage.mouse.move(0, 0);
+      await testPage.mouse.move(x, y);
+      await testPage.clock.runFor(350);
+      await expect(chip).toHaveAttribute("aria-expanded", "true");
+      await expect(testPage.getByText(PROMPT_CONTENT, { exact: true })).toBeVisible();
+      await testPage.mouse.click(x, y);
+      await testPage.clock.runFor(1_000);
+      await expect(chip).toHaveAttribute("aria-expanded", "false");
+
+      await chip.focus();
+      await testPage.keyboard.press("Enter");
+      await expect(chip).toHaveAttribute("aria-expanded", "true");
+      await testPage.keyboard.press("Space");
+      await testPage.clock.runFor(1_000);
+      await expect(chip).toHaveAttribute("aria-expanded", "false");
+      await testPage.keyboard.press("Space");
+      await expect(chip).toHaveAttribute("aria-expanded", "true");
+      await testPage.keyboard.press("Escape");
+      await testPage.clock.runFor(1_000);
+      await expect(chip).toHaveAttribute("aria-expanded", "false");
+    } finally {
+      await testPage.clock.resume();
+    }
   });
 });

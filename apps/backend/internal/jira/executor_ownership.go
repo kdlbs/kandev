@@ -2,24 +2,10 @@ package jira
 
 import (
 	"context"
-	"github.com/kandev/kandev/internal/auth/authn"
+
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
-
-func executorCreatorUserID(ctx context.Context) string {
-	identity, known := authn.IdentityFromContext(ctx)
-	if known && identity.Synthetic {
-		return ""
-	}
-	if actor, bound := taskmodels.ExecutorActorFromContext(ctx); bound {
-		return actor
-	}
-	if known {
-		return identity.UserID
-	}
-	return ""
-}
 
 func (s *Store) migrateExecutorCreators() error {
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)

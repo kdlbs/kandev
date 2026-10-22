@@ -142,9 +142,15 @@ func TestStartupMigrationCostsPopulated(t *testing.T) {
 		t.Fatalf("measure prompt sequence backfill: %v", err)
 	}
 	promptSeqDuration := time.Since(promptSeqStarted)
+	upgradedStarted := time.Now()
+	if _, err := NewWithDB(replayDB, replayDB, nil); err != nil {
+		t.Fatalf("upgraded second startup: %v", err)
+	}
+	upgradedDuration := time.Since(upgradedStarted)
 	if err := replayDB.Close(); err != nil {
 		t.Fatalf("close replay database: %v", err)
 	}
+	t.Logf("upgraded second startup: %s", upgradedDuration)
 
 	t.Logf("populated startup evidence: sessions=%d messages=%d db_bytes=%d backup_bytes=%d fresh_schema=%s backup=%s replay=%s updated_at_backfill=%s prompt_seq_backfill=%s environment=%s/%s go=%s cpus=%d",
 		sessionCount, messageCount, dbInfo.Size(), backupBytes, freshDuration, backupDuration,

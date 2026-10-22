@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/db/dialect"
-	"github.com/kandev/kandev/internal/office/models"
 )
 
 // inFlightRunStatuses are the run statuses that mean work is still owed on a
@@ -14,8 +15,8 @@ import (
 // `failed` or `cancelled` only at the end. Anything outside this pair is
 // terminal.
 var inFlightRunStatuses = []string{
-	string(models.RunStatusQueued),
-	string(models.RunStatusClaimed),
+	string(runsmodels.RunStatusQueued),
+	string(runsmodels.RunStatusClaimed),
 }
 
 // HasInFlightRunForTask reports whether the task has a queued or claimed run.

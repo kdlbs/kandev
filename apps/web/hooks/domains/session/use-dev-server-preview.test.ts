@@ -25,9 +25,11 @@ vi.mock("@/lib/api", () => ({
   stopProcess: (...args: unknown[]) => api.stopProcess(...args),
 }));
 
+const storeApi = { getState: () => appState };
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(appState),
-  useAppStoreApi: () => ({ getState: () => appState }),
+  useAppStoreApi: () => storeApi,
 }));
 
 function startResponse(status: string, updatedAt: string) {

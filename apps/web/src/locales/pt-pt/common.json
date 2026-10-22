@@ -551,5 +551,17 @@
   "sidebarYearsMax": "99+a",
   "integrationSettings": "Definições de integrações",
   "pageNavigation": "Nesta página",
-  "viewOptions": "Opções de visualização"
+  "viewOptions": "Opções de visualização",
+  "commandGoToArchivedTasks": "Ir para as tarefas arquivadas",
+  "commandGoToArchivedTasksKeywords": "tarefas arquivadas, arquivo, histórico",
+  "conversationSearch_open": "Pesquisar tarefas",
+  "conversationSearch_match": "Correspondência na conversa",
+  "conversationSearch_searching": "A pesquisar conversas…",
+  "conversationSearch_indexing": "A indexação das conversas está em curso.",
+  "conversationSearch_limited": "Algumas correspondências foram omitidas. Refine a pesquisa.",
+  "conversationSearch_unavailable": "A pesquisa de conversas não está disponível.",
+  "conversationSearch_query_too_short": "Use pelo menos 3 caracteres para pesquisar conversas.",
+  "conversationSearch_query_too_long": "Use no máximo 200 caracteres para pesquisar conversas.",
+  "conversationSearch_query_too_broad": "Use pelo menos 3 letras ou algarismos consecutivos.",
+  "conversationSearch_title": "Paleta de comandos"
 }

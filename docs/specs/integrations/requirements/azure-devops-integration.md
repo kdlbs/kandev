@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-07-17
-updated: 2026-10-18
+updated: 2026-10-20
 owners:
   - tbd
 ---
@@ -35,11 +35,19 @@ Teams whose source code and planning work live in Azure DevOps cannot use Kandev
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.13:** When the current work item's project name is missing, empty, or whitespace-only, detail shall match only the nonempty selected project ID. Empty association project values shall never match. When the selected project and work-item project values coincide, each matching association shall appear once; several distinct linked tasks shall all remain visible.
 - **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.14:** Detail shall exclude associations for another workspace, another work item, or a project value other than those two exact current-project identities, including when the work-item number matches. Matching shall not infer project aliases by changing case, trimming identifiers, or dropping the project constraint.
 
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.15:** When saved-view saves or confirmed deletes overlap within one mounted Azure page, the system shall preserve action order in both the visible list and persisted list. An older result shall not undo newer pending intent.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.16:** When a saved-view action fails, the system shall remove that action's optimistic effect and preserve successful actions. Later pending actions shall use the last confirmed server list, including server normalization, rather than assuming failed actions succeeded. The failed action shall remain retryable.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.17:** When the initial saved-view read is pending across an admitted action, the system shall preserve the loaded views that action does not change, and shall not publish the initial read over the pending action. If the read fails, the system shall send no saved-view write, reject actions admitted against that read, and reload the server list when the user retries an action.
+- **AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18:** Desktop and phone shall apply the same saved-view ordering and recovery behavior. Save failures shall retain the existing dialog feedback, and delete failures shall show localized feedback without an unhandled rejection.
+
 ## Exclusions
 
 Linked-task display does not change association validation or stored identities,
 introduce a migration, or infer historical project names after an Azure project
 rename. It adds no provider mutation or new detail interaction.
+
+Saved-view ordering is scoped to one mounted workspace page. Multi-tab consistency,
+new backend concurrency contracts, and ordering across page remounts are excluded.
 
 ## System design
 

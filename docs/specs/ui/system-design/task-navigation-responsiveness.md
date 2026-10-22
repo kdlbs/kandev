@@ -471,42 +471,45 @@ does not mark the session fetched.
 
 Optimistic mark/unmark/reset still update their captured session cache and notify
 all readers. Route direct local setters, including the existing mark rollback,
-through a captured active reader publisher as well. This changes only local
-publication ownership; it does not change which mutations are admitted, their
-wire arguments, cache ordering, or rollback policy. A retired mutation's cache
+through a captured active reader publisher as well. Reader guards preserve
+mutation admission, wire arguments and rollback policy. A retired mutation's cache
 effects may remain observable to a current same-session reader through existing
-notifications. Read-versus-mutation and overlapping-mutation ordering are outside
-this repair, as are cache eviction, authorization generations, transport abort,
-and a public revision protocol.
+notifications. Overlapping-mutation ordering, cache eviction, authorization
+generations, transport abort, and a public revision protocol remain outside this
+boundary.
+
+### Initial snapshot reconciliation with local intent
+
+For `.14`, a transient shared-read entry records touched mark/unmark/rollback
+paths and a reset barrier until initial GET settlement. Overlay touched paths
+from the latest session cache onto the server map, deleting absent paths;
+after reset use the current cache alone. Preserve unrelated rows, notifications,
+loading and fetched reuse. Release bookkeeping on success/failure, independently
+of reader retirement. Keep existing mark deletion rollback and ignored unmark/
+reset failures; never reject accepted writes because a read was superseded.
+This refines local reconciliation without durable ownership or write ordering.
+Whole-read rejection loses unrelated rows; reader-local tracking misses peers.
+Add deferred-wire pending/acknowledged mark/unmark/reset, both mark-failure orders,
+untouched rows/read, shared retirement and real checkbox-action coverage.
+
+- [Snapshot reconciliation plan](../../../plans/session-file-review-snapshot-reconciliation/plan.md)
 
 ### Consumer lifetime and verification
 
-The audited callers are `components/task/changes-panel-data.tsx:399`,
-`task-changes-panel.tsx:116` (classification) and `:287` (actions), and
-`components/review/review-dialog.tsx:399`. The Changes data path computes review
-progress; the task panel uses the actual `computeChangesReviewSets` and `hashDiff`.
-`TaskCenterPanel`'s Changes branch renders the task panel without a session key.
-Its tablet ancestor uses a stable layout key, permitting a retained reader when
-that composition and tab remain mounted. Dockview can dispose panels during
-reconciliation; this audit does not establish every panel survives a switch.
+Changes data/progress uses `changes-panel-data.tsx`, `task-changes-panel.tsx`
+and real `computeChangesReviewSets`/`hashDiff`. Tablet TaskCenterPanel can retain
+an unkeyed Changes reader; Dockview may dispose panels, so not all readers
+survive navigation. `TaskReviewDialogMount` renders an unkeyed ReviewDialog for
+non-null sessions and unmounts at null. Its hook sits above keyed diff rows.
+A real mounted dialog with identical ready files therefore proves A-to-B
+checkbox/progress ownership without claiming every runtime path retains it.
 
-`TaskReviewDialogMount` renders `ReviewDialog` without a session key for non-null
-sessions; null unmounts the dialog. The dialog hook is above the keyed inner diff
-row, so that row's remount does not retire the reader. A mounted real dialog with
-identical ready file data can prove the checkbox/progress outcome on an A-to-B
-prop switch. Actual runtime reachability still depends on retaining its ancestor
-and having reviewable data; do not claim every consumer leaks or null always
-retains a dialog. No consumer production change is required by this audit.
-
-Use one `hooks/use-session-file-reviews.test.tsx` suite with the real hook,
-`WebSocketClient`, connection singleton, real `StateProvider` and other required
-providers for a mounted `ReviewDialog`. Substitute only deferred wire transport;
-reply by request ID/action with actual protocol envelopes. Keep real
-`computeChangesReviewSets`, `hashDiff`, file keys, and dialog classification.
-Disable auto-mark through real settings data so scrolling cannot contaminate the
-read regression. Scope checkbox assertions to `review-file-row` and its path;
-also prove mount continuity. No hook/provider/classifier/component mocks,
-missing-method errors, source-text tests, or copied predicates count as RED.
+Use `hooks/use-session-file-reviews.test.tsx` with real hook, WebSocketClient,
+connection singleton, StateProvider and ReviewDialog providers. Defer only wire
+transport and correlate actual protocol replies. Keep real classification,
+hashes and file keys; disable auto-mark via real settings. Scope checkbox
+assertions to `review-file-row`/path and prove mount continuity. Mocked product
+coordination, missing methods, source tests or copied predicates cannot prove RED.
 
 Cover the accepted late-A-after-B and committed-null failures first. Add current
 success/empty/error/no-client/loading, A-to-B-to-A, pending-to-hit, queued loading
@@ -516,10 +519,20 @@ Use unique session IDs without production cache-reset exports; settle every
 recorded request, disconnect the client, restore the previous singleton and
 globals, and join test-owned timers in teardown. Do not replay the ROOT archive.
 
-Phone Changes reuses `useChangesPanelData` through `MobileChangesPanel`, and
-phone Review uses `SessionMobileReviewDialog`/`TaskReviewDialogMount`. This is pure
-state/data work with no layout, copy, touch, scroll, navigation or breakpoint
-change. The mobile-parity exception permits targeted hook/component tests and
-this note; browser/build/E2E/full-suite work is unnecessary for this boundary.
+Phone Changes/Review share this state through MobileChangesPanel and
+SessionMobileReviewDialog/TaskReviewDialogMount. With no layout, copy, touch,
+scroll, navigation or breakpoint change, mobile parity's state/data exception
+permits focused hook/consumer tests without browser/build/E2E/full-suite work.
 
 - [Reader ownership delivery plan](../../../plans/session-file-review-reader-ownership/plan.md)
+
+## Dev-server command ownership
+
+For `.5`, `.17`, `.18`, `useDevServerPreview` shares transient pending promises
+per app store and session. Admit before transport; overlapping calls join.
+Selection/unmount retain admitted work. Settlement deletes its entry. Preserve
+originating-store publication, process freshness, failure returns and panels.
+`PreviewController` restoration remains a separate request path.
+Phone/tablet do not mount this Dockview control; the mobile-parity state/data
+exception applies. Real-consumer tests and managed browser checks cover this
+boundary. See [design details and verification](../../../plans/dev-server-command-ownership/plan.md).

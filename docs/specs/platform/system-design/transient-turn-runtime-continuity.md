@@ -2,6 +2,7 @@
 status: current
 system: platform
 created: 2026-10-03
+updated: 2026-10-21
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
@@ -180,7 +181,7 @@ Shared validation checks policy-specific support and uses the same owner, identi
 Do not weaken the transport-loss policy when extracting shared validation.
 
 Settle the failed turn as interrupted before arming the timer.
-Reuse the existing 5/10/20/40/60-second ladder and validated short reset hints.
+Use the capacity episode timing below. Other transient failures retain the existing short ladder.
 At timer fire, revalidate native identity, execution, generation, runtime readiness, configuration, retry ownership, and queue priority.
 Submit one internal instruction through the ordinary prompt seam on the retained runtime.
 Use capacity-specific wording: continue unfinished work from existing history, preserve completed actions, and ask the user about uncertain outcomes.
@@ -195,7 +196,7 @@ Ambiguous dispatch stops without another automatic send.
 Every additional capacity failure belongs to the same episode until successful completion or supersession.
 Preserve the initial interruption and all completed tool rows.
 Do not reset the episode on assistant output, tool completion, or prompt acceptance.
-Increment started attempts only at actual dispatch, with at most five additional attempts.
+Increment started attempts only at actual dispatch, using the capacity episode limit below.
 Preserve the existing success and cancellation cleanup owners.
 Refusal and exhaustion on a usable runtime retain historical errors and the normal composer.
 
@@ -204,7 +205,7 @@ Refusal and exhaustion on a usable runtime retain historical errors and the norm
 Protocol tests prove current-generation snapshots, mixed completed/pending tools, permissions, unknown outcomes, and remote omission.
 Service tests prove same-process continuation after completed effects and preservation of the original-prompt replay fence.
 Barrier tests cover cancellation, successor generations, queue priority, configuration changes, and runtime loss.
-Exhaustion tests prove the five delays, five dispatches, and no sixth attempt after progress.
+Exhaustion tests prove all eleven capacity delays, the absolute admission deadline, and no twelfth attempt after progress.
 Desktop and phone E2E tests use the real ACP mock process and assert unchanged native identities and initialization count.
 The implementation package must also capture an isolated Codex compatibility trace before enabling its dialect support.
 Mock evidence alone does not establish the production Codex capability.
@@ -214,6 +215,108 @@ Use a disposable conversation, never the reported user's task.
 The [capacity plan](../../../plans/model-capacity-continuation/plan.md) owns exact tests and commands.
 Public guidance changes with implementation in `docs/public/tasks-and-workflows.md`.
 The design turn changes internal artifacts only.
+
+## Capacity episode timing
+
+The October 21 timing amendment is specified here and delivered by the
+[delayed capacity retry plan](../../../plans/delayed-capacity-retries/plan.md).
+Completed earlier plans retain their historical verification results.
+
+Extend `transientRetryEntry` and its existing successor-entry transfer with an
+immutable capacity policy, initial failure time, monotonic admission deadline,
+and maximum of eleven started attempts. Set the policy only when a current
+high-confidence `CodeModelCapacity` failure has a valid retained-runtime binding
+and qualifies for existing replay or live capacity continuation. Do not change
+the global `transientMaxAttempts` or the generic short ladder. A non-capacity
+episode cannot gain a fresh capacity budget halfway through recovery.
+
+For a capacity episode use nominal delays of 5/10/20/40/60/120/240/300/300/300/300
+seconds. Preserve validated short reset hints only within the first five slots;
+later slots use the slower ladder. No jitter is introduced in this amendment.
+The first failure starts a fixed thirty-minute window. Each next wait starts
+after the current failure settles, so prompt durations consume window time.
+With immediate failures and no hints, dispatches occur at cumulative offsets
+5/15/35/75/135/255/495/795/1095/1395/1695 seconds. These are admission offsets,
+not turn timeouts or a promise of eleven attempts in every episode.
+
+Use one policy-aware budget predicate in scheduling, timer fire, retained
+dispatch, and terminal feedback. Replace global-cap assumptions in
+`event_handlers_transient.go`, `provider_interruption_preparation.go`,
+`provider_interruption_failure.go`, and `event_handlers_turn_failure.go` only
+where they inspect the selected episode. Non-capacity and restoration episodes
+retain five attempts. Transfer the original deadline and actual started count
+unchanged when an eligible no-output replay transitions to live continuation.
+Capacity evidence must be revalidated for each failed generation.
+
+An admitted live continuation can fail at capacity before producing new output
+or tools. Preserve its continuation mode when its accepted execution/generation
+matches and fresh, complete capacity evidence proves no pending, failed, unknown,
+permission, or background work. Revalidate the original conversation binding;
+do not require another completed tool or replay the original completed request.
+Missing evidence or a stale acceptance still refuses recovery.
+
+`handleTransientFailure` remains the single owner. Before arming, compare the
+next due time with the admission deadline. If no slot fits, retain the same
+owner with a terminal wake at the deadline, then retire it without dispatch.
+At timer fire and again at admission under the existing cancellation guard,
+reject an expired deadline, exhausted count, superseded owner, new/queued user
+input, changed settings or authorization, or invalid retained runtime/evidence.
+The check must be adjacent to dispatch; a timer check alone is insufficient.
+Count a started attempt at the existing actual-dispatch boundary. An ambiguous
+dispatch remains manual and is never repeated to fill an unused slot.
+
+A successful turn ends the episode; output and tools alone do not. A subsequent
+non-capacity failure terminates the extended episode using its truthful manual
+disposition, without starting a second loop or resetting the budget. Loss of
+runtime continuity stops delayed capacity recovery, including pre-result replay
+under this policy. Keep the existing instruction and original-prompt replay fence.
+Expiry only controls future admission and never cancels a dispatched turn.
+If that turn later fails at capacity, the expired episode receives no new attempt.
+
+Persist presentation-only `retry_window_ends_at` alongside existing `retry_at`,
+`max_attempts`, `attempt`, and `attempts_started` in the single current notice.
+Use RFC3339 UTC for both deadlines. Emit a distinct bounded disposition
+`window_expired` for expiry; retain `exhausted`, `refused`, cancellation, and
+`restart_interrupted` semantics. Update `event_handlers_transient_messages.go`
+to project the selected policy rather than the global attempt cap. Propagate
+the window deadline through `ActionMeta` and render it in `TransientRetryNotice`.
+Older notices without the field retain their existing rendering.
+
+The backend owns time and dispatch. A browser clock or countdown never authorizes
+recovery. Service tests use Go `testing/synctest`, including suspension past the
+deadline. `ServiceConfig.RetryClock` is an optional constructor dependency with
+`Now` and cancellable `WaitUntil` operations. Nil uses the system clock. Store
+the absolute retry deadline before publishing the notice, so advancing time
+before wait registration cannot postpone dispatch.
+
+The backend composition root supplies an isolated clock only when both
+`KANDEV_E2E_MOCK=true` and the existing mock-agent mode (`true` or `only`) apply.
+It passes through real time until a test explicitly freezes it. Test-only
+`/api/v1/e2e/capacity-retry-clock/freeze` and `/advance` routes then control
+capacity waits; neither route nor clock override is constructed in production.
+No new environment variable, operator setting, or production control API is added.
+
+No retry-job table, migration, or restart reconstruction is added. Shutdown
+cancels the existing owner. Extend `retireInterruptedNoticesOnStartup` and
+`settleRestartedContinuation` to understand capacity counts through eleven while
+still retiring the notice. Historical metadata, surviving agentctl, and durable
+delivery adoption cannot recreate the process-local deadline or retry authority.
+
+Reuse the inline notice in `transient-retry-notice.tsx` within the shipped Chat
+layout and `session-mobile-layout.tsx`. Add one localized recovery-window line;
+retain reason, provider/model, attempt, next retry, and Cancel. Shared view-model
+logic drives desktop and phone. Phone uses wrapping text and a separate reachable
+Cancel row with a minimum 44px hitbox; fine-pointer desktop retains its compact
+action size. Chat remains the sole transcript scroll owner, and composer
+safe-area/draft behavior remains unchanged. Announce phase changes, not countdown
+ticks. No new drawer or navigation is needed for this passive waiting state.
+
+Log bounded policy, ordinal, started count, and stop reason through existing
+retry diagnostics. Session/execution identities remain structured log fields;
+do not log prompt contents or raw provider diagnostics. No new metrics are needed.
+Tests must prove the 30-minute deadline, eleven-attempt cap, same native runtime,
+restart retirement, and unchanged non-capacity budgets. Desktop/phone E2E must
+exercise recovery beyond attempt five, Cancel, reload, and truthful final feedback.
 
 ## Ownership and failure
 

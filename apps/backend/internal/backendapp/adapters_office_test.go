@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -267,8 +269,8 @@ func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wan
 	if got, _ := metadata[models.MetaKeyOfficeCarrierRoutineID].(string); got != wantRoutineID {
 		t.Errorf("carrier routine_id = %q, want %q", got, wantRoutineID)
 	}
-	if got, _ := metadata[models.MetaKeyOfficeCarrierActorKind].(string); got != string(officemodels.ActorKindSystem) {
-		t.Errorf("carrier actor_kind = %q, want %q", got, officemodels.ActorKindSystem)
+	if got, _ := metadata[models.MetaKeyOfficeCarrierActorKind].(string); got != string(runsmodels.ActorKindSystem) {
+		t.Errorf("carrier actor_kind = %q, want %q", got, runsmodels.ActorKindSystem)
 	}
 	if got, _ := metadata[models.MetaKeyOfficeCarrierActorID].(string); got != "" {
 		t.Errorf("carrier actor_id = %q, want empty", got)
@@ -298,7 +300,7 @@ func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T
 		models.MetaKeyOfficeCarrierCreatingRunID:  "run-1",
 		models.MetaKeyOfficeCarrierHumanRooted:    false,
 		models.MetaKeyOfficeCarrierRoutineID:      "",
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindAgent),
+		models.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindAgent),
 		models.MetaKeyOfficeCarrierActorID:        "agent-worker",
 	}
 	// Metadata round-trips through a JSON column: numbers come back as

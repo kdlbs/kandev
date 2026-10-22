@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-04-29
-updated: 2026-10-08
+updated: 2026-10-21
 owners:
   - cfl
 ---
@@ -46,7 +46,8 @@ serialization, and filesystem ACL preservation are outside this amendment.
 
 **Intent:** Acknowledging a submitted plan shall preserve newer typing in the
 same task's editor. The persisted plan and the live unsaved draft represent
-different points in the user's editing history.
+different points in the user's editing history. Snapshot refreshes shall also
+preserve plan state already observed through live publication.
 
 #### Acceptance criteria
 
@@ -57,13 +58,14 @@ different points in the user's editing history.
 - **AC-TASKS-DOCUMENTS-003.5:** Autosave and explicit save shall provide the same acknowledgement protection. Overlapping own saves for one task shall preserve the existing latest-started save outcome; an older callback shall not replace newer typing, report an unpublished result as saved, or clear suppression belonging to a later rejected attempt, including repeated submissions of identical content.
 - **AC-TASKS-DOCUMENTS-003.6:** A task change, including a change to no task or a return to an earlier task, shall reset the local draft to the currently selected task's persisted content. A callback from the outgoing task view shall not alter the new view's draft, editor identity, or retry suppression. Existing legitimate background publication for the outgoing task shall remain supported.
 - **AC-TASKS-DOCUMENTS-003.7:** A failed save shall retain the live draft and the persisted baseline. Size rejection shall suppress only an unchanged automatic retry; changing the draft or explicitly saving shall remain available, and generic failures shall retain automatic retry eligibility, as defined by [plan-content-size-limit](plan-content-size-limit.md#req-tasks-plan-content-size-limit-003-a-user-sees-the-rejection-and-keeps-their-draft).
+- **AC-TASKS-DOCUMENTS-003.8:** Once this app store observes a plan creation, update, or deletion, a snapshot read started before that observation shall not replace that state or consume its unread indicator. For overlapping reads of the same task and store, only the latest started read may settle content, loading, or read errors. Later fresh reads, absence, and ordinary failures remain supported; tasks and independent app stores stay isolated. Retired reads shall not affect the selected task view after navigation.
 
 This contract applies to the existing task Plan editor on desktop and phone.
 It changes no editing affordances or navigation. It does not define arbitrary
 concurrent-writer reconciliation, conflict merging, transport ordering, or a
 new version policy. Its technical owner is the [task document persistence
 lifecycle](../system-design/plan-write-lifecycle.md#plan-draft-acknowledgement).
-Delivery is recorded in the [draft-continuity plan](../../../plans/preserve-plan-typing/plan.md).
+Delivery is recorded in the [draft-continuity plan](../../../plans/preserve-plan-typing/plan.md) and [snapshot freshness repair](../../../plans/preserve-live-plans/plan.md).
 
 ## Migrated source detail
 

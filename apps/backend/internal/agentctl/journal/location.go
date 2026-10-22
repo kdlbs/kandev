@@ -54,27 +54,27 @@ func ResolveLocation(root, ownerID string) (Location, error) {
 func CheckStorage(root, ownerID string) StorageCapability {
 	location, err := ResolveLocation(root, ownerID)
 	if err != nil {
-		return StorageCapability{Version: CurrentVersion, Reason: "storage_not_durable"}
+		return StorageCapability{Version: CurrentProtocolVersion, Reason: "storage_not_durable"}
 	}
 	dir := filepath.Dir(location.Path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return StorageCapability{Version: CurrentVersion, Path: location.Path, Reason: "storage_unavailable"}
+		return StorageCapability{Version: CurrentProtocolVersion, Path: location.Path, Reason: "storage_unavailable"}
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
-		return StorageCapability{Version: CurrentVersion, Path: location.Path, Reason: "storage_unavailable"}
+		return StorageCapability{Version: CurrentProtocolVersion, Path: location.Path, Reason: "storage_unavailable"}
 	}
 	if _, err := os.Stat(filepath.Join(dir, lostMarkerName)); err == nil {
-		return StorageCapability{Version: CurrentVersion, Path: location.Path, Reason: "journal_lost"}
+		return StorageCapability{Version: CurrentProtocolVersion, Path: location.Path, Reason: "journal_lost"}
 	}
 	if _, err := os.Stat(filepath.Join(dir, ownerMarkerName)); err != nil {
 		if !os.IsNotExist(err) {
-			return StorageCapability{Version: CurrentVersion, Path: location.Path, Reason: "storage_unavailable"}
+			return StorageCapability{Version: CurrentProtocolVersion, Path: location.Path, Reason: "storage_unavailable"}
 		}
 		if err := os.WriteFile(filepath.Join(dir, ownerMarkerName), []byte(ownerID+"\n"), 0o600); err != nil {
-			return StorageCapability{Version: CurrentVersion, Path: location.Path, Reason: "storage_unavailable"}
+			return StorageCapability{Version: CurrentProtocolVersion, Path: location.Path, Reason: "storage_unavailable"}
 		}
 	}
-	return StorageCapability{Version: CurrentVersion, Durable: true, Path: location.Path}
+	return StorageCapability{Version: CurrentProtocolVersion, Durable: true, Path: location.Path}
 }
 
 // MarkStorageLost is the explicit destructive cleanup operation. It removes

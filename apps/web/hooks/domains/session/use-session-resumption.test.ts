@@ -13,8 +13,15 @@ const mockSetSessionAgentctlStatus = vi.fn();
 const mockSetResumeSkipped = vi.fn();
 let mockConnectionStatus = "connected";
 let mockPreventAutoStart = false;
-let mockSessionItems: Record<string, { started_at?: string; updated_at?: string; state?: string }> =
-  {};
+let mockSessionItems: Record<
+  string,
+  {
+    started_at?: string;
+    updated_at?: string;
+    state?: string;
+    session_recovery_blocks?: Array<{ consumer_reference?: string }>;
+  }
+> = {};
 let mockWorkspaceRestorationEnabled = false;
 let mockWorkspaceStore = createAppStore();
 
@@ -577,6 +584,40 @@ describe("useSessionResumption", () => {
         started_at: STARTED_AT,
       },
     };
+  });
+
+  it("prioritizes visible restart restoration before a pending startup status request settles", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const status = Promise.withResolvers<unknown>();
+    mockSessionItems[SESSION_ID] = {
+      state: "FAILED",
+      session_recovery_blocks: [{ consumer_reference: "agent_delivery" }],
+    };
+    mockRequest.mockImplementation((action: string) =>
+      action === STATUS_ACTION ? status.promise : Promise.resolve({ success: true }),
+    );
+    try {
+      const { unmount } = renderHook(() => useSessionResumption(TASK_ID, SESSION_ID));
+      await waitFor(() =>
+        expect(mockRequest).toHaveBeenCalledWith(
+          LAUNCH_ACTION,
+          expect.objectContaining({
+            activation_source: "session_focus",
+            intent: "resume",
+            session_id: SESSION_ID,
+          }),
+          expect.any(Number),
+        ),
+      );
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(mockRequest.mock.calls.filter(([action]) => action === LAUNCH_ACTION)).toHaveLength(1);
+      unmount();
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   it("does not mint client timestamps when status has no updated_at", async () => {

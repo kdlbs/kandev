@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { estimateDurationComponents } from "./duration";
-import type { StartupStepSnapshot } from "./types";
+import type { StartupStepSnapshot, StartupCompletedStep } from "./types";
 
 const STARTUP_KEY_PREFIX = "startup.";
 
@@ -31,7 +31,10 @@ export function formatPhaseLabel(t: TFunction, phase: string): string {
   return t(`startup:phase.${phase}`);
 }
 
-export function formatStepLabel(t: TFunction, step: StartupStepSnapshot): string {
+export function formatStepLabel(
+  t: TFunction,
+  step: Pick<StartupStepSnapshot | StartupCompletedStep, "label_key">,
+): string {
   return t(`startup:${stripStartupPrefix(step.label_key)}`);
 }
 
@@ -63,4 +66,8 @@ export function percentDone(done: number, total: number): number {
   if (pct < 0) return 0;
   if (pct > 100) return 100;
   return pct;
+}
+
+export function formatTimingDuration(t: TFunction, ms: number): string {
+  return ms < 1000 ? t("startup:duration.milliseconds", { count: ms }) : formatDuration(t, ms);
 }

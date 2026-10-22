@@ -3,6 +3,7 @@ status: draft
 system: tasks
 requirements:
   - REQ-TASKS-DEFERRED-START-STEP-ENTRY-001
+  - REQ-TASKS-TASK-DEPENDENCIES-001
 ---
 
 # Deferred Start on Step Entry System Design
@@ -20,6 +21,7 @@ own deferred records' replay.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-TASKS-DEFERRED-START-STEP-ENTRY-001` | [Control flow](#control-flow) |
+| `REQ-TASKS-TASK-DEPENDENCIES-001` | [Prepared primary on deferred start](#prepared-primary-on-deferred-start) |
 
 ## Components and responsibilities
 
@@ -34,8 +36,9 @@ own deferred records' replay.
 
 ## Data and contracts
 
-No signature or record format changes. The decision depends only on the event
-name and the loaded step.
+The step-entry decision depends on the event name and loaded step. Prepared
+primary reuse adds only an internal launch option; no wire or record format
+changes.
 
 ## Control flow
 
@@ -55,6 +58,33 @@ step read fails, it still calls `launchDeferredTask` before it returns,
 because a failed read is no evidence that the step has no agent (`001.3`).
 Other events keep the early call, and queue promotion, dependency resolution,
 and creation keep their behavior (`001.3`).
+
+### Prepared primary on deferred start
+
+A start-when-unblocked intent may encounter the workspace-only `CREATED`
+primary prepared when the blocked task was opened. After resolving the workflow
+recipient and effective profile, the deferred start reuses that primary only
+when its profile and executor settings match and it has no messages, turns,
+initial-prompt submission, provider conversation, resume token, or committed
+harness generation. An omitted executor ID retains the prepared selection, as
+`LaunchPreparedSession` already does; an explicit different executor is not
+eligible. The existing lifecycle lock protects the eligibility read and launch.
+A workspace
+execution alone does not make the conversation used. Its runtime may still
+report startup liveness; the executor serializes workspace preparation and the
+first agent launch with its existing session lock.
+
+Explicit workflow targets and Office sessions retain their established
+selectors. Any starting/running session or live sibling agent prevents this
+prepared primary claim, and launch failure restores the existing deferred
+intent. A non-primary, failed, terminal, or otherwise ineligible session is not revived
+or promoted. Ordinary starts retain their creation behavior. The dependency consumer currently leaves automatic activation unset and retains
+existing manual admission at a full session ceiling. It does not create a
+ceiling-deferred start; this repair adds no ceiling payload/replay field or
+admission-policy change. The selected
+session retains its queue incarnation and goes through normal launch admission;
+MCP moves continue to select the resulting active primary and defer until its
+turn ends. This adds no caller-supplied move authority or checkout refresh.
 
 ## Failure and recovery
 

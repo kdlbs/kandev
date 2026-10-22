@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -166,7 +167,7 @@ func TestRunLifecycle_ErrorEventEmitted(t *testing.T) {
 
 // listRunEvents reads run events via the repo. Exposed via a service
 // helper so the integration test stays in the _test package.
-func listRunEvents(t *testing.T, svc *service.Service, runID string) ([]*models.RunEvent, error) {
+func listRunEvents(t *testing.T, svc *service.Service, runID string) ([]*runsmodels.RunEvent, error) {
 	t.Helper()
 	return svc.ListRunEventsForTest(context.Background(), runID)
 }

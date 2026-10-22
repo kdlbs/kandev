@@ -121,6 +121,8 @@ type Manager struct {
 	deliveryJournal             *journal.Journal
 	deliveryJournalErr          error
 	deliveryWriter              *deliveryEventWriter
+	shellDeliveryMu             sync.Mutex
+	shellDelivery               map[shellDeliveryKey]shellDeliveryBaseline
 	deliveryJournalMu           sync.RWMutex
 	deliveryJournalClose        sync.Once
 	deliveryJournalCloseErr     error
@@ -531,12 +533,12 @@ func (m *Manager) deliveryJournalAvailable() bool {
 // peer; a configured journal failure is reported as unavailable instead.
 func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if m == nil || m.cfg == nil || m.cfg.DurableJournalPath == "" {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_not_durable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_not_durable"}
 	}
 	m.deliveryJournalMu.RLock()
 	defer m.deliveryJournalMu.RUnlock()
 	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
 	// Stream records are replayable and can be acknowledged by the connected
 	// backend while a session is starting. Only an unsettled prompt outcome
@@ -544,9 +546,9 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	// unacknowledged stream records through the full descriptor.
 	unresolved, err := m.deliveryJournal.HasUnresolvedSubmissions(context.Background())
 	if err != nil {
-		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
 	}
-	return journal.StorageCapability{Version: journal.CurrentVersion, Durable: true, Unresolved: unresolved}
+	return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
 }
 
 // DeliveryRecoveryDescriptor returns the authenticated instance's durable
@@ -1167,9 +1169,14 @@ func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	}
 }
 
-// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+// stopWorkspaceTrackers stops root, per-repo, and lazy trackers idempotently.
 func (m *Manager) stopWorkspaceTrackers() {
 	root, trackers := m.snapshotTrackers()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
 	if root != nil {
 		root.Stop()
 	}
@@ -2349,7 +2356,7 @@ func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, over
 		base[githubauth.CredentialCLIShimDirEnv],
 		base[githubauth.CredentialCLIBashEnvEnv],
 	)
-	removeObsoleteManagedCredentialEnvironment(base)
+	githubauth.RemoveManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
 			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
@@ -2405,27 +2412,6 @@ func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools
 	// Unwrap those owned entries before rebuilding the active environment.
 	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
 	config.ActivateManagedGitTools(env, shimDir, bashEnv)
-}
-
-func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
-	for _, key := range []string{
-		githubauth.CredentialBrokerURLEnv,
-		githubauth.CredentialHelperPathEnv,
-		githubauth.CredentialCLIShimDirEnv,
-		githubauth.CredentialCLIBashEnvEnv,
-		githubauth.CredentialParentBashEnv,
-		githubauth.CredentialLeaseEnv,
-		githubauth.CredentialReissueCapabilityEnv,
-		githubauth.CredentialTaskIDEnv,
-		githubauth.CredentialSessionIDEnv,
-		githubauth.CredentialRepositoryEnv,
-		githubauth.CredentialOwnerEnv,
-		githubauth.CredentialRepoEnv,
-		githubauth.CredentialHostEnv,
-		githubauth.CredentialScopesEnv,
-	} {
-		delete(env, key)
-	}
 }
 
 func environmentMapFromSlice(env []string) map[string]string {
@@ -2503,6 +2489,9 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 				return
 			}
 			update = persisted
+			if update.Type == "" {
+				continue
+			}
 			m.recordTerminalOutcome(&update)
 			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
 				m.signalDeliveryWakeup()
@@ -2580,7 +2569,7 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	return committed[0], nil
 }
 
-func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
+func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
 	m.deliveryJournalMu.RLock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal

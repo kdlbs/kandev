@@ -357,3 +357,30 @@ implementation; none changes an acceptance criterion.
   waiting on the rendered card.
 - Workflow snapshots must be loaded for every workflow of the workspace, or
   counts undercount.
+
+
+## Results: PR #3680 sidebar preference coverage (2026-10-10)
+
+The empty-state fixture assumed fast actions were disabled. A retained hosted
+trace showed the valid header shortcut; enabling fast actions reproduced the
+missing-body-link assertion with retries disabled. The fixture now verifies the
+accessible Open coordinators link in both explicit preference modes and restores
+the previous setting. Inbox, empty-state text, settings destination, coordinator
+destination and absent-strip assertions remain intact. Product behavior and this
+work order's implementation status are unchanged. The current-workspace-source
+QA report records combined verification and hosted results.
+
+
+Verification passed with retries disabled:
+
+```bash
+cd apps/web
+pnpm e2e:run --host --no-build --shards 1 --project chromium tests/coordinator/empty-states.spec.ts tests/settings/agent-profile-order.spec.ts tests/task/sidebar-scroll-preservation.spec.ts tests/chat/quick-chat-cancel-palette.spec.ts -- --retries 0 --max-failures 1
+pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/chat/mobile-quick-chat-cancel-palette.spec.ts tests/coordinator/mobile-needs-you.spec.ts -- --retries 0 --max-failures 1
+pnpm exec eslint e2e/tests/coordinator/empty-states.spec.ts
+```
+
+The combined runs passed 20 desktop cases (2.8 minutes) and five phone cases
+(42.0 seconds). Six desktop empty-state cases and three phone coordinator
+cases belong to this work order. Typecheck, documentation catalog and full
+specification lint passed. Fresh hosted checks are assessed separately.

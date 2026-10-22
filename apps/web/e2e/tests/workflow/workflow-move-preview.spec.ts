@@ -12,24 +12,31 @@ import { seedMoveOverrideFixture } from "./workflow-step-move-overrides-helpers"
 import {
   applyHarmlessPreviewUpdate,
   movePreviewRequestPredicate,
+  waitForPreviewTaskSessionsLoaded,
 } from "./workflow-move-preview-stability-helpers";
 
-function waitForPreviewResponse(page: Page, taskId: string) {
-  return page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname === `/api/v1/tasks/${taskId}/move-preview` &&
-      response.ok(),
-  );
+/** Observes a successful preview for the requested task and destination step. */
+function waitForPreviewResponse(page: Page, taskId: string, workflowStepId: string) {
+  const matchesRequest = movePreviewRequestPredicate(taskId, workflowStepId);
+  return page.waitForResponse((response) => matchesRequest(response.request()) && response.ok());
 }
 
-async function openStepPreview(page: Page, taskId: string, stepName: string) {
-  const response = waitForPreviewResponse(page, taskId);
-  await page.getByTestId(`workflow-step-${stepName}`).hover();
+/** Reads the response body before later UI transitions can discard it. */
+async function openStepPreview(
+  page: Page,
+  taskId: string,
+  stepName: string,
+  workflowStepId: string,
+) {
+  await waitForPreviewTaskSessionsLoaded(page, taskId);
+  const [preview] = await Promise.all([
+    waitForPreviewResponse(page, taskId, workflowStepId).then((response) => response.json()),
+    page.getByTestId(`workflow-step-${stepName}`).hover(),
+  ]);
   const popover = page.locator('[data-testid="workflow-step-popover"]:visible');
   await expect(popover).toBeVisible();
   await expect(popover.getByTestId("workflow-move-preview")).toBeVisible({ timeout: 15_000 });
-  return { popover, preview: await response.then((value) => value.json()) };
+  return { popover, preview };
 }
 
 test.describe("Workflow move preview", () => {
@@ -48,7 +55,12 @@ test.describe("Workflow move preview", () => {
     await testPage.reload();
     await fixture.session.waitForLoad();
 
-    const { popover, preview } = await openStepPreview(testPage, fixture.taskId, "Verify");
+    const { popover, preview } = await openStepPreview(
+      testPage,
+      fixture.taskId,
+      "Verify",
+      fixture.targetStepId,
+    );
     await expectPreviewFooter(popover, "workflow-step-move-here");
     expect(preview.outcome).toBe("reuse_current");
     expect(preview.recipient.session_id).toBe(fixture.primarySessionId);
@@ -89,7 +101,12 @@ test.describe("Workflow move preview", () => {
     testPage.on("request", requestListener);
 
     try {
-      const { popover } = await openStepPreview(testPage, fixture.taskId, "Verify");
+      const { popover } = await openStepPreview(
+        testPage,
+        fixture.taskId,
+        "Verify",
+        fixture.targetStepId,
+      );
       expect(requestCount).toBe(1);
 
       let unexpectedRequest = false;
@@ -171,11 +188,11 @@ test.describe("Workflow move preview", () => {
       agent_profile_id: profileB.id,
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
-    await apiClient.createWorkflowStep(workflow.id, "Return A", 2, {
+    const returnStep = await apiClient.createWorkflowStep(workflow.id, "Return A", 2, {
       agent_profile_id: profileA.id,
       events: { on_enter: [{ type: "auto_start_agent" }] },
     });
-    await apiClient.createWorkflowStep(workflow.id, "Fresh C", 3, {
+    const freshStep = await apiClient.createWorkflowStep(workflow.id, "Fresh C", 3, {
       agent_profile_id: profileC.id,
       profile_session_start_policy: "new",
       events: { on_enter: [{ type: "auto_start_agent" }] },
@@ -200,7 +217,7 @@ test.describe("Workflow move preview", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const returnPreview = await openStepPreview(testPage, task.id, "Return A");
+    const returnPreview = await openStepPreview(testPage, task.id, "Return A", returnStep.id);
     expect(returnPreview.preview.outcome).toBe("reuse_other");
     expect(returnPreview.preview.recipient.session_id).toBe(initialSessionId);
     expect(returnPreview.preview.model.after.known).toBe(true);
@@ -218,8 +235,9 @@ test.describe("Workflow move preview", () => {
     expect(await waitForWorkflowProfileSession(apiClient, task.id, profileA.id)).toBe(
       initialSessionId,
     );
+    await waitForPreviewTaskSessionsLoaded(testPage, task.id, initialSessionId);
 
-    const freshPreview = await openStepPreview(testPage, task.id, "Fresh C");
+    const freshPreview = await openStepPreview(testPage, task.id, "Fresh C", freshStep.id);
     expect(freshPreview.preview.outcome).toBe("create_new");
     expect(freshPreview.preview.recipient.session_id ?? "").toBe("");
     expect(freshPreview.preview.model.after.known).toBe(true);

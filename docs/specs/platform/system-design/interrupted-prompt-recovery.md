@@ -24,6 +24,7 @@ existing controls, recovery actions, and persistence.
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .7 and .10 | Workspace-only access |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .25 and .26 | Bounded projection wait |
 
 ## Workspace-only access
 
@@ -103,6 +104,59 @@ On backend adoption, unknown SQL history is excluded from active work only when 
 full peer records retain matching retirement, uncertain state, session/incarnation, generation,
 and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
 new endpoint, migration, native conversation replacement, or generation rotation is needed.
+
+## Bounded projection wait
+
+The [silent prompt work package](../../../plans/silent-prompt-recovery/plan.md)
+records implementation and verification. `nativeResumeProofCursor` returns the
+distinct `errNativeResumeProjectionLag` sentinel when received and projected
+sequences differ. It wraps `ErrDurableAdoptionBlocked` for compatibility.
+The retry loop owned by `GetNativeResumeDeliveryEvidence` must match
+`errNativeResumeProjectionLag` with `errors.Is` before handling
+`ErrDurableAdoptionBlocked`. Compatibility handling must not short-circuit the
+bounded projection wait. Never classify errors by message text.
+
+`GetNativeResumeDeliveryEvidence` owns the wait because it owns the complete
+proof. Retry only verified projection lag or monotonic same-owner stream progress
+after authentication, cursor coverage, submission retirement, and identity
+validation. Either result starts the bounded wait, including on the first proof
+attempt. Capture session, execution,
+incarnation, stream, native session, and harness generation from that proof
+attempt. Use a 10-second maximum and 200 ms polling, shortened by caller
+cancellation/deadline. Do not detach this wait from the recovery request.
+
+Poll the cursor through the existing repository and verify current execution
+ownership. No event-bus, projection, cancellation, or stream lock may span the
+wait. A notification primitive may replace polling if it already has the same
+bounded and cancellation-safe behavior. Do not add a general retry service.
+
+When the cursor catches up, discard the partial proof and rerun the full
+existing authenticated status, SQL/journal inventory, retirement, cursor and
+final-status checks. Revalidate captured identity before returning. One full
+proof with equal cursors and matching opening/closing authenticated status is
+sufficient; no additional quiet polling interval is required. If same-owner
+stream progress invalidates that proof, retry no sooner than the next 200 ms
+poll, using the original deadline. A stream that prevents a stable full proof
+throughout the budget times out and stays blocked. Changed identity,
+storage/authentication failure, unresolved live work, and conflicting evidence
+fail immediately. Never retry native initialization or send a prompt as part of
+this loop. Empty streams keep their current behavior.
+
+The existing transactional SQL resolver remains the final authority. Resolving
+one block cannot clear unrelated restrictions. Timeout returns the typed blocked
+result and preserves retired history and prior uncertainty for a later explicit
+attempt. Cancellation or a replacement execution prevents a late result from
+resolving the block. Existing concurrent recovery ownership prevents duplicate
+resolution and queue release.
+
+The browser retains its existing 60-second manual Resume timeout and busy
+controls on desktop and phone. No extra action or new layout is needed.
+Tests use a projection barrier and real journal/SQL state to prove one-request
+success, timeout, cancellation, owner change, same-owner progress, unavailable
+storage, no historical resend, and preservation of unrelated blocks. Continuously
+advancing status must time out on the original deadline without a tight retry
+loop. Unresolved journal work, even with a lagging cursor, must return blocked
+before starting a wait or scheduling a retry.
 
 ## Failure and compatibility
 

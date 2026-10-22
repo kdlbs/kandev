@@ -400,3 +400,49 @@ hint and revalidated from the configured provider before persistence or clone.
 ## Implementation Plan
 
 See [the active implementation plan](../../../plans/azure-devops-integration/plan.md).
+
+## Saved-view mutation settlement
+
+`useAzureDevOpsSavedViews` owns one ordered mutation queue for a mounted Azure
+page. `AzureDevOpsPageClient` keys its content by workspace ID. This is a
+same-page ordering fix; changing hook props alone does not demonstrate a
+cross-workspace page defect.
+
+The existing GET and whole-list PUT `/api/v1/azure-devops/views` API is unchanged.
+The hook retains the last confirmed server list plus ordered pending updates
+in a ref-owned scope that survives renders and is replaced only when workspace
+identity changes.
+It publishes the confirmed list with pending updates applied, synchronously
+admitting updates before another callback can run. The page appends a saved
+view with a functional update; delete filters by ID. These operations can be
+reapplied without carrying a failed earlier operation in a captured snapshot.
+Explicit whole-list replacement remains supported for its existing semantics.
+
+Writes wait for the initial read and preceding write to settle. Each request
+applies its update to the confirmed list at dispatch. Success accepts the
+normalized server response; failure leaves the confirmed baseline unchanged.
+Either outcome removes the settled update and republishes the remaining
+optimistic updates. Rejection remains visible to the initiating caller and
+does not poison the queue. An initial GET contributes the baseline beneath
+pending updates rather than replacing their visible intent. A failed read can
+leave the display empty, but never confirms an empty server list. Every action
+captures the read promise at admission; if that read fails, each bound action
+rejects without a PUT and loses only its optimistic effect. A later retry
+starts one shared fresh GET before writing against the recovered baseline.
+Binding rejection to the admitted read prevents a retry from making an older
+failed action eligible to write.
+
+The page handles delete rejection through the shared reporting toast with
+`integrations:failedToDeleteSavedQuery`; the save dialog keeps its existing
+localized failure and retry flow. Desktop scope menus and phone bottom menus
+retain their existing confirmation surfaces and share the same hook.
+Queued writes finish for their captured workspace after unmount; publication
+stops. There is no shared cache, cross-mount queue, backend revision protocol,
+or claim of multi-tab consistency. An ambiguous transport failure is not proof
+that the server rejected the write; broader reconciliation remains excluded.
+
+This section satisfies AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.15 through
+AC-INTEGRATIONS-AZURE-DEVOPS-INTEGRATION-001.18. Deferred hook tests prove request
+order, confirmed-baseline recovery, read settlement, normalization, and retry.
+Desktop and mobile browser tests exercise the actual confirmation and failure
+feedback, and query the backend to prove the final stored list.

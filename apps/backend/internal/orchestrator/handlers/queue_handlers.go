@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"strings"
 
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -28,8 +31,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 const (
@@ -1337,23 +1338,6 @@ func (h *QueueHandlers) updateQueuedMessage(
 	return atomicMutations.UpdateMessageWithMetadataForSessionWithClaim(
 		ctx, identity, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy, *atomicClaim,
 	)
-}
-
-func (h *QueueHandlers) releaseFailedQueueAttachmentClaims(
-	ctx context.Context,
-	releaser QueueAttachmentReleaser,
-	previous *messagequeue.QueuedMessage,
-	sessionID string,
-	attachments []messagequeue.MessageAttachment,
-) {
-	if releaser == nil || previous == nil {
-		return
-	}
-	if err := releaser.ReleaseMessageAttachments(
-		ctx, previous.TaskID, sessionID, queueAttachmentsToV1(attachments),
-	); err != nil {
-		h.logger.Warn("failed to release attachments after queue update failure", zap.Error(err))
-	}
 }
 
 // wsUpdateMessage handles ActionMessageQueueUpdate, replacing a queued entry's content.

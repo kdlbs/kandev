@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -42,6 +43,7 @@ import (
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -80,6 +82,7 @@ func provideOrchestrator(
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	retryClock *e2eCapacityRetryClock,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -90,6 +93,9 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	if retryClock != nil {
+		serviceCfg.RetryClock = retryClock
+	}
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
@@ -202,6 +208,16 @@ func provideOrchestrator(
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
+	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
+	turnChangeCoordinator.SetLogger(log.Zap())
+	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	}
+	agentruntime.InstallTurnChangeCaptureHandler(
+		lifecycleMgr,
+		&runtimeTurnChangeCaptureHandler{coordinator: turnChangeCoordinator, publisher: taskSvc},
+	)
 
 	// Route orchestrator task.updated events through the task service, which
 	// owns the canonical rich payload. Covers workflow transitions, workflow
@@ -1290,6 +1306,14 @@ func (u *repoLocalPathUpdater) UpdateRepositoryLocalPath(ctx context.Context, re
 		LocalPath: &localPath,
 	})
 	return err
+}
+
+// UpdateVerifiedRepositoryLocalPath retains the repository snapshot validated by attachment.
+func (u *repoLocalPathUpdater) UpdateVerifiedRepositoryLocalPath(ctx context.Context, repository *taskmodels.Repository, localPath string) error {
+	if repository == nil || repository.ID == "" || localPath == "" {
+		return fmt.Errorf("verified repository identity and path are required")
+	}
+	return u.svc.UpdateVerifiedManagedRepositoryPath(ctx, repository, localPath)
 }
 
 func (u *repoLocalPathUpdater) UpdateRepositoryDefaultBranch(ctx context.Context, repositoryID, defaultBranch string) error {

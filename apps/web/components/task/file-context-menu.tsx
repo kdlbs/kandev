@@ -1,5 +1,7 @@
 "use client";
 
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
+
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
 import { IconMessageDots } from "@tabler/icons-react";
@@ -549,9 +551,12 @@ export function TreeNodeName({
     }
   }, [rename.isRenaming]);
 
-  const handleBlur = useCallback(() => {
-    rename.handleConfirmRename();
-  }, [rename]);
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: rename.isRenaming,
+    identity: node.path,
+    inputRef,
+    onLeave: rename.handleConfirmRename,
+  });
 
   if (rename.isRenaming) {
     return (
@@ -560,8 +565,11 @@ export function TreeNodeName({
         controlSize="none"
         value={rename.renameValue}
         onChange={(e) => rename.setRenameValue(e.target.value)}
-        onKeyDown={rename.handleRenameKeyDown}
-        onBlur={handleBlur}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === "Escape") cancelPendingBlur();
+          rename.handleRenameKeyDown(event);
+        }}
+        onBlur={onBlur}
         onClick={(e) => e.stopPropagation()}
         className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
       />

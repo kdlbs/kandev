@@ -197,6 +197,7 @@ type McpServerConfig = agentctl.McpServerConfig
 const (
 	MetadataKeyMainRepoGitDir = "main_repo_git_dir"
 	MetadataKeyWorktreeID     = "worktree_id"
+	MetadataKeyWorktreePath   = "worktree_path"
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
@@ -292,6 +293,8 @@ const (
 	// change. Empty for every non-Office launch, which is legitimate, not
 	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
+	// MetadataKeyCausingRunID keeps the Office cause across a lifecycle restart.
+	MetadataKeyCausingRunID = "causing_run_id"
 	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
 	// across runtime and backend restarts so restore policy can distinguish a
 	// relocation from an unchanged workspace.
@@ -437,6 +440,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
+	MetadataKeyCausingRunID:             true,
 	MetadataKeyOriginalWorkspacePath:    true,
 	metadataKeyPassthroughMCPClaims:     true,
 }
@@ -467,6 +471,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
+	MetadataKeyCausingRunID:          true,
 	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
@@ -642,6 +647,7 @@ type RemoteInstanceRefresher interface {
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
 	InstanceID    string
+	CausingRunID  string
 	IsPassthrough bool
 	// ExecutorType is retained in execution metadata so recovered sessions can
 	// safely re-check host-local filesystem eligibility.
@@ -876,11 +882,16 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
+	causingRunID := req.CausingRunID
+	if causingRunID == "" && req.Metadata != nil {
+		causingRunID, _ = req.Metadata[MetadataKeyCausingRunID].(string)
+	}
 	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
 		startupDisposition:         startupDispositionFromMetadata(metadata),
 		ID:                         ri.InstanceID,
+		CausingRunID:               causingRunID,
 		ExecutorType:               executorType,
 		RunID:                      req.Env["KANDEV_RUN_ID"],
 		TaskID:                     req.TaskID,

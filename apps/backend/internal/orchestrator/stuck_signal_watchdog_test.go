@@ -37,6 +37,7 @@ func TestReclaimStuckSignalSessionsOnce_ReclaimsStuckRunningSession(t *testing.T
 		ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
 	}
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	svc.repo = watchdogNarrowOnlyRepo{Repository: repo, t: t}
 
 	// The agent called step_complete_kandev well over the watchdog's
 	// threshold ago, but the turn never reached turn-end and never failed —

@@ -2070,6 +2070,7 @@ func registerSecondaryRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
+	registerE2ECapacityRetryClockRoutes(p.router, p.services.capacityRetryClock)
 
 	if officetestharness.Enabled() {
 		var officeAgentSvc *officeagents.AgentService
@@ -2594,7 +2595,11 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetReviewService(reviewParts.service)
 	mcpHandlers.SetReviewRunner(reviewParts.runner)
 	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
-	reviewParts.runner.Start(context.Background())
+	reviewCtx := p.ctx
+	if reviewCtx == nil {
+		reviewCtx = context.Background()
+	}
+	startup.AfterReady(reviewCtx, func() { reviewParts.runner.Start(reviewCtx) })
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			reviewParts.runner.Stop()

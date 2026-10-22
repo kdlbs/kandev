@@ -459,7 +459,7 @@ func validateWorkspaceRepositoryInfo(
 	deferManagedCloneMismatch bool,
 	manager *worktree.Manager,
 ) error {
-	candidate := workspaceRepositoryCandidate(ctx, info, index, repository)
+	candidate := executionWorkspaceRepositoryCandidate(ctx, info, index, repository)
 	if manager != nil && info.ExecutorType == string(models.ExecutorTypeWorktree) {
 		adopted, err := manager.ValidateWorkspaceAdoptionForReuse(ctx, worktree.CreateRequest{
 			TaskEnvironmentID: info.TaskEnvironmentID, RepositoryID: repository.RepositoryID,
@@ -478,7 +478,7 @@ func validateWorkspaceRepositoryInfo(
 	return err
 }
 
-func workspaceRepositoryCandidate(
+func executionWorkspaceRepositoryCandidate(
 	ctx context.Context,
 	info *WorkspaceInfo,
 	index int,
@@ -487,6 +487,8 @@ func workspaceRepositoryCandidate(
 	switch {
 	case info.ExecutorType == string(models.ExecutorTypeWorktree) && repository.WorktreePath != "":
 		return repository.WorktreePath
+	case repository.WorkspaceRelativePath != "" || info.WorkspaceLayout == workspaceLayoutTaskRoot || info.WorkspaceLayout == workspaceLayoutKandevDirectory:
+		return workspaceRepositoryCandidate(info.WorkspacePath, info.WorkspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
 	case index > 0:
 		if info.ExecutorType != string(models.ExecutorTypeWorktree) {
 			if _, err := localGitTopLevel(ctx, info.WorkspacePath); err == nil {
@@ -496,7 +498,7 @@ func workspaceRepositoryCandidate(
 			}
 		}
 		return filepath.Join(info.WorkspacePath, repository.RepoName)
-	case len(info.WorkspaceRepositories) > 1:
+	case len(info.WorkspaceRepositories) > 1 || info.WorkspaceLayout == workspaceLayoutCurrentRoot:
 		// Multi-repository worktree layouts use a task root. Local layouts
 		// may use the primary repository as the root, so try its child only
 		// when the root does not validate.
@@ -1051,11 +1053,11 @@ type executionEnvironmentPreparation struct {
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
 	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
+	if err := reconcileWorkspaceSourcesAtLayout(ctx, info.WorkspacePath, info.WorkspaceLayout, info.WorkspaceFolders, owner); err != nil {
 		return err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
+		if err := reconcileWorkspaceRepositoriesAtLayout(info.WorkspacePath, info.WorkspaceLayout, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
 	}
@@ -1277,6 +1279,7 @@ func (m *Manager) initializeCreatedExecution(
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
 	}
+	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
 	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
 	execution.SetSessionSpan(sessionSpan)
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
@@ -1342,6 +1345,7 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 			RemoteSyncHandled: repository.RemoteSyncHandled,
 			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
+			WorkspaceRelativePath: repository.WorkspaceRelativePath,
 		}); err != nil {
 			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
 		}
@@ -1492,7 +1496,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 	if rt != nil && runtimeInstance != nil {
-		if stopErr := stopRuntimeInstanceAndRelease(ctx, rt, runtimeInstance, true); stopErr != nil {
+		if stopErr := m.stopWorkspaceRuntimeAndRelease(ctx, rt, runtimeInstance, true); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))
@@ -1599,17 +1603,6 @@ func (m *Manager) persistRequiredKubernetesRuntimeSecrets(
 // and saves the secret ID in the execution's metadata for recovery after restart.
 func (m *Manager) persistAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
 	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyAuthTokenSecret, "agentctl-auth", instance.AuthToken)
-}
-
-func (m *Manager) persistBootstrapNonce(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyBootstrapNonceSecret, "agentctl-bootstrap", instance.BootstrapNonce)
-}
-
-func (m *Manager) persistContainerControlAuthToken(ctx context.Context, instance *ExecutorInstance, execution *AgentExecution) {
-	if instance == nil || instance.ContainerID == "" {
-		return
-	}
-	m.persistRuntimeSecret(ctx, instance, execution, MetadataKeyContainerControlAuthSecret, "agentctl-container-control", instance.AuthToken)
 }
 
 func (m *Manager) persistRuntimeSecret(

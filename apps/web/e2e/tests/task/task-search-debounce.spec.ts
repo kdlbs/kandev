@@ -17,8 +17,8 @@ test("latest task search wins and clear cancels queued input", async ({
     });
   }
   await testPage.goto("/tasks?group=none");
-  const search = testPage.getByTestId("kanban-header-search");
-  const input = search.getByRole("textbox");
+  const search = testPage.getByTestId("tasks-list-filters");
+  const input = testPage.getByTestId("tasks-list-search");
   const rows = testPage.getByTestId("tasks-list-row-title");
   const beta = waitForHttp(testPage, "GET", listPath, {
     predicate: (r) => new URL(r.url()).searchParams.get("query") === "Debounce Beta",
@@ -30,7 +30,7 @@ test("latest task search wins and clear cancels queued input", async ({
   const empty = waitForHttp(testPage, "GET", listPath, {
     predicate: (r) => !new URL(r.url()).searchParams.has("query"),
   });
-  await search.getByRole("button").click();
+  await search.getByRole("button", { name: "Clear search", exact: true }).click();
   await empty;
   await expect(
     testPage.getByTestId("tasks-list").getByText("Debounce Alpha", { exact: true }),
@@ -45,7 +45,7 @@ test("latest task search wins and clear cancels queued input", async ({
     if (listPath.test(url.pathname)) queries.push(url.searchParams.get("query") ?? "");
   });
   await input.fill("Cancelled input");
-  await search.getByRole("button").click();
+  await search.getByRole("button", { name: "Clear search", exact: true }).click();
   await testPage.clock.runFor(1000);
   expect(queries).not.toContain("Cancelled input");
   await expect(input).toHaveValue("");
@@ -66,11 +66,15 @@ for (const outcome of ["success", "error"] as const) {
     }
     let release!: () => void;
     let admitted!: () => void;
+    let replied!: () => void;
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
     const started = new Promise<void>((resolve) => {
       admitted = resolve;
+    });
+    const settled = new Promise<void>((resolve) => {
+      replied = resolve;
     });
     await testPage.route(/\/api\/v1\/workspaces\/[^/]+\/tasks\?/, async (route) => {
       if (new URL(route.request().url()).searchParams.get("query") !== "Reply Alpha") {
@@ -80,17 +84,21 @@ for (const outcome of ["success", "error"] as const) {
       const response = await route.fetch();
       admitted();
       await held;
-      if (outcome === "success") await route.fulfill({ response });
-      else
-        await route.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "obsolete search failure" }),
-        });
+      try {
+        if (outcome === "success") await route.fulfill({ response });
+        else
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "obsolete search failure" }),
+          });
+      } finally {
+        replied();
+      }
     });
     try {
       await testPage.goto("/tasks?group=none");
-      const input = testPage.getByTestId("kanban-header-search").getByRole("textbox");
+      const input = testPage.getByTestId("tasks-list-search");
       await input.fill("Reply Alpha");
       await started;
       const beta = waitForHttp(testPage, "GET", listPath, {
@@ -99,11 +107,8 @@ for (const outcome of ["success", "error"] as const) {
       await input.fill("Reply Beta");
       await beta;
       await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText(["Reply Beta"]);
-      const alpha = waitForHttp(testPage, "GET", listPath, {
-        predicate: (r) => new URL(r.url()).searchParams.get("query") === "Reply Alpha",
-      });
       release();
-      await (await alpha).finished();
+      await settled;
       await dwell(
         testPage,
         100,

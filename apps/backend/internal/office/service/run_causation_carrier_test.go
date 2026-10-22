@@ -14,7 +14,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -57,7 +58,7 @@ func TestCarrierFromTaskMetadata_FullCarrierDecodesExactly(t *testing.T) {
 		CreatingRunID:  "run-1",
 		HumanRooted:    true,
 		RoutineID:      "routine-1",
-		ActorKind:      models.ActorKindAgent,
+		ActorKind:      runsmodels.ActorKindAgent,
 		ActorID:        "agent-1",
 	}
 	if c != want {
@@ -78,7 +79,7 @@ func TestCarrierFromTaskMetadata_EmptyCreatingRunIDRootsDespiteOtherValues(t *te
 			c.CreatingRunID, c.CausationID, c.CausationDepth)
 	}
 	// The routine attribution, human-rooted flag, and actor still apply.
-	if c.RoutineID != "routine-1" || !c.HumanRooted || c.ActorKind != models.ActorKindAgent {
+	if c.RoutineID != "routine-1" || !c.HumanRooted || c.ActorKind != runsmodels.ActorKindAgent {
 		t.Fatalf("carrier = %+v, want routine/human-rooted/actor to still apply", c)
 	}
 }
@@ -166,7 +167,7 @@ func TestCarrierFromTaskMetadata_MissingRoutineIDResolvesEmpty(t *testing.T) {
 		t.Errorf("routine_id = %q, want empty (absent resolves restrictively)", c.RoutineID)
 	}
 	// One malformed/absent value must not discard the others.
-	if c.CreatingRunID != "run-1" || c.ActorKind != models.ActorKindAgent {
+	if c.CreatingRunID != "run-1" || c.ActorKind != runsmodels.ActorKindAgent {
 		t.Fatalf("carrier = %+v, want lineage/actor unaffected by the absent routine id", c)
 	}
 }
