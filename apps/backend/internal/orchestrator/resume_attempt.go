@@ -687,6 +687,9 @@ func (s *Service) beginResumeAttempt(
 		if s.cancelledResumeTeardownForSession(sessionID) != nil {
 			return nil, false, fmt.Errorf("%w: cancelled startup teardown is still in progress", ErrResumeAttemptCancelled)
 		}
+		if err := s.validateWorkflowAutoStartResumeAdmission(ctx, taskID, sessionID); err != nil {
+			return nil, false, err
+		}
 		// The guard marker is only valid for this registration call. Do not
 		// carry it into lifecycle work that can outlive the guard owner.
 		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
@@ -709,6 +712,11 @@ func (s *Service) beginResumeAttempt(
 					return nil, false, fmt.Errorf("wait for cancelled startup teardown before resume: %w", err)
 				}
 				continue
+			}
+			if err := s.validateWorkflowAutoStartResumeAdmission(ctx, taskID, sessionID); err != nil {
+				lock.Unlock()
+				release()
+				return nil, false, err
 			}
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
 			if owner {

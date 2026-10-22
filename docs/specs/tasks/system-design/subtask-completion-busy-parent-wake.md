@@ -59,6 +59,13 @@ when a reload returns another task binding; the complete original tuple must
 still match before any claim. An acknowledged cancellation
 or a replaced incarnation therefore cannot become a fresh launch attempt.
 
+The same captured identity and cancellation revision are checked when a resume
+attempt registers under its existing session guard. Cancellation can finish
+after prompt input admission but before runtime startup; that stale action must
+not register new startup work. Both locally acquired and caller-held registration
+guards apply this check. Calls without workflow auto-start admission retain their
+existing behavior, and provider work remains outside the registration guard.
+
 A confirmed busy refusal does not authorize terminal-session recovery. A retry
 stops when the original session becomes terminal; initial and manual recovery
 routes keep their existing policy.

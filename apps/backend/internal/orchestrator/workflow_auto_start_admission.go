@@ -108,6 +108,22 @@ func (s *Service) withWorkflowAutoStartInputAdmission(
 	return admit()
 }
 
+// validateWorkflowAutoStartResumeAdmission runs under the resume-registration guard.
+func (s *Service) validateWorkflowAutoStartResumeAdmission(ctx context.Context, taskID, sessionID string) error {
+	admission, _ := ctx.Value(workflowAutoStartAdmissionKey{}).(*workflowAutoStartAdmission)
+	if admission == nil {
+		return nil
+	}
+	if admission.identity.TaskID != taskID || admission.identity.SessionID != sessionID {
+		return messagequeue.ErrSessionIdentityMismatch
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return s.validateWorkflowAutoStartAdmission(ctx, session)
+}
+
 func (s *Service) validateWorkflowStepPromptSession(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep) error {
 	if session.TaskID != taskID {
 		return fmt.Errorf("session does not belong to task")

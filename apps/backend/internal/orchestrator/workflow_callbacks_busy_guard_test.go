@@ -294,3 +294,56 @@ func TestAutoStartAgentCallback_LateTaskReplacementPreservesInputs(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, claimed, "the successor keeps its own first-prompt slot")
 }
+
+type cancelledWorkflowResumeProbe struct {
+	*mockAgentManager
+	bindings int
+}
+
+func (m *cancelledWorkflowResumeProbe) BindResumeAttempt(context.Context, string, string) error {
+	m.bindings++
+	return errors.New("cancelled workflow reached runtime resume binding")
+}
+
+func TestAutoStartAgentCallback_CancellationBeforeResumeRegistration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	repo, svc, manager := setupBusyParentChildrenCompleted(t)
+	seedMockTaskState(svc.taskRepo.(*mockTaskRepo), busyParentID, "IN_PROGRESS")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, busyParentSessionID, models.TaskSessionStateWaitingForInput, ""))
+	probe := &cancelledWorkflowResumeProbe{mockAgentManager: manager}
+	svc.agentManager = probe
+	var cancelled sync.Once
+	manager.isAgentReadyFn = func(context.Context, string) bool {
+		cancelled.Do(func() {
+			require.NoError(t, svc.CancelAgent(ctx, busyParentSessionID))
+		})
+		return false
+	}
+	_, err := (&autoStartAgentCallback{svc: svc}).Execute(ctx, busyParentAutoStartInput())
+	require.Error(t, err)
+	require.EqualValues(t, 1, manager.cancelAgentCalls.Load(), "the cancellation must finish between input admission and resume registration")
+	require.Zero(t, probe.bindings, "a stale workflow must not bind a runtime resume after cancellation acknowledgement")
+	require.Empty(t, manager.capturedPrompts)
+	_, active := svc.resumeAttemptStore().current(busyParentSessionID)
+	require.False(t, active)
+}
+
+func TestAutoStartAgentCallback_CancelledAdmissionCannotRegisterWithHeldGuard(t *testing.T) {
+	ctx := context.Background()
+	_, svc, _ := setupBusyParentChildrenCompleted(t)
+	seedMockTaskState(svc.taskRepo.(*mockTaskRepo), busyParentID, "IN_PROGRESS")
+	admissionCtx, err := svc.withWorkflowAutoStartAdmission(ctx, busyParentID, busyParentSessionID)
+	require.NoError(t, err)
+	require.NoError(t, svc.CancelAgent(ctx, busyParentSessionID))
+	guard := svc.lockCancelInFlightGuard(busyParentSessionID)
+	defer guard.release()
+	admissionCtx = withCancelInFlightGuardHeldForSession(admissionCtx, busyParentSessionID)
+	attempt, owner, err := svc.beginResumeAttempt(admissionCtx, busyParentID, busyParentSessionID)
+	if attempt != nil {
+		attempt.finish(svc.resumeAttemptStore())
+	}
+	require.Error(t, err)
+	require.Nil(t, attempt)
+	require.False(t, owner)
+}
