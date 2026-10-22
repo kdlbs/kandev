@@ -439,7 +439,7 @@
   "profileDragCancel": "已取消配置档 {{name}} 的重新排序。",
   "sessionRuntimeManaged": "会话运行时：由 Kandev 管理",
   "sessionRuntimeNative": "会话运行时：原生 CLI",
-  "sessionRuntimeHarness": "会话运行时：由代理管理的 CLI",
+  "sessionRuntimeHarness": "会话运行时：由运行框架管理的 CLI",
   "sessionRuntimeCustom": "会话运行时：自定义命令",
   "sessionRuntimeUnknown": "会话运行时：未知",
   "sessionRuntimePackage": "{{package}} · {{version}}",

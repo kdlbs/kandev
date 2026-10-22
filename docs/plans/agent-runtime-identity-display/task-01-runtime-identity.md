@@ -171,3 +171,12 @@ Completed 2026-10-22 in the primary conversation, without delegation.
 
 Rendered captures were produced by the existing `prCapture` fixture. Development instances
 were not touched; the managed Docker E2E runner tore down its isolated instances.
+
+## PR review remediation
+
+Corrected the harness-owner label in Japanese, Korean, Portuguese, and Chinese catalogs;
+Traditional Chinese variants were generated with `pnpm run i18n:zh-hant`.
+`pnpm run i18n:check` passed and the focused runtime/card Vitest command passed 29 tests.
+The existing ambiguous-runtime table already covers the managed-fallback flag and OpenCode
+name guard independently; the review thread was answered with those concrete cases.
+Runtime behavior and the rendered composition remain as previously verified.

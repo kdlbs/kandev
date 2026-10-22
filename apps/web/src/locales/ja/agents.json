@@ -439,7 +439,7 @@
   "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。",
   "sessionRuntimeManaged": "セッションランタイム：Kandev が管理",
   "sessionRuntimeNative": "セッションランタイム：ネイティブ CLI",
-  "sessionRuntimeHarness": "セッションランタイム：エージェント管理の CLI",
+  "sessionRuntimeHarness": "セッションランタイム：ハーネス管理の CLI",
   "sessionRuntimeCustom": "セッションランタイム：カスタムコマンド",
   "sessionRuntimeUnknown": "セッションランタイム：不明",
   "sessionRuntimePackage": "{{package}} · {{version}}",
