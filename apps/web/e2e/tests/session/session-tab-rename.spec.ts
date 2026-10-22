@@ -140,7 +140,9 @@ test("preserves legal Unicode names and edits at the server code-point limit", a
   await input.press("Home");
   await testPage.keyboard.insertText("Z");
   await expect(input).toHaveValue(boundary);
+  await input.press("Home");
   await input.press("ArrowRight");
+  expect(await input.evaluate((element: HTMLInputElement) => element.selectionStart)).toBe(1);
   await testPage.keyboard.insertText("Z");
   await expect(input).toHaveValue(boundary);
   const saved = ws.waitForResponse("session.rename");

@@ -268,3 +268,9 @@ Remediation local results before the normal follow-up commit:
 - No default input maxlength, lifecycle, backend, menu, workflow or provider
   configuration changes. Combined-current-main and new-head CI/review validation
   follow the normal commit; historical evidence above is not relabeled.
+
+A delivery test follow-up explicitly returns Home before moving one character
+inside the full name, then asserts `selectionStart === 1` before typing. This
+removes any ambiguity from caret movement after the previous rejected insertion.
+Fresh managed desktop verification passed 2/2 with retries 0 against the unchanged
+production bundle. No production behavior or phone classification changed.
