@@ -73,8 +73,7 @@ See [combined preview](plan.md#ascii-ui-preview).
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/task/mobile/mobile-sessions-section.test.tsx)
-(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-menu-gesture.spec.ts --retries=0)
-(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-tab-restart.spec.ts e2e/tests/session/mobile-session-deletion.spec.ts --retries=0)
+(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-menu-gesture.spec.ts e2e/tests/session/mobile-session-tab-restart.spec.ts e2e/tests/session/mobile-session-deletion.spec.ts --retries=0)
 (cd apps/web && pnpm exec eslint components/task/mobile/mobile-sessions-section.tsx components/task/mobile/mobile-sessions-section.test.tsx components/task/mobile/use-session-menu-opening-gesture.ts e2e/tests/session/mobile-session-menu-gesture.spec.ts)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 python3 scripts/list-docs.py validate
@@ -114,18 +113,21 @@ parent review checkpoint before push/PR remains mandatory.
 
 ## Results
 
-All commands above passed. Real-Radix consumer tests: 24/24 (3.53s), after
-expected RED (4 failures/20 passes). Dedicated fresh managed native phone test:
-1/1 (16.3s), after exact-target stop/launch RED on original code. Existing
-restart/deletion browser tests: 4/4 (43.3s). All local browser runs use retries 0,
-one worker/shard, strict gateway accounting and bounded Go build settings.
+All commands above passed after the keyboard review correction. Real-Radix
+consumer tests: 27/27 (3.80s). The original touch RED remains recorded as
+4 failures/20 passes; additional Tab/ArrowRight/unrelated-key regressions fail
+3/3 before narrowing the propagation guard. Enter/Space/ArrowDown continue to
+open the menu without selecting its enclosing row.
 
-Scoped ESLint has no warnings/errors. Typecheck passes with 8GB heap after a
-separately recorded default-heap OOM. Catalog (396 decisions/1697 specs), full
-spec lint, PR-documentation coverage (`covered`), and diff checks pass.
+Fresh managed production browser package: 5/5 (53.1s), including the native touch
+mutation gate and all existing restart/deletion cases. Retries 0, one worker/shard,
+strict gateway accounting and bounded Go build settings remain active.
 
-Full history, positive backend/readback evidence, inspected phone screenshot,
-setup failures, public docs assessment, compatibility limits and receipt paths
-are recorded in the [plan results](plan.md#verification-results). No shared
-primitive, backend/API, lifecycle policy, or Unicode rename file changed. All
-validation handles terminal. Stop for parent validation before push/PR.
+Scoped ESLint has no warnings/errors. Typecheck passes with 8GB heap. Catalog,
+full spec lint, PR-documentation coverage, and diff checks pass. The default-heap
+OOM and initial setup failures remain historical, separately recorded outcomes.
+
+Full gateway history, positive backend/readback evidence, public docs assessment,
+compatibility limits and receipt paths are in the [plan results](plan.md#verification-results).
+Parent validation and subsequent delivery authorization completed; final-head
+CI/review/screenshot/merge evidence is maintained externally until terminal.

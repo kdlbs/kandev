@@ -590,6 +590,20 @@ describe("Native session menu opening gesture", () => {
     expect(mocks.restartSession).not.toHaveBeenCalled();
   });
 
+  it.each(["Tab", "ArrowRight", "k"])("lets surrounding handlers receive %s", (key) => {
+    const onKeyDown = vi.fn();
+    document.addEventListener("keydown", onKeyDown);
+    try {
+      const trigger = renderTrigger();
+      fireEvent.keyDown(trigger, { key });
+      expect(onKeyDown).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", onKeyDown);
+    }
+  });
+
   it.each(["Enter", " ", "ArrowDown"])(
     "opens with %s without selecting the enclosing row",
     (key) => {

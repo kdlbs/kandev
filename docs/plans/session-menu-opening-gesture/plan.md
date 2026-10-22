@@ -89,8 +89,7 @@ compatibility. Existing restart/deletion specs protect lifecycle integration.
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/task/mobile/mobile-sessions-section.test.tsx)
-(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-menu-gesture.spec.ts --retries=0)
-(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-tab-restart.spec.ts e2e/tests/session/mobile-session-deletion.spec.ts --retries=0)
+(cd apps/web && GOMAXPROCS=2 GOFLAGS=-p=2 pnpm e2e:run --host --shards 1 --project mobile-chrome e2e/tests/session/mobile-session-menu-gesture.spec.ts e2e/tests/session/mobile-session-tab-restart.spec.ts e2e/tests/session/mobile-session-deletion.spec.ts --retries=0)
 (cd apps/web && pnpm exec eslint components/task/mobile/mobile-sessions-section.tsx components/task/mobile/mobile-sessions-section.test.tsx components/task/mobile/use-session-menu-opening-gesture.ts e2e/tests/session/mobile-session-menu-gesture.spec.ts)
 (cd apps/web && NODE_OPTIONS=--max-old-space-size=8192 pnpm run typecheck)
 python3 scripts/list-docs.py validate
@@ -104,10 +103,11 @@ Keep raw receipts outside the checkout and report every process terminal.
 ## Verification results
 
 - Frozen install passed; no lockfile change. Real-Radix consumer RED: 4 failures,
-  20 passes. Final consumer GREEN: 24/24 (3.53s).
+  20 passes. Review regression RED: 3 failures/24 passes for unrelated keyboard
+  propagation. Final consumer GREEN: 27/27 (3.80s).
 - Native `.tap()` RED on original consumer, independently reconfirmed with full
   payload/phase assertions: trigger alone sent stop plus non-focus resume launch
-  for the exact selected secondary. Final fresh managed phone GREEN: 1/1 (16.3s),
+  for the exact selected secondary. Final fresh managed phone package GREEN: 5/5 (53.1s),
   one worker/shard, retries 0, strict gateway accounting and bounded Go builds.
 - Full gateway history retained with stimulus index: one legitimate primary
   `session_focus` before the stimulus; only the later explicit secondary
@@ -115,7 +115,8 @@ Keep raw receipts outside the checkout and report every process terminal.
   Opening, Escape, Enter, hybrid mouse, repeated touch and outside dismissal pass.
 - Screenshot inspected against UI-01: inset menu, clear rows, dimmed backdrop,
   viewport containment, 44px targets and no document horizontal overflow.
-- Existing restart/deletion specs: 4/4 (43.3s), retries 0. Scoped ESLint: zero
+- The combined package includes the native gesture test plus all four existing
+  restart/deletion cases; retries 0 throughout. Scoped ESLint: zero
   errors/warnings. Typecheck/catalog check: passed with 8GB heap; initial default
   4GB attempt exhausted its heap (exit 134), preserved separately.
 - Docs catalog validated 396 decisions/1697 specifications; full spec lint,
@@ -133,8 +134,14 @@ Keep raw receipts outside the checkout and report every process terminal.
   PR4444 f15b457, PR1512 a8655ad, PR4013 37bfa1ec remain unchanged; unrelated hunks
   and shared primitives are untouched. Detailed logs/artifacts are outside the
   checkout at the task workspace's `loop-receipts/attempt16/`.
-- All validation handles terminal. Ready for parent validation before push/PR;
-  separate same-session parent delivery authorization is still required.
+- Review remediation limits trigger key propagation suppression to Enter, Space,
+  and ArrowDown. Tab, ArrowRight, and unrelated keys reach surrounding handlers;
+  existing opening-key tests still protect against selecting the enclosing row.
+  The owning design is clarified; no new product/domain contract was introduced.
+- Parent actual-diff and independent consumer validation completed, followed by
+  separate same-session delivery authorization. Local checks above are complete;
+  current-head CI/review, screenshot and merge evidence remain tracked externally
+  until delivery finishes. No record-only commit is required for that state.
 
 ## Risks
 

@@ -96,7 +96,8 @@ and opens from the completed trigger click instead, using local controlled open
 state. Menu content is therefore absent during the opening touch sequence and
 cannot receive that gesture as an item selection. Cancelled touches do not open
 the menu. Mouse, pen, and keyboard retain Radix trigger behavior; keyboard events
-from the nested trigger do not select the surrounding session row.
+for Enter, Space, and ArrowDown do not select the surrounding session row. Other
+trigger keys retain propagation to surrounding keyboard handlers.
 
 This coordination stays local to the consumer. Item callbacks, pending and
 disabled rules, delete confirmation handoff, and captured session identity keep

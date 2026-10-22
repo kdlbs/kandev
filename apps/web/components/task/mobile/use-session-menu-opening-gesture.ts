@@ -24,7 +24,9 @@ export function useSessionMenuOpeningGesture() {
     },
     onKeyDown: (event) => {
       openingTouch.current = false;
-      event.stopPropagation();
+      if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown") {
+        event.stopPropagation();
+      }
     },
   };
   return { open, setOpen, triggerProps };
