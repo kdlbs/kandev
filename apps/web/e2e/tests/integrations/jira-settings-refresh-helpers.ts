@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import { JiraSettingsPage } from "../../pages/jira-settings-page";
 
 function snapshot(repository: string) {
@@ -87,11 +88,16 @@ export async function exerciseJiraRefresh({
       )
         return route.continue();
       const pending = (async () => {
-        const response = await route.fetch();
-        expect(response.status()).toBe(touch ? 204 : 200);
-        captured.resolve();
-        await release.promise;
-        await route.fulfill({ response });
+        try {
+          const response = await route.fetch();
+          expect(response.status()).toBe(touch ? 204 : 200);
+          captured.resolve();
+          await release.promise;
+          await route.fulfill({ response });
+        } catch (error) {
+          captured.reject(error);
+          throw error;
+        }
       })();
       held.push(pending);
       return pending;
@@ -107,17 +113,32 @@ export async function exerciseJiraRefresh({
       });
     } else await settings.projectInput.fill("SAVED");
     await expect(settings.saveButton).toBeEnabled();
+    const saved = waitForHttp(page, "POST", /\/api\/v1\/jira\/config$/, {
+      predicate: (response) =>
+        new URL(response.url()).searchParams.get("workspace_id") === workspaceId,
+    });
     if (touch) await settings.saveButton.tap();
     else await settings.saveButton.click();
+    const saveResponse = await saved;
+    expect(saveResponse.status()).toBe(200);
+    await saveResponse.finished();
     await expect(settings.projectInput).toHaveAttribute("data-settings-dirty", "false");
+    const staleRead = waitForHttp(page, "GET", /\/api\/v1\/jira\/config$/, {
+      predicate: (response) =>
+        new URL(response.url()).searchParams.get("workspace_id") === workspaceId,
+    });
     holding = false;
     release.resolve();
     await Promise.all(held);
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
+    const staleResponse = await staleRead;
+    expect(staleResponse.status()).toBe(touch ? 204 : 200);
+    // A 204 has no response body to await.
+    if (staleResponse.status() !== 204) await staleResponse.finished();
+    await dwell(
+      page,
+      200,
+      "negative-assertion",
+      "Rejected Jira read publication emits no event; observe that the settled stale response cannot dirty the saved form.",
     );
     await expect(settings.projectInput).toHaveValue("SAVED");
     await expect(settings.projectInput).toHaveAttribute("data-settings-dirty", "false");
@@ -131,8 +152,15 @@ export async function exerciseJiraRefresh({
     await expect(settings.projectInput).toHaveValue("SAVED");
     await expect(settings.projectInput).toHaveAttribute("data-settings-dirty", "false");
     await settings.projectInput.fill("NEXT");
+    const savedAgain = waitForHttp(page, "POST", /\/api\/v1\/jira\/config$/, {
+      predicate: (response) =>
+        new URL(response.url()).searchParams.get("workspace_id") === workspaceId,
+    });
     if (touch) await settings.saveButton.tap();
     else await settings.saveButton.click();
+    const secondResponse = await savedAgain;
+    expect(secondResponse.status()).toBe(200);
+    await secondResponse.finished();
     await expect(settings.projectInput).toHaveAttribute("data-settings-dirty", "false");
     await page.reload();
     await expect(settings.projectInput).toHaveValue("NEXT");
@@ -152,14 +180,19 @@ export async function exerciseJiraRefresh({
     try {
       await Promise.all(held);
     } finally {
-      await page.unrouteAll({ behavior: "wait" });
-      await page.goto("/settings");
-      if (repositoryId) await api.deleteRepository(repositoryId);
-      if (workspace) await api.deleteWorkspace(workspace.id, name);
-      if (executor) await api.deleteExecutor(executor.id);
-      rmSync(repository, { recursive: true, force: true });
-      expect(snapshot(seedRepository)).toEqual(seedBefore);
-      expect(snapshot(sourceRoot)).toEqual(sourceBefore);
+      try {
+        if (!page.isClosed()) {
+          await page.unrouteAll({ behavior: "wait" });
+          await page.goto("/settings");
+        }
+      } finally {
+        if (repositoryId) await api.deleteRepository(repositoryId);
+        if (workspace) await api.deleteWorkspace(workspace.id, name);
+        if (executor) await api.deleteExecutor(executor.id);
+        rmSync(repository, { recursive: true, force: true });
+        expect(snapshot(seedRepository)).toEqual(seedBefore);
+        expect(snapshot(sourceRoot)).toEqual(sourceBefore);
+      }
     }
   }
 }

@@ -185,3 +185,39 @@ producer paths. No backlog fishing or Query migration is included.
 Implementation and local verification are done. Stop at the clean committed
 `ready_for_parent_validation` checkpoint with all owned handles terminal. No push,
 PR, CI monitor, merge, archive, follow-up task, or other worker is authorized here.
+
+
+## PR review remediation
+
+Review remediation is limited to the browser helper: arm workspace-scoped POST
+response waits before both Save actions, wait for the released GET body, observe
+its rejected publication with a named negative-assertion dwell, and reject the
+capture barrier when fetching/asserting/fulfilling fails. The existing production
+owner and Jira wiring are unchanged. Strengthened-helper source RED and final
+focused browser results are retained in the external delivery receipt.
+
+The optional toast suggestion is not adopted: an acknowledged backend write
+still succeeds when its mounted owner is gone, and feedback must remain truthful.
+The optional loading-finalizer suggestion is not adopted: publication freshness
+and live-owner loading settlement have different lifetimes. A successful write
+can invalidate a read without disposing its owner; `isCurrent()` in `finally`
+could leave loading set after that invalidation. No speculative concurrent-load
+or initial-GET recovery redesign is included.
+
+Native hosted CI for the reviewed implementation passed both owned Jira cases
+on their first attempts. Its retry-summary artifact recorded four unrelated
+cases passing after retry; that is qualified evidence, not a zero-flake claim.
+Fixture-only follow-up invalidates the prior exact-head CI/review snapshot.
+Final exact-head gates and current-base synthetic proof remain external delivery
+requirements; no record-only commit is needed after those gates finish.
+
+
+The strengthened helper reproduced the original dirty-state assertion against a
+temporary original producer in the owned detached checkout. Final desktop and
+phone checks each passed one case, retries 0, after the helper changes. A local
+phone failure and bounded diagnostic isolated an unresolved body-completion wait
+for the held real 204 response; 204 now uses its response event (no body), while
+200 responses still await their bodies. Timeout cleanup also runs after the page
+closes. Both failed diagnostic runtimes were removed by managed teardown, and
+all temporary instrumentation/producer edits were removed. Strict changed-helper
+and sanctioned-wait lint passed. See external `hardened-helper-*` receipts.
