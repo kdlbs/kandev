@@ -1,10 +1,45 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { TabRenameInput } from "./tab-rename-input";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.4
+it.each([
+  { key: "Enter", isComposing: true, keyCode: 13 },
+  { key: "Enter", isComposing: false, keyCode: 229 },
+  { key: "Escape", isComposing: true, keyCode: 27 },
+  { key: "Escape", isComposing: false, keyCode: 229 },
+])("leaves $key ($isComposing, $keyCode) to the IME without resolving rename", (key) => {
+  const commit = vi.fn();
+  const cancel = vi.fn();
+  const surroundingKey = vi.fn();
+  render(
+    <div onKeyDown={surroundingKey}>
+      <TabRenameInput initial="Original" seqBadge={null} onCommit={commit} onCancel={cancel} />
+    </div>,
+  );
+  const input = screen.getByRole("textbox");
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: "日本" } });
+  const event = createEvent.keyDown(input, { ...key, bubbles: true, cancelable: true });
+  fireEvent(input, event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(surroundingKey).not.toHaveBeenCalled();
+  expect(commit).not.toHaveBeenCalled();
+  expect(cancel).not.toHaveBeenCalled();
+  expect((input as HTMLInputElement).value).toBe("日本");
+
+  fireEvent.compositionEnd(input, { data: "日本語" });
+  fireEvent.change(input, { target: { value: "日本語" } });
+  fireEvent.keyDown(input, { key: "Enter", isComposing: false, keyCode: 13 });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.blur(input, { relatedTarget: document.body });
+  expect(commit).toHaveBeenCalledExactlyOnceWith("日本語");
+  expect(cancel).not.toHaveBeenCalled();
 });
 
 // @covers AC-UI-EDIT-FOCUS-001.1

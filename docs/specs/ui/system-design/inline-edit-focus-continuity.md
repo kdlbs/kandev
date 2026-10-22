@@ -86,6 +86,25 @@ activation. Verify both paths together at the title length limit.
 
 ## Draft and identity ownership
 
+### Tab rename composition
+
+For `AC-UI-EDIT-FOCUS-001.4`, `TabRenameInput` keeps key propagation inside
+the editor, then returns before Enter/Escape resolution when
+`nativeEvent.isComposing` is true or `nativeEvent.keyCode` is 229. Do not
+prevent the default action for these keys or mark the edit complete. This
+matches the existing task-title input guards. The shared input owns the rule
+for Dockview session/terminal tabs, preview session tabs, and the tablet
+right-panel terminal input. Domain committers, Unicode insertion limits,
+internal blur, and at-most-once completion retain their existing ownership.
+
+Phone task views use the native Sessions picker and `MobileTerminalPane`,
+which do not expose these inline tab rename inputs. Tablet terminals use
+`TaskRightPanel` through `SessionTabletLayout`; desktop uses Dockview.
+Component tests exercise native keyboard flags and default prevention;
+browser-dispatched composition events through shipped rename entry points
+exercise real consumers and persistence. Neither establishes physical OS IME
+integration. See the [tab composition repair plan](../../../plans/tab-rename-composition/plan.md).
+
 Each component continues to own its local draft. Same-target prop refreshes
 must not seed it again during editing. Bind the top-bar edit to `taskId` so a
 route change cannot apply an old draft to the next task. Office must retain its

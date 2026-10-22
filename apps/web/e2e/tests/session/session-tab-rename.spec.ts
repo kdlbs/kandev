@@ -2,8 +2,60 @@ import { dwell, watchWs } from "../../helpers/causal-waits";
 import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { composeTabRename } from "../../helpers/tab-rename-composition";
 
 test.use({ channel: "chromium" });
+
+// @covers AC-UI-EDIT-FOCUS-001.4
+test("keeps session rename open during composition until a separate Enter", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Session rename composition",
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("Missing session ID");
+  const renames: unknown[] = [];
+  testPage.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname !== "/ws") return;
+    socket.on("framesent", ({ payload }) => {
+      const frame = JSON.parse(String(payload));
+      if (frame.action === "session.rename") renames.push(frame.payload);
+    });
+  });
+  const ws = watchWs(testPage);
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  const tab = session.sessionTabBySessionId(task.session_id);
+  await tab.click({ button: "right" });
+  await session.contextMenuItem("Rename").click();
+  const input = testPage.getByTestId("session-tab-rename-input");
+  await composeTabRename(input);
+  expect(renames).toEqual([]);
+  const saved = ws.waitForResponse("session.rename");
+  await input.press("Enter");
+  await saved;
+  await expect(input).toHaveCount(0);
+  expect(renames).toEqual([{ session_id: task.session_id, name: "日本語" }]);
+  await expect(tab).toContainText("日本語");
+  await testPage.reload();
+  await session.waitForLoad();
+  await expect(tab).toContainText("日本語");
+  expect(
+    (await apiClient.listTaskSessions(task.id)).sessions.find((row) => row.id === task.session_id)
+      ?.name,
+  ).toBe("日本語");
+});
 
 test.describe("Session tab rename", () => {
   // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1 through .3

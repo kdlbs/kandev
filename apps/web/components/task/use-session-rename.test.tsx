@@ -44,7 +44,12 @@ function mount(initial: string) {
   render(
     <StateProvider
       initialState={{
-        taskSessions: { items: { [session.id]: session } },
+        taskSessions: {
+          items: {
+            [session.id]: session,
+            "session-sibling": { ...session, id: sessionId("session-sibling"), name: "Sibling" },
+          },
+        },
       }}
     >
       <ToastProvider>
@@ -63,6 +68,40 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.4
+describe("actual session rename composition boundary", () => {
+  it.each([
+    { key: "Enter", isComposing: true, keyCode: 13 },
+    { key: "Enter", isComposing: false, keyCode: 229 },
+    { key: "Escape", isComposing: true, keyCode: 27 },
+  ])("keeps $key ($isComposing, $keyCode) nonterminal through API and store", async (key) => {
+    const input = mount(ORIGINAL);
+    fireEvent.compositionStart(input);
+    fireEvent.change(input, { target: { value: "日本" } });
+    await act(async () => fireEvent.keyDown(input, key));
+    expect(request).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(currentStore.getState().taskSessions.items[SESSION_ID].name).toBe(ORIGINAL);
+
+    fireEvent.compositionEnd(input, { data: "日本語" });
+    fireEvent.change(input, { target: { value: "日本語" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", isComposing: false, keyCode: 13 });
+      fireEvent.keyDown(input, { key: "Enter" });
+      fireEvent.blur(input, { relatedTarget: document.body });
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith(RENAME_ACTION, {
+      session_id: SESSION_ID,
+      name: "日本語",
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(currentStore.getState().taskSessions.items[SESSION_ID].name).toBe("日本語");
+    expect(currentStore.getState().taskSessions.items["session-sibling"].name).toBe("Sibling");
+  });
 });
 
 // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.5 and .6

@@ -72,6 +72,7 @@ export function TabRenameInput({
         }
         onKeyDown={(e) => {
           e.stopPropagation();
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
           if (doneRef.current) return;
           if (e.key === "Enter") {
             e.preventDefault();
