@@ -11,11 +11,8 @@ owners:
 
 ## Purpose
 
-Paired design for
-[Kanban Task Reordering](../requirements/kanban-task-reordering.md). The
-requirement states what a user observes; this file states the mechanism behind
-it, the prior art the contract was drawn from, and the reasoning that would
-otherwise have to be rediscovered at build time.
+Design for [Kanban Task Reordering](../requirements/kanban-task-reordering.md),
+covering ordering, arrivals and client reconciliation.
 
 ## Requirement mapping
 
@@ -27,32 +24,15 @@ otherwise have to be rediscovered at build time.
 | `.8`, `.16`, `.17`, `.18`, `.19`, `.20`, `.25` | Reorder contract |
 | `.15`, `.28`, `.29`, `.30`, `.31` | Position allocation |
 | `.26`, `.27`, `.37` | Concurrency |
+| `.13` | Cross-step optimistic rollback |
 | `.32`, `.33`, `.34` | Band model, Position allocation |
 
 ## Prior art
 
-**Wiki (`OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`, QMD collection
-`wiki`).** Queried twice: `lex: kanban board ordering drag drop reorder backlog
-priority queue position` / `vec: how tasks should be ordered in a kanban column
-and how drag-and-drop reordering with a persisted position field works`, then
-`lex: backlog prioritization WIP limit queue next in line pull` / `vec: how to
-decide what work gets picked up next, backlog ordering, work-in-progress limits
-and pull-based queues`. Direct page reads were unavailable (the vault path is
-not readable from the task sandbox, so `grep` and `obsidian-wiki graph-query`
-both failed); QMD's own index served the retrieval. **The wiki returned nothing
-useful on board ordering or drag-and-drop reordering.** The nearest hits are
-product-method pages, not interaction or persistence contracts:
-`concepts/shape-up.md` (0.39) records the Basecamp position that backlogs,
-sprints and points should be replaced by a betting table, and
-`concepts/roadmap-from-failure-signal.md` (0.78) records Block's inversion where
-customer signal generates the backlog rather than prioritising within it.
-Neither takes a position this specification departs from: both argue about where
-a backlog comes from, not how an existing queue is ordered. No prior position is
+External prior-art discovery yielded no board-ordering guidance: the wiki
+index returned product-method notes, direct vault reads were unavailable, and
+the cross-vendor documentation tool was unavailable. No external position is
 overridden.
-
-**Cross-vendor (`saas-kb` / `search_fsm_docs`, `category: "ai_sdlc"`).**
-Unavailable: the tool is not exposed in this session and no tool-discovery
-mechanism is offered, so this leg did not run. Recorded rather than faked.
 
 **In-repo prior art, which is the load-bearing one.** Kandev has already solved
 this problem once, for the session message queue:
@@ -69,13 +49,6 @@ would make the two drags on one card start differently. And the band
 discriminator, per AC-TASKS-KANBAN-TASK-REORDERING-001.17: a message queue has
 one list per session, so `{session_id, ordered_ids}` needs no band field, while
 a step has two bands and the request must say which one it names.
-
-That document also carries `## API Surface`, `## Data Model` and
-`## Failure Modes` sections. Those are migrated legacy detail, not the current
-house style for a requirement, which is why the paired requirement here does not
-imitate them. The equivalents live below: the wire contract in
-`## Reorder contract`, the storage rules in `## Position allocation`, and the
-failure and race behavior in `## Concurrency`.
 
 ## Reorder contract
 
@@ -375,6 +348,34 @@ request is outstanding until that request resolves, then reconciles to the
 authoritative order. Without that rule the two requirements pull in opposite
 directions: applying the event wholesale flickers the in-flight band back to the
 order the user just changed, and ignoring it wholesale strands the sibling band.
+
+## Cross-step optimistic rollback
+
+`useCrossStepMove` in `hooks/domains/kanban/use-swimlane-kanban-dnd.ts` owns the
+stage-only optimistic write used by `SwimlaneKanbanContent` desktop drag and
+phone card-menu movement. Read the original task from the captured workflow
+snapshot; absent tasks and same-step targets do not submit. Do not compute or
+send an arrival position.
+
+After the optimistic write, open an existing bounded task-overview change
+journal (`beginTaskOverviewRead`). While the request is pending, accepted task
+events and other changed projections enter that journal. On failure, rollback
+only if the journal still belongs to the current scope, has no stage write or
+deletion for this task, and the task still occupies the captured workflow
+snapshot and target stage. A newer accepted stage projection owns its stage even
+when equal to the optimistic target. This uses accepted client evidence, without
+assuming timestamp or transport ordering. Other tasks and partial unrelated
+fields do not revoke ownership. The rollback changes only the stage in the
+current snapshot. Track membership until settlement so a removed and reinserted
+row cannot reclaim ownership. Close the journal and membership subscription in
+`finally`; missing journals (scope replacement, recovery or bounded overflow)
+fail closed. Keep the original
+request and error callback's task/session identity after rerenders.
+
+The existing phone focused-column and visible card-menu composition is unchanged.
+Regression tests exercise the real store, action, HTTP client and registered
+`task.updated` handler with a deferred fetch, plus desktop drag and phone taps
+through the shipped board against disposable managed browser fixtures.
 
 ## Ordering keys and the promotion comparators
 

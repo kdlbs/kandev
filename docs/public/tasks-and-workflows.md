@@ -118,6 +118,11 @@ Workflow position and runtime state differ. Moving a task changes its step. It d
 - An open task follows the conversation selected for the destination after it becomes available.
 - If routing is pending or fails, Kandev keeps your selected conversation. A later manual selection stays active.
 
+If a board move fails, Kandev shows an error. The card returns to its previous
+step unless a newer stage update has supplied its current placement, including
+the same destination. This applies to desktop dragging and the phone card's
+**Move to** menu.
+
 ## Move a task with one-time entry options
 
 Normal **Move here** and next-step actions use the destination step's saved defaults. Choose **Move with options** in the workflow stepper, Chat status bar, or passthrough toolbar when one move needs an exception. The options apply to that entry only.

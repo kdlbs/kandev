@@ -35,6 +35,48 @@ export type SwimlaneKanbanDndOptions = {
   onMoveError?: (error: MoveTaskError) => void;
 };
 
+type CrossStepMoveOwnership = {
+  workflowId: string;
+  taskId: string;
+  targetStepId: string;
+  originalStepId: string;
+  readId: string;
+  retained: boolean;
+  workspaceId?: string;
+};
+
+function restoreOwnedStep(
+  store: ReturnType<typeof useAppStoreApi>,
+  ownership: CrossStepMoveOwnership,
+) {
+  const { workflowId, taskId, targetStepId, originalStepId, readId, retained, workspaceId } =
+    ownership;
+  const current = store.getState();
+  const snapshot = current.kanbanMulti.snapshots[workflowId];
+  const task = snapshot?.tasks.find((item) => item.id === taskId);
+  const read = current.taskOverview.reads[readId];
+  const change = read?.changes[taskId];
+  // Accepted stage writes supersede this write even when their stage is equal.
+  // Missing journals and departed membership cannot regain rollback ownership.
+  if (
+    !retained ||
+    !snapshot ||
+    task?.workflowId !== workflowId ||
+    task.workflowStepId !== targetStepId ||
+    task.workspaceId !== workspaceId ||
+    read?.scope !== current.taskOverview.scope ||
+    change === null ||
+    (change !== undefined && Object.hasOwn(change, "workflowStepId"))
+  )
+    return;
+  current.setWorkflowSnapshot(workflowId, {
+    ...snapshot,
+    tasks: snapshot.tasks.map((item) =>
+      item.id === taskId ? { ...item, workflowStepId: originalStepId } : item,
+    ),
+  });
+}
+
 export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveTaskError) => void) {
   const store = useAppStoreApi();
   const { moveTaskById } = useTaskActions();
@@ -43,9 +85,10 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
     async (taskId: string, targetStepId: string, task: Task) => {
       const state = store.getState();
       const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
+      const originalTask = snapshot?.tasks.find((item) => item.id === taskId);
+      if (!snapshot || !originalTask || originalTask.workflowStepId === targetStepId) return;
 
-      const originalStepId = task.workflowStepId;
+      const originalStepId = originalTask.workflowStepId;
 
       // The server always computes a cross-step arrival's position itself
       // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: it sorts last in the
@@ -59,26 +102,32 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
         ),
       });
 
+      const ownership: CrossStepMoveOwnership = {
+        workflowId,
+        taskId,
+        targetStepId,
+        originalStepId,
+        readId: store.getState().beginTaskOverviewRead(),
+        retained: true,
+        workspaceId: originalTask.workspaceId,
+      };
+      const unsubscribe = store.subscribe((next) => {
+        if (!next.kanbanMulti.snapshots[workflowId]?.tasks.some((item) => item.id === taskId)) {
+          ownership.retained = false;
+        }
+      });
       try {
         await moveTaskById(taskId, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
         });
       } catch (error) {
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          // Revert only this task's optimistic step change, not the whole
-          // array: a concurrent update to another task while this move was
-          // in flight must survive the rollback.
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...currentSnapshot,
-            tasks: currentSnapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-              t.id === taskId ? { ...t, workflowStepId: originalStepId } : t,
-            ),
-          });
-        }
+        restoreOwnedStep(store, ownership);
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
+      } finally {
+        unsubscribe();
+        store.getState().finishTaskOverviewRead(ownership.readId);
       }
     },
     [workflowId, store, moveTaskById, onMoveError],
