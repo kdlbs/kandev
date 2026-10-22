@@ -162,6 +162,8 @@ func (s *Service) processOnTurnCompleteWithCause(
 		return false
 	}
 
+	ctx = s.withStepCompletionEntryGuard(ctx, taskID, session, currentStep, cause)
+
 	// Process side-effect actions first, then find the first transition action
 	transitionAction := s.processTurnCompleteActions(ctx, session, currentStep)
 
@@ -247,8 +249,8 @@ func (s *Service) shouldRunLegacyTurnCompletion(
 		return false
 	}
 	if cause != turnCompletionCauseUserCancellation && currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != currentStep.ID {
+		_, has := s.matchingStepCompletionSignal(ctx, task.ID, currentStep.ID, session)
+		if !has {
 			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
 				zap.String("step_id", currentStep.ID))
 			s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
@@ -533,8 +535,8 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.logger.Warn("failed to load session for step handoff carry",
 			zap.String("session_id", sessionID), zap.Error(signalErr))
 	} else if triggerOnEnter && signalSession != nil {
-		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID {
-			consumedSignal = &signal
+		if signal, has := s.matchingStepCompletionSignal(ctx, taskID, fromStep.ID, signalSession); has {
+			consumedSignal = signal
 		}
 		setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
 	}
@@ -609,7 +611,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
 	if queued {
 		if triggerOnEnter {
-			s.clearPendingStepSignalByID(ctx, sessionID)
+			if signalSession != nil {
+				s.clearConsumedStepSignal(ctx, signalSession)
+			}
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		} else {
 			s.reportWorkflowTurnStartPreparationError(
@@ -631,7 +635,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		// not left). The session struct isn't used after this point,
 		// so skip the extra GetTaskSession round-trip and write
 		// straight to the DB by session_id.
-		s.clearPendingStepSignalByID(ctx, sessionID)
+		if signalSession != nil {
+			s.clearConsumedStepSignal(ctx, signalSession)
+		}
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent. Match the engine path's
@@ -711,6 +717,10 @@ func (s *Service) updateTransitionTaskWithCapacityAndEffect(
 	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) (bool, error) {
+	if _, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, task.ID, fromStepID); guarded {
+		return guardedStepCompletionMove(ctx, s.repo, task, fromStepID, targetStep)
+	}
+
 	if targetStep == nil {
 		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}
@@ -7794,6 +7804,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		}
 		return false
 	}
+	ctx = s.withStepCompletionEntryGuard(ctx, taskID, session, currentStep, cause)
 	evaluationCtx := withWorkflowPolicy(ctx, task, currentStep.UpdatedAt)
 
 	state := s.buildMachineState(evaluationCtx, task, session)
@@ -8026,8 +8037,8 @@ func (s *Service) allowEngineSignalCompletion(
 	if cause == turnCompletionCauseUserCancellation || !currentStep.AutoAdvanceRequiresSignal {
 		return true
 	}
-	signal, has := models.LoadPendingStepSignal(session.Metadata)
-	if !has || signal.StepID != currentStep.ID {
+	signal, has := s.matchingStepCompletionSignal(ctx, taskID, currentStep.ID, session)
+	if !has {
 		s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8388,6 +8399,12 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		stepEntry = &stepentry.AllocationResult{}
 		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
 	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		if signal, has := s.matchingStepCompletionSignal(ctx, taskID, result.FromStepID, session); has {
+			consumedSignal = signal
+		}
+	}
 	applied, err := commit(applyCtx)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
@@ -8406,12 +8423,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
+
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -8432,7 +8444,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// cleared so the next step's gating starts from a clean slate. A guarded
 	// decision must leave the decider session untouched.
 	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		s.clearPendingStepSignal(ctx, session)
+		s.clearConsumedStepSignal(ctx, session)
 	}
 
 	if len(result.DataPatch) > 0 && sessionLifecycle {

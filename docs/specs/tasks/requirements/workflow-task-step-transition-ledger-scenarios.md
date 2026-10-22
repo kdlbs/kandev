@@ -35,8 +35,11 @@ The ledger contract is observable through turn starts, committed transitions, ro
   before the turn completes, **THEN** the turn's stamp is still `S`.
 - **GIVEN** a turn created before activation, **WHEN** it is read after
   activation, **THEN** it carries no stamp and is not backfilled.
-- **GIVEN** the task row cannot be read, **WHEN** a turn starts, **THEN** the
-  turn is created without a stamp and turn creation does not fail.
+- **GIVEN** the task row cannot be read, **WHEN** a telemetry-only turn starts,
+  **THEN** the turn is created without a stamp and turn creation does not fail.
+  Durable canonical output turns instead preserve uncommitted replay under
+  AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.5 in the
+  [completion requirements](workflow-explicit-completion-signal.md).
 - **GIVEN** a synthetic completed turn created for a lifecycle message, **WHEN**
   it is written while its task sits in step `S`, **THEN** it carries the same
   stamp as a normal turn.

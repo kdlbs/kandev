@@ -489,8 +489,8 @@ func (s *workflowStore) carryStepHandoffForTransition(
 		return
 	}
 	var consumedSignal *models.PendingStepCompletionSignal
-	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
-		consumedSignal = &signal
+	if signal, has := matchingWorkflowSignal(ctx, s.repo, task.ID, fromStepID, session); has {
+		consumedSignal = signal
 	}
 	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
 }
@@ -672,6 +672,10 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 }
 
 func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) (bool, error) {
+	if _, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, task.ID, fromStepID); guarded {
+		return guardedStepCompletionMove(ctx, s.repo, task, fromStepID, targetStep)
+	}
+
 	if targetStep == nil {
 		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}

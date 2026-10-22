@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -50,6 +52,26 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
 		return nil, err
 	}
+	// The attempt releases session/stream locks before retrying task-row contention.
+	delay := 10 * time.Millisecond
+	for {
+		result, err := r.projectCanonicalDeliveryAttempt(ctx, streamID, events, effects)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			return result, err
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		delay = min(delay*2, 250*time.Millisecond)
+	}
+}
+
+func (r *Repository) projectCanonicalDeliveryAttempt(ctx context.Context, streamID string, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -440,15 +462,43 @@ func (r *Repository) canonicalDeliveryTurnTx(
 		return "", fmt.Errorf("load canonical delivery turn: %w", err)
 	}
 	turnID = fmt.Sprintf("agent-delivery-turn-%s-%d", event.StreamID, event.Sequence)
+	metadata, err := r.canonicalDeliveryTurnMetadataTx(ctx, tx, taskID)
+	if err != nil {
+		return "", err
+	}
 	now := r.nowUTC()
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_turns
 		(id, task_session_id, task_id, started_at, completed_at, execution_profile_id,
 		route_generation, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULL, '', 0, '{}', ?, ?)
-		ON CONFLICT (id) DO NOTHING`), turnID, sessionID, taskID, now, now, now)
+		VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`), turnID, sessionID, taskID, now, metadata, now, now)
 	if err != nil {
 		return "", fmt.Errorf("create canonical delivery turn: %w", err)
 	}
 	return turnID, nil
+}
+
+func (r *Repository) canonicalDeliveryTurnMetadataTx(ctx context.Context, tx *sqlx.Tx, taskID string) (string, error) {
+	_, stepID, found, err := r.readTaskStepInTxMode(ctx, tx, taskID, true)
+	if err != nil {
+		return "", fmt.Errorf("read canonical turn workflow step: %w", err)
+	}
+	if !found {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	turn := &models.Turn{TaskID: taskID}
+	if stepID != "" {
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			return "", fmt.Errorf("stamp canonical turn workflow entry: %w", err)
+		}
+	}
+	if turn.Metadata == nil {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(turn.Metadata)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical turn workflow stamp: %w", err)
+	}
+	return string(raw), nil
 }
