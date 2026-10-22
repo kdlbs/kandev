@@ -2,20 +2,11 @@ package process
 
 import (
 	"errors"
-	"os"
 	"sort"
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 )
-
-func installedMaterializeGitHelperPath() string {
-	if path := os.Getenv(githubauth.CredentialHelperPathEnv); path != "" {
-		return path
-	}
-	path, _ := os.Executable()
-	return path
-}
 
 // MaterializationGitEnvironment returns one detached current-instance snapshot.
 // Only installed tooling may fall back to startup state; authorization may not.

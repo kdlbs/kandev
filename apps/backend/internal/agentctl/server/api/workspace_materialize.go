@@ -252,31 +252,7 @@ func validateRemovalRepositoryLocator(locator string) error {
 	return validateRepositoryLocator(locator)
 }
 
-func materializeRepository(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, bindings ...*models.RemoteContribution) (bool, error) {
-	var binding *models.RemoteContribution
-	if len(bindings) > 0 {
-		binding = bindings[0]
-	}
-	return materializeRepositoryInternal(ctx, locator, destination, baseBranch, checkoutBranch, binding, nil)
-}
-
-func materializeRepositoryInternal(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination) (bool, error) {
-	return materializeRepositoryWithOptions(ctx, locator, destination, baseBranch, checkoutBranch, binding, contributionDestination, nil)
-}
-
-func materializeRepositoryWithOptions(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, binding *models.RemoteContribution, contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions) (bool, error) {
-	return materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, 0, nil, binding, contributionDestination, options)
-}
-
 type materializeGitRunner struct{ env []string }
-
-func materializeRepositoryWithQualifiedPRBase(
-	ctx context.Context, locator, destination, baseBranch, checkoutBranch string,
-	prNumber int, qualifiedPRBase *models.PRBase, binding *models.RemoteContribution,
-	contributionDestination *models.ContributionDestination, options *models.RepositoryCheckoutOptions,
-) (bool, error) {
-	return (materializeGitRunner{}).materializeRepositoryWithQualifiedPRBase(ctx, locator, destination, baseBranch, checkoutBranch, prNumber, qualifiedPRBase, binding, contributionDestination, options)
-}
 
 func (runner materializeGitRunner) materializeRepositoryWithQualifiedPRBase(
 	ctx context.Context, locator, destination, baseBranch, checkoutBranch string,

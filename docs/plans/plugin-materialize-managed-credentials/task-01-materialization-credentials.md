@@ -59,7 +59,8 @@ Run from the repository root. Install web dependencies once before Playwright.
 ```bash
 (cd apps/backend && go test ./internal/agentctl/server/api -run '^TestWorkspaceMaterializeRepository_ManagedCredentials$' -count=1)
 (cd apps/backend && go test ./internal/agentctl/server/api -count=1)
-(cd apps/backend && go test ./internal/agentctl/server/process -run 'TestManager.*(GitEnvironment|ManagedGit|Configure)|TestWorkspaceGitEnvironment' -count=1)
+(cd apps/backend && go test ./internal/agentctl/server/process -run 'TestManager.*(GitEnvironment|ManagedGit|Configure)|TestWorkspaceGitEnvironment|TestAmbientEnvCoverageIncludesEveryPackageEnvRead' -count=1)
+(cd apps/backend && go test ./internal/agentctl/server/config ./internal/agentctl/server/instance -count=1)
 (cd apps/backend && go test ./cmd/plugin-fixture -run '^TestPluginExecutorFixture' -count=1)
 pnpm --dir apps install --frozen-lockfile
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/plugins/remote-executor-plugin.spec.ts
@@ -79,6 +80,11 @@ Do not run overlapping E2E suites or bypass the runner's resource guard.
 
 - `apps/backend/internal/agentctl/server/api/workspace_materialize.go`
 - `apps/backend/internal/agentctl/server/api/workspace_materialize_credentials_test.go` (new)
+- `apps/backend/internal/agentctl/server/api/workspace_materialize_test.go`
+- `apps/backend/internal/agentctl/server/config/config.go`
+- `apps/backend/internal/agentctl/server/config/instance_git_env.go`
+- `apps/backend/internal/agentctl/server/instance/manager.go`
+- `apps/backend/internal/agentctl/server/instance/manager_git_authorization_test.go`
 - `apps/backend/internal/agentctl/server/process/manager.go`
 - `apps/backend/internal/agentctl/server/process/workspace_git_env_test.go`
 - `docs/public/plugins-authoring.md`
@@ -135,3 +141,39 @@ checkout-runner config, instance isolation, denied-access cleanup, no persisted
 secrets, public/no-lease operation, and sanitized malformed-environment failure.
 Ordinary checkout reuse does not fetch; authenticated fetch is exercised explicitly
 through the same operation-scoped runner. No live cloud provider is claimed.
+
+
+## PR remediation results
+
+The first PR head exposed one source-audit failure in the process package:
+`TestAmbientEnvCoverageIncludesEveryPackageEnvRead`. Both Linux backend jobs
+and the Windows process shard reported that same guard; the fourth failed check
+was their backend aggregate. All leaf logs/artifacts were inspected.
+Startup helper discovery now belongs to `server/config`, alongside the existing
+runtime environment collectors, and the process package guard passes unchanged.
+
+Review also identified that `CollectAgentEnvWithError` copied startup managed
+authorization into a new instance before snapshotting. A new instance-admission
+regression reproduced that inheritance. Instance creation now uses
+`CollectInstanceAgentEnvWithError`, which strips inherited managed authorization,
+reissue/scope metadata, and generated helpers before merging the request. It
+preserves installed helper tooling and unrelated Git config. Standalone default
+collection retains its prior behavior. The regression verifies executor and
+managed requests, including a complete request-owned indexed credential block.
+Failure assertions inspect individual keys without printing the environment.
+
+The convenience wrappers with nil environments moved into the existing test
+file; production materialization always uses an explicitly prepared runner.
+Added unavailable-helper error-path coverage without a production injection hook.
+
+Final remediation checks:
+
+- `go test ./internal/agentctl/server/config ./internal/agentctl/server/instance -count=1`: passed (config 0.098s, instance 2.775s).
+- Strengthened admission regression rerun: `go test ./internal/agentctl/server/instance -run '^TestInstanceAdmissionUsesOnlyRequestManagedAuthorization$' -count=1`: passed (0.106s).
+- `go test ./internal/agentctl/server/api -count=1`: passed (54.613s).
+- `go test ./internal/agentctl/server/process -run 'TestManager.*(GitEnvironment|ManagedGit|Configure)|TestWorkspaceGitEnvironment|TestAmbientEnvCoverageIncludesEveryPackageEnvRead' -count=1`: passed (1.757s).
+- Managed E2E command above: passed again after fresh builds, 2 Chromium tests (10.3s).
+- `bash scripts/lint-go-changed apps/backend/internal/agentctl/server/api/workspace_materialize.go apps/backend/internal/agentctl/server/api/workspace_materialize_test.go apps/backend/internal/agentctl/server/api/workspace_materialize_credentials_test.go apps/backend/internal/agentctl/server/config/config.go apps/backend/internal/agentctl/server/config/instance_git_env.go apps/backend/internal/agentctl/server/instance/manager.go apps/backend/internal/agentctl/server/instance/manager_git_authorization_test.go apps/backend/internal/agentctl/server/process/manager.go apps/backend/internal/agentctl/server/process/materialize_git_env.go apps/backend/internal/agentctl/server/process/materialize_git_env_test.go`: passed, 0 issues.
+- Catalog, spec lint, public-doc validation, and whitespace checks passed after the remediation.
+
+CI and review are re-evaluated for the pushed remediation head before merge.

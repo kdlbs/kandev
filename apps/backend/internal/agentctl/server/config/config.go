@@ -902,6 +902,10 @@ func CollectAgentEnvWithoutAdditional() []string {
 // CollectAgentEnvWithError collects environment variables for an agent instance.
 // It rejects malformed indexed Git configuration rather than changing Git's effective config.
 func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
+	return collectAgentEnvWithError(additional, false)
+}
+
+func collectAgentEnvWithError(additional map[string]string, instance bool) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -913,6 +917,14 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
 				envMap[key] = e[idx+1:]
 			}
+		}
+	}
+
+	if instance {
+		var err error
+		envMap, err = withoutInheritedManagedGitAuthorization(envMap)
+		if err != nil {
+			return nil, err
 		}
 	}
 

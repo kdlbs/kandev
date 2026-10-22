@@ -444,7 +444,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		cfg:                        cfg,
 		logger:                     log.WithFields(zap.String("component", "process-manager")),
 		managedGitTools:            installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
-		materializeGitHelperPath:   installedMaterializeGitHelperPath(),
+		materializeGitHelperPath:   config.InstalledGitCredentialHelperPath(),
 		updatesCh:                  make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:         make(map[string]*PendingPermission),
 		lifetimeCtx:                lifetimeCtx,

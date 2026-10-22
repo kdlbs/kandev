@@ -73,3 +73,11 @@ func TestManagerMaterializationGitEnvironmentRejectsMalformedConfig(t *testing.T
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "secret-sentinel")
 }
+
+func TestManagerMaterializationGitEnvironmentHelperUnavailable(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir(), AgentEnv: []string{githubauth.CredentialBrokerURLEnv + "=https://broker.example", githubauth.CredentialLeaseEnv + "=lease"}}, newTestLogger(t))
+	t.Cleanup(func() { require.NoError(t, mgr.StopForTeardown(context.Background())) })
+	mgr.materializeGitHelperPath = ""
+	_, err := mgr.MaterializationGitEnvironment()
+	require.ErrorContains(t, err, "unavailable")
+}

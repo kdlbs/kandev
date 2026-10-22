@@ -56,7 +56,9 @@ Use a detached current-instance environment snapshot and an explicit per-operati
 Git runner, following the paired design. Avoid mutable global test hooks and
 process environment writes. Preserve helper path captured at manager construction;
 use `gitconfigenv` for indexed config and the existing subproc seam for execution.
-An existing ADR already assigns core ownership of materialization; this repair
+Instance admission strips inherited managed authorization before merging the current
+request while preserving installed tools and unrelated config. An existing ADR
+already assigns core ownership of materialization; this repair
 restores that boundary and needs no new architecture decision.
 
 Compatibility coverage:

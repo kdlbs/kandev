@@ -244,8 +244,10 @@ Materialization implements AC-EXECUTORS-PLUGIN-002.5 through
 AC-EXECUTORS-PLUGIN-002.7. Providers retain the existing bootstrap contract;
 Git broker issuance, scope checks, and reissue remain authoritative.
 
-The instance receives its managed broker contract in `CreateRequest.Env`, which
-becomes `InstanceConfig.AgentEnv`. Before invoking materialization, agentctl takes
+Instance admission removes inherited managed broker authorization and generated
+credential config before merging `CreateRequest.Env`. Runtime helper tools and
+unrelated Git configuration remain available. Standalone default collection keeps
+its existing behavior. The request becomes `InstanceConfig.AgentEnv`. Agentctl takes
 a detached snapshot of the current instance Git environment under the process
 manager's existing lock. One request uses one snapshot throughout clone, fetch,
 PR-base preparation, sparse checkout, and checkout. An explicit operation-scoped
@@ -257,19 +259,14 @@ of managed authorization. Preserve process-installed helper tooling when absent
 from that snapshot, including `KANDEV_GITHUB_CREDENTIAL_HELPER_PATH`. Capture
 installed tooling during manager construction, as existing managed Git activation
 does; do not re-read mutable ambient credentials per command. Do not fall back to
-startup broker leases when the instance lacks current authorization. Any additional
-base environment must have stale managed credentials and their generated indexed
-Git entries removed before composition. Preserve non-managed Git configuration,
-and use `internal/gitconfigenv` for indexed block composition and validation.
-Do not import lifecycle's private `managedGitCredentialBrokerEnv` into agentctl.
+startup broker leases when the instance lacks current authorization. Use `internal/gitconfigenv` to preserve and validate unrelated indexed config.
 
 Both runners retain `subproc.NewGitCommand`, classified `GitLifecycle` capacity,
 existing verb-specific timeouts, cancellation, stdin handling, and final
-noninteractive Git environment enforcement. Request environment preparation
-failures use the existing sanitized error path before invoking Git. Repository
-validation, cleanup ownership checks, origin scrubbing, and error response shapes
-remain unchanged. Secrets remain transient command environment values and are
-never serialized into the repository or a provider checkpoint.
+noninteractive Git environment enforcement. Preparation failures retain sanitized
+errors. Repository validation, cleanup, origin scrubbing, and response shapes
+remain unchanged. Secrets remain transient command environment values, never
+serialized into the repository or a provider checkpoint.
 
 No workspace credential-mode default changes: `executor` uses credentials already
 available on the remote executor; `managed` permits host-issued scoped credentials.

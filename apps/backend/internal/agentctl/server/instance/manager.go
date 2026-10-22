@@ -240,7 +240,7 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
 	}
 
-	agentEnv, err := config.CollectAgentEnvWithError(req.Env)
+	agentEnv, err := config.CollectInstanceAgentEnvWithError(req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("prepare agent environment: %w", err)
 	}
