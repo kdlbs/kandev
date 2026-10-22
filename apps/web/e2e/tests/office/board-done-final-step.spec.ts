@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 /**
  * A user's Done on the Office status board, for a task that is not on its
@@ -58,7 +59,11 @@ test.describe("Office board Done before the final workflow step", () => {
     expect((await persistedTask(apiClient, task.id)).stepId).not.toBe(final.id);
 
     await openBoard(testPage);
+    const changed = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/tasks/${task.id}$`));
     await dragCardToColumn(testPage, task.id, "done");
+    const response = await changed;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ status: "done" });
 
     const doneColumn = testPage.getByTestId("board-column-done");
     await expect(doneColumn.getByTestId(`board-card-${task.id}`)).toBeVisible();
@@ -90,7 +95,11 @@ test.describe("Office board Done before the final workflow step", () => {
     const before = await persistedTask(apiClient, task.id);
 
     await openBoard(testPage);
+    const changed = waitForHttp(testPage, "PATCH", new RegExp(`/api/v1/office/tasks/${task.id}$`));
     await dragCardToColumn(testPage, task.id, "done");
+    const response = await changed;
+    expect(response.status()).toBe(409);
+    expect(response.request().postDataJSON()).toEqual({ status: "done" });
 
     await expect(
       testPage.getByText(/awaiting approval from Board Done Approver/i).first(),

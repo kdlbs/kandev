@@ -811,8 +811,8 @@ func (r *Repository) listWorkflowScopedSeats(ctx context.Context, taskID, roleFi
 }
 
 // ListTaskParticipantsAtStep returns the task's seats as they would read with
-// the task standing at stepID: per-task rows across the task's workflow plus
-// the template rows of stepID. An empty stepID means the current step.
+// the task standing at stepID: per-task rows across the destination workflow
+// plus the template rows of stepID. An empty stepID means the current step.
 func (r *Repository) ListTaskParticipantsAtStep(ctx context.Context, taskID, stepID, role string) ([]Participant, error) {
 	return r.listWorkflowScopedSeatsAt(ctx, taskID, stepID, role)
 }
@@ -822,8 +822,13 @@ func (r *Repository) listWorkflowScopedSeatsAt(ctx context.Context, taskID, atSt
 	if err != nil {
 		return nil, err
 	}
-	if atStepID != "" && stepID != "" {
+	if atStepID != "" {
 		stepID = atStepID
+		if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+			`SELECT workflow_id FROM workflow_steps WHERE id = ?`,
+		), stepID).Scan(&workflowID); err != nil {
+			return nil, err
+		}
 	}
 	if stepID == "" {
 		return []Participant{}, nil

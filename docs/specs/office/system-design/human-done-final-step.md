@@ -69,8 +69,9 @@ tests on the current path.
 `backendapp` wires the guard with an adapter over
 `DashboardService.PendingApproversForCompletion`, which reads approver seats
 as if the task stood at the destination step
-(`Repository.ListTaskParticipantsAtStep`: per-task seats across the workflow
-plus the destination step's template seats) and resolves names. "Pending"
+(`Repository.ListTaskParticipantsAtStep`: per-task seats across the destination workflow
+plus the destination step's template seats, even when the task has no current
+step) and resolves names. "Pending"
 keeps one definition, approver seats without a current approval, and a
 template approver on the destination step counts even though the task has
 not reached it yet.
