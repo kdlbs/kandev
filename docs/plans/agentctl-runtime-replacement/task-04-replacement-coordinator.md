@@ -118,3 +118,50 @@ Validation passed:
 - `git diff --check`
 
 The SQLite identity migration checks and cross-platform compile checks recorded under Task 03 remain applicable. PostgreSQL conformance and native Windows/macOS containment execution remain open release gates; cross-compilation is not native evidence.
+
+## Renewal lifetime correction (PR #4691)
+
+The bounded replacement attempt ends immediately after provisioning. Its
+context must not own the published runtime's renewal or adopted-server
+monitor. This restores the existing lifetime and cleanup responsibilities for
+AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-001.4 and
+AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.6. Ownership cadence remains governed
+by REQ-EXECUTORS-CONTROL-OWNERSHIP-003 in the
+[executor ownership contract](../../specs/executors/requirements/standalone-control-server-ownership.md).
+
+Owned paths for this correction:
+
+- `apps/backend/internal/backendapp/agentctl.go` and `main.go`: separate bounded
+  provisioning from backend-lifetime renewal and monitoring.
+- `apps/backend/internal/backendapp/agentctl_lifetime_test.go`: provider-level
+  fresh/adopted HTTP claims, adopted health probes and explicit cleanup.
+- `apps/backend/internal/backendapp/agentctl_survival_test.go` and
+  `agentctl_survival_gate_test.go`: adoption renewal and existing survival gate.
+
+Acceptance: cancelling a successful attempt preserves renewal and monitoring;
+explicit binding cleanup still stops both. Startup, authentication, epoch
+fences, survival defaults, lease durations and retry budgets retain their
+existing behavior. No UI or public configuration changes.
+
+Focused verification (backend commands run from `apps/backend`, with
+`GOMAXPROCS=2 GOMEMLIMIT=3GiB GOFLAGS='-p=1 -trimpath'`):
+
+```bash
+go test -trimpath -p=1 ./internal/backendapp/...
+go test -trimpath -p=1 -race ./internal/backendapp -run 'Agentctl|OwnershipRenewal' -count=1 -v
+go test -trimpath -p=1 -race ./internal/agent/runtime/agentctl -run 'RuntimeReplacement|RuntimeRecover|RuntimeBinding|RuntimeOwner|RuntimeCandidate|RuntimeExit|RetiringRuntime|AdoptedRuntime|ClaimOwnership' -count=1 -v
+go test -trimpath -p=1 -race ./internal/agent/runtime/lifecycle -run '^Test(OwnershipRenewer|AttemptAdoptControlServer|RecordFreshControlServer)' -count=1 -v
+```
+
+Run changed-Go lint from the repository root, followed by the documentation
+catalog, all-spec lint and the local documentation-coverage evaluator.
+Selected-head and current-main merged backendapp tests passed. Three
+one-call reversions independently failed the existing provider assertions for
+adopted renewal, adopted monitoring and fresh renewal; original bytes were
+restored before green runs. Focused provider, runtime-owner/coordinator,
+authenticated claim, adoption and renewer race checks passed. Changed-Go lint
+also passed on both trees. Exact commands, terminal process results, resource
+receipts and final documentation-check results are retained in the review
+packet. No supplemental production or permanent test changes were needed. Native Windows/macOS, live providers,
+PostgreSQL, full backend and browser suites are outside this correction's
+local validation; earlier task results are historical.
