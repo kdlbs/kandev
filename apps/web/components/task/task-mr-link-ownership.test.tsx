@@ -375,3 +375,55 @@ it("duplicate activation before render admits only one current request", async (
   await request.settle();
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+function HydrationFlow() {
+  store = useAppStoreApi();
+  const [hydrated, setHydrated] = useState(false);
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button onClick={() => setHydrated(true)}>Hydrate repository</button>
+      <TaskMRLinkDialog
+        open={open}
+        onOpenChange={setOpen}
+        taskId="task-a"
+        workspaceId={WORKSPACE_A}
+        repositories={hydrated ? repositories : []}
+        taskRepositories={hydrated ? links : []}
+      />
+    </>
+  );
+}
+
+it.each([false, true])(
+  "passive repository hydration retains pending ownership (failure=%s)",
+  async (failed) => {
+    const request = transport();
+    renderFlow(<HydrationFlow />);
+    draft(` ${ORIGINAL} `);
+    save();
+    await waitFor(() => expect(request.requests).toHaveLength(1));
+    expect(request.requests[0]).toMatchObject({
+      workspace: WORKSPACE_A,
+      body: { task_id: "task-a", mr_url: ORIGINAL },
+    });
+    expect(request.requests[0].body).not.toHaveProperty("repository_id");
+    press("Hydrate repository");
+    expect(input().value).toBe(` ${ORIGINAL} `);
+    expect(screen.getByRole("combobox").textContent).toBe(ORIGINAL_REPOSITORY);
+    expect(isBusy().hasAttribute("disabled")).toBe(true);
+    fireEvent.keyDown(input(), { key: "Enter", code: "Enter" });
+    expect(request.requests).toHaveLength(1);
+    await request.settle(0, failed);
+    if (failed) {
+      assertDraft(` ${ORIGINAL} `);
+      expect(screen.getByText(FAILED)).toBeTruthy();
+      save();
+      await waitFor(() => expect(request.requests).toHaveLength(2));
+      expect(request.requests[1].body.repository_id).toBe("repo-a");
+      await request.settle(1);
+    }
+    expect(originalAssociation()).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);

@@ -358,13 +358,15 @@ Tasks system owns form completion authority; the
 continues to own provider permissions, URL validation and association semantics.
 
 Key an inner form by task and workspace identifiers. Give each committed open
-form and selected repository a fresh local admission identity in a layout
-effect. Closing invalidates it synchronously; layout cleanup retires it on
+form and explicit repository selection a fresh local admission identity in a
+layout effect. Closing invalidates it synchronously; layout cleanup retires it on
 unmount or replacement. StrictMode effect replay must create a new identity;
 uncommitted concurrent renders must not mutate the current owner. Object-only
 metadata refreshes keep the same form. Repository changes retire completion and
 busy authority without rewriting its raw URL or moving focus. Keep default
-repository hydration and closed-form reset behavior.
+repository hydration and closed-form reset behavior. Passive default hydration
+fills the selector without retiring a pending admission or changing its captured
+payload; only an explicit selection change advances repository ownership.
 
 Submit captures the identity, trimmed URL, repository, workspace and task. Its
 synchronous pending bit prevents duplicate admissions before React renders.

@@ -165,3 +165,26 @@ real disposable backend with mock GitLab. No physical OS/device, real-provider,
 operator-incident, server-data-loss or zero-flake claim. The parent must review
 the full diff and independently rerun focused checks, then issue a separate
 same-session delivery grant. No push or PR is authorized at this checkpoint.
+
+## Review remediation: passive repository hydration
+
+The substantive exact-head CodeRabbit review found that passive default
+hydration could retire a pending admission and enable another submission. Two
+actual retained-form/provider/API/store regressions failed at the pending-state
+assertion before correction. A local selection epoch now advances only on an
+explicit repository selection, keeping passive hydration owned by its admitted
+request. The original trimmed payload and absent repository remain captured;
+current success closes and failure retries with the hydrated default.
+
+The focused suite now contains 25 cases (21 actual-flow ownership cases and
+4 existing hydration/refresh controls). Initial 23-case evidence above is
+historical. Final remediation verification and exact-head CI/review evidence
+are recorded in the delivery receipts outside the checkout. No provider/API,
+public copy or navigation change; no public docs update is needed.
+
+Remediation local results: 25 focused tests passed; strict changed-file ESLint,
+full web typecheck (Node 24, 8 GiB), rich-output catalog, documentation catalog
+and full specification lint passed. Fresh rebuilt desktop and phone each passed
+three scenarios with retries disabled (the two registered tests plus one
+capture scenario). Normal hooks and post-commit recaptures follow in the
+same-session delivery receipt; no tests or workflows were suppressed.

@@ -144,6 +144,7 @@ function useMRLinkForm(
   }, [defaultRepositoryID, open]);
 
   const owner = useRef<{ submitting: boolean } | null>(null);
+  const [selectionEpoch, setSelectionEpoch] = useState(0);
 
   useLayoutEffect(() => {
     owner.current = open ? { submitting: false } : null;
@@ -151,14 +152,17 @@ function useMRLinkForm(
     return () => {
       owner.current = null;
     };
-  }, [open, repositoryID]);
+  }, [open, selectionEpoch]);
 
   const changeOpen = (nextOpen: boolean) => {
     if (!nextOpen) owner.current = null;
     onOpenChange(nextOpen);
   };
   const changeRepository = (value: string) => {
-    if (value !== repositoryID) owner.current = null;
+    if (value !== repositoryID) {
+      owner.current = null;
+      setSelectionEpoch((epoch) => epoch + 1);
+    }
     setRepositoryID(value);
   };
 
