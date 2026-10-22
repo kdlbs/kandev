@@ -33,7 +33,9 @@ system_design:
 
 Connect verified missing-dependency evidence to the existing lifecycle startup
 owner. Recover a new task or retained conversation once without replay,
-version changes, or disturbance to healthy siblings.
+changes to the selected ACP bridge, saved runtime selection, or package
+identity, or disturbance to healthy siblings. Transitive `@openai/codex`
+resolution may differ; report the actual resulting runtime observation.
 
 ## In scope
 

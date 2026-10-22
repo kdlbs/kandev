@@ -44,9 +44,11 @@ outlive every subprocess that can use them. Backend detach/adoption is not a
 cleanup event. Release only after owned descendants have stopped.
 
 This qualifies the earlier decision's explicit-maintenance-only consequence
-for this verified condition, not its shared-tree safety rule. It also permits
-this narrow recovery during profile discovery without granting general
-package-install or runtime-selection authority to profile refresh.
+and strict ETARGET-only host capability-probe eligibility for this verified
+condition, not its shared-tree safety rule. Other host probe failures remain
+ETARGET-only. It also permits this narrow recovery during profile discovery
+without granting general package-install or runtime-selection authority to
+profile refresh.
 The linked draft package must be implemented before these additions ship.
 
 ## Consequences

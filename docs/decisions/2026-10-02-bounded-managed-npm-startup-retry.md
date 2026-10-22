@@ -47,6 +47,8 @@ Older agentctl versions retain strict ETARGET recovery; missing structured evide
 The accepted [isolated dependency recovery extension](2026-10-19-isolated-managed-dependency-recovery.md)
 qualifies the explicit-maintenance consequence for verified missing bundled
 Codex platform dependencies once its draft implementation package is delivered.
+It also adds that verified condition to host capability-probe eligibility;
+other probe failures remain strict ETARGET-only.
 It does not authorize mutation or deletion of a shared runtime tree.
 
 ## Alternatives considered

@@ -250,8 +250,19 @@ JS
 
 Product commands are defined in the work orders and have not run: implementation
 has not started. Public docs remain unchanged until the product behavior ships.
-All design artifacts are unstaged and uncommitted. No subagents were authorized
-or launched.
+The design package is committed; implementation work orders remain pending.
+No subagents were authorized or launched.
+
+PR review clarifications on 2026-10-22 explicitly require the live-bridge
+missing-dependency browser case, distinguish selected bridge identity from
+transitive provider resolution, qualify host probe eligibility in both ADRs,
+and state the work-order diff-check execution point. These are planning-only
+clarifications, not completed implementation or product verification.
+After the clarifications, `python3 scripts/list-docs.py validate`,
+`python3 scripts/lint-spec-files.py --all`, and
+`python3 scripts/lint-spec-files.test.py` passed (36 tests); `git diff --check`
+passed before staging. Exact-head CI/review and merge validation remain external
+delivery gates, not completed work-order results.
 
 ## Risks
 

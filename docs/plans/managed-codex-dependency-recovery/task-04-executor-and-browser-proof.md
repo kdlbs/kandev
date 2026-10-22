@@ -58,6 +58,11 @@ guidance only after the behavior is implemented.
 3. Public docs explain the bounded automatic path without promising failure
    prevention, global cache deletion, or version fallback. All package
    commands/results and spec lifecycle states match actual delivery.
+4. Desktop and phone tests exercise the missing platform-package initialize
+   diagnostic while the bridge remains alive after its provider child exits.
+   Independently verified package absence triggers exactly one private
+   preparation and one retry, recovering in the original task/session.
+   Existing transient npm-failure coverage alone does not satisfy this case.
 
 ## Verification
 
@@ -66,6 +71,11 @@ assets and backend. Restore dependencies only if a chosen command reports they
 are missing, then run `pnpm install --frozen-lockfile` from `apps/` once.
 Docker/SSH cases require a real Docker daemon. If unavailable, record the
 explicit blocker; do not mark this work order done.
+
+Run the sequence below before staging or committing; `git diff --check`
+therefore checks the unstaged implementation changes. After committing, also
+run `git diff --check <delivery-base> HEAD` with the actual delivery base
+revision to cover the complete committed delta.
 
 ```bash
 (cd apps/web && pnpm e2e:run --project chromium tests/session/managed-runtime-startup-retry.spec.ts tests/settings/host-utility-managed-runtime-recovery.spec.ts tests/settings/profile-capability-discovery.spec.ts)
