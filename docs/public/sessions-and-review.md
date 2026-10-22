@@ -458,6 +458,11 @@ When the repository defines a dev script, the desktop header shows a dev server 
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
+Large generic tool arguments or results can be shortened in Kandev history.
+Their JSON includes `truncated: true` and a bounded `preview`; the agent still
+receives its original tool result and continues running. Kandev does not retain
+the omitted data for download.
+
 For foreground ACP commands, consecutive output-only updates are grouped into
 periodic snapshots, normally no more frequently than once every 250 ms while
 delivery is available. Ordered boundaries can flush sooner.

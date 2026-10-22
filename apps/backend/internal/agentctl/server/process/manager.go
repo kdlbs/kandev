@@ -2545,6 +2545,7 @@ func (m *Manager) closeDeliveryEventWriter() {
 // The normalized event is kept as an opaque payload here; backend projection
 // remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	update = streams.BoundGenericToolEvent(update)
 	m.deliveryJournalMu.Lock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal
