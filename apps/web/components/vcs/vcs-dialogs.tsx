@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useCallback, useMemo, type ReactNode } from "react";
 import { IconGitCommit, IconLoader2, IconCheck } from "@tabler/icons-react";
 import {
   Dialog,
@@ -36,6 +36,8 @@ import {
   type CreateChangeRequestInput,
 } from "./use-create-change-request-handler";
 import { useCommitDialogState } from "./use-commit-dialog-state";
+import { usePRDialogState } from "./use-pr-dialog-state";
+import { useAppStore } from "@/components/state-provider";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -239,56 +241,6 @@ function CommitDialog({
   );
 }
 
-type UsePRDialogReturn = {
-  open: boolean;
-  setOpen: (v: boolean) => void;
-  title: string;
-  setTitle: (v: string) => void;
-  body: string;
-  setBody: (v: string) => void;
-  draft: boolean;
-  setDraft: (v: boolean) => void;
-  branchPushed: boolean;
-  setBranchPushed: (v: boolean) => void;
-  /** Undefined means the default scope; "" is an explicit workspace-root scope. */
-  repo: string | undefined;
-  setRepo: (v: string | undefined) => void;
-  openDialog: (taskTitle?: string, repo?: string) => void;
-};
-
-function usePRDialogState(): UsePRDialogReturn {
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [draft, setDraft] = useState(true);
-  const [branchPushed, setBranchPushed] = useState(false);
-  const [repo, setRepo] = useState<string | undefined>(undefined);
-  const openDialog = useCallback((taskTitle?: string, nextRepo?: string) => {
-    setTitle(taskTitle || "");
-    setBody("");
-    setBranchPushed(false);
-    // Defensive: callers binding `openDialog` directly to onClick can leak the
-    // React MouseEvent into nextRepo. Only accept actual repo strings.
-    setRepo(typeof nextRepo === "string" ? nextRepo : undefined);
-    setOpen(true);
-  }, []);
-  return {
-    open,
-    setOpen,
-    title,
-    setTitle,
-    body,
-    setBody,
-    draft,
-    setDraft,
-    branchPushed,
-    setBranchPushed,
-    repo,
-    setRepo,
-    openDialog,
-  };
-}
-
 /**
  * Computes the file summary for the commit dialog: an explicit repo scope
  * uses that repo's files; no scope in multi-repo sums across every repo
@@ -385,6 +337,22 @@ function useVcsDialogsState(
     isLoading: isGitLoading,
   } = useSessionGit(sessionId);
   const registeredCreateTarget = useChangeRequestProviderTarget(sessionId, ps.repo);
+  const creationTaskId = useAppStore(
+    (state) =>
+      (sessionId ? state.taskSessions.items[sessionId]?.task_id : undefined) ??
+      state.tasks.activeTaskId,
+  );
+  const creationScope = useMemo(
+    () => ({}),
+    [
+      sessionId,
+      creationTaskId,
+      effectivePullRequestBaseBranch,
+      registeredCreateTarget?.provider,
+      registeredCreateTarget?.workspaceId,
+      registeredCreateTarget?.repositoryId,
+    ],
+  );
   const createPR = useCallback(
     (input: CreateChangeRequestInput) => {
       if (!registeredCreateTarget || !sessionId) {
@@ -437,6 +405,8 @@ function useVcsDialogsState(
   }, [cs, gitWithFeedback, commit, isGitLoading, t]);
   const handleCreatePR = useCreateChangeRequestHandler({
     dialog: ps,
+    scope: creationScope,
+    taskId: creationTaskId,
     baseBranch: effectivePullRequestBaseBranch,
     createChangeRequest: createPR,
     defaultTerminology: changeRequestTerminology,

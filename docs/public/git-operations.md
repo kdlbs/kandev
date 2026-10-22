@@ -563,6 +563,11 @@ Do not reset or amend commits already consumed by other users unless you intend 
 
 ## Create a pull request or merge request
 
+Submitting closes the creation dialog immediately. If you reopen it while an earlier
+request finishes, that result keeps its original task and repository association
+and preserves your new title, description, and draft choice. A partial failure
+reopens the original form for retry only when you have not replaced that form.
+
 For an ordinary task, **Create PR** first runs:
 
 ```bash
