@@ -269,3 +269,23 @@ The first pending-chain commit attempt failed its new-code i18n hook because the
 extracted test-helper suffix is not excluded by that scanner. Fixture-only title
 values now have explicit non-product-copy exemption comments. No hook was bypassed
 and no product copy was introduced.
+
+## Final review dispositions
+
+The acceptance wording now explicitly forbids recreating departed tasks or
+writing to replaced workspaces. This clarifies the existing sticky departure
+contract; production and tests are unchanged. Skipping accepted equal-stage
+snapshot claims would restore the demonstrated bug, so that suggestion was
+rejected. Identity-retained siblings and stale rows already avoid claims; the
+bounded journal deliberately fails closed on exhaustion.
+
+The source HEAD/full raw status guards are required isolation checks and remain.
+Cleanup guard failures must fail the injected callback-failure control rather
+than masquerade as its expected callback error. Additional error aggregation is
+optional diagnostics, not part of this repair. Suggested task-preview/topbar menu
+selectors address other surfaces; these tests exercise the actual board-card
+menu. Extra instrumentation is unnecessary for the admitted native flows.
+
+The exact final-head CI, semantic review, current-base combined proof and merge
+receipts remain external gates. Earlier successful checks retain their immutable
+input boundaries and are not silently promoted to a later head or base.
