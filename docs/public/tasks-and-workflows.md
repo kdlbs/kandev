@@ -187,6 +187,10 @@ returns to the previous choices. Archive and Delete retain their confirmations.
 On phones, open **Search tasks** from the navigation menu to use the palette,
 or use task overflow for actions on the current task.
 
+When you dismiss a Jira, Linear, or Sentry link form after saving, that request
+can still finish. Reopening Link gives you a fresh form: the earlier result
+leaves your new draft open, and failures still appear as notifications.
+
 ## Prepare a workspace
 
 A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow

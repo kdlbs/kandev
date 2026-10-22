@@ -151,3 +151,11 @@ reapplied after an uncertain response.
   AC-TASKS-TASK-ACTIONS-MENU-004.3a and a repeated detach does under
   AC-TASKS-TASK-ACTIONS-MENU-004.3b, there is no rejection and the system shall
   surface no failure feedback.
+- **AC-TASKS-TASK-ACTIONS-MENU-004.7:** Each external issue-link dialog
+  opening owns its draft, pending state, inline error, and completion close.
+  After dismissal, unmount, or replacement of its task, provider, or workspace,
+  an admitted operation may finish against its captured target, but shall not
+  close, reset, disable, or show an inline error in a later form, including a
+  reopening for the same task. Successful operations retain success feedback;
+  failures remain visible through application feedback when their form is gone.
+  A current form closes on success and stays open with its error on failure.
