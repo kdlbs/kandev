@@ -132,6 +132,12 @@ Do not wait inside the global polling loop, create one goroutine per watch, or
 bypass admission. Preserve the independent orphan-cleanup passes. Workflow Sync
 keeps its separate continuation and durable retry owner.
 
+PR monitoring rotates its starting workspace each cycle. Local admission
+deferrals leave authentication circuits unchanged because no provider request
+failed. Both PR monitoring and
+review cleanup gate requests through the resolved principal. The active legacy
+client's quota must not pause unrelated workspace work.
+
 ## Workflow Sync recovery
 
 `workflow_sync_configs` uses the shared auth circuit's `failure_class`,
@@ -147,6 +153,20 @@ Definite GitHub credential/access failures and missing targets suspend
 automatic polling and write one actionable error. A credential fingerprint
 change or configuration save clears the suspension and retry state. GitLab
 continues to use bounded circuit retries for its auth/config failures.
+Legacy fingerprint reads share a mutation lock with managed token mutation,
+client publication, and resolver invalidation. New metadata cannot escape with
+an old cached client. Token validation occurs before the mutation lock. The first observed revision or
+a changed revision invalidates resolver entries, auth-dependent data caches, and
+retained polling progress before publication. This also
+covers edits through the generic Secrets API without new event wiring.
+
+The fingerprint includes the workspace connection generation. App connections
+also include their registration ID, applied registration generation, and runtime
+availability. Legacy connections include the configured secret ID and persisted
+update timestamp. The secret adapter carries this existing metadata without
+revealing the token or adding a second persistence write. Unchanged revisions
+survive restart, and a metadata read error cannot clear a suspension.
+
 Explicit Sync now bypasses automatic scheduling state, updates the single error
 on failure, and clears the state on success. GitLab receives generic transient
 backoff but does not use GitHub-specific response classification.

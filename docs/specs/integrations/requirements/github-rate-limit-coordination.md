@@ -89,8 +89,8 @@ agents and operators.
   isolated, including legacy account replacement. Credential rotation for the
   same verified principal shall retain that principal's active restrictions.
 - **AC-INTEGRATIONS-GITHUB-RATE-002.7:** While configuration remains stable and
-  admission repeatedly permits background requests, every enabled issue/review
-  watch and every configured repository filter shall eventually receive a read.
+  admission repeatedly permits background requests, every PR-monitoring workspace, enabled issue/review
+  watch, and configured repository filter shall eventually receive a read.
   Deferral shall not permanently repeat the first filter or first watch.
   Resumed reads shall use current workspace authorization and credentials.
 
@@ -124,6 +124,12 @@ provider bursts.
   an automatic sync, that sync shall eventually complete after admission opens.
   Deferral alone shall not repeat completed requests or apply partial results.
   A changed configuration or a later manual result shall invalidate old work.
+
+- **AC-INTEGRATIONS-GITHUB-RATE-003.8:** When a managed legacy token is replaced
+  or removed, or a GitHub App registration key is rotated, recovery fingerprints
+  shall invalidate suspended and retained automatic work. An unchanged credential
+  revision shall remain stable across restart. Fingerprint reads shall not expose
+  credential values or issue provider requests.
 
 ### REQ-INTEGRATIONS-GITHUB-RATE-004: Operation-local rate failure context
 

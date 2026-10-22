@@ -88,21 +88,6 @@ func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
 	}
 }
 
-// @covers AC-INTEGRATIONS-GITHUB-RATE-002.2
-func TestPollerRateTrackerStopsBackgroundAtPrimaryReserve(t *testing.T) {
-	poller, service, _, _ := setupPollerTest(t)
-	service.rateTracker.Record(RateSnapshot{
-		Resource: ResourceGraphQL, Limit: 5000, Remaining: 500,
-		ResetAt: time.Now().Add(time.Hour), UpdatedAt: time.Now(),
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	if poller.waitForRateLimit(ctx, ResourceGraphQL, "reserve") {
-		t.Fatal("background poller proceeded after reaching the ten-percent reserve")
-	}
-}
-
 func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 	poller, _, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -2029,15 +2014,6 @@ func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
 	})
 }
 
-func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
-	poller, _, _, _ := setupPollerTest(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if !poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected true when no exhaustion recorded")
-	}
-}
-
 func TestDetectPRForWatch_FailsClosedWithoutWorkspace(t *testing.T) {
 	poller, _, mockClient, _ := setupPollerTest(t)
 
@@ -2105,21 +2081,4 @@ func TestCheckIssueWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
 	}
 
 	poller.checkIssueWatches(ctx)
-}
-
-func TestWaitForRateLimit_ReturnsFalseOnContextCancel(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-	// Force exhaustion with a far-future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceGraphQL,
-		Limit:     5000,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(time.Hour),
-		UpdatedAt: time.Now(),
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately so the timer select returns ctx.Done first
-	if poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected false when context cancelled during sleep")
-	}
 }

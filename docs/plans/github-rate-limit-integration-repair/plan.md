@@ -15,10 +15,12 @@ legacy_specs: []
 
 ## Overview
 
-Repair four reproduced defects in PR #3143 while retaining principal-wide
-admission and Workflow Sync ownership. Execute the four work orders sequentially.
+Repair the reproduced defects in PR #3143 while retaining principal-wide
+admission and Workflow Sync ownership. The original four work orders are
+complete. Task 05 contains the subsequent independent-review remediation.
 Classification and state fixes precede the polling integration repair.
-No delegation is authorized by this package.
+Implementation remains in the primary session. The user separately authorized
+an independent read-only review session on 2026-10-22.
 
 ## Evidence and assumption check
 
@@ -127,16 +129,23 @@ No rendered UI changes require browser coverage in this package.
 Tasks are independent repair boundaries. Use the listed order in this single
 session. Task 04 includes final integration checks across all four repairs.
 
+- [x] [Task 05: Complete polling isolation and credential recovery](task-05-polling-and-credential-recovery.md)
+
+An independent review on 2026-10-22 found remaining integration gaps in PR
+workspace ordering, legacy quota gates, and credential-recovery fingerprints.
+The user authorized remediation and delivery. Task 05 addresses those findings
+within the existing admission and recovery boundaries.
+
 ## Companion records
 
 The original `github-rate-limit-coordination` and September
 `github-rate-limit-pr3143-repair` plans remain historical receipts. Their earlier
 completed work orders do not certify the current head. This package tracks the
-four new findings. Preserve those historical counts and scopes.
+integration findings. Preserve those historical counts and scopes.
 
 ## Verification results
 
-Implementation and final package verification are complete. All four original
+The first four work orders and their package verification are complete. All four original
 failures have permanent regression coverage. Token replacement also invalidates
 cached workspace clients, as proved by an additional service regression.
 
@@ -162,13 +171,17 @@ Design-package checks passed on 2026-10-20:
 - `git status --short -- docs/plans/github-rate-limit-integration-repair`:
   the new package is untracked and remains unstaged for review.
 
+Task 05 is complete. Its final focused race tests, full current-main integration
+race suites, backend lint, documentation checks, and independent rereview passed.
+[Task 05](task-05-polling-and-credential-recovery.md#results) records the evidence.
+
 ## Risks
 
 - Wrong provisional-state transfer can either cross identities or erase a throttle.
 - Watch cursors need configuration/credential invalidation and fair watch ordering.
 - Deferral handling must retain completed discoveries and preserve orphan cleanup.
 - In-memory progress resets on restart. Workflow Sync retry persistence must remain unchanged.
-- Current CI has a required failure outside the proven repair scope.
+- CI evidence belongs to one head SHA. Every push requires a fresh result.
 
 ## Workspace
 

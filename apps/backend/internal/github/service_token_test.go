@@ -36,6 +36,7 @@ func (t *blockingPrincipalRoundTripper) RoundTrip(req *http.Request) (*http.Resp
 type mockSecretManager struct {
 	secrets map[string]string // id -> value
 	names   map[string]string // id -> name
+	updated map[string]time.Time
 	nextID  int
 	mu      sync.Mutex
 }
@@ -44,6 +45,7 @@ func newMockSecretManager() *mockSecretManager {
 	return &mockSecretManager{
 		secrets: make(map[string]string),
 		names:   make(map[string]string),
+		updated: make(map[string]time.Time),
 	}
 }
 
@@ -53,6 +55,7 @@ func (m *mockSecretManager) Create(_ context.Context, name, value string) (strin
 	m.nextID++
 	id := fmt.Sprintf("secret-%d", m.nextID)
 	m.secrets[id] = value
+	m.updated[id] = time.Now().UTC()
 	m.names[id] = name
 	return id, nil
 }
@@ -64,6 +67,7 @@ func (m *mockSecretManager) Update(_ context.Context, id, value string) error {
 		return fmt.Errorf("secret not found: %s", id)
 	}
 	m.secrets[id] = value
+	m.updated[id] = time.Now().UTC()
 	return nil
 }
 
@@ -72,6 +76,7 @@ func (m *mockSecretManager) Delete(_ context.Context, id string) error {
 	defer m.mu.Unlock()
 	delete(m.secrets, id)
 	delete(m.names, id)
+	delete(m.updated, id)
 	return nil
 }
 
@@ -86,9 +91,10 @@ func (m *mockSecretProvider) List(_ context.Context) ([]*SecretListItem, error) 
 	var items []*SecretListItem
 	for id, name := range m.mgr.names {
 		items = append(items, &SecretListItem{
-			ID:       id,
-			Name:     name,
-			HasValue: m.mgr.secrets[id] != "",
+			ID:        id,
+			Name:      name,
+			HasValue:  m.mgr.secrets[id] != "",
+			UpdatedAt: m.mgr.updated[id],
 		})
 	}
 	return items, nil

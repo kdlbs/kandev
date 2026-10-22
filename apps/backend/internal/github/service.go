@@ -124,6 +124,8 @@ type WorkspaceGroupOwnerSessionResolver interface {
 type Service struct {
 	mu                          sync.Mutex
 	connectionMutationLocks     [64]sync.Mutex
+	legacyCredentialMu          sync.Mutex
+	legacyCredentialRevision    string
 	client                      Client
 	authMethod                  string
 	secrets                     SecretProvider

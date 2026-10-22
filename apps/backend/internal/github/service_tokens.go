@@ -185,6 +185,9 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.logger.Info("validated GitHub token", zap.String("user", user))
 	s.coordinateLegacyClient(ctx, testClient, user)
 
+	s.legacyCredentialMu.Lock()
+	defer s.legacyCredentialMu.Unlock()
+
 	// Check if a GITHUB_TOKEN secret already exists
 	existingID, exists := s.findGitHubTokenSecret(ctx)
 	if exists {
@@ -216,12 +219,7 @@ func (s *Service) ConfigureToken(ctx context.Context, token string) error {
 	s.mu.Lock()
 	s.client = testClient
 	s.authMethod = AuthMethodPAT
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
-	if s.resolver != nil {
-		s.resolver.InvalidateAll()
-	}
+	s.clearLegacyCredentialCachesLocked()
 	s.mu.Unlock()
 
 	return nil
@@ -233,12 +231,16 @@ func (s *Service) ClearToken(ctx context.Context) error {
 		return fmt.Errorf("secret manager not configured")
 	}
 
+	s.legacyCredentialMu.Lock()
+
 	existingID, exists := s.findGitHubTokenSecret(ctx)
 	if !exists {
+		s.legacyCredentialMu.Unlock()
 		return nil // No token to clear
 	}
 
 	if err := s.secretManager.Delete(ctx, existingID); err != nil {
+		s.legacyCredentialMu.Unlock()
 		return fmt.Errorf("delete token: %w", err)
 	}
 	s.logger.Info("cleared GitHub token secret", zap.String("id", existingID))
@@ -248,16 +250,24 @@ func (s *Service) ClearToken(ctx context.Context) error {
 	s.mu.Lock()
 	s.client = nil
 	s.authMethod = AuthMethodNone
-	s.ClearAccessibleReposCaches()
-	s.ClearRepoErrorCache()
-	s.ClearPRCaches()
-	if s.resolver != nil {
-		s.resolver.InvalidateAll()
-	}
+	s.clearLegacyCredentialCachesLocked()
 	s.mu.Unlock()
+	s.legacyCredentialMu.Unlock()
 
 	// Try to re-establish connection via other methods
 	s.retryClientCreation(ctx)
 
 	return nil
+}
+
+// clearLegacyCredentialCachesLocked requires s.mu. Cache generations reject
+// writes from requests that began before credential replacement.
+func (s *Service) clearLegacyCredentialCachesLocked() {
+	s.ClearAccessibleReposCaches()
+	s.ClearRepoErrorCache()
+	s.ClearPRCaches()
+	s.clearWatchFilterProgress("")
+	if s.resolver != nil {
+		s.resolver.InvalidateAll()
+	}
 }
