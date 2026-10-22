@@ -88,7 +88,7 @@ and configures Git to use it for pushes. Run ordinary **Push** or `git push`; do
 or replace it with a fork. The PR workflow uses the canonical repository and an explicit
 `<fork-owner>:<branch>` head. Other tasks keep the normal `origin` push behavior.
 
-Changing only the comparison base of an existing Worktree task, such as retargeting a stacked pull request to `main`, keeps its current checkout available for Resume and additional sessions. Kandev retains the checkout's recorded identity while using the updated base for comparisons. An explicit checkout-branch selection still requires the matching checkout.
+When its recorded checkout identity is complete, changing only the comparison base of an existing Worktree task, such as retargeting a stacked pull request to `main`, keeps its current checkout available for Resume and additional sessions. Incomplete identity evidence uses the existing guarded recovery flow. Kandev retains the checkout's recorded identity while using the updated base for comparisons. An explicit checkout-branch selection still requires the matching checkout.
 
 ### Compare a fork pull request
 

@@ -23,6 +23,12 @@ const (
 // lifecycle preparer can touch the workspace. It intentionally consults the
 // durable environment inventory rather than a sibling session projection.
 func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) error {
+	return e.validateReuseEnvironmentInventoryWithIdentity(ctx, req, env, true)
+}
+
+func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
+	ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment, preserveCanonicalIdentity bool,
+) error {
 	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
 		return nil
 	}
@@ -42,7 +48,9 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
-	pinCanonicalWorktreeIdentities(req, env)
+	if preserveCanonicalIdentity {
+		pinCanonicalWorktreeIdentities(req, env)
+	}
 	if len(req.Repositories) > 0 {
 		specs = req.Repositories
 	} else if spec, ok := topLevelLaunchRepoSpec(req); ok {

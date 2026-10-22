@@ -56,8 +56,8 @@ func uniqueCanonicalWorktreeSlot(spec RepoSpec, env *models.TaskEnvironment) *mo
 	var selected *models.TaskEnvironmentRepo
 	for _, row := range env.Repos {
 		if row == nil || row.TaskEnvironmentID != env.ID || row.RepositoryID != spec.RepositoryID ||
-			row.WorkspaceRelativePath != spec.WorkspaceRelativePath || row.WorktreeID == "" ||
-			worktree.SanitizeBranchSlug(row.BranchSlug) == "" || row.DeletedAt != nil || row.Status != taskEnvironmentRepoStatusActive {
+			row.WorkspaceRelativePath != spec.WorkspaceRelativePath || !completeCanonicalWorktreeIdentity(row) ||
+			row.DeletedAt != nil || row.Status != taskEnvironmentRepoStatusActive {
 			continue
 		}
 		if selected != nil {
@@ -71,4 +71,10 @@ func uniqueCanonicalWorktreeSlot(spec RepoSpec, env *models.TaskEnvironment) *mo
 func ownsCanonicalWorktreeEnvironment(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
 	return req.UseWorktree && env != nil && env.ID != "" && env.TaskID == req.TaskID &&
 		env.ExecutorType == string(models.ExecutorTypeWorktree)
+}
+
+func completeCanonicalWorktreeIdentity(row *models.TaskEnvironmentRepo) bool {
+	return row.WorktreeID != "" && row.WorktreePath != "" && row.WorktreeBranch != "" &&
+		row.WorktreeSourceClonePath != "" && row.WorktreeSourceCommonDir != "" &&
+		worktree.SanitizeBranchSlug(row.BranchSlug) != ""
 }

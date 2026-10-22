@@ -86,11 +86,17 @@ For AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4, a mutable comparison
 base is not the identity of a materialized checkout. Before canonical inventory
 validation and worktree-ID reuse, resolve an unambiguous existing Worktree slot
 from the canonical environment rows by repository and workspace-relative path.
+The retained row must carry its worktree ID, path, checkout branch, recorded
+source clone, common directory, and nonempty branch key. Incomplete legacy rows
+retain the existing guarded inventory-repair path and attestation requirements.
 Only a single logical requested slot and a single eligible physical row owned
 by the requesting task may use this rule. Inherited environments retain their
 existing exact-selection contract. Pin its recorded `branch_slug` and worktree ID into the launch
 request while retaining its current `BaseBranch` and comparison metadata.
 Do not rewrite stored slugs, Git metadata, files, or task/session states.
+An explicit inventory-repair request still validates its requested branch key
+without this preservation rule, so normal reuse cannot replace the repair
+receipt, idempotency, and post-repair attestation contract.
 
 Explicit checkout branches retain exact selection. Duplicate logical slots,
 multiple eligible rows, conflicting supplied worktree IDs, failed/deleted rows,

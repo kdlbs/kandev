@@ -12,7 +12,7 @@ import (
 func retargetReuseFixture(t *testing.T) (*Executor, *mockRepository, *LaunchAgentRequest, *models.TaskEnvironment) {
 	t.Helper()
 	repo := newMockRepository()
-	row := &models.TaskEnvironmentRepo{ID: "slot-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1", BranchSlug: "feature-parent", WorktreeID: "wt-1", Status: "active"}
+	row := &models.TaskEnvironmentRepo{ID: "slot-1", TaskEnvironmentID: "env-1", RepositoryID: "repo-1", BranchSlug: "feature-parent", WorktreeID: "wt-1", WorktreePath: "/tmp/task/repo", WorktreeBranch: "feature/work", WorktreeSourceClonePath: "/tmp/repo", WorktreeSourceCommonDir: "/tmp/repo/.git", Status: "active"}
 	env := &models.TaskEnvironment{ID: "env-1", TaskID: "task-1", ExecutorType: "worktree", MaterializationSessionID: "owner", Repos: []*models.TaskEnvironmentRepo{row}}
 	repo.taskEnvironments[env.ID] = env
 	repo.taskEnvironmentRepos[env.ID] = env.Repos
@@ -52,15 +52,17 @@ func TestRetargetedBasePreservesCanonicalWorktreeIdentity(t *testing.T) {
 // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4
 func TestCanonicalWorktreeIdentityRetargetMultipleRepositories(t *testing.T) {
 	e, repo, req, env := retargetReuseFixture(t)
-	second := &models.TaskEnvironmentRepo{ID: "slot-2", TaskEnvironmentID: env.ID, RepositoryID: "repo-2", BranchSlug: "other-parent", WorktreeID: "wt-2", Status: "active"}
+	second := &models.TaskEnvironmentRepo{ID: "slot-2", TaskEnvironmentID: env.ID, RepositoryID: "repo-2", BranchSlug: "other-parent", WorktreeID: "wt-2", WorktreePath: "/tmp/task/repo2", WorktreeBranch: "feature/work2", WorktreeSourceClonePath: "/tmp/repo2", WorktreeSourceCommonDir: "/tmp/repo2/.git", Status: "active"}
 	env.Repos = append(env.Repos, second)
 	repo.taskEnvironmentRepos[env.ID] = env.Repos
-	req.Repositories = []RepoSpec{{RepositoryID: "repo-1", BaseBranch: "main", BranchIdentitySlug: "main"}, {RepositoryID: "repo-2", BaseBranch: "main", BranchIdentitySlug: "main"}}
+	req.Repositories = []RepoSpec{{RepositoryID: "repo-1", BaseBranch: "main", BranchIdentitySlug: "main", BranchSlug: "main"}, {RepositoryID: "repo-2", BaseBranch: "main", BranchIdentitySlug: "main", BranchSlug: "main"}}
 	require.NoError(t, e.validateReuseEnvironmentInventory(context.Background(), req, env))
 	e.reuseExistingRepositoryWorktrees(context.Background(), req, env)
 	for i, want := range []string{"wt-1", "wt-2"} {
 		require.Equal(t, want, req.Repositories[i].WorktreeID)
 		require.Equal(t, "main", req.Repositories[i].BaseBranch)
+		require.Equal(t, env.Repos[i].BranchSlug, req.Repositories[i].BranchSlug)
+		require.Equal(t, env.Repos[i].BranchSlug, req.Repositories[i].BranchIdentitySlug)
 	}
 }
 
@@ -75,6 +77,10 @@ func TestCanonicalWorktreeIdentityRetargetRefusesUnprovenSelection(t *testing.T)
 		{"wrong placement", func(r *LaunchAgentRequest, _ *models.TaskEnvironment) { r.WorkspaceRelativePath = "different" }},
 		{"foreign owner", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.TaskID = "other-task" }},
 		{"foreign environment", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].TaskEnvironmentID = "foreign" }},
+		{"missing recorded source", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].WorktreeSourceClonePath = "" }},
+		{"missing recorded common directory", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].WorktreeSourceCommonDir = "" }},
+		{"missing checkout path", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].WorktreePath = "" }},
+		{"missing checkout branch", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].WorktreeBranch = "" }},
 		{"failed", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].Status = "failed" }},
 		{"deleted", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) { e.Repos[0].Status = "deleted" }},
 		{"multiple physical slots", func(_ *LaunchAgentRequest, e *models.TaskEnvironment) {

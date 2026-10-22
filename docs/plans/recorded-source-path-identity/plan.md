@@ -230,3 +230,27 @@ merge remain pending until the published head passes their gates.
 
 Final changed-package Go lint passed with zero issues. Normal commit hooks and
 published-head CI/review evidence are recorded by the delivery session.
+
+## PR remediation
+
+Initial-head backend CI identified inventory-admission/repair receipt failures.
+Canonical key preservation now requires the existing row's complete physical
+identity; incomplete rows retain guarded recovery. Explicit repair still checks
+the requested key before creating or replaying its receipt. Added missing
+identity negatives and the review-requested branch-path propagation assertions.
+The combined inventory/attestation/retargeting scope passed in 21.127s. Mutation
+proof confirmed the branch-path assertion catches omitted propagation.
+
+The broader local executor run identified four pre-existing macOS fixture
+failures. A Go overlay restoring pre-PR production code reproduced all four.
+The remaining full executor scope is rerun separately and Linux CI retains the
+unfiltered suite. Exact-head CI/review/merge evidence remains external until the
+fixup is pushed and its new checks finish.
+
+The final full executor run passed in 94.410s with only the four baseline macOS
+fixture cases excluded. The original-source baseline reproduced those cases;
+none was hidden from the GitHub Linux gate.
+
+The second failing backend shard exercised the same explicit-repair boundary at
+the orchestrator layer. Its two focused recovery tests passed after the fix
+(1.821s). Changed executor-package lint passed with zero issues.

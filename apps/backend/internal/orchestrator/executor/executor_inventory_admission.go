@@ -11,7 +11,9 @@ import (
 func (e *Executor) admitResumeWorkspaceInventory(ctx context.Context, task *v1.Task, session *models.TaskSession,
 	req *LaunchAgentRequest, env *models.TaskEnvironment, repositories []*repoInfo, options ResumeOptions,
 ) error {
-	inventoryErr := e.validateReuseEnvironmentInventory(ctx, req, env)
+	// Explicit repair validates the requested key so its receipt and attestation
+	// cannot be replaced by ordinary checkout-identity preservation.
+	inventoryErr := e.validateReuseEnvironmentInventoryWithIdentity(ctx, req, env, !options.RepairWorkspaceInventory)
 	// Explicit retries must validate the key's identity even after repair made
 	// the inventory valid. Ordinary resumes are gated by the physical row.
 	if options.RepairWorkspaceInventory {

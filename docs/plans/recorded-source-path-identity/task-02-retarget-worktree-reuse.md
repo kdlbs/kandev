@@ -51,8 +51,9 @@ From the repository root (resolve temporary-path aliases for Git fixtures):
 
 ```bash
 export TMPDIR="$(python3 -c 'import os,tempfile; print(os.path.realpath(tempfile.gettempdir()))')"
-(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator/executor -run 'Retarget|CanonicalWorktreeIdentity|ReuseEnvironmentInventory|PrepareResumeRepositorySettings|MultiBranch' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator/executor -run 'Retarget|CanonicalWorktreeIdentity|ReuseEnvironmentInventory|PrepareResumeRepositorySettings|MultiBranch|InventoryAdmission|WorkspaceInventory' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/worktree -run 'ReuseRequired|ReuseWorktree' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/orchestrator -run 'TestInventoryRepairDoesNotRunMutatingRecoveryPreflight|TestInventoryRepairRejectsProviderRestoredSettingsBeforeRepositoryAccess' -count=1)
 bash scripts/lint-go-changed apps/backend/internal/orchestrator/executor/executor_worktree_reuse_identity.go apps/backend/internal/orchestrator/executor/executor_worktree_reuse_identity_test.go apps/backend/internal/orchestrator/executor/executor_environment_reuse.go
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -64,6 +65,7 @@ git diff --check
 - `apps/backend/internal/orchestrator/executor/executor_worktree_reuse_identity.go`
 - `apps/backend/internal/orchestrator/executor/executor_worktree_reuse_identity_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_environment_reuse.go`
+- `apps/backend/internal/orchestrator/executor/executor_inventory_admission.go`
 - `docs/specs/tasks/requirements/additional-session-workspace-reuse.md`
 - `docs/specs/tasks/system-design/additional-session-workspace-reuse.md`
 - This work order and its plan.
@@ -109,3 +111,31 @@ fixture failures. Three representative failures reproduced with an overlay
 restoring the original production file. Resolving temporary-path aliases made
 the full compatibility scope pass; no production workaround was added for those
 fixtures. No live task, database, Git metadata, runtime, or provider token changed.
+
+## PR remediation
+
+The first published head exposed inventory-repair receipt tests that the initial
+focused scope omitted. Ordinary key preservation now requires complete recorded
+physical identity (including both source fields, checkout path, and branch).
+Incomplete rows retain automatic guarded repair and post-repair attestation.
+Explicit repair independently keeps strict requested-key validation. The
+inventory-admission, workspace-inventory, retargeting, and persisted-preflight
+suite passed together in 21.127s after the correction.
+
+The review-requested nonempty `BranchSlug` assertion was added to the multi-repo
+case. A temporary Go overlay disabling propagation made it fail with old key
+versus main; the real implementation passed. Missing source/common/path/branch
+subcases also failed before the eligibility guard and passed afterward.
+
+Four unrelated macOS executor fixture failures reproduced against pre-PR
+production code: `/dev/fd/3` access in continuation/missing-checkout tests and
+bare-repository policy in the remote-selection test. These remain baseline
+limitations; Linux CI owns the full unfiltered suite.
+
+The final full executor run passed in 94.410s with only the four baseline macOS
+fixture cases excluded. The original-source baseline reproduced those cases;
+none was hidden from the GitHub Linux gate.
+
+The second failing backend shard exercised the same explicit-repair boundary at
+the orchestrator layer. Its two focused recovery tests passed after the fix
+(1.821s). Changed executor-package lint passed with zero issues.

@@ -60,7 +60,8 @@ reconstructs or resumes its runtime.
 - **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4:** Changing only a task
   repository's comparison base, including retargeting a stacked pull request,
   shall preserve reuse of its existing validated checkout on resume and later
-  session attachment. The updated comparison base shall still apply to change
+  session attachment when its recorded ownership evidence is complete and
+  unambiguous. Incomplete evidence shall retain the guarded recovery path. The updated comparison base shall still apply to change
   calculations. An explicit checkout-branch selection or ambiguous existing
   checkouts shall retain exact selection and fail safely when it cannot be
   proven, without modifying files or repository inventory.

@@ -60,6 +60,10 @@ func newLegacyCloneRecoveryFixture(t *testing.T, recordedAlias bool, branchSlug 
 	runExecutorRecoveryGit(t, source, "worktree", "add", "-b", "feature/legacy", checkout)
 	require.NoError(t, os.WriteFile(filepath.Join(checkout, "untracked.txt"), []byte("keep me\n"), 0o600))
 	wt := &worktree.Worktree{ID: "wt-legacy", TaskID: "task-legacy", SessionID: "session-legacy", TaskEnvironmentID: "env-legacy", RepositoryID: "repo-legacy", BranchSlug: branchSlug, Path: checkout, RepositoryPath: source, Branch: "feature/legacy", Status: worktree.StatusActive}
+	if branchSlug != "main" {
+		wt.SourceClonePath = source
+		wt.SourceCommonDir = filepath.Join(source, ".git")
+	}
 	if recordedAlias {
 		setLegacyRecordedCaseAlias(t, wt, source)
 	}
