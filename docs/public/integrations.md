@@ -471,6 +471,10 @@ With no custom query, a review watch searches open MRs that directly request the
 
 A new match creates at most one task for that watch and external item. MR-created tasks are linked to the MR; issue-created tasks retain issue metadata but are not durable issue associations. Watch controls let you edit, pause/enable, run now, reset, and delete. Invalid or removed workspace dependencies self-disable the affected watch and leave its error visible.
 
+You can close a review or issue watch dialog while its Save is pending. The
+submitted change can still finish and report its result. If you open another
+watch dialog, the earlier result preserves that dialog's draft and controls.
+
 Both watch types inspect only their first GitLab result page, up to 50 items. Already-seen items still occupy that window, so narrow broad queries enough that important matches can reach the first page. The in-flight cap defers dispatch when too many watch-created tasks are active; it does not expand the provider result window.
 
 **Reset** previews its task count, then permanently best-effort deletes all tasks owned by that watch, including archived tasks, clears deduplication state, and makes current matches eligible again. A review-watch reset schedules an immediate rerun; an issue-watch reset waits for the next poll or **Run now**. Deleting a watch also best-effort deletes all of its owned tasks and cannot trigger another run.
