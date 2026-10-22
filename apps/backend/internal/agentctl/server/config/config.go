@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -278,8 +279,9 @@ type InstanceConfig struct {
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
 	AgentArgs             []string
-	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
-	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
+	OpenCodeRuntime       managedruntime.OpenCodeRuntime `json:"opencode_runtime,omitzero"`
+	LaunchWrapper         launchwrapper.Spec             `json:"launch_wrapper,omitzero"`
+	LaunchWrapperRequired bool                           `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string

@@ -340,6 +340,7 @@ type Manager struct {
 	turnOutcomeRecorder   TurnOutcomeRecorder
 	turnOutcomeInstanceID string
 	startMu               sync.Mutex
+	credentialImport      bool // guarded by startMu
 	admissionMu           sync.Mutex
 	admissionCount        int
 	admissionDrained      chan struct{}
@@ -1823,6 +1824,9 @@ func (m *Manager) Start(ctx context.Context) error {
 func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return 0, errors.New("OpenCode credential import is in progress")
+	}
 	release, err := m.admitStart()
 	if err != nil {
 		return 0, err
@@ -2338,7 +2342,7 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, managedruntime.OpenCodeRuntime{}, wrapper...)
 }
 
 // ConfigureWithEnvironment sets the agent command and replaces the complete
@@ -2346,14 +2350,22 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 // instance variables that are absent from env remain available to the agent.
 // This must be called before Start() if the instance was created without a command.
 func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
-	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, wrapper...)
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, managedruntime.OpenCodeRuntime{}, wrapper...)
 }
 
-func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
+// ConfigureRuntime atomically carries resolved runtime identity with launch configuration.
+func (m *Manager) ConfigureRuntime(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime managedruntime.OpenCodeRuntime, wrapper launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, replaceEnv, runtime, wrapper)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, runtime managedruntime.OpenCodeRuntime, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return errors.New("OpenCode credential import is in progress")
+	}
 
-	if m.Status() == StatusRunning || m.Status() == StatusStarting {
+	if m.commandActive() {
 		return fmt.Errorf("cannot configure while agent is running")
 	}
 
@@ -2388,14 +2400,12 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
+	m.cfg.OpenCodeRuntime = runtime
 	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
 	m.cfg.LaunchWrapperRequired = !spec.IsZero()
 
 	// Store continue command for one-shot adapters
-	if continueArgsPresent {
-		m.cfg.ContinueCommand = continueCommand
-		m.cfg.ContinueArgs = continueArgs
-	} else if continueCommand != "" {
+	if continueArgsPresent || continueCommand != "" {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
 	}
@@ -2409,6 +2419,11 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
 
 	return nil
+}
+
+func (m *Manager) commandActive() bool {
+	status := m.Status()
+	return status == StatusRunning || status == StatusStarting
 }
 
 type installedManagedGitTools struct {

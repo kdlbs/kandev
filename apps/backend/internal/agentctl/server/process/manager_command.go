@@ -36,6 +36,10 @@ func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec)
 }
 
 func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSpec) ([]byte, []byte, error) {
+	return m.runManagedCommandInput(parent, spec, nil)
+}
+
+func (m *Manager) runManagedCommandInput(parent context.Context, spec tools.CommandSpec, input []byte) ([]byte, []byte, error) {
 	ctx, release, err := m.BeginOwnedOperation(parent)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +70,13 @@ func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSp
 	if err != nil {
 		return nil, nil, err
 	}
-	_ = proc.Stdin.Close()
+	defer func() { _ = proc.Stdin.Close() }()
+	written := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(proc.Stdin, bytes.NewReader(input))
+		_ = proc.Stdin.Close()
+		written <- err
+	}()
 	stdout := collectManagedCommandOutput(proc.Stdout)
 	stderr := collectManagedCommandOutput(proc.Stderr)
 
@@ -94,6 +104,8 @@ func (m *Manager) runManagedCommand(parent context.Context, spec tools.CommandSp
 	stdoutOutput := <-stdout
 	stderrOutput := <-stderr
 	waitErr := proc.Wait()
+	_ = proc.Stdin.Close()
+	waitErr = errors.Join(waitErr, <-written)
 	if canceled {
 		return stdoutOutput, stderrOutput, errors.Join(ctx.Err(), stopErr, waitErr)
 	}

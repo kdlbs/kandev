@@ -336,6 +336,11 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 }
 
 func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
+	if selected, err := a.ResolveSelectedRuntime(context.Background()); err == nil && selected.Family == managedruntime.OpenCodeFamilyV2 {
+		return &RemoteAuth{Methods: []RemoteAuthMethod{{
+			Type: remoteAuthMethodTypeFiles, Label: remoteAuthLabelCopyFiles, ProvisionAtLaunch: true,
+		}}}
+	}
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{

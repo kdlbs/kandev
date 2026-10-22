@@ -106,6 +106,9 @@ func (o *PassthroughOwner) Start(ctx context.Context, req types.PassthroughStart
 	m := o.manager
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	if m.credentialImport {
+		return types.PassthroughSnapshot{}, errors.New("OpenCode credential import is in progress")
+	}
 	ctx, release, err := m.BeginOwnedOperation(ctx)
 	if err != nil {
 		return types.PassthroughSnapshot{}, err

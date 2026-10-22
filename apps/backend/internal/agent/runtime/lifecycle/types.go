@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
@@ -117,9 +118,10 @@ type AgentExecution struct {
 	// adoption. It is used to reconcile the descriptor's bounded high-water
 	// mark before a live stream is attached.
 	DeliveryReplayCursor uint64
-	AgentCommand         string               // Command to start the agent subprocess
-	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
-	LaunchWrapper        launchwrapper.Spec   `json:"-"`
+	AgentCommand         string             // Command to start the agent subprocess
+	ContinueCommand      string             // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec `json:"-"`
+	OpenCodeRuntime      managedruntime.OpenCodeRuntime
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")

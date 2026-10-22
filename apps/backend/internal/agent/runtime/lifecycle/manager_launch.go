@@ -660,11 +660,12 @@ func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 
 // agentCommands holds both the display strings and structured argv for an agent execution.
 type agentCommands struct {
-	wrapper      launchwrapper.Spec
-	initial      string
-	continue_    string // continue command for one-shot agents (empty if not applicable)
-	args         []string
-	continueArgs []string
+	openCodeRuntime managedruntime.OpenCodeRuntime
+	wrapper         launchwrapper.Spec
+	initial         string
+	continue_       string // continue command for one-shot agents (empty if not applicable)
+	args            []string
+	continueArgs    []string
 }
 
 func newAgentCommands(args, continueArgs []string) agentCommands {
@@ -775,6 +776,9 @@ func (m *Manager) buildAgentCommandWithContext(
 		return agentCommands{}, err
 	}
 	commands := newAgentCommands(args, continueArgs)
+	commands.openCodeRuntime = managedruntime.OpenCodeRuntime{
+		Family: cmdOpts.ManagedRuntimeFamily, Source: cmdOpts.ManagedRuntimeSource, Version: cmdOpts.ManagedRuntimeVersion,
+	}
 	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
 	return commands, nil
 }
@@ -2021,6 +2025,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.AgentArgs = cmds.args
 		execution.ContinueArgs = cmds.continueArgs
 		execution.LaunchWrapper = cmds.wrapper
+		execution.OpenCodeRuntime = cmds.openCodeRuntime
 		execution.ExecutionProfileID = executionProfileID(req)
 		if profileInfo != nil {
 			execution.CopilotSelectedPlugins = append([]string{}, profileInfo.CopilotSelectedPlugins...)
@@ -2065,6 +2070,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 				execution.AgentArgs = nil
 				execution.ContinueArgs = nil
 				execution.LaunchWrapper = launchwrapper.Spec{}
+				execution.OpenCodeRuntime = managedruntime.OpenCodeRuntime{}
 				execution.isResumedSession = false
 				execution.IsPassthrough = false
 				return nil, err
@@ -2500,6 +2506,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.AgentArgs = cmds.args
 	execution.ContinueArgs = cmds.continueArgs
 	execution.LaunchWrapper = cmds.wrapper
+	execution.OpenCodeRuntime = cmds.openCodeRuntime
 	return execution, nil
 }
 
@@ -3138,10 +3145,13 @@ func (m *Manager) configureAndStartAgentWithPreparedArgs(
 
 	// Starting with stale agent configuration could expose an old credential
 	// set, so the subprocess must not start when configuration delivery fails.
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.LaunchWrapper); err != nil {
+	if err := client.ConfigureAgentRuntime(ctx, execution.AgentCommand, agentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs, execution.OpenCodeRuntime, execution.LaunchWrapper); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 
+	if err := m.provisionOpenCodeCredentials(ctx, execution, client); err != nil {
+		return "", err
+	}
 	fullCommand, err := client.Start(ctx)
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start agent: "+err.Error())

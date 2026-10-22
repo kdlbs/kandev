@@ -88,9 +88,7 @@ func (s ManagedNPMRuntimeSpec) ACPCommand(version string) Command {
 
 // InteractiveCommand starts the selected package's CLI without ACP mode.
 func (s ManagedNPMRuntimeSpec) InteractiveCommand(version string) Command {
-	args := []string{"npx", "--yes", "--prefer-offline"}
-	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
-	args = append(args, s.PackageSpec(version))
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), false)
 	return NewCommand(args...)
 }
 
@@ -108,13 +106,7 @@ func (s ManagedNPMRuntimeSpec) RuntimeCommand(version string) Command {
 }
 
 func (s ManagedNPMRuntimeSpec) runtimeCommandWithNpmPreference(version string, preferOnline bool) Command {
-	preference := "--prefer-offline"
-	if preferOnline {
-		preference = "--prefer-online"
-	}
-	args := []string{"npx", "--yes", preference}
-	args = append(args, managedruntime.NPMProjectPrefixArgs()...)
-	args = append(args, s.PackageSpec(version))
+	args := managedruntime.ManagedNPMCommand(s.PackageSpec(version), preferOnline)
 	args = append(args, s.runtimeArgs()...)
 	return NewCommand(args...)
 }

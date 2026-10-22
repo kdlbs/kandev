@@ -116,6 +116,10 @@ func TestBuildAgentCommandUsesSelectedOpenCodeFamilyAcrossExecutors(t *testing.T
 		if !strings.Contains(cmds.initial, "@opencode/cli@2.0.18") || !strings.Contains(cmds.initial, "acp --print-logs") || strings.Contains(cmds.initial, "--log-level") {
 			t.Fatalf("%s command = %q, want selected v2 package, version, and flags", executorType, cmds.initial)
 		}
+		wantRuntime := managedruntime.OpenCodeRuntime{Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, Version: "2.0.18"}
+		if cmds.openCodeRuntime != wantRuntime {
+			t.Fatalf("%s lost resolved runtime identity: %+v", executorType, cmds.openCodeRuntime)
+		}
 	}
 }
 
