@@ -11,6 +11,8 @@ import { useCrossStepMove } from "./use-swimlane-kanban-dnd";
 
 const WORKFLOW_ID = "workflow-a";
 const ORIGINAL_SESSION = "session-original";
+const STALE_STEP = "stale-stage";
+const STALE_UPDATED_AT = "2026-10-22T09:00:00Z";
 const wireTask = {
   task_id: "task-a",
   workflow_id: WORKFLOW_ID,
@@ -359,5 +361,130 @@ it("fails closed when the real bounded journal overflows", async () => {
   expect(h.store.getState().taskOverview.reads[readId]).toBeUndefined();
   await h.settle(pending);
   expect(current(h.store)?.workflowStepId).toBe("optimistic");
+  expect(h.store.getState().taskOverview.reads).toEqual({});
+});
+
+describe("accepted stage evidence", () => {
+  it("rolls back after an older task event is discarded", async () => {
+    const h = setup();
+    const pending = h.start();
+    update(h.store, {
+      workflow_step_id: STALE_STEP,
+      title: "Stale title",
+      updated_at: STALE_UPDATED_AT,
+    });
+    expect(current(h.store)).toMatchObject({ workflowStepId: "optimistic", title: "Original" });
+    await h.settle(pending);
+    expect(current(h.store)).toMatchObject({ workflowStepId: "source", title: "Original" });
+    expect(h.store.getState().taskOverview.reads).toEqual({});
+  });
+
+  it.each([false, true])(
+    "preserves an accepted equal-stage snapshot (identical=%s)",
+    async (identical) => {
+      const h = setup();
+      const pending = h.start();
+      const live = h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID];
+      act(() =>
+        h.store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+          ...live,
+          tasks: live.tasks.map((task) =>
+            task.id === "task-a"
+              ? {
+                  ...task,
+                  ...(identical ? {} : { title: "Snapshot title", position: 23 }),
+                }
+              : task,
+          ),
+        }),
+      );
+      await h.settle(pending);
+      expect(current(h.store)).toMatchObject({
+        workflowStepId: "optimistic",
+        title: identical ? "Original" : "Snapshot title",
+        position: identical ? 7 : 23,
+      });
+    },
+  );
+
+  it("does not treat a discarded stale snapshot as a stage write", async () => {
+    const h = setup();
+    const pending = h.start();
+    const live = h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID];
+    act(() =>
+      h.store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+        ...live,
+        tasks: live.tasks.map((task) =>
+          task.id === "task-a"
+            ? {
+                ...task,
+                workflowStepId: STALE_STEP,
+                updatedAt: STALE_UPDATED_AT,
+              }
+            : task,
+        ),
+      }),
+    );
+    expect(current(h.store)?.workflowStepId).toBe("optimistic");
+    await h.settle(pending);
+    expect(current(h.store)?.workflowStepId).toBe("source");
+  });
+});
+
+it.each(["event", "snapshot"])(
+  "keeps independently fresh status summary from a stale %s without claiming the stage",
+  async (source) => {
+    const h = setup();
+    const pending = h.start();
+    const summary = { revision: 2, updated_at: "2026-10-22T11:00:00Z", active_subagent_count: 2 };
+    if (source === "event")
+      update(h.store, {
+        workflow_step_id: STALE_STEP,
+        updated_at: STALE_UPDATED_AT,
+        status_summary: summary,
+      });
+    else {
+      const live = h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID];
+      act(() =>
+        h.store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+          ...live,
+          tasks: live.tasks.map((task) =>
+            task.id === "task-a"
+              ? {
+                  ...task,
+                  workflowStepId: STALE_STEP,
+                  updatedAt: STALE_UPDATED_AT,
+                  statusSummary: summary,
+                }
+              : task,
+          ),
+        }),
+      );
+    }
+    expect(current(h.store)).toMatchObject({
+      workflowStepId: "optimistic",
+      statusSummary: summary,
+    });
+    await h.settle(pending);
+    expect(current(h.store)).toMatchObject({ workflowStepId: "source", statusSummary: summary });
+    expect(h.store.getState().taskOverview.reads).toEqual({});
+  },
+);
+
+it("does not claim an unchanged task when a sibling snapshot row is replaced", async () => {
+  const h = setup();
+  const pending = h.start();
+  const live = h.store.getState().kanbanMulti.snapshots[WORKFLOW_ID];
+  act(() =>
+    h.store.getState().setWorkflowSnapshot(WORKFLOW_ID, {
+      ...live,
+      tasks: live.tasks.map((task) =>
+        task.id === "task-b" ? { ...task, title: "Snapshot sibling", position: 24 } : task,
+      ),
+    }),
+  );
+  await h.settle(pending);
+  expect(current(h.store)).toMatchObject({ workflowStepId: "source", position: 7 });
+  expect(current(h.store, "task-b")).toMatchObject({ title: "Snapshot sibling", position: 24 });
   expect(h.store.getState().taskOverview.reads).toEqual({});
 });

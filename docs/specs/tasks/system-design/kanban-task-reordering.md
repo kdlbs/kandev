@@ -359,7 +359,11 @@ send an arrival position.
 
 After the optimistic write, open an existing bounded task-overview change
 journal (`beginTaskOverviewRead`). While the request is pending, accepted task
-events and other changed projections enter that journal. On failure, rollback
+events and replacement snapshot rows enter that journal, including equal stage
+values. Snapshot rows retained by identity do not assert another task's stage.
+Freshness rules reject stale stage fields; independently fresh status
+summaries remain admissible. Omitted WS stage fields do not assert a stage.
+On failure, rollback
 only if the journal still belongs to the current scope, has no stage write or
 deletion for this task, and the task still occupies the captured workflow
 snapshot and target stage. A newer accepted stage projection owns its stage even

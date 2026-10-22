@@ -27,7 +27,8 @@ proof, internal contract clarification and recorded checks.
 
 ## Out of scope
 
-See [plan scope](plan.md#scope). No delegation or publication.
+See [plan scope](plan.md#scope). No delegation. Publication required the separate
+parent grant, subsequently received after independent checkpoint validation.
 
 ## Acceptance
 
@@ -95,6 +96,9 @@ per-check outcomes, actual diff, clean HEAD and resource closure for the parent.
 - `apps/web/e2e/helpers/cross-step-rollback.ts`
 - `apps/web/e2e/tests/kanban/cross-step-rollback.spec.ts`
 - `apps/web/e2e/tests/kanban/mobile-cross-step-rollback.spec.ts`
+- `apps/web/lib/ws/handlers/task-overview.ts`
+- `apps/web/lib/state/slices/task-overview-merge.ts`
+- `apps/web/lib/state/slices/kanban/{kanban-slice,snapshot-task-stages}.ts`
 - Existing owning Tasks requirement/design pair and this package.
 
 ## Dependencies
@@ -171,5 +175,42 @@ the final documented root invocation passed. No deadline was used as evidence.
 
 This proves managed Chromium and phone-emulated interactions. It does not claim
 physical-device, OS-shell, operator-incident reproduction or zero-flake coverage.
-No push or PR was attempted; parent independent validation and a separate
-same-session delivery grant remain required.
+At that original checkpoint no push or PR had been attempted. Parent independent
+validation and its separate same-session delivery grant were subsequently received.
+
+## Review remediation results
+
+Original-head check counts and parent review above are historical after remediation.
+
+- Real-handler/store RED: four intended failures (discarded stale event, identical
+  and changed-metadata equal-stage snapshots, stale event with independently fresh
+  summary); two stale-snapshot controls passed. No setup/import failure.
+- Minimal shared admission fix reuses existing freshness/discard rules and the
+  bounded journal. Accepted explicit equal-stage WS events remain authoritative.
+  A snapshot replacement asserts its stage; unchanged row identities do not.
+  Stale task fields do not assert a stage, while independently fresh status
+  summaries still merge. No revision framework or transport guarantee added.
+- Shared GREEN: 48 files, 429 tests passed across Kanban hooks, task-overview
+  state and task update ordering/status-summary/snapshot handlers. Final added
+  sibling-identity control plus causal/isolated-slice run: 43 tests, two files.
+  Final task-handler and task-overview suites: 157 tests across 25 files passed.
+- Profile cleanup RED: actual profile GET returned 200 where cleanup required
+  404. The regression's fallback removed that owned orphan. Explicit profile
+  deletion now precedes executor deletion, and each cleanup is attempted even
+  if another fails. Worker seed/source HEAD and raw status guards remain.
+- Fresh production build and browser GREEN: desktop 3/3; phone 2/2. Both now arm
+  the real authoritative `task.updated` wait before the move, await it before
+  releasing the old failure, and retain native pointer/tap semantics. The
+  failure-path fixture control passed. Phone screenshot inspected.
+- Typecheck/catalog and focused ESLint passed without warnings after correcting
+  the narrow slice context type and duplicate test literals. Localization,
+  public-doc tests/pages, catalog and full-spec checks passed. Final normal-hook
+  commit and complete diff are retained externally; no hook bypass or amend.
+
+PR 4692 was opened under the separate parent grant. Initial CI had zero failed
+checks and eight recovered native retries, with error contexts/traces inspected;
+all five owned browser cases passed first attempt. These are historical initial
+head results, not final-head signoff. Fresh final-head reviews/checks, exact
+current-base combined validation and protected merge remain delivery gates.
+Current base advanced by a disjoint agents planning package; its actual patch
+was inspected. Do not infer publication or merge success from these local results.

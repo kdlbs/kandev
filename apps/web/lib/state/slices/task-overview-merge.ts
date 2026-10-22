@@ -22,14 +22,23 @@ export function mergeTaskOverview(
     : next;
 }
 
+export function isStaleTaskOverviewPatch(
+  current: TaskOverviewPatch | undefined,
+  patch: TaskOverviewPatch,
+): boolean {
+  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
+  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
+  return before !== null && incoming !== null && incoming < before;
+}
+
 function mergeTaskOverviewPatch(
   current: TaskOverviewPatch | undefined,
   patch: TaskOverviewPatch,
 ): TaskOverviewPatch {
-  const before = parseStrictRfc3339Timestamp(current?.updatedAt?.replace(" ", "T"));
-  const incoming = parseStrictRfc3339Timestamp(patch.updatedAt?.replace(" ", "T"));
-  const stale = before !== null && incoming !== null && incoming < before;
-  const next = { ...current, ...(stale ? {} : patch) } as TaskOverviewPatch;
+  const next = {
+    ...current,
+    ...(isStaleTaskOverviewPatch(current, patch) ? {} : patch),
+  } as TaskOverviewPatch;
   if (
     Object.hasOwn(patch, "statusSummary") ||
     (current && Object.hasOwn(current, "statusSummary"))

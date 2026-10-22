@@ -21,13 +21,34 @@ test("disposable rollback fixture cleans up after a callback failure", async ({
 }) => {
   let root = "";
   let workspaceId = "";
-  await expect(
-    withRollbackFixture({ apiClient, backend, seedData }, async (owned) => {
-      root = owned.root;
-      workspaceId = owned.workspaceId;
-      throw new Error("Injected fixture callback failure");
-    }),
-  ).rejects.toThrow("Injected fixture callback failure");
+  let profileId = "";
+  const deleteExecutor = apiClient.deleteExecutor.bind(apiClient);
+  apiClient.deleteExecutor = async (executorId) => {
+    let orphaned = false;
+    try {
+      const profile = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/executors/${executorId}/profiles/${profileId}`,
+      );
+      orphaned = profile.status === 200;
+      expect(profile.status).toBe(404);
+    } finally {
+      await deleteExecutor(executorId);
+      if (orphaned) await apiClient.deleteExecutorProfile(profileId);
+    }
+  };
+  try {
+    await expect(
+      withRollbackFixture({ apiClient, backend, seedData }, async (owned) => {
+        profileId = owned.profileId;
+        root = owned.root;
+        workspaceId = owned.workspaceId;
+        throw new Error("Injected fixture callback failure");
+      }),
+    ).rejects.toThrow("Injected fixture callback failure");
+  } finally {
+    apiClient.deleteExecutor = deleteExecutor;
+  }
   expect(fs.existsSync(root)).toBe(false);
   expect(
     (await apiClient.listWorkspaces()).workspaces.some((workspace) => workspace.id === workspaceId),

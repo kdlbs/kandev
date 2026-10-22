@@ -81,7 +81,7 @@ Implemented and verified in Task 01: 20 causal tests, the full Kanban hook
 package (42 files, 384 tests), desktop browser 3/3 and phone browser 2/2,
 typecheck, focused lint, localization, public docs and specification gates.
 The immutable-base replay fails only the two expected stage assertions while
-its ordinary-failure control passes. Final focused GREEN passes all 20 cases.
+its ordinary-failure control passes. Initial focused GREEN passed all 20 cases; post-review evidence is below.
 
 Stop after the normal-hook clean commit and terminal owned handles at
 `ready_for_parent_validation`. No push/PR without a separate same-session parent
@@ -93,3 +93,34 @@ are in the external attempt26 checkpoint packet.
 Only accepted stage writes revoke stage ownership; partial unrelated fields
 survive an owned rollback. Journal scope/overflow invalidation must suppress
 rollback; no event ordering or durable backend data-loss claim is made.
+
+## Review remediation
+
+PR #4692 first head passed terminal CI (64 passed, 25 skipped, one neutral) but
+has valid bounded review findings. Keep the same owning requirement/design and
+work order. Distinguish rejected stale events from accepted stage assertions,
+including independent fresh status summaries, and explicitly journal replacement
+snapshot rows at the existing write boundary even when their stage is equal.
+Preserve unchanged row references, partial WS omission, scope and bounded overflow
+semantics. Add real-store/registered-handler RED cases before production edits.
+Also strengthen the causal browser wait and explicitly retire the owned executor
+profile; retain required worker/source HEAD and full raw-status guards. Tighten
+public wording to cross-step moves. No global revisions, new framework or package.
+New head needs normal hooks, affected shared-state suites, browser proofs, fresh
+assets if affected, current-base combined validation and actual new-head reviews.
+
+## Reviewed delivery update
+
+Parent independently reviewed clean `1f5cde91` and reran its 25 focused tests,
+then issued the separate same-session delivery grant. PR 4692 is open. Its
+initial CI completed with no failed checks; eight native tests recovered through
+retries (artifacts inspected), so this is not zero-flake evidence.
+
+Review remediation keeps the same package and journal boundary: rejected stale
+events do not assert cached stages, accepted replacement snapshot rows assert
+equal stages, independently fresh status summaries survive stale task data,
+and identity-retained sibling rows do not claim ownership. The browser now
+waits for the actual authoritative move event and explicitly deletes its owned
+executor profile. Public guidance is limited to cross-step failures.
+Detailed RED/GREEN and final local receipts are in Task 01. Delivery still
+requires fresh exact-head checks/reviews and current-base combined validation.

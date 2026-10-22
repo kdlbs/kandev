@@ -1,5 +1,5 @@
-import type { SliceCreator } from "@/lib/state/slice-creator";
-
+import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
+import type { TaskOverviewState } from "../task-overview-types";
 import type { Draft } from "immer";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 import { generateUUID } from "@/lib/utils";
@@ -10,6 +10,7 @@ import {
   recordTaskRemovalResult,
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
+import { journalSnapshotTaskStages } from "./snapshot-task-stages";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import {
   acknowledgeWorkflowSessionFocus,
@@ -502,7 +503,11 @@ function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskAction
   };
 }
 
-export const createKanbanSlice: SliceCreator<KanbanSlice> = (set, get) => ({
+type KanbanStore = KanbanSlice & { taskOverview?: TaskOverviewState };
+export const createKanbanSlice: (
+  set: SliceSet<KanbanStore>,
+  get: () => KanbanStore,
+) => KanbanSlice = (set, get) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
   ...createTaskActions(set, get),
@@ -537,12 +542,14 @@ export const createKanbanSlice: SliceCreator<KanbanSlice> = (set, get) => ({
     }),
   setWorkflowSnapshot: (workflowId, data) =>
     set((draft) => {
+      if (draft.taskOverview)
+        draft.taskOverview = journalSnapshotTaskStages(
+          draft.taskOverview,
+          data.tasks,
+          get().kanbanMulti.snapshots[workflowId]?.tasks,
+        );
       draft.kanbanMulti.snapshots[workflowId] = data;
-      // Seed this workflow's steps into orderRevisionByStepId even when it
-      // is not the currently-active board (hydrate() only walks the active
-      // kanban.steps), so a task.reordered WS event for a background
-      // "All Workflows" column is still gated on a real revision rather
-      // than the no-recorded-revision fallback.
+      // Background workflow reorders require the snapshot's real step revisions.
       draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
         draft.kanbanMulti.orderRevisionByStepId,
         data.steps,

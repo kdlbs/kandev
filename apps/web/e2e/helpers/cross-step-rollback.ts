@@ -7,6 +7,7 @@ import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import type { Page, Route } from "@playwright/test";
 import { makeGitEnv } from "./git-helper";
+import { watchWs } from "./causal-waits";
 import { settledBoundingBox } from "./settled-box";
 import { MobileKanbanPage } from "../pages/mobile-kanban-page";
 
@@ -23,6 +24,7 @@ export const test = base.extend({
 
 type Inputs = { apiClient: ApiClient; backend: BackendContext; seedData: SeedData };
 type Owned = {
+  profileId: string;
   workspaceId: string;
   workflowId: string;
   taskId: string;
@@ -53,6 +55,7 @@ export async function withRollbackFixture<T>(
   const env = makeGitEnv(root);
   let workspace: { id: string; name: string } | undefined;
   let executorId: string | undefined;
+  let profileId: string | undefined;
   let ownedRepoBefore: ReturnType<typeof fingerprint> | undefined;
   try {
     fs.mkdirSync(repoPath);
@@ -78,6 +81,7 @@ export async function withRollbackFixture<T>(
     const executor = await apiClient.createExecutor(name, "worktree");
     executorId = executor.id;
     const profile = await apiClient.createExecutorProfile(executor.id, name);
+    profileId = profile.id;
     const task = await apiClient.createTask(workspace.id, "Rollback original", {
       workflow_id: workflow.id,
       workflow_step_id: steps[0],
@@ -89,6 +93,7 @@ export async function withRollbackFixture<T>(
       workflow_filter_id: workflow.id,
     });
     return await run({
+      profileId: profile.id,
       workspaceId: workspace.id,
       workflowId: workflow.id,
       taskId: task.id,
@@ -103,6 +108,9 @@ export async function withRollbackFixture<T>(
       }),
       workspace ? apiClient.deleteWorkspace(workspace.id, workspace.name) : Promise.resolve(),
     ]);
+    const profileCleanup = profileId
+      ? await Promise.allSettled([apiClient.deleteExecutorProfile(profileId)])
+      : [];
     const executorCleanup = executorId
       ? await Promise.allSettled([apiClient.deleteExecutor(executorId)])
       : [];
@@ -115,7 +123,7 @@ export async function withRollbackFixture<T>(
     expect(fs.existsSync(root)).toBe(false);
     expect(fingerprint(seedData.repositoryPath)).toEqual(seedBefore);
     expect(fingerprint(checkout)).toEqual(sourceBefore);
-    for (const result of [...cleanupResults, ...executorCleanup]) {
+    for (const result of [...cleanupResults, ...profileCleanup, ...executorCleanup]) {
       if (result.status === "rejected") throw result.reason;
     }
   }
@@ -156,6 +164,7 @@ export async function proveRollback(
 ) {
   const { page, backend, apiClient } = inputs;
   await withRollbackFixture(inputs, async (owned) => {
+    const ws = watchWs(page);
     await page.addInitScript(
       ({ port }) => {
         localStorage.setItem("kandev.onboarding.completed", "true");
@@ -191,7 +200,14 @@ export async function proveRollback(
         title: "Remote title",
       });
       expect(rename.ok).toBe(true);
+      const authoritativeUpdate = ws.waitForEvent("task.updated", {
+        where: (payload) =>
+          payload.task_id === owned.taskId &&
+          payload.workflow_step_id === authoritativeStep &&
+          payload.title === "Remote title",
+      });
       await apiClient.moveTask(owned.taskId, owned.workflowId, authoritativeStep);
+      await authoritativeUpdate;
       await showStep(page, authoritativeIndex, mobile);
       const authoritativeCard = page
         .getByTestId(`kanban-column-${authoritativeStep}`)
