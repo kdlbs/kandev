@@ -539,3 +539,65 @@ describe("Mobile session restart", () => {
     }
   });
 });
+
+// @covers AC-UI-MOBILE-TASK-NAVIGATION-001.11
+describe("Native session menu opening gesture", () => {
+  function renderTrigger() {
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId="session-b" fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    return within(screen.getByTestId(SESSION_B_ROW)).getByRole("button", {
+      name: SESSION_ACTIONS_LABEL,
+    });
+  }
+
+  it("keeps menu items absent until the opening touch click, then accepts a separate action once", () => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.pointerUp(trigger, { pointerType: "touch", button: 0 });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+    const restart = screen.getByRole("menuitem", { name: "Restart session" });
+    fireEvent.pointerDown(restart, { pointerType: "touch", button: 0 });
+    fireEvent.pointerUp(restart, { pointerType: "touch", button: 0 });
+    fireEvent.click(restart);
+    expect(mocks.restartSession).toHaveBeenCalledExactlyOnceWith("session-b");
+    expect(mocks.setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not open on a cancelled touch and permits a later mouse gesture", () => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType: "touch", button: 0, ctrlKey: false });
+    fireEvent.pointerCancel(trigger, { pointerType: "touch" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0, ctrlKey: false });
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["mouse", "pen"])("retains Radix pointerdown opening for %s", (pointerType) => {
+    const trigger = renderTrigger();
+    fireEvent.pointerDown(trigger, { pointerType, button: 0, ctrlKey: false });
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.pointerUp(trigger, { pointerType, button: 0 });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(mocks.restartSession).not.toHaveBeenCalled();
+  });
+
+  it.each(["Enter", " ", "ArrowDown"])(
+    "opens with %s without selecting the enclosing row",
+    (key) => {
+      const trigger = renderTrigger();
+      fireEvent.keyDown(trigger, { key });
+      expect(screen.getByRole("menu")).toBeTruthy();
+      expect(mocks.setActiveSession).not.toHaveBeenCalled();
+      expect(mocks.restartSession).not.toHaveBeenCalled();
+    },
+  );
+});
