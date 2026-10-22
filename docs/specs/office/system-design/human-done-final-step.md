@@ -78,6 +78,9 @@ not reached it yet.
 
 `task/handlers.handleSelectedMoveError` maps the error to 409
 `{code: "task_approvals_pending", error, pending_approvers: [{agent_profile_id, name}]}`.
+The WebSocket `task.move` path returns `CONFLICT` with
+`details.error_code: "task_approvals_pending"` and the same `pending_approvers`
+list, preserving the refused task state.
 
 The guard reads seats and decisions outside the admission transaction. An
 approver seated, or an approval superseded, between that read and the write is
@@ -118,8 +121,12 @@ The `backendapp` adapter `officeFinalStepMoverAdapter` reads the task, takes
 the step with the highest position from `ListStepsByWorkflow` (a position tie
 goes to the larger step ID), and calls
 `MoveTaskWithOptions` with `StepHistoryActor: human` and
-`AllowActivePrimarySession: true`, the same options as `httpMoveTask`. It
-classifies refusals into `*dashboard.FinalStepMoveRefusedError{Reason, Code, Pending}`
+`AllowActivePrimarySession: true`, matching the human actor and session options
+of `httpMoveTask`. It also carries `ExpectedWorkflowID` from the task read:
+the existing write-time workflow guard refuses a concurrent reassignment
+instead of moving the task back to its stale workflow. That refusal uses
+`reason: "workflow_move"` and `code: "workflow_change_conflict"`.
+It classifies refusals into `*dashboard.FinalStepMoveRefusedError{Reason, Code, Pending}`
 with the task handlers' exported `CompletionGateCode` and `MoveConflictCode`:
 
 | Move error | `reason` | Extra fields |

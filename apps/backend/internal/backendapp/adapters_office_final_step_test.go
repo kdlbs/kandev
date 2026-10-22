@@ -159,3 +159,48 @@ func TestOfficeFinalStepMover_ReportsWIPQueuedMove(t *testing.T) {
 		t.Fatalf("result = %+v, want queued for Done with the prior state", result)
 	}
 }
+
+// reassigningFinalSteps lands a real workflow move after the adapter's task read.
+type reassigningFinalSteps struct {
+	finalStepWorkflowSteps
+	reassign func()
+}
+
+func (s reassigningFinalSteps) ListStepsByWorkflow(ctx context.Context, id string) ([]*wfmodels.WorkflowStep, error) {
+	steps, err := s.finalStepWorkflowSteps.ListStepsByWorkflow(ctx, id)
+	if err == nil {
+		s.reassign()
+	}
+	return steps, err
+}
+
+func TestOfficeFinalStepMover_ConcurrentWorkflowReassignmentSurvives(t *testing.T) {
+	h := newPluginMoveErrorBindingHarness(t)
+	ctx := context.Background()
+	if err := h.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{ID: "step-home-done", WorkflowID: "wf-home", Name: "Done", Position: 10, CompleteTaskOnEnter: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.repo.CreateTask(ctx, &models.Task{ID: "human-done-race", WorkspaceID: "ws-1", WorkflowID: "wf-home", WorkflowStepID: "step-home", Title: "Concurrent move", State: v1.TaskStateTODO}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := officeFinalStepMoverAdapter{tasks: h.adapter.svc, steps: reassigningFinalSteps{
+		finalStepWorkflowSteps: h.workflowSvc,
+		reassign: func() {
+			if _, err := h.adapter.svc.MoveTaskWithOptions(ctx, "human-done-race", "wf-target", "step-target", 0, taskservice.MoveTaskOptions{}); err != nil {
+				t.Fatalf("concurrent move: %v", err)
+			}
+		},
+	}}
+	_, err := adapter.MoveTaskToFinalStep(ctx, "human-done-race")
+	persisted, readErr := h.repo.GetTask(ctx, "human-done-race")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if persisted.WorkflowID != "wf-target" || persisted.WorkflowStepID != "step-target" || persisted.State == v1.TaskStateCompleted {
+		t.Fatalf("stale Done overwrote concurrent move: workflow=%s step=%s state=%s (error=%v)", persisted.WorkflowID, persisted.WorkflowStepID, persisted.State, err)
+	}
+	var refused *dashboard.FinalStepMoveRefusedError
+	if !errors.As(err, &refused) || !errors.Is(err, taskservice.ErrWorkflowResolutionConflict) || refused.Reason != dashboard.FinalStepMoveReasonWorkflowMove || refused.Code != "workflow_change_conflict" {
+		t.Fatalf("error=%v, want workflow conflict refusal", err)
+	}
+}

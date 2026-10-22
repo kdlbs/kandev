@@ -284,7 +284,7 @@ func moveConflictCode(err error) string {
 	if errors.Is(err, workflowmove.ErrMoveConflict) {
 		return moveConflictCodePending
 	}
-	if errors.Is(err, service.ErrWorkflowChangeConflict) {
+	if errors.Is(err, service.ErrWorkflowChangeConflict) || errors.Is(err, service.ErrWorkflowResolutionConflict) {
 		return moveConflictCodeWorkflowChange
 	}
 	msg := strings.ToLower(err.Error())

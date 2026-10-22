@@ -50,6 +50,7 @@ func (a officeFinalStepMoverAdapter) MoveTaskToFinalStep(
 	moved, err := a.tasks.MoveTaskWithOptions(ctx, taskID, task.WorkflowID, final.ID, 0, taskservice.MoveTaskOptions{
 		AllowActivePrimarySession: true,
 		StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+		ExpectedWorkflowID:        &task.WorkflowID,
 	})
 	if err != nil {
 		return nil, classifyFinalStepMoveError(err)

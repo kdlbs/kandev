@@ -538,6 +538,12 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		},
 	)
 	if err != nil {
+		var approvalsErr *service.ApprovalsPendingMoveError
+		if errors.As(err, &approvalsErr) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, approvalsErr.Error(), map[string]interface{}{
+				"error_code": "task_approvals_pending", "pending_approvers": pendingApproversBody(approvalsErr.Pending),
+			})
+		}
 		if errors.Is(err, repoerrors.ErrTaskCompletionGateBlocked) || errors.Is(err, repoerrors.ErrTaskCompletionCriteriaConflict) ||
 			errors.Is(err, repoerrors.ErrTaskCompletionHumanConfirmationRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "Task completion requirements changed or are not satisfied", map[string]interface{}{"error_code": "task_completion_gate_blocked"})
