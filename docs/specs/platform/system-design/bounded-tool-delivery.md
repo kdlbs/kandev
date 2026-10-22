@@ -42,15 +42,17 @@ Wide/deep or unsupported subtrees are omitted without full traversal or marshal.
 Small supported values retain JSON meaning, including typed nil containers.
 
 An oversized value becomes ordinary JSON `{truncated: true, preview: ...}`.
-Its preview has a separate 4 KiB budget, leaving room for the wrapper on later
-preparation. Map traversal is deterministic and key inventory is bounded before
-sorting. Byte/resource bodies are either complete within budget or omitted;
+Its preview has a separate 4 KiB budget and reserves nodes and depth for the
+wrapper and omitted leaf on later preparation. Map traversal is deterministic
+and key inventory is bounded before sorting. Byte/resource bodies are either complete within budget or omitted;
 never publish a cut binary block as a valid image.
 
 The same event's `ToolCallContents` receives a bounded preliminary size check
 before serialization. If it exceeds the content budget, replace the duplicate
 carrier with a small text block containing the marked JSON and mark the generic
 output too. Preserve substantive-content presence, actual tool status and IDs.
+When the content is the only result carrier, retain a bounded text preview from
+it. Fitting content slices, blocks and mutable scalar pointers are copied.
 
 Prepare before ACP `sendUpdateNow`/`sendUpdateLocked` snapshots and native Codex
 `emit`, with a defensive call in `Manager.persistDeliveryEvent` before writer

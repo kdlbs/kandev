@@ -106,6 +106,10 @@ Completed 2026-10-22.
 - `bash scripts/lint-go-changed` over all eight added/changed Go files: 0 issues.
 - Specification catalog/lint, focused work-order coverage preflight, public-doc
   tests/validation (54 pages), and whitespace checks passed.
+- PR review regressions reproduced unstable deep/node-limited previews, lost
+  content-only previews and shared fitting-content pointers. Reserved marker
+  budgets, bounded text fallback and copied content fix these cases. Targeted
+  tests and race checks passed again across all four affected packages.
 
 Go commands used `GOCACHE=/tmp/kandev-tool-fix-go-cache` because the default host
 cache is read-only in this execution environment. Lint also used an isolated

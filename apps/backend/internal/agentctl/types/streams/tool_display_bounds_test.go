@@ -79,3 +79,47 @@ func TestBoundedToolEventKeepsControlAndShell(t *testing.T) {
 		require.Equal(t, event, BoundGenericToolEvent(event))
 	}
 }
+
+func TestBoundedToolPreviewRemainsStable(t *testing.T) {
+	deep := any("leaf")
+	for range 17 {
+		deep = []any{deep}
+	}
+	for name, value := range map[string]any{"deep": deep, "nodes": make([]any, toolValueNodes-1)} {
+		t.Run(name, func(t *testing.T) {
+			first := truncatedToolValue(value)
+			for range 3 {
+				require.Equal(t, first, boundToolValue(first))
+			}
+		})
+	}
+}
+
+func TestBoundedToolContentOnlyPreview(t *testing.T) {
+	event := AgentEvent{Type: EventTypeToolUpdate, NormalizedPayload: NewGeneric("tool", nil),
+		ToolCallContents: []ToolCallContentItem{{Type: "content", Content: &ContentBlock{Type: "text", Text: strings.Repeat("result世", 10000)}}}}
+	bounded := BoundGenericToolEvent(event)
+	output := bounded.NormalizedPayload.Generic().Output.(map[string]any)
+	require.Equal(t, true, output["truncated"])
+	preview, ok := output["preview"].(string)
+	require.True(t, ok, "retain a text preview of the content-only result")
+	require.True(t, strings.HasPrefix(preview, "result世"))
+	require.True(t, utf8.ValidString(preview))
+	require.LessOrEqual(t, len(preview), toolPreviewBytes)
+	require.Equal(t, bounded, BoundGenericToolEvent(bounded))
+}
+
+func TestBoundedToolFittingContentsAreDetached(t *testing.T) {
+	oldText, size := "before", 42
+	event := AgentEvent{Type: EventTypeToolUpdate, NormalizedPayload: NewGeneric("tool", nil),
+		ToolCallContents: []ToolCallContentItem{{Type: "content", OldText: &oldText, Content: &ContentBlock{Type: "text", Text: "result", Size: &size}}}}
+	bounded := BoundGenericToolEvent(event)
+	before, err := json.Marshal(bounded)
+	require.NoError(t, err)
+	oldText, size = "changed", 100
+	event.ToolCallContents[0].Content.Text = "changed"
+	event.ToolCallContents[0].Type = "changed"
+	after, err := json.Marshal(bounded)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}

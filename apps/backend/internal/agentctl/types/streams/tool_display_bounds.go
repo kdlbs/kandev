@@ -3,6 +3,7 @@ package streams
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -27,9 +28,14 @@ func BoundGenericToolEvent(event AgentEvent) AgentEvent {
 	generic.Input = boundToolValue(generic.Input)
 	generic.Output = boundToolValue(generic.Output)
 	if !toolContentsFit(event.ToolCallContents) {
+		if generic.Output == nil {
+			generic.Output = toolContentsPreview(event.ToolCallContents)
+		}
 		generic.Output = truncatedToolValue(generic.Output)
 		marker, _ := json.Marshal(generic.Output)
 		event.ToolCallContents = []ToolCallContentItem{{Type: "content", Content: &ContentBlock{Type: "text", Text: string(marker)}}}
+	} else {
+		event.ToolCallContents = copyToolContents(event.ToolCallContents)
 	}
 	payload.generic = &generic
 	event.NormalizedPayload = &payload
@@ -46,9 +52,46 @@ func boundToolValue(value any) any {
 }
 
 func truncatedToolValue(value any) any {
-	budget, nodes := toolPreviewBytes, toolValueNodes
-	preview, _ := copyToolValue(value, &budget, &nodes, 0)
+	// Reserve the marker's nodes and depth, plus the omitted leaf's depth, so
+	// another preparation accepts the preview without wrapping it again.
+	budget, nodes := toolPreviewBytes, toolValueNodes-2
+	preview, _ := copyToolValue(value, &budget, &nodes, 2)
 	return map[string]any{"truncated": true, "preview": preview}
+}
+
+func toolContentsPreview(contents []ToolCallContentItem) string {
+	var preview strings.Builder
+	budget := toolPreviewBytes
+	for _, item := range contents[:min(len(contents), toolValueNodes)] {
+		if item.Content == nil || item.Content.Type != "text" {
+			continue
+		}
+		text, cut := copyToolString(item.Content.Text, &budget)
+		preview.WriteString(text)
+		if cut || budget < 8 {
+			break
+		}
+	}
+	return preview.String()
+}
+
+func copyToolContents(contents []ToolCallContentItem) []ToolCallContentItem {
+	result := slices.Clone(contents)
+	for i := range result {
+		if c := result[i].Content; c != nil {
+			content := *c
+			if content.Size != nil {
+				size := *content.Size
+				content.Size = &size
+			}
+			result[i].Content = &content
+		}
+		if result[i].OldText != nil {
+			text := *result[i].OldText
+			result[i].OldText = &text
+		}
+	}
+	return result
 }
 
 // Byte, container and node budgets bound allocation and traversal, including
