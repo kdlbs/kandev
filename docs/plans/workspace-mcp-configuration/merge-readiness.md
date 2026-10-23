@@ -12,6 +12,51 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `5c9b42656`
+
+The exact reviewed head `5c9b42656335d56dfc05d889bf51cdf0c70ca754` completed
+CI with 86 passed, 11 skipped, six failed and zero pending checks. PostgreSQL
+partition 3 and its aggregate failed in run `40029587822`; browser shards
+6, 25 and 26 and their aggregate failed in run `40029587688`. The routine-save
+shard passed. Review threads remained clear and GitHub reported no conflicts.
+
+The PostgreSQL failure was a collector commit deadline in
+`TestDeliveryRetentionConcurrencyCanonicalEffectScopeFallback/foreign_incarnation`,
+not a package timeout. The fixture deliberately parks the collector while
+testing an independent operation, consuming the same 250 ms budget used in
+production. A temporary real-PostgreSQL probe that held this barrier for 500 ms
+reproduced the deadline. The transaction body is now extracted unchanged behind
+the public method, which retains option normalization and the 250 ms limit.
+Only the parked lock-proof fixture invokes the same body with normalized options
+and a separate five-second context derived from its caller. Cleanup cancels,
+releases and joins the collector. Existing lock, ownership and durable-result
+assertions remain. Public-entry tests cover default and oversized requested
+budgets, force expiry before payload mutation, and require an unchanged cursor
+and unpruned inbox row. They passed before extraction too. This does not infer
+rollback from an ambiguous commit response. The temporary probe passed after
+extraction and was removed; it is not shipped test code.
+
+The desktop scroll fixture matched both `filler message 120` and
+`middle filler message 120`. Its two filler locators now match the complete
+seeded text. The sidebar fixture reloaded after optimistic view selection
+without waiting for preference persistence; the failed snapshot showed Other
+selected instead of Repositories. Each selection now awaits a successful
+settings PATCH matched by workspace and view before later reloads. Existing
+query, row, recovery and reload assertions remain. Both affected desktop cases
+and the phone sidebar case passed with one worker and zero retries.
+
+Quick Chat's confirmation tap passed only on retry in CI. Its original cause
+is still unknown; three unchanged local repetitions passed. Three unchanged
+sidebar repetitions also passed before the persistence-wait correction. These
+passes do not establish a baseline defect or exclude a new contribution.
+The first real-PostgreSQL race run passed all selected concurrency checks,
+public-budget controls and the temporary probe. After the cleanup correction
+and probe removal, the final race run passed with 36 test/subtest results,
+zero skips and zero failures against isolated PostgreSQL 16.15. Frontend
+type checking, scoped ESLint, formatting and documentation checks passed.
+Final build and review verification are recorded in the current delivery receipt; exact-head CI
+remains a separate gate. No product timeout or UI behavior was changed.
+
 ### CI follow-up after `7c9fdc427`
 
 The isolated review accepted the exact published commit

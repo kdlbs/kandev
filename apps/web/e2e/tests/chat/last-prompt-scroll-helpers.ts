@@ -153,7 +153,7 @@ export async function seedScrolledPastLastPrompt(
     .toBe(0);
   await expect(
     session.activeChat().getByText("middle filler message " + MIDDLE_FILLER_COUNT, {
-      exact: false,
+      exact: true,
     }),
   ).toBeVisible({ timeout: 15_000 });
 
@@ -167,7 +167,7 @@ export async function seedScrolledPastLastPrompt(
   }
   const lastFiller = session
     .activeChat()
-    .getByText(`filler message ${trailingFillerCount}`, { exact: false });
+    .getByText(`filler message ${trailingFillerCount}`, { exact: true });
   await expect(lastFiller).toBeVisible({ timeout: 15_000 });
   await lastFiller.scrollIntoViewIfNeeded();
 
