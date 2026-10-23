@@ -19,13 +19,16 @@ export function parseSlashCommand(content: string | undefined): string | null {
   return firstWord.length > 0 ? firstWord : null;
 }
 
-/** Whether `command` matches one of the agent's advertised commands (case-insensitive). */
+/** Whether `command` matches an advertised command or its colon-delimited argument form. */
 export function isKnownCommand(
   command: string,
   available: AvailableCommand[] | undefined,
 ): boolean {
   const lower = command.toLowerCase();
-  return (available ?? []).some((c) => c.name.toLowerCase() === lower);
+  return (available ?? []).some((c) => {
+    const name = c.name.toLowerCase();
+    return lower === name || lower.startsWith(`${name}:`);
+  });
 }
 
 // Catalog key; resolved inside `emptyTurnNoticeText`.

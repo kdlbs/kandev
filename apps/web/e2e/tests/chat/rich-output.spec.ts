@@ -259,9 +259,7 @@ test("renders complete chart geometry when device animation is disabled", async 
   await expect(line).toHaveAttribute("d", /^M[\d.,-]+[CL]/);
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
-  await barPlot.evaluate((element) =>
-    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
-  );
+  await barPlot.scrollIntoViewIfNeeded();
   await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
   await expect(barPlot.locator(".recharts-bar-rectangle")).toHaveCount(6, {
     timeout: 30_000,

@@ -27,11 +27,7 @@ func TestWorkspaceTracker_StopsWhenWorkDirRemoved(t *testing.T) {
 	wt.SetPollMode(PollModeFast)
 
 	wt.Start(context.Background())
-	select {
-	case <-wt.initialScanDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("workspace tracker did not complete its initial scan")
-	}
+	waitForWorkspaceTrackerInitialScans(t, wt)
 
 	// Remove the watched path atomically; delete its contents after Git stops.
 	removedDir := filepath.Join(t.TempDir(), "removed-worktree")
@@ -54,6 +50,34 @@ func TestWorkspaceTracker_StopsWhenWorkDirRemoved(t *testing.T) {
 		// Both goroutines exited — success
 	case <-time.After(5 * time.Second):
 		t.Fatal("workspace tracker goroutines did not stop after workdir was removed")
+	}
+}
+
+func waitForWorkspaceTrackerInitialScans(t *testing.T, wt *WorkspaceTracker) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+
+	select {
+	case <-wt.initialScanDone:
+	case <-deadline.C:
+		t.Fatal("workspace monitor did not finish its initial scan")
+	}
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		wt.gitStateMu.RLock()
+		gitPollInitialized := wt.cachedHeadSHA != ""
+		wt.gitStateMu.RUnlock()
+		if gitPollInitialized {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("workspace Git poll did not finish its initial scan")
+		case <-ticker.C:
+		}
 	}
 }
 

@@ -35,7 +35,10 @@ import {
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { useFileBrowserData } from "./file-browser-data";
-import { labelFileBrowserPath } from "./file-browser-repository-labels";
+import {
+  labelFileBrowserPath,
+  type FileBrowserRepositoryContext,
+} from "./file-browser-repository-labels";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
 import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
@@ -63,6 +66,7 @@ function useFileBrowserHandlers(
   onOpenFile: (file: OpenFileTab) => void,
   onCreateFile: FileBrowserProps["onCreateFile"],
   treeState: ReturnType<typeof useFileBrowserTree>,
+  { workspacePath, worktrees }: FileBrowserRepositoryContext,
 ) {
   const { toast } = useToast();
   const { t } = useTranslation("chat");
@@ -125,13 +129,15 @@ function useFileBrowserHandlers(
       openFileAbortRef.current = controller;
       return fetchAndOpenFile(sessionId, path, onOpenFile, toast, {
         signal: controller.signal,
+        workspacePath,
+        worktrees,
       }).finally(() => {
         if (openFileAbortRef.current === controller) {
           openFileAbortRef.current = null;
         }
       });
     },
-    [sessionId, onOpenFile, toast],
+    [sessionId, onOpenFile, toast, workspacePath, worktrees],
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
   const handleAddToChatContext = useCallback(
@@ -362,7 +368,10 @@ function useFileBrowserViewModel({
 }) {
   const data = useFileBrowserData(sessionId, environmentId);
   useScrollPersistence(sessionId, data.isTreeLoaded, scrollAreaRef, data.treeState.tree);
-  const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, data.treeState);
+  const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, data.treeState, {
+    workspacePath: data.workspacePath,
+    worktrees: data.worktrees,
+  });
   const selection = useSelectionInteractions(
     sessionId,
     data.treeState,

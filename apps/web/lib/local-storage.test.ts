@@ -288,13 +288,13 @@ describe("open file tabs storage", () => {
     window.sessionStorage.clear();
   });
 
-  it("round-trips generic rendered preview state with the multi-repo repo subpath", () => {
+  it("round-trips Markdown mode with the multi-repo repo subpath", () => {
     setOpenFileTabs("sess-1", [
       {
         path: sourcePath,
         name: "README.md",
         repo: "enrichment-commons",
-        renderedPreview: true,
+        markdownMode: "preview",
         pinned: true,
       },
     ]);
@@ -304,7 +304,7 @@ describe("open file tabs storage", () => {
         path: sourcePath,
         name: "README.md",
         repo: "enrichment-commons",
-        renderedPreview: true,
+        markdownMode: "preview",
         pinned: true,
       },
     ]);
@@ -314,7 +314,7 @@ describe("open file tabs storage", () => {
       path: sourcePath,
       name: "README.md",
       repo: "enrichment-commons",
-      renderedPreview: true,
+      markdownMode: "preview",
       pinned: true,
     });
   });
@@ -336,7 +336,7 @@ describe("open file tabs storage", () => {
       {
         path: "README.md",
         name: "README.md",
-        renderedPreview: true,
+        markdownMode: "preview",
         pinned: true,
       },
     ]);
@@ -357,6 +357,28 @@ describe("open file tabs storage", () => {
       name: "index.html",
       pinned: true,
     });
+  });
+
+  it("migrates legacy Markdown preview flags to an explicit mode", () => {
+    const previewPath = "preview.md";
+    const sourcePath = "source.md";
+    const missingPath = "missing.md";
+    const pinned = true;
+
+    window.sessionStorage.setItem(
+      "kandev.openFiles.sess-legacy",
+      JSON.stringify([
+        { path: previewPath, name: previewPath, markdownPreview: true, pinned },
+        { path: sourcePath, name: sourcePath, markdownPreview: false, pinned },
+        { path: missingPath, name: missingPath, pinned },
+      ]),
+    );
+
+    expect(getOpenFileTabs("sess-legacy")).toEqual([
+      { path: previewPath, name: previewPath, markdownMode: "preview", pinned },
+      { path: sourcePath, name: sourcePath, markdownMode: "source", pinned },
+      { path: missingPath, name: missingPath, markdownMode: "source", pinned },
+    ]);
   });
 });
 

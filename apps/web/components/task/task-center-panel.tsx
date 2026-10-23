@@ -35,12 +35,15 @@ import { useNormalizedTaskReviews } from "./review-panel-provider";
 import { useReviewItemSelection } from "./review-selection";
 import {
   getFileTabKey,
+  installFileEditorTab,
+  toStoredFileTab,
+  useCanonicalFileTabs,
   upsertOpenFileTab,
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { TaskCenterReviewContent } from "./task-center-review-content";
 import { useTaskCenterFileOpen } from "@/hooks/use-task-center-file-open";
-import { getFilePreviewKind } from "@/lib/utils/file-types";
+import type { MarkdownFileMode } from "./markdown-file-mode";
 
 import type { SelectedDiff } from "./task-layout";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
@@ -198,6 +201,15 @@ function useFileTabOperations({
     [setOpenFileTabs],
   );
 
+  const handleMarkdownModeChange = useCallback(
+    (fileKey: string, markdownMode: MarkdownFileMode) => {
+      setOpenFileTabs((prev) =>
+        prev.map((tab) => (getFileTabKey(tab) === fileKey ? { ...tab, markdownMode } : tab)),
+      );
+    },
+    [setOpenFileTabs],
+  );
+
   const { handleFileSave, handleFileDelete, savingFiles } = useFileSaveDelete({
     activeSessionId,
     openFileTabs,
@@ -210,6 +222,7 @@ function useFileTabOperations({
     handleCloseFileTab,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
     savingFiles,
@@ -278,15 +291,7 @@ function reviewLabelForReviews(
 function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: OpenFileTab[]) {
   useEffect(() => {
     if (!activeSessionId) return;
-    saveOpenFileTabs(
-      activeSessionId,
-      openFileTabs.map(({ path, name, repo, renderedPreview }) => ({
-        path,
-        name,
-        repo,
-        ...(getFilePreviewKind(path) === "markdown" && renderedPreview ? { renderedPreview } : {}),
-      })),
-    );
+    saveOpenFileTabs(activeSessionId, openFileTabs.map(toStoredFileTab));
   }, [activeSessionId, openFileTabs]);
 }
 
@@ -311,7 +316,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeTaskId,
   );
   const { reviews, selectedReview, selectReview, reviewLabel } = useTaskReview(activeTaskId);
-  const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
+  const [openFileTabs, setOpenFileTabs] = useCanonicalFileTabs(activeSessionId);
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
   const {
     leftTab,
@@ -353,7 +358,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     queueMicrotask(async () => {
       const hash = openFileRequest.originalHash || (await calculateHash(openFileRequest.content));
       fileTabOps.addFileTab({
-        ...openFileRequest,
+        ...installFileEditorTab(openFileRequest),
         originalContent: openFileRequest.originalContent || openFileRequest.content,
         originalHash: hash,
         isDirty: openFileRequest.isDirty ?? false,
@@ -424,6 +429,7 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     handleOpenFileFromChat,
     handleFileChange,
     handleRenderedPreviewToggle,
+    handleMarkdownModeChange,
     handleFileSave,
     handleFileDelete,
   } = fileTabOps;
@@ -478,6 +484,8 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
             onTogglePreview={() => handleRenderedPreviewToggle(getFileTabKey(tab))}
+            onOpenFile={handleOpenFileFromChat}
+            onMarkdownModeChange={(mode) => handleMarkdownModeChange(getFileTabKey(tab), mode)}
           />
         ))}
       </SessionTabs>

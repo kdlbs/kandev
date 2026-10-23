@@ -8,6 +8,11 @@ import {
   type ElementBox,
 } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
+import {
+  expectInheritedButtonForeground,
+  expectNeutralDisabledButton,
+  setButtonTheme,
+} from "../../helpers/button-state-colors";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PR_NUMBER = 701;
@@ -174,6 +179,116 @@ async function expectCenterHit(locator: Locator, label: string): Promise<void> {
 }
 
 test.describe("PR Details layout panel", () => {
+  test("button colors keep pending custom-green PR actions neutral in both themes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const task = await createTaskWithSession(apiClient, seedData, "PR action button colors");
+    await apiClient.mockGitHubSetRepositoryDetails("testorg", "testrepo", true);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: RESPONSIVE_PR_NUMBER,
+      pr_url: RESPONSIVE_PR_URL,
+      pr_title: "PR action button colors",
+      head_branch: "feat/pr-button-colors",
+      base_branch: "main",
+      author_login: "another-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+      review_count: 1,
+      required_reviews: 1,
+      checks_total: 1,
+      checks_passing: 1,
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: RESPONSIVE_PR_NUMBER,
+      checks: [{ name: "Tests", status: "completed", conclusion: "success" }],
+      reviews: [{ id: 1, author: "code-owner", state: "APPROVED" }],
+    });
+    await expect
+      .poll(() => apiClient.getTaskPR(task.id))
+      .toMatchObject({
+        state: "open",
+        checks_state: "success",
+        review_state: "approved",
+        mergeable_state: "clean",
+      });
+    const session = await openTask(testPage, task.id);
+    await session.prDetailTab().click();
+    const detail = testPage.getByTestId("change-request-detail");
+    const approve = detail.getByTestId("pr-approve-button");
+    const merge = detail.getByTestId("pr-merge-button");
+    for (const dark of [false, true]) {
+      await setButtonTheme(testPage, dark);
+      for (const button of [approve, merge]) {
+        await expect(button).toBeEnabled();
+        await expectInheritedButtonForeground(button);
+        await expect
+          .poll(() =>
+            button.evaluate((element) => {
+              const probe = document.createElement("span");
+              probe.className = "bg-green-600 text-white";
+              element.append(probe);
+              try {
+                const actual = getComputedStyle(element);
+                const target = getComputedStyle(probe);
+                return (
+                  actual.backgroundColor === target.backgroundColor && actual.color === target.color
+                );
+              } finally {
+                probe.remove();
+              }
+            }),
+          )
+          .toBe(true);
+      }
+    }
+
+    // Delay transport admission so provider events cannot remove the pending actions.
+    for (const [button, endpoint, method] of [
+      [approve, "reviews", "POST"],
+      [merge, "merge", "PUT"],
+    ] as const) {
+      let release: (() => void) | undefined;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const routePattern = `**/api/v1/github/prs/testorg/testrepo/${RESPONSIVE_PR_NUMBER}/${endpoint}?*`;
+      await testPage.route(routePattern, async (route) => {
+        if (route.request().method() !== method) return route.continue();
+        await pending;
+        await route.continue();
+      });
+      const response = testPage.waitForResponse(
+        (value) =>
+          value.request().method() === method &&
+          value.url().includes(`/prs/testorg/testrepo/${RESPONSIVE_PR_NUMBER}/${endpoint}?`),
+      );
+      try {
+        await button.click();
+        for (const dark of [false, true]) {
+          await setButtonTheme(testPage, dark);
+          await expectNeutralDisabledButton(button);
+        }
+      } finally {
+        release?.();
+        expect((await response).ok()).toBe(true);
+        await testPage.unroute(routePattern);
+      }
+      if (endpoint === "reviews") await expect(merge).toBeEnabled();
+    }
+  });
+
   test("adds linked review content beside Agent without changing focus", async ({
     testPage,
     apiClient,

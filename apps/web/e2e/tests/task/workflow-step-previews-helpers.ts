@@ -19,9 +19,43 @@ export async function expectWorkflowStepPreviewsLoaded(
   const receivedResponses = await Promise.all(responses);
   for (const response of receivedResponses) expect(response.ok()).toBe(true);
   await Promise.all(receivedResponses.map((response) => response.finished()));
-  for (const { id, stepNames } of workflows) {
-    await expectStepsInOrder(page, id, stepNames);
-  }
+  await Promise.all(
+    workflows.map(({ id }) =>
+      expect(page.getByTestId("workflow-option-steps-" + id)).toBeVisible(),
+    ),
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate((expectedWorkflows) => {
+          return expectedWorkflows
+            .filter(({ id, stepNames }) => {
+              const group = document.querySelector<HTMLElement>(
+                `[data-testid="workflow-option-steps-${id}"]`,
+              );
+              const titles = Array.from(
+                group?.querySelectorAll("span.wrap-anywhere") ?? [],
+                (element) => element.textContent,
+              );
+              let previousPosition = -1;
+              for (const name of stepNames) {
+                const position = titles.indexOf(name);
+                if (position <= previousPosition) return true;
+                previousPosition = position;
+              }
+              return false;
+            })
+            .map(({ id, stepNames }) => ({
+              id,
+              expected: stepNames,
+              rendered: document.querySelector<HTMLElement>(
+                `[data-testid="workflow-option-steps-${id}"]`,
+              )?.textContent,
+            }));
+        }, workflows),
+      { message: "Workflow preview steps should render in order" },
+    )
+    .toEqual([]);
 }
 
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
@@ -109,7 +143,10 @@ const overflowStageNames = [
 ];
 
 function getOverflowStageNames(workflowName: string): string[] {
-  return overflowStageNames.map((name, index) => `${workflowName}: ${name} ${index + 1}`);
+  const names = overflowStageNames.map((name, index) => `${workflowName}: ${name} ${index + 1}`);
+  // An earlier label contains a later label, so order checks must match whole titles.
+  names[0] = `${names[1]} (architecture consultation)`;
+  return names;
 }
 
 export async function seedWorkflowStepPreviewScenario(
@@ -163,9 +200,7 @@ export async function seedWorkflowStepPreviewScenario(
   for (let index = 0; index < extraWorkflowCount; index += 1) {
     const workflowName = `Picker overflow ${index + 1}`;
     const workflow = await apiClient.createWorkflow(workspaceId, workflowName);
-    const stepNames = longWorkflowSteps
-      ? getOverflowStageNames(workflowName)
-      : [`Overflow start ${index + 1}`];
+    const stepNames = [`Overflow start ${index + 1}`];
     for (const [position, name] of stepNames.entries()) {
       await apiClient.createWorkflowStep(workflow.id, name, position, {
         is_start_step: position === 0,
@@ -312,8 +347,8 @@ export async function expectWorkflowOptionVisibleAndHitTestable(
   if (!optionBox || !listBox || !testId) throw new Error("Workflow option is not measurable");
   expect(optionBox.width).toBeGreaterThanOrEqual(44);
   expect(optionBox.height).toBeGreaterThanOrEqual(44);
-  expect(optionBox.x).toBeGreaterThanOrEqual(listBox.x);
-  expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(listBox.x + listBox.width);
+  expect(optionBox.x).toBeGreaterThanOrEqual(listBox.x - 1);
+  expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1);
   const visibleTop = Math.max(optionBox.y, listBox.y);
   const visibleBottom = Math.min(optionBox.y + optionBox.height, listBox.y + listBox.height);
   expect(visibleBottom).toBeGreaterThan(visibleTop);

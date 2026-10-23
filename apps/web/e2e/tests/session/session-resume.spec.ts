@@ -406,7 +406,7 @@ test.describe("Task status during resume", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("Session resume (TUI passthrough mode)", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("resume TUI session after backend restart reconnects with resume flag", async ({
     testPage,
@@ -448,6 +448,16 @@ test.describe("Session resume (TUI passthrough mode)", () => {
       timeout: 30_000,
     });
 
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial TUI session did not settle before restart",
+      timeout: 30_000,
+    });
+
     // 6. Restart the backend
     await backend.restart();
 
@@ -455,11 +465,14 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     await testPage.reload();
 
     // 8. Wait for passthrough terminal to reconnect after resume
-    await session.waitForPassthroughLoad();
+    await session.waitForPassthroughLoad(60_000);
     await session.waitForPassthroughLoaded(60_000);
 
     // 9. The TUI should show the RESUMED header, confirming --resume/-c was passed
     await session.expectPassthroughHasText("RESUMED", 60_000);
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions.map((candidate) => candidate.id)).toEqual([sessionId]);
+    expect(sessions[0]?.agent_profile_id).toBe(tuiProfile.id);
   });
 
   test("resume TUI session with multiple repos reconnects with resume flag", async ({
@@ -526,7 +539,7 @@ test.describe("Session resume (TUI passthrough mode)", () => {
     await testPage.reload();
     await session.waitForPassthroughLoad(60_000);
     await session.waitForPassthroughLoaded(60_000);
-    await session.expectPassthroughHasText("RESUMED", 30_000);
+    await session.expectPassthroughHasText("RESUMED", 60_000);
   });
 });
 

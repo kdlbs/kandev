@@ -17,6 +17,7 @@ vi.mock("@/lib/ws/connection", () => ({
 
 import {
   buildFileEditorState,
+  buildPersistedTabs,
   fetchFileEditorState,
   getPreviewItemIdToRemoveOnReplace,
   isFileEditorPanelAlreadyRestored,
@@ -60,6 +61,42 @@ describe("buildFileEditorState", () => {
   it("leaves repo undefined for single-repo tasks", async () => {
     const state = await buildFileEditorState(PATH, RESPONSE);
     expect(state.repo).toBeUndefined();
+  });
+});
+
+describe("buildPersistedTabs", () => {
+  it("preserves repository identity and Markdown modes for pinned tabs", async () => {
+    const path = "README.md";
+    const fileKey = buildRepoScopedItemId(path, REPO);
+    const file = {
+      ...(await buildFileEditorState(path, RESPONSE, REPO)),
+      markdownMode: "edit" as const,
+    };
+    const api = makeDockApi({ [`file:${fileKey}`]: {} });
+
+    expect(buildPersistedTabs(api, new Map([[fileKey, file]]))).toEqual([
+      { path, name: path, repo: REPO, markdownMode: "edit", pinned: true },
+    ]);
+  });
+
+  it.each([false, true])(
+    "persists a promoted preview as pinned only when promoted is %s",
+    async (promoted) => {
+      const path = "README.md";
+      const file = { ...(await buildFileEditorState(path, RESPONSE)), renderedPreview: true };
+      const api = makeDockApi({
+        [PREVIEW_FILE_EDITOR_ID]: { params: { previewItemId: path, promoted } },
+      });
+
+      expect(buildPersistedTabs(api, new Map([[path, file]]))).toEqual([
+        { path, name: path, renderedPreview: true, pinned: promoted },
+      ]);
+    },
+  );
+
+  it("excludes buffers with no panel", async () => {
+    const file = await buildFileEditorState(PATH, RESPONSE);
+    expect(buildPersistedTabs(makeDockApi({}), new Map([[PATH, file]]))).toEqual([]);
   });
 });
 

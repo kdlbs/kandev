@@ -24,7 +24,10 @@ import {
   setPendingCursorPosition,
   useOpenFileAtLine,
 } from "./use-file-editors";
-import { EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS } from "./file-editor-cursor";
+import {
+  pendingWalkthroughAcknowledgement,
+  EDITOR_CONTENT_SEARCH_FLASH_DURATION_MS,
+} from "./file-editor-cursor";
 
 function createEditor(modelPath: string | null, modelUri?: string) {
   return {
@@ -349,4 +352,44 @@ describe("useOpenFileAtLine", () => {
     expect(getMonacoInstance).not.toHaveBeenCalled();
     expect(consumePendingCursorPosition(APP_PATH)).toBeUndefined();
   });
+});
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-002.18
+it("retains walkthrough navigation ownership for conditional acknowledgement", () => {
+  const owner = Symbol();
+  const options = { walkthroughOwner: owner };
+  setPendingCursorPosition(APP_PATH, 7, 1, REPO, options);
+  expect(consumePendingCursorPosition(APP_PATH, REPO)).toEqual({
+    line: 7,
+    column: 1,
+    walkthroughOwner: owner,
+  });
+});
+
+it("acknowledges only the observed walkthrough request and preserves newer navigation", () => {
+  setPendingCursorPosition(APP_PATH, 7, 1, REPO, { walkthroughOwner: Symbol() });
+  const acknowledge = pendingWalkthroughAcknowledgement(APP_PATH, REPO, undefined, 7);
+  setPendingCursorPosition(APP_PATH, 12, 3, REPO, { flashLine: true });
+  acknowledge();
+  expect(consumePendingCursorPosition(APP_PATH, REPO)).toEqual({
+    line: 12,
+    column: 3,
+    flashLine: true,
+  });
+  setPendingCursorPosition(APP_PATH, 7, 1, REPO, { walkthroughOwner: Symbol() });
+  pendingWalkthroughAcknowledgement(APP_PATH, REPO, undefined, 7)();
+  expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
+});
+it("does not acknowledge another session, repository, range, or search request", () => {
+  setPendingCursorPosition(APP_PATH, 7, 1, REPO, {
+    sessionId: FIRST_SESSION_ID,
+    walkthroughOwner: Symbol(),
+  });
+  pendingWalkthroughAcknowledgement(APP_PATH, REPO, SECOND_SESSION_ID, 7)();
+  pendingWalkthroughAcknowledgement(APP_PATH, undefined, FIRST_SESSION_ID, 7)();
+  pendingWalkthroughAcknowledgement(APP_PATH, REPO, FIRST_SESSION_ID, 8)();
+  expect(consumePendingCursorPosition(APP_PATH, REPO, FIRST_SESSION_ID)?.line).toBe(7);
+  setPendingCursorPosition(APP_PATH, 7, 1, REPO);
+  pendingWalkthroughAcknowledgement(APP_PATH, REPO, undefined, 7)();
+  expect(consumePendingCursorPosition(APP_PATH, REPO)).toEqual({ line: 7, column: 1 });
 });

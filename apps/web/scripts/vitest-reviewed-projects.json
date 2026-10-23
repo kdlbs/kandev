@@ -139,6 +139,7 @@
     "e2e/scripts/kubernetes-fixture-policy.test.ts",
     "e2e/scripts/kubernetes-helpers.test.ts",
     "e2e/scripts/kubernetes-pins.test.ts",
+    "e2e/scripts/markdown-browser-coverage.test.ts",
     "e2e/scripts/plan-shards.test.ts",
     "e2e/scripts/resource-guard.test.ts",
     "e2e/scripts/retry-summary.test.ts",

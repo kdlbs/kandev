@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
@@ -20,8 +20,10 @@ import {
   revealPendingCodeMirrorCursor,
 } from "./codemirror-cursor-navigation";
 import { useTranslation } from "react-i18next";
+import type { SourcePositionProps } from "../source-position";
+import { useCodeMirrorSourcePosition } from "../use-source-position";
 
-type FileEditorContentProps = {
+type FileEditorContentProps = SourcePositionProps & {
   path: string;
   content: string;
   originalContent: string;
@@ -40,6 +42,7 @@ type FileEditorContentProps = {
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -96,6 +99,13 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  useCodeMirrorSourcePosition({
+    view: editorView,
+    content,
+    identity: JSON.stringify([sessionId, repo, path]),
+    isActive: props.isActive,
+    onSourcePositionHandle: props.onSourcePositionHandle,
+  });
   const state = useCodeMirrorEditorState({
     path,
     repo,
@@ -154,6 +164,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     onTogglePreview,
     onPreviewHtml,
     isPublishingHtmlPreview,
+    toolbarModeControl,
     onSave,
     onReloadFromAgent,
     onDelete,
@@ -188,6 +199,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onTogglePreview={onTogglePreview}
         onPreviewHtml={onPreviewHtml}
         isPublishingHtmlPreview={isPublishingHtmlPreview}
+        toolbarModeControl={toolbarModeControl}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror

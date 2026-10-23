@@ -10,6 +10,7 @@ import { SessionRecoveryCard } from "./session-recovery-card";
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 afterEach(cleanup);
 
+const FAILED_RESUME = "Failed to resume session";
 const RESUME_BUTTON = "recovery-resume-button";
 const FRESH_BUTTON = "recovery-fresh-button";
 const RESTORE_WORKSPACE_BUTTON = "recovery-restore-workspace-button";
@@ -334,7 +335,7 @@ describe("read-only recovery presentation", () => {
 
     const error = screen.getByTestId("session-recovery-error");
     expect(error.getAttribute("role")).toBe("status");
-    expect(error.textContent).toContain("Failed to resume session");
+    expect(error.textContent).toContain(FAILED_RESUME);
   });
 });
 
@@ -393,7 +394,7 @@ it("keeps typed selection copy primary over a correlated manual recovery error",
   expect(screen.getByTestId("session-recovery-fresh-start-warning").textContent).toContain(
     "A fresh session uses your saved selections",
   );
-  expect(screen.queryByText("Failed to resume session")).toBeNull();
+  expect(screen.queryByText(FAILED_RESUME)).toBeNull();
   fireEvent.click(screen.getByText("Technical details"));
   const details = screen.getByText(/Requested model/).textContent ?? "";
   expect(details).toContain("claude-opus-4-8");
@@ -451,36 +452,62 @@ it("keeps a typed startup cause and workspace status visible after read-only res
   expect(screen.getByTestId("recovery-fresh-button")).toBeTruthy();
 });
 
-it("shows only the confirmed managed clone relocation action", () => {
-  render(
-    <StateProvider
-      initialState={
-        {
-          taskSessions: { items: { session } },
-          agentProfiles: { items: [{ id: "profile" }] },
-        } as unknown as Partial<AppState>
-      }
-    >
-      <SessionRecoveryCard
-        model={{
-          sessionId: "session",
-          stamp: "managed-stamp",
-          kind: "managed_clone_relocation_required",
-          summary: "old clone mismatch",
-        }}
-        actions={actions}
-        onNewSession={vi.fn()}
-      />
-    </StateProvider>,
-  );
+it.each([false, true])(
+  "keeps managed clone relocation guidance and its confirmed action (manual failure: %s)",
+  (manualFailure) => {
+    relocate.mockClear();
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            stamp: "managed-stamp",
+            kind: "managed_clone_relocation_required",
+            summary: "old clone mismatch",
+          }}
+          actions={{
+            ...actions,
+            recoveryError: manualFailure ? new Error(FAILED_RESUME) : null,
+            manualRecoveryFailure: manualFailure
+              ? {
+                  operation: "resume",
+                  sessionId: "session",
+                  errorStamp: "managed-stamp",
+                  requestKey: "task\u0000session\u0000managed-stamp",
+                  operationId: 1,
+                }
+              : null,
+          }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
 
-  expect(screen.getByTestId(RELOCATE_BUTTON)).toBeTruthy();
-  expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
-  expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
-  expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
-  fireEvent.click(screen.getByTestId(RELOCATE_BUTTON));
-  expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
-  expect(document.body.textContent).toContain("Git staging choices do not transfer");
-  fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
-  expect(relocate).toHaveBeenCalledOnce();
-});
+    expect(
+      screen.getByText(
+        "This worktree belongs to an older repository clone and has local changes.",
+        { exact: false },
+      ),
+    ).toBeTruthy();
+    if (manualFailure) {
+      fireEvent.click(screen.getByText("Technical details"));
+      expect(screen.getByText(FAILED_RESUME)).toBeTruthy();
+    }
+    expect(screen.getByTestId(RELOCATE_BUTTON)).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
+    fireEvent.click(screen.getByTestId(RELOCATE_BUTTON));
+    expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
+    expect(document.body.textContent).toContain("Git staging choices do not transfer");
+    fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+    expect(relocate).toHaveBeenCalledOnce();
+  },
+);

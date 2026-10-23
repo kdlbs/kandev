@@ -4,6 +4,14 @@ const CI = !!process.env.CI;
 const upgradeRun = ["upgrade-desktop", "upgrade-mobile"].includes(
   process.env.KANDEV_UPGRADE_PROJECT ?? "",
 );
+// Native clipboard shortcuts follow the Linux runner. Safari on macOS is a separate manual check.
+const desktopWebkit = { ...devices["Desktop Safari"] };
+if (process.platform === "linux") {
+  desktopWebkit.userAgent = desktopWebkit.userAgent.replace(
+    /\(Macintosh;[^)]+\)/,
+    "(X11; Linux x86_64)",
+  );
+}
 
 export default defineConfig({
   testDir: "./tests",
@@ -108,6 +116,21 @@ export default defineConfig({
       testMatch: /mobile-.*\.spec\.ts/,
       testIgnore: [/ssh\/.*\.spec\.ts/, /upgrade\/.*\.spec\.ts/],
       use: { ...devices["Pixel 5"] },
+    },
+    {
+      name: "markdown-firefox",
+      testMatch: /\/task\/markdown-file-editing\.spec\.ts$/,
+      use: { ...devices["Desktop Firefox"] },
+    },
+    {
+      name: "markdown-webkit",
+      testMatch: /\/task\/markdown-file-editing\.spec\.ts$/,
+      use: desktopWebkit,
+    },
+    {
+      name: "markdown-mobile-webkit",
+      testMatch: /\/task\/mobile-markdown-file-editing\.spec\.ts$/,
+      use: { ...devices["iPhone 13"] },
     },
     {
       // Real-container E2E. Opt-in: run with `playwright test --project=containers`.

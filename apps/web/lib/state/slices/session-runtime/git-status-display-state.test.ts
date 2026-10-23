@@ -117,6 +117,42 @@ describe("Git status display snapshots", () => {
 });
 
 describe("Git status display comparison scope", () => {
+  // @covers AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.2
+  it.each([
+    { initial: undefined, next: "" },
+    { initial: "", next: undefined },
+    { initial: "", next: "" },
+  ])("keeps the no-target scope stable from $initial to $next", ({ initial, next }) => {
+    const store = state();
+    applyGitStatus(store, "environment", entry({ comparison_target: initial }));
+    const previous = displayEntry(store);
+
+    applyGitStatus(
+      store,
+      "environment",
+      entry({ comparison_target: next, snapshot_revision: 2, files_complete: false, files: {} }),
+    );
+
+    expect(displayEntry(store)).toEqual(previous);
+    expect(displayEntry(store)?.comparisonTarget).toBeNull();
+    expect(displayEntry(store)?.files["src/a.ts"].flat?.diff).toContain("+new");
+  });
+
+  it.each(["", "origin/release"])(
+    "invalidates retained content when a real target changes to %s",
+    (comparison_target) => {
+      const store = state();
+      applyGitStatus(store, "environment", entry());
+      applyGitStatus(
+        store,
+        "environment",
+        entry({ comparison_target, snapshot_revision: 2, files_complete: false, files: {} }),
+      );
+
+      expect(displayEntry(store)?.files).toEqual({});
+    },
+  );
+
   it("treats an empty base scope in a ready snapshot as an explicit comparison change", () => {
     const store = state();
     applyGitStatus(store, "environment", entry());

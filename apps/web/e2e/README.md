@@ -1,6 +1,6 @@
 # Kandev Web — E2E Test Suite
 
-Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports; that backend serves the Vite SPA assets and boot data while Playwright drives a real Chromium against it.
+Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go backend (no mocks of internal services) on isolated ports; that backend serves the Vite SPA assets and boot data while Playwright drives Chromium, Firefox, or WebKit against it.
 
 ## Project layout
 
@@ -92,7 +92,8 @@ journal to the shipped 256 MiB limit and checks pruning after Retry.
 
 ## Playwright projects
 
-The suite is split into six projects. Pick one with `--project=<name>`.
+Pick a project with `--project=<name>`. The general suites and focused
+Markdown browser suites use separate project names.
 
 ### `routing`
 
@@ -128,6 +129,36 @@ pnpm e2e:raw
 ### `mobile-chrome`
 
 Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobile-*.spec.ts`. Runs in the same CI shard matrix as `chromium`.
+
+### Markdown browser projects
+
+`markdown-firefox` and `markdown-webkit` run only
+`tests/task/markdown-file-editing.spec.ts` in their actual browser engines.
+`markdown-mobile-webkit` runs only `tests/task/mobile-markdown-file-editing.spec.ts`
+with an iPhone viewport. Each uses one worker. Existing `chromium` and
+`mobile-chrome` projects retain the same Markdown specs.
+
+Install both engines, then run the focused suites sequentially from the repository root:
+
+```sh
+pnpm --dir apps/web exec playwright install --with-deps firefox webkit
+pnpm --dir apps/web e2e:run --host --shards 1 --project markdown-firefox tests/task/markdown-file-editing.spec.ts
+pnpm --dir apps/web e2e:run --host --shards 1 --project markdown-webkit tests/task/markdown-file-editing.spec.ts
+pnpm --dir apps/web e2e:run --host --shards 1 --project markdown-mobile-webkit tests/task/mobile-markdown-file-editing.spec.ts
+```
+
+CI runs these three projects in a focused matrix, installs their native browser
+libraries, and validates the downloaded backend/build identity before execution.
+It retains separate `markdown-browser-blob-*` reports and failure artifacts.
+These supplemental reports stay outside the general suites' immutable native
+catalog. Their job result remains required by the E2E gate.
+
+Linux WebKit uses a Linux user agent so native shortcuts agree with the host.
+This proves Linux WebKit behavior. The iPhone project proves viewport and input
+handler behavior. Synthetic composition events and emulated touch do not prove
+OS input methods, physical keyboards, or assistive technology. Record native
+Zen/macOS, Safari/macOS, Android, iOS, and screen-reader checks separately with
+the [native acceptance guide](../../../docs/plans/markdown-browser-parity/manual-testing.md).
 
 ### `containers` — **Docker required**
 

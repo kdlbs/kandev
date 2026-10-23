@@ -141,3 +141,9 @@ split by purpose: update notices use a separate top position, while ordinary
 action toasts keep their bottom position. Toast surfaces pass pointer
 events through to the underlying controls. The mobile clarification, mobile
 sidebar archive, and mobile thread-action E2Es passed after this change.
+
+PR #3113 fixup on 2026-10-23 preserves typed dirty-worktree guidance after a
+manual resume failure. The generic failure remains in Technical details.
+Recovery unit coverage passed all 34 tests across three files, including the
+manual-error regression. The phone dirty-worktree relocation scenario passed
+on the integrated build with retries disabled.

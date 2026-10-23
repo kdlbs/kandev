@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { repositoryId } from "@/lib/types/ids";
 import type { FileContentResponse, OpenFileTab } from "@/lib/types/backend";
 import type { fetchAndOpenFile as FetchAndOpenFile } from "./file-browser-actions";
 
@@ -18,6 +19,9 @@ let fetchAndOpenFile: typeof FetchAndOpenFile;
 const SESSION_ID = "session-1";
 const FILE_PATH = "src/example.ts";
 const REPO = "frontend";
+const WORKSPACE_PATH = "/tmp/task-root";
+const SECONDARY_ROOT = "/tmp/task-root/secondary";
+const SECONDARY_FILE = "secondary/README.md";
 
 beforeEach(async () => {
   vi.resetModules();
@@ -92,4 +96,129 @@ describe("fetchAndOpenFile", () => {
     expect(onOpenFile).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
+});
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-002.13
+it("opens a workspace-prefixed secondary checkout with repository-qualified tab identity", async () => {
+  requestFileContentMock.mockResolvedValueOnce(response("# Secondary README"));
+  const onOpenFile = vi.fn<(tab: OpenFileTab) => void>();
+  const scope = {
+    workspacePath: WORKSPACE_PATH,
+    worktrees: [
+      {
+        repository_id: repositoryId("primary"),
+        worktree_path: "/tmp/task-root/primary",
+        position: 0,
+        worktree_id: "wt-primary",
+      },
+      {
+        repository_id: repositoryId("secondary-id"),
+        worktree_path: SECONDARY_ROOT,
+        position: 1,
+        worktree_id: "wt-secondary",
+      },
+    ],
+  };
+  await fetchAndOpenFile(SESSION_ID, SECONDARY_FILE, onOpenFile, vi.fn(), scope);
+  expect(requestFileContentMock).toHaveBeenCalledWith(
+    expect.anything(),
+    SESSION_ID,
+    SECONDARY_FILE,
+    undefined,
+  );
+  expect(onOpenFile).toHaveBeenCalledWith(
+    expect.objectContaining({
+      path: "README.md",
+      repo: "secondary",
+      name: "README.md",
+      content: "# Secondary README",
+    }),
+  );
+});
+
+it.each([
+  { path: "README.md", root: WORKSPACE_PATH, expectedPath: "README.md", expectedRepo: undefined },
+  {
+    path: "secondary-lookalike/README.md",
+    root: SECONDARY_ROOT,
+    expectedPath: "secondary-lookalike/README.md",
+    expectedRepo: undefined,
+  },
+  {
+    path: SECONDARY_FILE,
+    root: "/tmp/outside/secondary",
+    expectedPath: SECONDARY_FILE,
+    expectedRepo: undefined,
+  },
+])(
+  "preserves an unqualified path without a matching checkout root: $path ($root)",
+  async ({ path, root, expectedPath, expectedRepo }) => {
+    requestFileContentMock.mockResolvedValueOnce(response());
+    const onOpenFile = vi.fn();
+    await fetchAndOpenFile(SESSION_ID, path, onOpenFile, vi.fn(), {
+      workspacePath: WORKSPACE_PATH,
+      worktrees: [
+        {
+          repository_id: repositoryId("repo"),
+          worktree_path: root,
+          position: 0,
+          worktree_id: "wt",
+        },
+      ],
+    });
+    expect(onOpenFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: expectedPath, repo: expectedRepo }),
+    );
+  },
+);
+
+it("keeps explicitly scoped file paths relative to their supplied repository", async () => {
+  requestFileContentMock.mockResolvedValueOnce(response());
+  const onOpenFile = vi.fn();
+  await fetchAndOpenFile(SESSION_ID, SECONDARY_FILE, onOpenFile, vi.fn(), {
+    repo: "explicit",
+    workspacePath: WORKSPACE_PATH,
+    worktrees: [
+      {
+        repository_id: repositoryId("secondary"),
+        worktree_path: SECONDARY_ROOT,
+        position: 0,
+        worktree_id: "wt",
+      },
+    ],
+  });
+  expect(requestFileContentMock).toHaveBeenCalledWith(
+    expect.anything(),
+    SESSION_ID,
+    SECONDARY_FILE,
+    "explicit",
+  );
+  expect(onOpenFile).toHaveBeenCalledWith(
+    expect.objectContaining({ path: SECONDARY_FILE, repo: "explicit" }),
+  );
+});
+
+it("does not infer ownership from ambiguous checkout metadata", async () => {
+  requestFileContentMock.mockResolvedValueOnce(response());
+  const onOpenFile = vi.fn();
+  await fetchAndOpenFile(SESSION_ID, SECONDARY_FILE, onOpenFile, vi.fn(), {
+    workspacePath: WORKSPACE_PATH,
+    worktrees: [
+      {
+        repository_id: repositoryId("one"),
+        worktree_path: SECONDARY_ROOT,
+        position: 0,
+        worktree_id: "wt-one",
+      },
+      {
+        repository_id: repositoryId("two"),
+        worktree_path: SECONDARY_ROOT,
+        position: 1,
+        worktree_id: "wt-two",
+      },
+    ],
+  });
+  expect(onOpenFile).toHaveBeenCalledWith(
+    expect.objectContaining({ path: SECONDARY_FILE, repo: undefined }),
+  );
 });

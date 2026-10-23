@@ -6,6 +6,13 @@ import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("PR watcher merged cleanup", () => {
+  test.describe.configure({ retries: 0 });
+  const disposableWorkflowIds: string[] = [];
+  test.afterEach(async ({ apiClient }) => {
+    for (const workflowId of disposableWorkflowIds.splice(0)) {
+      await apiClient.deleteWorkflow(workflowId);
+    }
+  });
   /**
    * When a PR watcher creates a task for a PR, and the PR is subsequently
    * merged (branch deleted), triggering the watch again should auto-delete
@@ -43,12 +50,15 @@ test.describe("PR watcher merged cleanup", () => {
     // Create a workflow step without auto-start for the review watch.
     // The seed start step may have auto_start_agent, which would create a session
     // and prevent cleanup (we only delete unstarted tasks).
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "PR Inbox", 0);
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Merged PR Cleanup");
+    disposableWorkflowIds.push(workflow.id);
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "PR Inbox", 0);
+    await apiClient.saveUserSettings({ workflow_filter_id: workflow.id });
 
     // --- Create review watch on the inbox step (no auto-start) ---
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       { repos: [{ owner: "testorg", name: "testrepo" }] },
@@ -283,11 +293,14 @@ test.describe("PR watcher merged cleanup", () => {
     ]);
 
     // Create a step without auto-start
-    const inboxStep = await apiClient.createWorkflowStep(seedData.workflowId, "Review Inbox", 0);
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Approved PR Cleanup");
+    disposableWorkflowIds.push(workflow.id);
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Review Inbox", 0);
+    await apiClient.saveUserSettings({ workflow_filter_id: workflow.id });
 
     const watch = await apiClient.createReviewWatch(
       seedData.workspaceId,
-      seedData.workflowId,
+      workflow.id,
       inboxStep.id,
       seedData.agentProfileId,
       { repos: [{ owner: "testorg", name: "testrepo" }] },

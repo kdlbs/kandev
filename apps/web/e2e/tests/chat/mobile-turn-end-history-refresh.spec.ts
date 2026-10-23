@@ -9,6 +9,8 @@ import {
 
 const USAGE_PROMPT = "Reply briefly /with-usage";
 
+test.describe.configure({ retries: 0 });
+
 test("mobile idle recovery preserves transcript scroll without a loading row", async ({
   testPage,
   apiClient,

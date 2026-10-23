@@ -52,10 +52,10 @@ async function openMarkdownPreview(
   await expect(testPage.locator(`.dv-default-tab:has-text('${fileName}')`)).toBeVisible({
     timeout: 10_000,
   });
-  const previewToggle = testPage.getByTestId("markdown-preview-toggle").first();
-  await expect(previewToggle).toBeVisible({ timeout: 10_000 });
-  await previewToggle.click();
-  await expect(testPage.getByTestId("markdown-preview")).toBeVisible({ timeout: 10_000 });
+  const editor = testPage.getByTestId("markdown-file-editor");
+  await expect(editor).toBeVisible({ timeout: 10_000 });
+  await expect(editor.getByTestId("markdown-mode-preview")).toHaveAttribute("aria-pressed", "true");
+  await expect(editor.getByTestId("markdown-preview")).toBeVisible({ timeout: 10_000 });
 }
 
 test.describe("Markdown math", () => {

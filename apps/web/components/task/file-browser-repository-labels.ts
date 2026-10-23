@@ -1,4 +1,5 @@
 import type { Repository, TaskSessionWorktree } from "@/lib/types/http";
+import { isWorkspaceTreePath, workspaceRelativeFilePath } from "@/lib/workspace-file-path";
 
 type RepositoryLabelMetadata = Pick<Repository, "id" | "name" | "provider_owner" | "provider_name">;
 type RepositoryLabelWorktree = Pick<
@@ -80,4 +81,33 @@ function relativeWorkspacePath(workspacePath: string, worktreePath: string): str
 
 function normalizePath(path: string): string {
   return path.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
+}
+
+export type FileBrowserRepositoryContext = {
+  workspacePath?: string | null;
+  worktrees?: readonly RepositoryLabelWorktree[] | null;
+};
+
+/** Qualifies an opened file with its exact active checkout subpath. */
+export function resolveFileBrowserFileIdentity(
+  path: string,
+  repo: string | undefined,
+  { workspacePath, worktrees }: FileBrowserRepositoryContext,
+): { path: string; repo?: string } {
+  if (repo || !workspacePath || !worktrees || !isWorkspaceTreePath(path)) return { path, repo };
+  const matches = worktrees
+    .flatMap((worktree) => {
+      if (!worktree.repository_id || !worktree.worktree_path) return [];
+      const root = workspaceRelativeFilePath(worktree.worktree_path, workspacePath);
+      if (!root || !path.startsWith(`${root}/`)) return [];
+      return [{ root, repositoryId: worktree.repository_id }];
+    })
+    .sort((left, right) => right.root.length - left.root.length);
+  const root = matches[0]?.root;
+  if (!root) return { path, repo };
+  const owners = new Set(
+    matches.filter((match) => match.root === root).map((match) => match.repositoryId),
+  );
+  if (owners.size !== 1) return { path, repo };
+  return { path: path.slice(root.length + 1), repo: root };
 }

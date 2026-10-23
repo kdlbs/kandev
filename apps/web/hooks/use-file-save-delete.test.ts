@@ -68,7 +68,10 @@ function renderActions() {
     const params: SaveDeleteParams = {
       activeSessionIdRef,
       activeEditorVisitRef: useRef<symbol | null>(Symbol()),
-      updateFileState: vi.fn(),
+      updateFileState: vi.fn((key: string, updates: Partial<FileEditorState>) => {
+        const current = openFilesMap.get(key);
+        if (current) openFilesMap.set(key, { ...current, ...updates });
+      }),
       setSavingFiles: vi.fn(),
       toast: vi.fn(),
     };

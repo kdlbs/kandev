@@ -60,7 +60,7 @@ export function DesktopNotificationsSection({
             }
             className={
               notificationPermission === "granted"
-                ? "bg-emerald-500 text-white hover:bg-emerald-500"
+                ? "bg-success text-success-foreground hover:bg-success disabled:bg-success disabled:text-success-foreground dark:disabled:bg-success dark:disabled:text-success-foreground"
                 : "cursor-pointer"
             }
           >

@@ -1,8 +1,23 @@
 import type { ReactNode } from "react";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type * as FileBrowserParts from "./file-browser-parts";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const openFile = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+const browserSession = vi.hoisted(() => ({
+  current: null as null | {
+    id: string;
+    task_id: string;
+    workspace_path: string;
+    worktrees: Array<{
+      repository_id: string;
+      worktree_path: string;
+      position: number;
+      worktree_id: string;
+    }>;
+  },
+}));
 
 const NODE_ACTIONS_TEST_ID = "file-tree-node-actions";
 
@@ -15,7 +30,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsive,
 }));
 vi.mock("@/hooks/domains/session/use-session", () => ({
-  useSession: () => ({ session: null, isFailed: false, errorMessage: null }),
+  useSession: () => ({ session: browserSession.current, isFailed: false, errorMessage: null }),
 }));
 vi.mock("@/hooks/domains/workspace/use-repository", () => ({ useRepository: () => null }));
 vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
@@ -75,10 +90,12 @@ vi.mock("./file-browser-hooks", () => ({
   useScrollPersistence: () => {},
   loadNodeChildren: vi.fn(),
   toggleFolderExpand: vi.fn(),
-  fetchAndOpenFile: () => Promise.resolve(),
+  fetchAndOpenFile: (...args: unknown[]) =>
+    (openFile as (...args: unknown[]) => Promise<void>)(...args),
 }));
 vi.mock("./file-browser-path", () => ({
-  getFileBrowserSessionWorkspacePath: () => null,
+  getFileBrowserSessionWorkspacePath: (session: { workspace_path?: string } | null) =>
+    session?.workspace_path ?? null,
   resolveFileBrowserPaths: () => ({ fullPath: "/workspace", displayPath: "workspace" }),
 }));
 vi.mock("./file-tree-reveal", () => ({ useFileTreeReveal: () => {} }));
@@ -93,15 +110,20 @@ vi.mock("./file-browser-content-area", async () => {
     FileBrowserContentArea: ({
       showTouchActions,
       onAddToChatContext,
+      onOpenFile,
     }: {
       showTouchActions: boolean;
       onAddToChatContext: (treeNode: FileTreeNode) => void;
+      onOpenFile: (path: string) => void;
     }) => (
-      <actual.FileTreeNodeTouchActions
-        node={node}
-        showTouchActions={showTouchActions}
-        onAddToChatContext={onAddToChatContext}
-      />
+      <>
+        <button onClick={() => onOpenFile("secondary/README.md")}>Open secondary file</button>
+        <actual.FileTreeNodeTouchActions
+          node={node}
+          showTouchActions={showTouchActions}
+          onAddToChatContext={onAddToChatContext}
+        />
+      </>
     ),
   };
 });
@@ -114,6 +136,8 @@ function renderFileBrowser() {
 
 afterEach(() => {
   cleanup();
+  browserSession.current = null;
+  openFile.mockClear();
   responsive.isMobile = false;
   responsive.isFinePointer = true;
 });
@@ -148,4 +172,35 @@ describe("FileBrowser responsive touch action wiring", () => {
 
     expect(screen.getByTestId(NODE_ACTIONS_TEST_ID)).toBeTruthy();
   });
+});
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-002.13
+it("passes the current checkout inventory when opening a workspace-prefixed tree file", async () => {
+  browserSession.current = {
+    id: "session-1",
+    task_id: "task-1",
+    workspace_path: "/tmp/task-root",
+    worktrees: [
+      {
+        repository_id: "secondary-id",
+        worktree_path: "/tmp/task-root/secondary",
+        position: 1,
+        worktree_id: "wt-secondary",
+      },
+    ],
+  };
+  renderFileBrowser();
+  fireEvent.click(screen.getByRole("button", { name: "Open secondary file" }));
+  await waitFor(() =>
+    expect(openFile).toHaveBeenCalledWith(
+      "session-1",
+      "secondary/README.md",
+      expect.any(Function),
+      expect.any(Function),
+      expect.objectContaining({
+        workspacePath: "/tmp/task-root",
+        worktrees: browserSession.current?.worktrees,
+      }),
+    ),
+  );
 });

@@ -100,36 +100,38 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   });
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
-    <SessionPanel borderSide="left">
-      <SessionPanelContent>
-        <FilesTabContent
-          sessionId={activeSessionId}
-          onOpenFile={onOpenFile}
-          handleCreateFile={handleCreateFile}
-          hookDeleteFile={hookDeleteFile}
-          hookRenameFile={hookRenameFile}
-          hookDownloadFile={hookDownloadFile}
-          activeFilePath={activeFilePath}
-          onAddSources={(opener) => {
-            setAddSourcesOpener(opener);
-            setAddSourcesOpen(true);
-          }}
-          addSourcesButtonRef={addSourcesButtonRef}
-          addSourcesDisabledReason={addSourcesDisabledReason}
-        />
-      </SessionPanelContent>
-      {activeTask ? (
-        <AddWorkspaceSourcesDialog
-          open={addSourcesOpen}
-          onOpenChange={setAddSourcesOpen}
-          taskId={activeTask.id}
-          executorType={activeTask.primaryExecutorType}
-          workspaceId={workspaceId}
-          opener={addSourcesOpener}
-          openerRef={addSourcesButtonRef}
-        />
-      ) : null}
-    </SessionPanel>
+    <div data-testid="files-panel" className="h-full min-h-0">
+      <SessionPanel borderSide="left">
+        <SessionPanelContent>
+          <FilesTabContent
+            sessionId={activeSessionId}
+            onOpenFile={onOpenFile}
+            handleCreateFile={handleCreateFile}
+            hookDeleteFile={hookDeleteFile}
+            hookRenameFile={hookRenameFile}
+            hookDownloadFile={hookDownloadFile}
+            activeFilePath={activeFilePath}
+            onAddSources={(opener) => {
+              setAddSourcesOpener(opener);
+              setAddSourcesOpen(true);
+            }}
+            addSourcesButtonRef={addSourcesButtonRef}
+            addSourcesDisabledReason={addSourcesDisabledReason}
+          />
+        </SessionPanelContent>
+        {activeTask ? (
+          <AddWorkspaceSourcesDialog
+            open={addSourcesOpen}
+            onOpenChange={setAddSourcesOpen}
+            taskId={activeTask.id}
+            executorType={activeTask.primaryExecutorType}
+            workspaceId={workspaceId}
+            opener={addSourcesOpener}
+            openerRef={addSourcesButtonRef}
+          />
+        ) : null}
+      </SessionPanel>
+    </div>
   );
 });
 

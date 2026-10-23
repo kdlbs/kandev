@@ -14,7 +14,7 @@ export function revealFileAtLine(
   line: number,
   repo?: string,
 ): void {
-  if (line > 0) setPendingCursorPosition(file, line, 1, repo);
+  if (line > 0) setPendingCursorPosition(file, line, 1, repo, { walkthroughOwner: Symbol() });
   void openFile(file, repo);
   if (line > 0) scrollEditorIfMounted(file, null, line, 1, { repo });
 }

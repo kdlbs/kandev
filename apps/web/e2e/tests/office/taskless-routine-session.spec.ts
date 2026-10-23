@@ -78,6 +78,7 @@ test.describe("Office taskless routine sessions", () => {
     officeApi,
     apiClient,
     officeSeed,
+    backend,
     seedData,
   }) => {
     // A taskless launch has two asynchronous schedulers in front of the mock
@@ -108,6 +109,9 @@ test.describe("Office taskless routine sessions", () => {
       name: `Taskless E2E ${Date.now()}`,
       description: "Taskless routine session smoke test",
       assignee_agent_profile_id: agentId,
+      // This test asserts that each manual fire creates a distinct agent
+      // session. Keep that contract independent of unrelated in-flight
+      // coordinator work in the shared office workspace.
       concurrency_policy: "always_create",
     });
     const routineId = routine.id as string;
@@ -116,6 +120,7 @@ test.describe("Office taskless routine sessions", () => {
     const sessions: string[] = [];
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await waitForAgentIdle(officeApi, agentId);
+      await backend.ensureReady();
       const response = await officeApi.runRoutine(routineId);
       if (response.status !== 200) {
         throw new Error(
@@ -155,7 +160,7 @@ test.describe("Office taskless routine sessions", () => {
             );
             runId = run?.id ?? "";
             if (!runId) {
-              runId = await findAgentRunForRoutine(officeApi, routineAgentId, routineId, seen);
+              runId = await findAgentRunForRoutine(officeApi, agentId, routineId, seen);
             }
             return runId;
           },

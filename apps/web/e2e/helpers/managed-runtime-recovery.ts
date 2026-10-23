@@ -87,9 +87,8 @@ export type ManagedRuntimePreparationOptions = {
 };
 
 /**
- * The real managed OpenCode agent is enabled only for this container-backed
- * test. Its command runs through the image's npx wrapper, while the wrapper
- * starts the Linux mock ACP binary on the online retry.
+ * Managed startup runs through a deterministic npx wrapper on hosts and in
+ * runtime containers. Successful launches use the mock ACP binary.
  */
 export async function prepareManagedRuntimeProfile(
   apiClient: ApiClient,

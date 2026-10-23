@@ -62,6 +62,15 @@ describe("isKnownCommand", () => {
   it("matches case-insensitively", () => {
     expect(isKnownCommand("PR-Fixup", available)).toBe(true);
   });
+  it("matches an advertised command with a colon-delimited argument", () => {
+    expect(isKnownCommand("overloaded:9", [{ name: "overloaded" }])).toBe(true);
+  });
+  it("matches a colon-named command exactly before considering arguments", () => {
+    expect(isKnownCommand("tool:read", [{ name: "tool" }, { name: "tool:read" }])).toBe(true);
+  });
+  it("does not match a command name that only shares a prefix", () => {
+    expect(isKnownCommand("deploy-preview", [{ name: "deploy" }])).toBe(false);
+  });
   it("returns false for an unknown command", () => {
     expect(isKnownCommand("deploy", available)).toBe(false);
   });
@@ -145,6 +154,17 @@ describe("computeEmptyTurnNotice", () => {
       }),
     );
     expect(notice?.content).toContain("ran but produced no output");
+  });
+
+  it("recognizes an advertised command with a colon-delimited argument", () => {
+    const notice = computeEmptyTurnNotice(
+      baseInput({
+        messages: [userMessage("turn-1", "/overloaded:9")],
+        availableCommands: [{ name: "overloaded" }],
+      }),
+    );
+    expect(notice?.content).toContain("`/overloaded:9` ran but produced no output");
+    expect(notice?.content).not.toContain("isn't a command this agent recognizes");
   });
 
   it("uses the most recent user message for the turn", () => {

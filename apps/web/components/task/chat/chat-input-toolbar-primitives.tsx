@@ -109,7 +109,7 @@ function SendSubmitButton({
           onClick={onSubmit}
           data-testid="submit-message-button"
         >
-          {isSending && <GridSpinner className="text-primary-foreground" />}
+          {isSending && <GridSpinner />}
           {!isSending && planModeEnabled && <IconFileTextSpark className="h-4 w-4" />}
           {!isSending && !planModeEnabled && <IconArrowUp className="h-4 w-4" />}
         </Button>

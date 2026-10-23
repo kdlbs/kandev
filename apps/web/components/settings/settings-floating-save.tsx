@@ -82,7 +82,11 @@ function SaveActionButtons({
       <Button
         type="button"
         className={settingsActionClassName(
-          "shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35",
+          cn(
+            "shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35",
+            isSaved &&
+              "disabled:bg-success disabled:text-success-foreground dark:disabled:bg-success dark:disabled:text-success-foreground",
+          ),
         )}
         disabled={isBusy || isSaved || isInvalid}
         aria-label={accessibleLabel}

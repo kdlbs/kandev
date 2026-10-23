@@ -59,3 +59,29 @@ describe("useDiffFileComments", () => {
     expect(result.current.map((comment) => comment.id)).toEqual(["repo-a", "repo-b"]);
   });
 });
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-002.13
+it("isolates identical paths by repository name and preserves legacy comments", () => {
+  useCommentsStore.setState({
+    byId: {},
+    bySession: {},
+    pendingForChat: [],
+    editingCommentId: null,
+  });
+  act(() => {
+    const store = useCommentsStore.getState();
+    store.addComment(diffComment({ id: "primary-readme", repositoryName: "" }));
+    store.addComment(diffComment({ id: "secondary-readme", repositoryName: "secondary" }));
+    store.addComment(diffComment({ id: "legacy-readme" }));
+  });
+  const { result, rerender } = renderHook(
+    ({ repo }) => useDiffFileComments(SESSION_ID, FILE_PATH, undefined, repo),
+    { initialProps: { repo: "secondary" } },
+  );
+  expect(result.current.map((comment) => comment.id)).toEqual([
+    "secondary-readme",
+    "legacy-readme",
+  ]);
+  rerender({ repo: "" });
+  expect(result.current.map((comment) => comment.id)).toEqual(["primary-readme", "legacy-readme"]);
+});

@@ -10,6 +10,8 @@ import {
 // The mock agent reports token usage for this prompt, as real agents do every turn.
 const USAGE_PROMPT = "Reply briefly /with-usage";
 
+test.describe.configure({ retries: 0 });
+
 test("a conversation gap found after a turn is recovered without a loading row", async ({
   testPage,
   apiClient,

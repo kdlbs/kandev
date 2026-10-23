@@ -8,8 +8,12 @@ import { getFilesPanelScrollPosition, setFilesPanelScrollPosition } from "@/lib/
 import type { useToast } from "@/components/toast-provider";
 import type { useFileBrowserTree } from "./file-browser-hooks";
 import { t } from "@/lib/i18n";
+import {
+  resolveFileBrowserFileIdentity,
+  type FileBrowserRepositoryContext,
+} from "./file-browser-repository-labels";
 
-export type FetchAndOpenFileOptions = {
+export type FetchAndOpenFileOptions = FileBrowserRepositoryContext & {
   repo?: string;
   signal?: AbortSignal;
 };
@@ -147,11 +151,11 @@ export async function fetchAndOpenFile(
     const { calculateHash } = await import("@/lib/utils/file-diff");
     const hash = await calculateHash(response.content);
     if (signal?.aborted) return;
-    const name = path.split("/").pop() || path;
+    const identity = resolveFileBrowserFileIdentity(path, repo, options);
+    const name = identity.path.split("/").pop() || identity.path;
     onOpenFile({
-      path,
+      ...identity,
       name,
-      repo,
       content: response.content,
       originalContent: response.content,
       originalHash: hash,

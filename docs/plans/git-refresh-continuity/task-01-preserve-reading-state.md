@@ -135,3 +135,32 @@ The focused Vitest suite passed 21 files / 175 tests; the final Monaco view-stat
 The PR fixup regression suite passed 5 files / 55 tests, covering checkout-scope invalidation, pending and unavailable review controls on desktop and phone layouts, guarded review-state submission, and scroll-cancellation suppression restoration.
 After the fixup, web typecheck, the production Vite build, strict touched-file ESLint, documentation catalog validation, and `git diff --check` passed again.
 The post-PR verification also aligned the phone recovery assertions with the unavailable and pending states and completed the checkout-scope hook mock shape. The focused hook suite passed 16 tests; the phone recovery E2E passed with retries disabled after a production build. The mobile checkout-history E2E passed four isolated runs, and the slash-command case that flaked in CI passed four retries-disabled runs. Typecheck, strict touched-file ESLint, and whitespace checks passed.
+
+### PR #3113 CI follow-up (2026-10-09)
+
+The display scope now normalizes omitted and empty comparison targets to `null`.
+The regression covers stable absent-target scope and invalidation after real target replacement.
+Raw Git snapshots and checkout invalidation remain unchanged.
+
+The focused Vitest command passed 40 tests:
+
+```bash
+pnpm --dir apps/web exec vitest run lib/state/slices/session-runtime/git-status-display-state.test.ts lib/state/slices/session-runtime/git-status-state.test.ts hooks/domains/session/use-review-sources.test.ts
+```
+
+After a production build, these commands passed 18 desktop and 14 phone cases without retries.
+They ran from `apps/web` inside the CI runtime image with one worker, 2 CPUs, and 4 GiB of memory.
+
+```bash
+bash e2e/scripts/run-raw-e2e.sh --project=chromium e2e/tests/git/diff-expansion.spec.ts e2e/tests/chat/turn-end-history-refresh.spec.ts --repeat-each=2 --reporter=list --retries=0 --output=/tmp/pw-diff-green
+bash e2e/scripts/run-raw-e2e.sh --project=mobile-chrome e2e/tests/chat/mobile-markdown-wrap.spec.ts e2e/tests/chat/mobile-turn-end-history-refresh.spec.ts e2e/tests/git/mobile-diff-refresh-continuity.spec.ts --repeat-each=2 --reporter=list --retries=0 --output=/tmp/pw-final-green-mobile
+```
+
+The original six-repeat Expand all reproduction passed without retries after the correction:
+
+```bash
+bash e2e/scripts/run-raw-e2e.sh --project=chromium e2e/tests/git/diff-expansion.spec.ts --grep "expand-all button" --repeat-each=6 --reporter=list --retries=0 --output=/tmp/pw-diff-pressure-green
+```
+
+Typecheck, strict touched-file ESLint, i18n checks, the production build, documentation validation, and specification lint passed.
+Fresh exact-head CI and the complete retry report audit remain delivery gates.

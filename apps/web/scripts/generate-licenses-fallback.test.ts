@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { readGoEntriesFromManifest, recoverGoEntriesAfterReportFailure } from "./generate-licenses";
+import {
+  readGoEntriesFromManifest,
+  recoverGoEntriesAfterReportFailure,
+  resolveNpmLicenseText,
+} from "./generate-licenses";
 
 const APACHE_2 = "Apache-2.0";
 const EXISTING_GO_MODULE = "github.com/example/existing";
 const MODULE_VERSION = "v1.2.3";
 const OLD_MODULE_VERSION = "v1.0.0";
+
+describe("resolveNpmLicenseText", () => {
+  it("supplies Microsoft's MIT notice when the Markdown editor tarball omits it", () => {
+    expect(resolveNpmLicenseText("@vscode/markdown-editor", undefined)).toContain(
+      "Copyright (c) Microsoft Corporation.",
+    );
+  });
+});
 
 describe("readGoEntriesFromManifest", () => {
   it("returns valid Go entries from an existing manifest", () => {

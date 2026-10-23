@@ -97,6 +97,8 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
     treeState,
     workspaceRestoration,
     repositoryDisplayLabels,
+    workspacePath: getFileBrowserSessionWorkspacePath(session),
+    worktrees: session?.worktrees,
     inventoryRevision,
     isTreeLoaded,
     fileStatuses,

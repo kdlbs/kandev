@@ -1,7 +1,12 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 
-test.beforeEach(async ({ apiClient, seedData }) => {
+let baseline: Awaited<ReturnType<ApiClient["getUserSettings"]>>["settings"];
+test.beforeEach(async ({ testPage, apiClient, seedData }) => {
+  void testPage;
   const current = await apiClient.getUserSettings();
+  baseline = current.settings;
   await apiClient.saveUserSettings({
     sidebar_fast_actions_enabled: false,
     sidebar_new_task_style: "simple",
@@ -11,6 +16,18 @@ test.beforeEach(async ({ apiClient, seedData }) => {
         current.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
       layout: null,
     },
+  });
+});
+
+test.afterEach(async ({ apiClient, seedData }) => {
+  await restoreSidebarLayout(
+    apiClient,
+    seedData.workspaceId,
+    baseline.sidebar_layouts_by_workspace?.[seedData.workspaceId],
+  );
+  await apiClient.saveUserSettings({
+    sidebar_fast_actions_enabled: baseline.sidebar_fast_actions_enabled,
+    sidebar_new_task_style: baseline.sidebar_new_task_style,
   });
 });
 

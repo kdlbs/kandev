@@ -538,6 +538,33 @@ Select **Jump to latest** above the composer to return to the newest message,
 including agent replies. The action appears only when newer content is below
 the transcript. It does not change the session's auto-scroll preference.
 
+## Edit a Markdown file
+
+Open a `.md` file from **Files**. New files open in **Preview**.
+Choose a mode for the work you need:
+
+- **Preview** renders the current draft without editing it.
+- **Edit** keeps rendered context around the source text you change.
+- **Source** gives you the plain-text editor and exact Markdown syntax.
+
+Switching modes does not save the file. Select **Save** when the draft is
+ready, or use the editor's save shortcut. The draft stays with its file when
+you rotate a phone or change between phone and desktop layouts.
+
+On a phone, the header keeps **Save** visible. Open the current-mode menu to
+change modes. When an agent changes a file that you are editing, your local
+draft stays intact. Use **Reload** in the file actions menu to replace it with
+the outside version.
+
+Edit works in current Chromium, Firefox (including Zen), and Safari browsers.
+It does not require the experimental EditContext API. `.mdx` files use
+Preview and Source. If Edit fails to start, Kandev keeps your draft in Source.
+You can continue there or select Edit again to retry.
+
+Leaving an unsaved draft requires a discard decision. Cancel the decision to
+keep editing, or save before leaving. Unsaved drafts are not a backup across
+browser shutdown.
+
 ## Inspect changes
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
@@ -659,6 +686,11 @@ When the agent publishes the walkthrough:
 3. Kandev opens and highlights the referenced file range. On mobile, the explanation appears in a bottom sheet.
 4. Add feedback as pending context, or select **Run** to send that step's explanation, anchor, and your feedback to the active agent.
 5. Close the walkthrough to keep it, or select **Discard** and confirm to delete it.
+
+Markdown sections keep the blue walkthrough outline in **Preview**, **Edit**,
+and **Source**. Moving between steps keeps your selected mode and scrolls to
+the referenced section. On phones, the outline remains when the walkthrough
+sheet covers it. The connector disappears while its target is covered.
 
 A task stores one walkthrough. Publishing another replaces the current one. Kandev validates that each step has text, a file, and a positive line range, but it does not verify that the file exists or that the explanation matches current code. Anchors can drift as files change, and a PR-only file may be available only in the review diff. A walkthrough is an explanation, not test or review evidence.
 

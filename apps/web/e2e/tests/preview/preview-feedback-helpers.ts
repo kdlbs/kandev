@@ -117,6 +117,12 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
     await choice.click();
     await expect(trigger).toHaveAttribute("data-capture-mode", captureMode, { timeout: 750 });
   }).toPass({ timeout: 12_000, intervals: [250, 500, 1_000] });
+  if (name === "Select screenshot region") {
+    const previewFrame = page.locator("iframe").first().contentFrame();
+    await expect(previewFrame.locator("html")).toHaveCSS("cursor", "crosshair", {
+      timeout: 5_000,
+    });
+  }
 }
 
 /** Wait until the iframe has applied screenshot mode before dispatching a drag. */

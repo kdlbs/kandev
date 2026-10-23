@@ -3,7 +3,7 @@
 // the transient provider-error (529 Overloaded) retry flow: the yellow retry
 // card and its Cancel button must render and work on a narrow touch viewport.
 import { test, expect } from "../../fixtures/test-base";
-import { seedIdleSession } from "../../helpers/session";
+import { seedIdleSession, waitForSlashCommandAvailable } from "../../helpers/session";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { listTransientRetryNotices } from "../../helpers/transient-retry";
 
@@ -14,6 +14,7 @@ test.describe("mobile: transient provider error retry", () => {
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile Overloaded Test");
+    await waitForSlashCommandAvailable(testPage, session, "overloaded");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
 

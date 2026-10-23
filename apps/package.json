@@ -71,6 +71,10 @@
       "msw",
       "sharp",
       "unrs-resolver"
-    ]
+    ],
+    "patchedDependencies": {
+      "@vscode/markdown-editor@0.0.2-84": "patches/@vscode__markdown-editor@0.0.2-84.patch",
+      "monaco-editor@0.55.1": "patches/monaco-editor@0.55.1.patch"
+    }
   }
 }

@@ -1,0 +1,111 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 54ef1d7e0dca5152b46bfb0a156d5faa7d71f6e7..abd63d5dc1613918cb862a9cb4aab5ec5eef4429 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1228,7 +1228,7 @@ export declare class EditorView extends Disposable {
+     private readonly _model;
+     private readonly _options?;
+     readonly element: HTMLElement;
+-    readonly editContext: EditContext;
++    readonly editContext: MarkdownInputTransport['context'];
+     readonly measuredLayout: MeasuredLayoutModel;
+     readonly coordinateSpace: EditorCoordinateSpace;
+     readonly forcedMarkerVisibleBlocks: ISettableObservable<ReadonlySet<BlockAstNode>, void>;
+@@ -1465,7 +1465,32 @@ export declare class EditorView extends Disposable {
+     private _isRevealOccluded;
+ }
+ 
++export declare interface MarkdownInputSelection {
++    readonly anchor: number;
++    readonly active: number;
++    readonly instanceId: symbol;
++    readonly sourceRevision: number;
++}
++export declare interface MarkdownInputState extends MarkdownInputSelection {
++    readonly source: string;
++    readonly readOnly: boolean;
++}
++export declare interface MarkdownInputFactoryOptions {
++    readonly host: HTMLElement;
++    readonly text: string;
++    readonly getCaretRect: () => Rect2D | undefined;
++    readonly onSelection: (selection: MarkdownInputSelection) => void;
++}
++export declare interface MarkdownInputTransport {
++    readonly context: Pick<EditContext, 'text' | 'updateText' | 'updateSelection' | 'addEventListener' | 'removeEventListener'>;
++    attach(host: HTMLElement): void;
++    focus(): void;
++    setSuspended(suspended: boolean): void;
++    syncState(state: MarkdownInputState): void;
++    dispose(): void;
++}
+ export declare interface EditorViewOptions extends BlockViewOptions {
++    readonly inputFactory?: (options: MarkdownInputFactoryOptions) => MarkdownInputTransport;
+     /**
+      * Extra class names added to the editor root element, e.g. a theme class
+      * such as `'md-theme-default'` or `'github-markdown-theme'`. Theme styles
+diff --git a/dist/index.js b/dist/index.js
+index 93bb13f2a60d3f27654a2fb57a4b4866fdce67a0..7ab057cd18c403f4d5ea3bc112a5c522cf7f3f44 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -5841,21 +5841,39 @@ class gl extends H {
+     })), this._contentContainer.appendChild(this._gutterMarkersView.element), this._diffHighlightsView = this._register(new Nc(this._contentContainer, this.coordinateSpace)), this._contentContainer.appendChild(this._diffHighlightsView.element), this._register(P((l) => {
+       const d = this._model.readonlyMode.read(l);
+       this.element.classList.toggle("md-readonly", d), d || this.element.classList.remove("md-readonly-editing-attempt");
+-    })), this._options?.showReadonlyToggle !== !1 && this._setupReadonlyToggle(), this.editContext = new EditContext({
++    })), this._options?.showReadonlyToggle !== !1 && this._setupReadonlyToggle();
++    try { this._inputTransport = this._options?.inputFactory?.({ host: this.element, text: this._model.sourceText.get().value, getCaretRect: () => this.caretRect.get(), onSelection: (selection) => {
++      if (!this._inputAlive || selection.instanceId !== this._inputInstance || selection.sourceRevision !== this._inputRevision || this._inputSource !== this._model.sourceText.get().value) return;
++      const length = this._inputSource.length;
++      if (!Number.isInteger(selection.anchor) || !Number.isInteger(selection.active) || selection.anchor < 0 || selection.active < 0 || selection.anchor > length || selection.active > length) return;
++      this._model.selectionSource.set("user", void 0), this._model.selection.set(new k(selection.anchor, selection.active), void 0);
++    } }), this.editContext = this._inputTransport?.context ?? new EditContext({
+       text: this._model.sourceText.get().value,
+       selectionStart: 0,
+       selectionEnd: 0
+-    }), this.element.editContext = this.editContext, this._register(P(this._renderAutorun)), this._setupModifierTracking(), this._setupFocusTracking(), this._setupCaretScrollPadding(), this._register(P((l) => {
+-      const d = l.readObservable(this._model.selection)?.range;
++    }), this._register({ dispose: () => { if (this._inputAlive) { this._inputAlive = false; this._inputTransport?.dispose(); } } }), this._inputTransport ? this._inputTransport.attach(this.element) : this.element.editContext = this.editContext, this._register(P(this._renderAutorun)), this._setupModifierTracking(), this._setupFocusTracking(), this._setupCaretScrollPadding(), this._register(P((l) => {
++      const selection = l.readObservable(this._model.selection), d = selection?.range;
+       this.editContext.updateSelection(d?.start ?? 0, d?.endExclusive ?? 0);
++    })), this._inputTransport && this._register(P((l) => {
++      const selection = l.readObservable(this._model.selection);
++      const source = l.readObservable(this._model.sourceText).value, readOnly = l.readObservable(this._model.readonlyMode);
++      l.readObservable(this.caretRect);
++      if (source !== this._inputSource) { this._inputSource = source; this._inputRevision++; }
++      this._inputTransport?.syncState({ source, anchor: selection?.anchor ?? 0, active: selection?.active ?? 0, readOnly, instanceId: this._inputInstance, sourceRevision: this._inputRevision });
+     })), this._register({
+       dispose: () => {
+         this._stopFollowingCaret(), this._document.get()?.dispose(), this._clearDiff();
+       }
+     });
++    } catch (error) { this.dispose(); throw error; }
+   }
+   element;
+   editContext;
++  _inputTransport;
++  _inputInstance = Symbol();
++  _inputRevision = 0;
++  _inputSource;
++  _inputAlive = true;
+   measuredLayout;
+   coordinateSpace;
+   forcedMarkerVisibleBlocks = x(this, /* @__PURE__ */ new Set());
+@@ -6061,7 +6079,7 @@ class gl extends H {
+     });
+   }
+   focus() {
+-    this.element.focus({ preventScroll: !0 });
++    this._inputTransport ? this._inputTransport.focus() : this.element.focus({ preventScroll: !0 });
+   }
+   mountOverlay(e, t) {
+     return t === "top-chrome" ? this._contentContainer.insertBefore(e, this._contentContainer.firstChild) : t === "below-selection" ? this._contentContainer.insertBefore(e, this._selectionView.element) : this._contentContainer.appendChild(e), { dispose: () => e.remove() };
+@@ -6348,7 +6366,7 @@ class gl extends H {
+     this._diffHighlightsView.clear();
+   }
+   _syncEditContextAttachment() {
+-    this.element.editContext = this._editContextSuspensions.size > 0 ? null : this.editContext;
++    this._inputTransport ? this._inputTransport.setSuspended(this._editContextSuspensions.size > 0) : this.element.editContext = this._editContextSuspensions.size > 0 ? null : this.editContext;
+   }
+   _revealRange(e, t, s = "center", i) {
+     const o = this._document.get();

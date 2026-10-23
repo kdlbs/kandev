@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const openFile = vi.hoisted(() => vi.fn());
 
 const taskChangesPanel = vi.hoisted(() => ({
   props: null as Record<string, unknown> | null,
@@ -18,8 +20,40 @@ vi.mock("@/components/settings/canvas-host-route", () => ({
   ),
 }));
 
+vi.mock("./files-panel", () => ({
+  FilesPanel: ({
+    onOpenFile,
+  }: {
+    onOpenFile: (file: {
+      path: string;
+      name: string;
+      repo?: string;
+      content: string;
+      originalContent: string;
+      originalHash: string;
+      isDirty: boolean;
+    }) => void;
+  }) => (
+    <button
+      onClick={() =>
+        onOpenFile({
+          path: "README.md",
+          name: "README.md",
+          repo: "secondary",
+          content: "# Secondary",
+          originalContent: "# Secondary",
+          originalHash: "hash",
+          isDirty: false,
+        })
+      }
+    >
+      Open secondary repository file
+    </button>
+  ),
+}));
+
 vi.mock("@/hooks/use-file-editors", () => ({
-  useFileEditors: () => ({ openFile: vi.fn() }),
+  useFileEditors: () => ({ openFile }),
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -108,5 +142,21 @@ describe("dockview canvas panel content", () => {
     expect(host.parentElement?.className).toContain("h-full");
     expect(host.parentElement?.className).toContain("min-h-0");
     expect(host.parentElement?.className).toContain("flex");
+  });
+});
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-002.13
+describe("dockview workspace file repository identity", () => {
+  afterEach(() => {
+    cleanup();
+    openFile.mockReset();
+  });
+  it.each([
+    ["portaled", renderPanel],
+    ["shared", renderSharedPanel],
+  ] as const)("preserves the selected repository in the %s Files panel", (_label, renderer) => {
+    render(<>{renderer("files-panel", "files", {})}</>);
+    fireEvent.click(screen.getByRole("button", { name: "Open secondary repository file" }));
+    expect(openFile).toHaveBeenCalledWith("README.md", "secondary");
   });
 });

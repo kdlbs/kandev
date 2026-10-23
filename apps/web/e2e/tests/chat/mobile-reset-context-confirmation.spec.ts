@@ -21,10 +21,12 @@ test("mobile reset context opens a sheet and preserves composer controls", async
     seedData,
     "Mobile Reset Context Confirmation",
   );
-  await seedStaleContextWindow(testPage);
+  const sessionId = await session.activeChat().getAttribute("data-session-id");
+  if (!sessionId) throw new Error("active chat did not expose a session id");
+  await seedStaleContextWindow(testPage, sessionId);
 
   const contextRing = testPage.getByRole("button", { name: "Context window: 95% used" });
-  await expect(contextRing).toBeVisible();
+  await expect(contextRing).toBeVisible({ timeout: 15_000 });
 
   await session.resetContextButton().tap();
   const inlineConfirmation = testPage.getByTestId("mobile-action-confirmation");

@@ -99,10 +99,12 @@ test.describe("Office reactive scheduler", () => {
   test("assigning a task to an agent enqueues a task_assigned run", async ({
     apiClient,
     officeApi,
+    backend,
     seedData,
   }) => {
     test.setTimeout(150_000);
 
+    await backend.ensureReady();
     await withIsolatedSchedulerOffice(
       officeApi,
       apiClient,

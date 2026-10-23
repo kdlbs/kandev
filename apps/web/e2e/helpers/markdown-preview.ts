@@ -1,4 +1,19 @@
-import type { Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+export async function selectMobileMarkdownMode(
+  page: Page,
+  viewer: Locator,
+  mode: "preview" | "edit" | "source",
+  expectedMode: "preview" | "edit" | "source" = mode,
+): Promise<void> {
+  const menu = page.getByTestId("mobile-markdown-mode-menu");
+  const trigger = viewer.getByTestId("mobile-markdown-mode-trigger");
+  await expect(menu).toBeHidden();
+  await trigger.tap();
+  await menu.getByTestId(`mobile-markdown-mode-${mode}`).tap();
+  await expect(menu).toBeHidden();
+  await expect(trigger).toHaveAttribute("data-mode", expectedMode);
+}
 
 export async function selectMarkdownPreviewText(target: Locator): Promise<void> {
   await target.evaluate((element) => {

@@ -39,6 +39,7 @@ async function setupTask(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.activeChat().waitFor({ state: "visible", timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 45_000 });
   await session.clickTab("Files");
   return session;
 }

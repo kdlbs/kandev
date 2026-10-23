@@ -4,11 +4,42 @@ import type { MutableRefObject } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { calculateHash } from "@/lib/utils/file-diff";
+import { getFilePreviewKind } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import type { FileContentResponse } from "@/lib/types/backend";
 
 type DockApi = ReturnType<typeof useDockviewStore.getState>["api"];
+
+/** Build the sessionStorage tab records from live openFiles + dockview state. */
+export function buildPersistedTabs(api: DockApi, openFiles: Map<string, FileEditorState>) {
+  const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
+  const previewParams = preview?.params as Record<string, unknown> | undefined;
+  const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
+  const isPromoted = previewParams?.promoted === true;
+  return Array.from(openFiles.values()).flatMap(
+    ({ path, name, repo, renderedPreview, markdownMode }) => {
+      const itemId = buildRepoScopedItemId(path, repo);
+      const isPinned = !!api?.getPanel(`file:${itemId}`);
+      const isPreview = !isPinned && itemId === previewItemId;
+      if (!isPinned && !isPreview) return [];
+      // Promoted previews persist as pinned so edits survive refresh
+      const persistAsPinned = isPinned || (isPreview && isPromoted);
+      return [
+        {
+          path,
+          name,
+          ...(repo ? { repo } : {}),
+          ...(getFilePreviewKind(path) === "markdown" && renderedPreview
+            ? { renderedPreview }
+            : {}),
+          ...(markdownMode ? { markdownMode } : {}),
+          pinned: persistAsPinned,
+        },
+      ];
+    },
+  );
+}
 
 export type FileEditorRequestToken = {
   fileKey: string;

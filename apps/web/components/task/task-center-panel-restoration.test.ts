@@ -155,7 +155,9 @@ describe("task center file restoration", () => {
       resolvedPath: "docs/README.md",
       isDirty: false,
       isBinary: false,
+      markdownMode: "preview",
       renderedPreview: true,
+      repo: undefined,
     });
   });
 

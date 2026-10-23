@@ -138,7 +138,7 @@ async function openWorkspacePanels(
     await fileNode.tap();
     const viewer = page.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
-    await viewer.getByRole("button", { name: "Close" }).tap();
+    await viewer.getByRole("button", { name: "Back", exact: true }).tap();
     await expect(viewer).toHaveCount(0);
   }
   await navigateToPanel(page, session, mobile, "changes");

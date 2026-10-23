@@ -46,6 +46,7 @@ type SessionTaskSwitcherSheetProps = {
   renderInline?: (body: ReactNode) => ReactNode;
   showInlineNewTask?: boolean;
   selection?: TaskSheetSelectionController;
+  onRequestNavigation?: (action: () => void | Promise<void>) => void;
 };
 
 export function useMobileTaskLinking(
@@ -417,6 +418,7 @@ function useMobileSubtaskTarget(
   return { subtaskTarget, setSubtaskTarget, handleCreateSubtask };
 }
 
+// eslint-disable-next-line max-lines-per-function -- composes the single mobile task-switcher surface.
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -428,6 +430,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   renderInline,
   showInlineNewTask,
   selection,
+  onRequestNavigation,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expanded, setExpanded] = useState(true);
@@ -440,13 +443,11 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(
-    workspaceId,
-    handleOpenChange,
-    selectionController,
+  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController, {
+    onRequestNavigation,
     navigate,
-    data.tasksWithRepositories,
-  );
+    pageTasks: data.tasksWithRepositories,
+  });
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit(data.allTasks);
   const linking = useMobileTaskLinking(workspaceId, data.allTasks);

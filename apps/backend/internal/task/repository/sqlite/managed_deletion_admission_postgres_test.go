@@ -358,6 +358,8 @@ func cancelManagedBarrierPostgresRead(t *testing.T, ctx context.Context, holderD
 	require.Eventually(t, func() bool {
 		return waiter.DB().Stats().InUse == 0
 	}, time.Second, 10*time.Millisecond, "cancelled native barrier retained a database connection")
+	require.NoError(t, waiter.DB().PingContext(ctx), "cancellation must release the checked-out Postgres connection")
+	require.Zero(t, waiter.DB().Stats().InUse)
 	var held bool
 	require.NoError(t, observer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.granted AND l.mode='AccessExclusiveLock' AND c.relname='task_resource_cleanup_jobs')`, holderPID).Scan(&held))
 	require.True(t, held, "cancellation settled while actual holder remains locked")

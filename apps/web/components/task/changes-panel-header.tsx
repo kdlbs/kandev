@@ -161,6 +161,7 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
   return (
     <PanelHeaderBarSplit
       leftClassName="shrink-0"
+      className="[@media(max-width:47.999rem)]:px-1"
       left={
         <ChangesPanelHeaderLeft
           refreshStatus={props.refreshStatus}

@@ -235,7 +235,8 @@ function ChangesContent({ panelId }: { panelId: string }) {
 function FilesContent() {
   const { openFile } = useFileEditors();
   const handleOpenFile = useCallback(
-    (file: { path: string; name: string; content: string }) => openFile(file.path),
+    (file: { path: string; name: string; content: string; repo?: string }) =>
+      openFile(file.path, file.repo),
     [openFile],
   );
   return <FilesPanel onOpenFile={handleOpenFile} />;

@@ -51,19 +51,29 @@ export type SyncOpenFileArgs = {
   repo?: string;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   isCurrent: () => boolean;
+  retainCanonical?: boolean;
 };
 
 const pendingRefreshes = new Map<string, symbol>();
 
-function captureRefreshOwner({ fileKey, path, repo, isCurrent }: SyncOpenFileArgs) {
-  const { api, openFiles } = useDockviewStore.getState();
+function captureRefreshOwner({
+  fileKey,
+  path,
+  repo,
+  isCurrent,
+  retainCanonical,
+  sessionId,
+}: SyncOpenFileArgs) {
+  const { api, openFiles, fileSessionEpoch } = useDockviewStore.getState();
   const instanceId = openFiles.get(fileKey)?.instanceId;
   const readBuffer = () => {
     if (!isCurrent()) return;
     const state = useDockviewStore.getState();
     const file = state.openFiles.get(fileKey);
     if (
-      state.api !== api ||
+      (!retainCanonical && state.api !== api) ||
+      (retainCanonical &&
+        (state.fileSessionEpoch !== fileSessionEpoch || state.activeFileSessionId !== sessionId)) ||
       !instanceId ||
       file?.instanceId !== instanceId ||
       file.path !== path ||
@@ -110,7 +120,7 @@ export async function syncOpenFileFromWorkspace(args: SyncOpenFileArgs): Promise
 }
 
 function publishWorkspaceContent(
-  { fileKey, path, updateFileState }: SyncOpenFileArgs,
+  { fileKey, path, updateFileState, retainCanonical: argsRetainsCanonical }: SyncOpenFileArgs,
   response: Awaited<ReturnType<typeof requestFileContent>>,
   remoteHash: string,
   readCurrent: () => FileEditorState | undefined,
@@ -131,7 +141,8 @@ function publishWorkspaceContent(
         remoteContent: undefined,
         remoteOriginalHash: undefined,
       });
-      if (readCurrent()) updatePanelAfterSave(path, latest.name, latest.repo);
+      if (readCurrent() && !argsRetainsCanonical)
+        updatePanelAfterSave(path, latest.name, latest.repo);
       return;
     }
     if (

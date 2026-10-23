@@ -137,6 +137,8 @@ export type WaitForWsOptions = {
 
 export type WaitForWsResponseOptions = {
   timeout?: number;
+  /** Narrow outgoing requests before correlating their replies. */
+  requestWhere?: (payload: Record<string, unknown>) => boolean;
   /** Ignore correlated responses until their data matches the expected change. */
   where?: (payload: unknown) => boolean;
   /** Start the response timeout after this operation completes. */
@@ -260,7 +262,7 @@ function waitForResponse(
   action: string,
   options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, where } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, where, requestWhere } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
@@ -270,7 +272,9 @@ function waitForResponse(
       timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
-      if (frame.action === action && frame.id) requestIds.add(frame.id);
+      if (frame.action === action && frame.id && (!requestWhere || requestWhere(frame.payload))) {
+        requestIds.add(frame.id);
+      }
     });
     wait.listen(channels.received, (frame) => {
       if (!frame.id || !requestIds.has(frame.id)) return;

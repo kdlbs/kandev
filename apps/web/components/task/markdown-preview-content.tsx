@@ -23,6 +23,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
 import {
+  MarkdownFileLinkContext,
   MarkdownTaskContext,
   rehypePlugins,
   remarkPlugins,
@@ -49,6 +50,10 @@ import {
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
 import { useTranslation } from "react-i18next";
+import type { SourcePositionProps } from "@/components/editors/source-position";
+import type { MarkdownWalkthroughTarget } from "@/lib/markdown/walkthrough-range";
+import { useMarkdownPreviewWalkthroughRange } from "./use-markdown-preview-walkthrough-range";
+import { useMarkdownPreviewSourcePosition } from "./use-markdown-preview-source-position";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
@@ -62,7 +67,9 @@ interface MarkdownPreviewToolbarProps {
   repositoryName?: string;
   showExternalVcsLink: boolean;
   onDownload?: () => void;
-  onTogglePreview: () => void;
+  onTogglePreview?: () => void;
+  toolbarModeControl?: ReactNode;
+  toolbarActions?: ReactNode;
 }
 
 function MarkdownPreviewToolbar({
@@ -78,20 +85,26 @@ function MarkdownPreviewToolbar({
   showExternalVcsLink,
   onDownload,
   onTogglePreview,
+  toolbarModeControl,
+  toolbarActions,
 }: MarkdownPreviewToolbarProps) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   return (
     <PanelHeaderBarSplit
+      className={toolbarModeControl ? "markdown-file-toolbar" : undefined}
       left={
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
           <SymlinkIndicator isSymlink={isSymlink} showLabel />
-          <span className="text-xs text-muted-foreground/60">{t("task:preview")}</span>
+          {!toolbarModeControl && (
+            <span className="text-xs text-muted-foreground/60">{t("task:preview")}</span>
+          )}
         </div>
       }
       right={
         <div className="flex items-center gap-1">
+          {toolbarModeControl}
           {showExternalVcsLink && (
             <ExternalVcsFileLink
               filePath={path}
@@ -111,27 +124,31 @@ function MarkdownPreviewToolbar({
               <span>{t("task:commentCount", { count: commentCount })}</span>
             </div>
           )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={onTogglePreview}
-                className="h-6 w-6 p-0 cursor-pointer text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
-                data-testid="markdown-preview-toggle"
-              >
-                <IconCode className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("task:showCode")}</TooltipContent>
-          </Tooltip>
+          {onTogglePreview && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onTogglePreview}
+                  className="h-8 w-8 p-0 cursor-pointer text-foreground"
+                  data-testid="markdown-preview-toggle"
+                >
+                  <IconCode className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("task:showCode")}</TooltipContent>
+            </Tooltip>
+          )}
+          {toolbarActions}
         </div>
       }
     />
   );
 }
 
-interface MarkdownPreviewContentProps {
+interface MarkdownPreviewContentProps extends SourcePositionProps {
+  walkthroughTarget?: MarkdownWalkthroughTarget | null;
   path: string;
   isSymlink?: boolean;
   content: string;
@@ -143,7 +160,12 @@ interface MarkdownPreviewContentProps {
   enableComments?: boolean;
   showExternalVcsLink?: boolean;
   onDownload?: () => void;
-  onTogglePreview: () => void;
+  onTogglePreview?: () => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => boolean | void;
+  toolbarModeControl?: ReactNode;
+  toolbarActions?: ReactNode;
+  showToolbar?: boolean;
 }
 
 type PositionedNode = {
@@ -412,6 +434,7 @@ export function MarkdownPreviewRenderer({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- keeps preview comments and scroll ownership together.
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
   isSymlink,
@@ -425,9 +448,32 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   showExternalVcsLink = true,
   onDownload,
   onTogglePreview,
+  onOpenFile,
+  onOpenLink,
+  toolbarModeControl,
+  toolbarActions,
+  showToolbar = true,
+  onSourcePositionHandle,
+  walkthroughTarget,
+  isActive,
 }: MarkdownPreviewContentProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  useMarkdownPreviewSourcePosition({
+    content,
+    identity: JSON.stringify([sessionId, repositoryName, path]),
+    rootRef,
+    scrollRef,
+    isActive,
+    onSourcePositionHandle,
+  });
+  useMarkdownPreviewWalkthroughRange({
+    target: walkthroughTarget,
+    isActive,
+    content,
+    rootRef,
+    scrollRef,
+  });
   const [overlayRoot, setOverlayRoot] = useState<HTMLElement | null>(null);
   const commentsEnabled = enableComments && !!sessionId;
   const commentState = useMarkdownPreviewComments({
@@ -467,25 +513,42 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
 
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
-      <MarkdownPreviewToolbar
-        isSymlink={isSymlink}
-        path={path}
-        worktreePath={worktreePath}
-        commentCount={commentState.comments.length}
-        commentsEnabled={commentsEnabled}
-        taskId={taskId}
-        sessionId={sessionId}
-        repositoryId={repositoryId}
-        repositoryName={repositoryName}
-        showExternalVcsLink={showExternalVcsLink}
-        onDownload={onDownload}
-        onTogglePreview={onTogglePreview}
-      />
-      <div ref={scrollRef} className="flex-1 overflow-auto p-6">
+      {showToolbar && (
+        <MarkdownPreviewToolbar
+          isSymlink={isSymlink}
+          path={path}
+          worktreePath={worktreePath}
+          commentCount={commentState.comments.length}
+          commentsEnabled={commentsEnabled}
+          taskId={taskId}
+          sessionId={sessionId}
+          repositoryId={repositoryId}
+          repositoryName={repositoryName}
+          showExternalVcsLink={showExternalVcsLink}
+          onDownload={onDownload}
+          onTogglePreview={onTogglePreview}
+          toolbarModeControl={toolbarModeControl}
+          toolbarActions={toolbarActions}
+        />
+      )}
+      <div
+        ref={scrollRef}
+        className="relative flex-1 overflow-auto px-4 py-6"
+        data-testid="markdown-preview-scroll-container"
+      >
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
-          <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <MarkdownPreviewRenderer content={content} taskId={taskId} />
-          </PreviewCommentContext.Provider>
+          <MarkdownFileLinkContext.Provider
+            value={{
+              worktreePath,
+              currentFilePath: path,
+              onOpenFile,
+              onOpenLink,
+            }}
+          >
+            <PreviewCommentContext.Provider value={previewCommentContextValue}>
+              <MarkdownPreviewRenderer content={content} taskId={taskId} />
+            </PreviewCommentContext.Provider>
+          </MarkdownFileLinkContext.Provider>
         </div>
       </div>
       <MarkdownPreviewCommentOverlays

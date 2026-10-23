@@ -109,6 +109,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await cancelOption.tap();
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
     await waitForQuickChatSessionSettled(testPage, quickSessionId);
     await waitForQuickChatDirectInput(quickChat);
     await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");

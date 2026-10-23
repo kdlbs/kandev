@@ -100,4 +100,16 @@ describe("generated/licenses.json", () => {
       }),
     );
   });
+
+  it("includes the Microsoft MIT notice for the Markdown editor package", () => {
+    const markdownEditor = entries.find(
+      (entry) => entry.ecosystem === "npm" && entry.name === "@vscode/markdown-editor",
+    );
+
+    expect(markdownEditor).toMatchObject({
+      version: "0.0.2-84",
+      license: "MIT",
+    });
+    expect(markdownEditor?.license_text).toContain("Copyright (c) Microsoft Corporation.");
+  });
 });

@@ -306,7 +306,9 @@ function recoveryHeaderCopy(
   );
   let summary = actions.recoveryNotice ?? copy.summary;
   if (hasDistinctGuidance) summary = failure;
-  if (copy.hasTypedSelectionCause || copy.hasTypedCleanupCause) summary = copy.summary;
+  if (workspaceRecoveryRelevant || copy.hasTypedSelectionCause || copy.hasTypedCleanupCause) {
+    summary = copy.summary;
+  }
   return {
     summary,
     suppressSummary: !copy.showSummary && !hasDistinctGuidance,

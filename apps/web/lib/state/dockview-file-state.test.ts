@@ -36,3 +36,26 @@ describe("file buffer lifetime", () => {
     expect(useDockviewStore.getState().openFiles.size).toBe(0);
   });
 });
+
+// @covers AC-UI-MARKDOWN-FILE-EDITING-003.8
+it("reuses a retained canonical record and retires only the selected instance", () => {
+  const store = useDockviewStore.getState();
+  store.activateFileSession("registry-A");
+  store.setFileState(file.path, file);
+  store.updateFileState(file.path, { content: "draft", isDirty: true });
+  const retained = useDockviewStore.getState().openFiles.get(file.path);
+  store.clearFileStates();
+  store.activateFileSession("registry-B");
+  store.setFileState(file.path, { ...file, content: "other repository session" });
+  store.activateFileSession("registry-A");
+  expect(useDockviewStore.getState().openFiles.get(file.path)).toBe(retained);
+  store.ensureFileState(file.path, file);
+  expect(useDockviewStore.getState().openFiles.get(file.path)).toBe(retained);
+  store.removeFileState(file.path);
+  store.activateFileSession("registry-B");
+  expect(useDockviewStore.getState().openFiles.get(file.path)?.content).toBe(
+    "other repository session",
+  );
+  store.activateFileSession("registry-A");
+  expect(useDockviewStore.getState().openFiles.has(file.path)).toBe(false);
+});

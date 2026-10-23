@@ -1,6 +1,10 @@
 "use client";
 
-import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useContext } from "react";
+import { FileDraftSessionContext } from "./file-draft-session-context";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
+import { useSaveDeleteActions, type PendingFileSave } from "@/hooks/use-file-save-delete";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
@@ -19,7 +23,8 @@ import {
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
-import { getFilePreviewKind } from "@/lib/utils/file-types";
+import { getFilePreviewKind, isMarkdownFile } from "@/lib/utils/file-types";
+import { resolveStoredMarkdownFileMode } from "./markdown-file-mode";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -62,6 +67,9 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
             getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
               ? savedTab.renderedPreview
               : undefined,
+          ...(isMarkdownFile(savedTab.path)
+            ? { markdownMode: resolveStoredMarkdownFileMode(savedTab) }
+            : {}),
         }),
       );
     } catch {
@@ -121,6 +129,7 @@ export function useFileTabRestoration({
   setLeftTab,
   setOpenFileTabs,
 }: FileTabRestorationOptions) {
+  const retainedOwner = useContext(FileDraftSessionContext);
   const restoredTabsRef = useRef<string | null>(null);
   const restorationInProgressRef = useRef<boolean>(false);
   const prevSessionRef = useRef<string | null>(null);
@@ -140,14 +149,23 @@ export function useFileTabRestoration({
       restoredTabsRef.current = activeSessionId;
       prevSessionRef.current = activeSessionId;
       restorationInProgressRef.current = false;
-      setOpenFileTabs([]);
+      if (!retainedOwner) setOpenFileTabs([]);
     } else if (restorationInProgressRef.current || restoredTabsRef.current === activeSessionId) {
       return;
     }
-    const savedTabs = getOpenFileTabs(activeSessionId);
-    const savedActiveTab = getActiveTabForSession(activeSessionId, "chat");
+    const store = useDockviewStore.getState();
+    const epoch = store.fileSessionEpoch;
+    const selectedKey = store.mobileFileKeys.get(activeSessionId);
+    const selected = selectedKey ? store.openFiles.get(selectedKey) : undefined;
+    const savedTabs = getOpenFileTabs(activeSessionId).filter(
+      (tab) => !retainedOwner || !store.openFiles.has(buildRepoScopedItemId(tab.path, tab.repo)),
+    );
+    const savedActiveTab =
+      retainedOwner && selected
+        ? `file:${getFileTabKey(selected)}`
+        : getActiveTabForSession(activeSessionId, "chat");
     if (savedTabs.length === 0) {
-      setLeftTab(toPrimaryTab(savedActiveTab));
+      setLeftTab(retainedOwner && selected ? savedActiveTab : toPrimaryTab(savedActiveTab));
       return;
     }
     restorationInProgressRef.current = true;
@@ -161,7 +179,10 @@ export function useFileTabRestoration({
         restorationInProgressRef.current = false;
         return;
       }
-      if (restoredTabsRef.current !== activeSessionId) {
+      if (
+        restoredTabsRef.current !== activeSessionId ||
+        (retainedOwner && useDockviewStore.getState().fileSessionEpoch !== epoch)
+      ) {
         restorationInProgressRef.current = false;
         return;
       }
@@ -238,6 +259,46 @@ function useFileMutationOwner(activeSessionId: string | null, tabs: FileEditorTa
   return { capture, isCurrent, tabsRef, savingFiles, setPendingSaves };
 }
 
+function useRetainedFileSave(activeSessionId: string | null) {
+  const retainedOwner = useContext(FileDraftSessionContext);
+  const { toast } = useToast();
+  const [pending, setPending] = useState(new Map<string, PendingFileSave>());
+  const sessionIdRef = useRef(activeSessionId);
+  sessionIdRef.current = activeSessionId;
+  const visitRef = useRef<symbol | null>(null);
+  const files = useDockviewStore((state) => state.openFiles);
+  const actions = useSaveDeleteActions({
+    retainedOwner,
+    activeSessionIdRef: retainedOwner?.sessionIdRef ?? sessionIdRef,
+    activeEditorVisitRef: retainedOwner?.visitRef ?? visitRef,
+    updateFileState: useDockviewStore.getState().updateFileState,
+    setSavingFiles: setPending,
+    toast,
+  });
+  const savingFiles = new Set(
+    Array.from(pending).flatMap(([key, owner]) => {
+      const file = files.get(key);
+      return file?.instanceId === owner.instanceId && owner.sessionId === activeSessionId
+        ? [getFileTabKey(file)]
+        : [];
+    }),
+  );
+  return retainedOwner ? { handleFileSave: actions.saveFile, savingFiles } : null;
+}
+
+function clearPendingSave(
+  ownership: ReturnType<typeof useFileMutationOwner>,
+  fileKey: string,
+  owner: MutationOwner,
+) {
+  ownership.setPendingSaves((previous) => {
+    if (previous.get(fileKey) !== owner) return previous;
+    const next = new Map(previous);
+    next.delete(fileKey);
+    return next;
+  });
+}
+
 export function useFileSaveDelete({
   activeSessionId,
   openFileTabs,
@@ -246,6 +307,7 @@ export function useFileSaveDelete({
 }: FileSaveDeleteOptions) {
   const { toast } = useToast();
   const ownership = useFileMutationOwner(activeSessionId, openFileTabs);
+  const retainedSave = useRetainedFileSave(activeSessionId);
   const closeRef = useRef(handleCloseFileTab);
   closeRef.current = handleCloseFileTab;
 
@@ -297,12 +359,7 @@ export function useFileSaveDelete({
           variant: "error",
         });
       } finally {
-        ownership.setPendingSaves((prev) => {
-          if (prev.get(fileKey) !== owner) return prev;
-          const next = new Map(prev);
-          next.delete(fileKey);
-          return next;
-        });
+        clearPendingSave(ownership, fileKey, owner);
       }
     },
     [ownership, toast, setOpenFileTabs],
@@ -337,5 +394,9 @@ export function useFileSaveDelete({
     [ownership, toast],
   );
 
-  return { handleFileSave, handleFileDelete, savingFiles: ownership.savingFiles };
+  return {
+    handleFileSave: retainedSave?.handleFileSave ?? handleFileSave,
+    handleFileDelete,
+    savingFiles: retainedSave?.savingFiles ?? ownership.savingFiles,
+  };
 }

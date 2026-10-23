@@ -13,13 +13,17 @@ import {
   revealPendingCodeMirrorCursor,
 } from "@/components/editors/codemirror/codemirror-cursor-navigation";
 import { cn } from "@/lib/utils";
+import type { SourcePositionProps } from "@/components/editors/source-position";
+import { useCodeMirrorSourcePosition } from "@/components/editors/use-source-position";
 
-type FileViewerContentProps = {
+type FileViewerContentProps = SourcePositionProps & {
   path: string;
   content: string;
   repo?: string;
   sessionId?: string;
   className?: string;
+  editable?: boolean;
+  onChange?: (newContent: string) => void;
 };
 
 export function FileViewerContent({
@@ -28,11 +32,15 @@ export function FileViewerContent({
   repo,
   sessionId,
   className,
+  editable = false,
+  onChange,
+  onSourcePositionHandle,
+  isActive,
 }: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [
     EditorView.lineWrapping,
-    EditorView.editable.of(false),
+    EditorView.editable.of(editable),
     codeMirrorCursorFlashExtension,
   ];
   if (langExt) {
@@ -42,6 +50,13 @@ export function FileViewerContent({
   const viewRef = useRef<EditorView | null>(null);
   const fileIdentityRef = useRef({ path, repo, sessionId });
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  useCodeMirrorSourcePosition({
+    view: editorView,
+    content,
+    identity: JSON.stringify([sessionId, repo, path]),
+    isActive,
+    onSourcePositionHandle,
+  });
   const areaRef = useRef<HTMLDivElement>(null);
   const walkthroughRange = useCodeMirrorWalkthroughRange({
     view: editorView,
@@ -86,7 +101,8 @@ export function FileViewerContent({
         height="100%"
         theme={vscodeDark}
         extensions={extensions}
-        readOnly
+        readOnly={!editable}
+        onChange={editable ? onChange : undefined}
         onCreateEditor={handleCreateEditor}
         basicSetup={{
           lineNumbers: true,

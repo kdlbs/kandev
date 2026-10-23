@@ -11,8 +11,17 @@ import {
   parseSessionModelUri,
 } from "@/lib/lsp/file-uri";
 
-export type CursorPosition = { line: number; column: number; flashLine?: boolean };
-export type CursorRevealOptions = { sessionId?: string; flashLine?: boolean };
+export type CursorPosition = {
+  line: number;
+  column: number;
+  flashLine?: boolean;
+  walkthroughOwner?: symbol;
+};
+export type CursorRevealOptions = {
+  sessionId?: string;
+  flashLine?: boolean;
+  walkthroughOwner?: symbol;
+};
 type CodeMirrorCursorRevealer = (
   line: number,
   column: number,
@@ -61,6 +70,7 @@ export function setPendingCursorPosition(
     line,
     column,
     ...(options.flashLine ? { flashLine: true } : {}),
+    ...(options.walkthroughOwner ? { walkthroughOwner: options.walkthroughOwner } : {}),
   });
 }
 
@@ -72,6 +82,22 @@ export function consumePendingCursorPosition(
   const scopedPosition = takePendingCursor(pendingCursorKey(path, repo, sessionId));
   if (scopedPosition || sessionId === undefined) return scopedPosition;
   return takePendingCursor(pendingCursorKey(path, repo));
+}
+
+/** Acknowledge only the walkthrough request observed by this file presentation. */
+export function pendingWalkthroughAcknowledgement(
+  path: string,
+  repo: string | undefined,
+  sessionId: string | undefined,
+  line: number,
+): () => void {
+  const scopedKey = pendingCursorKey(path, repo, sessionId);
+  const key = pendingCursorPositions.has(scopedKey) ? scopedKey : pendingCursorKey(path, repo);
+  const pending = pendingCursorPositions.get(key);
+  if (!pending?.walkthroughOwner || pending.line !== line) return () => {};
+  return () => {
+    if (pendingCursorPositions.get(key) === pending) pendingCursorPositions.delete(key);
+  };
 }
 
 export function registerCodeMirrorCursorRevealer(

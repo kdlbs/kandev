@@ -5,6 +5,8 @@ import {
   exerciseSharedFirstResponse,
 } from "./sidebar-shared-task-state-fixtures";
 
+test.describe.configure({ retries: 0 });
+
 test.afterEach(async ({ backend }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus) return;
   await testInfo.attach("sidebar-shared-state-backend.log", {

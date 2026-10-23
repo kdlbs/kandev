@@ -194,6 +194,7 @@ surface.
   markers suppress insertion; existing panels sync identity without moving.
 - **Dockview environment switching:** reconcile ephemeral panels before restoring views;
   correlate ID-less groups by stable ID or position. Setup can precede asynchronous layout restoration. Reconcile dependent state after restoration settles. Dispose added subscriptions. Test late restoration and mixed valid or stale candidates before ambiguity checks. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+- **File draft ownership:** Keep `FileDraftSessionProvider` above responsive layouts. Use canonical session/repository/path records in `dockview-file-state.ts`. Guard saves by epoch, instance, and operation. Follow the [Markdown file design](../../docs/specs/ui/system-design/markdown-file-editing.md#buffer-and-file-lifecycle).
 - **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
   `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
   Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
@@ -250,11 +251,10 @@ Guide: [`docs/i18n.md`](../../docs/i18n.md); spec
 
 ## Markdown safety
 
-Any renderer that enables embedded raw HTML must pair `rehype-raw` immediately
-with `rehype-sanitize`, and enable that combination only on the intended
-surface. Do not broaden raw-HTML support to chat, comments, or other renderers
-without a separate security decision. Add regression coverage for permitted
-README markup and for stripping executable HTML and unsafe URLs.
+Any renderer that enables embedded raw HTML must pair `rehype-raw` immediately with `rehype-sanitize`, and enable that combination only on the intended surface. Do not broaden raw-HTML support to chat, comments, or other renderers without a separate security decision.
+Add regression coverage for permitted README markup and for stripping executable HTML and unsafe URLs.
+
+Markdown modes, retry, comments, and source-position lifetimes follow the [Markdown file editing design](../../docs/specs/ui/system-design/markdown-file-editing.md). The exact-pinned engine patch injects scoped native input under `components/editors/markdown/input/`; keep browser globals unchanged and preserve canonical bytes through textarea offset mapping. The pinned Monaco patch preserves backward native selections and input deltas; retain its real-package regressions on upgrades.
 
 ## Code-quality limits
 

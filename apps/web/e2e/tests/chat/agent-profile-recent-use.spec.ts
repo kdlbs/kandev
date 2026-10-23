@@ -43,12 +43,17 @@ test.describe("Agent profile recent use", () => {
       const cancelledSetup = dialog;
       const cancelledSelector = cancelledSetup.getByTestId("agent-profile-selector");
       await cancelledSelector.click();
-      await testPage
-        .getByRole("listbox")
-        .getByRole("option", { name: profileA.name, exact: false })
-        .click();
-      await cancelledSetup.getByRole("button", { name: "Close New Chat", exact: true }).click();
+      const cancelledOptions = testPage.getByRole("listbox").getByRole("option");
+      // The successful-use update is persisted before its selector list has
+      // necessarily received the corresponding client-side state change.
+      await expect(cancelledOptions.first()).toContainText(profileB.name);
+      await cancelledOptions.filter({ hasText: profileA.name }).click();
+      const cancelledSetupTab = cancelledSetup
+        .getByTestId("quick-chat-tab")
+        .filter({ hasText: "New Chat" });
+      await cancelledSetupTab.getByRole("button", { name: "Close New Chat", exact: true }).click();
 
+      await expect(cancelledSetupTab).toHaveCount(0);
       await expect(cancelledSetup.getByTestId("quick-chat-setup")).toHaveCount(0);
       await cancelledSetup.getByTestId("quick-chat-add-menu-trigger").click();
       await testPage.getByTestId("quick-chat-new-agent").click();

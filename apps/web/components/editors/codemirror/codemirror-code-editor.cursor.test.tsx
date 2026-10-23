@@ -59,6 +59,7 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 
 import { CodeMirrorCodeEditor } from "./codemirror-code-editor";
 import { codeMirrorCursorFlashExtension } from "./codemirror-cursor-navigation";
+import type { SourcePositionHandle } from "../source-position";
 
 const FILE_PATH = "src/app.ts";
 const FRONTEND_REPO = "frontend";
@@ -110,6 +111,21 @@ afterEach(() => {
 });
 
 describe("CodeMirrorCodeEditor pending cursor navigation", () => {
+  it("exposes an optional local range port when the native editor is ready", () => {
+    const onSourcePositionHandle = vi.fn();
+    const view = createEditorView();
+    const rendered = renderEditor({ ...baseProps, onSourcePositionHandle });
+    expect(onSourcePositionHandle).not.toHaveBeenCalled();
+    mountEditorView(view);
+    const handle = onSourcePositionHandle.mock.lastCall![0] as SourcePositionHandle;
+    handle.restore({ selection: { anchor: 15, active: 7 }, nearestLine: 3 });
+    expect(view.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ selection: { anchor: 15, head: 7 } }),
+    );
+    rendered.unmount();
+    expect(onSourcePositionHandle).toHaveBeenLastCalledWith(null);
+  });
+
   it("installs the shared cursor-flash extension", () => {
     renderEditor();
 

@@ -1,0 +1,66 @@
+diff --git a/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js b/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
+index b95e8b081b548e3675c202624c8f51ff8901e74f..a83d9cc61efb9ecdb12700f4270d852d4247ecbf 100644
+--- a/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
++++ b/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
+@@ -550,8 +550,8 @@ class TextAreaWrapper extends Disposable {
+         }
+         const activeWindow = getWindow(activeElement);
+         const currentIsFocused = (activeElement === textArea);
+-        const currentSelectionStart = textArea.selectionStart;
+-        const currentSelectionEnd = textArea.selectionEnd;
++        const currentSelectionStart = this.getSelectionStart();
++        const currentSelectionEnd = this.getSelectionEnd();
+         if (currentIsFocused && currentSelectionStart === selectionStart && currentSelectionEnd === selectionEnd) {
+             // No change
+             // Firefox iframe bug https://github.com/microsoft/monaco-editor/issues/643#issuecomment-367871377
+@@ -564,7 +564,7 @@ class TextAreaWrapper extends Disposable {
+         if (currentIsFocused) {
+             // No need to focus, only need to change the selection range
+             this.setIgnoreSelectionChangeTime('setSelectionRange');
+-            textArea.setSelectionRange(selectionStart, selectionEnd);
++            textArea.setSelectionRange(Math.min(selectionStart, selectionEnd), Math.max(selectionStart, selectionEnd), selectionStart > selectionEnd ? 'backward' : 'forward');
+             if (isFirefox && activeWindow.parent !== activeWindow) {
+                 textArea.focus();
+             }
+@@ -576,7 +576,7 @@ class TextAreaWrapper extends Disposable {
+             const scrollState = saveParentsScrollTop(textArea);
+             this.setIgnoreSelectionChangeTime('setSelectionRange');
+             textArea.focus();
+-            textArea.setSelectionRange(selectionStart, selectionEnd);
++            textArea.setSelectionRange(Math.min(selectionStart, selectionEnd), Math.max(selectionStart, selectionEnd), selectionStart > selectionEnd ? 'backward' : 'forward');
+             restoreParentsScrollTop(textArea, scrollState);
+         }
+         catch (e) {
+diff --git a/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js b/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
+index eaaac313da31581e8b42c6d31c630ea18823cba2..90cc79d2cf6b42a9890e24b708d9e4bb5283879e 100644
+--- a/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
++++ b/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
+@@ -92,17 +92,21 @@ class TextAreaState {
+                 positionDelta: 0
+             };
+         }
+-        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousState.selectionStart, currentState.selectionStart);
+-        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousState.selectionEnd, currentState.value.length - currentState.selectionEnd);
++        const previousStart = Math.min(previousState.selectionStart, previousState.selectionEnd);
++        const previousEnd = Math.max(previousState.selectionStart, previousState.selectionEnd);
++        const currentStart = Math.min(currentState.selectionStart, currentState.selectionEnd);
++        const currentEnd = Math.max(currentState.selectionStart, currentState.selectionEnd);
++        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousStart, currentStart);
++        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousEnd, currentState.value.length - currentEnd);
+         previousState.value.substring(prefixLength, previousState.value.length - suffixLength);
+         const currentValue = currentState.value.substring(prefixLength, currentState.value.length - suffixLength);
+-        const previousSelectionStart = previousState.selectionStart - prefixLength;
+-        const previousSelectionEnd = previousState.selectionEnd - prefixLength;
+-        const currentSelectionStart = currentState.selectionStart - prefixLength;
+-        const currentSelectionEnd = currentState.selectionEnd - prefixLength;
++        const previousSelectionStart = previousStart - prefixLength;
++        const previousSelectionEnd = previousEnd - prefixLength;
++        const currentSelectionStart = currentStart - prefixLength;
++        const currentSelectionEnd = currentEnd - prefixLength;
+         if (currentSelectionStart === currentSelectionEnd) {
+             // no current selection
+-            const replacePreviousCharacters = (previousState.selectionStart - prefixLength);
++            const replacePreviousCharacters = (previousStart - prefixLength);
+             return {
+                 text: currentValue,
+                 replacePrevCharCnt: replacePreviousCharacters,

@@ -103,6 +103,7 @@ export function CanvasTaskCreateLauncher({
     <Button
       ref={triggerRef}
       type="button"
+      variant={sidebar ? "ghost" : "default"}
       className={
         sidebar
           ? "min-h-8 w-full cursor-pointer justify-start rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:min-h-11"

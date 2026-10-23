@@ -7,6 +7,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { canvasHref, type Canvas } from "@/lib/api/domains/canvas-api";
 import { TaskSheetSelectionProvider } from "./mobile/task-sheet-selection-context";
 import { ResponsiveTaskPicker } from "./mobile/responsive-task-picker";
+import { MobileNavigationGuardProvider } from "./mobile/mobile-navigation-guard";
 import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
@@ -14,6 +15,7 @@ import type { Layout } from "react-resizable-panels";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import type { TaskTopbarRepository } from "./task-page-content-helpers";
+import { FileDraftSessionProvider } from "./file-draft-session-provider";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 
@@ -63,12 +65,16 @@ export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
   }
   return (
     <TaskSheetSelectionProvider workspaceId={props.workspaceId}>
-      <ResponsiveTaskLayout {...props} />
-      <ResponsiveTaskPicker
-        key={pickerWorkspaceId}
-        workspaceId={props.workspaceId}
-        workflowId={props.workflowId}
-      />
+      <MobileNavigationGuardProvider>
+        <FileDraftSessionProvider sessionId={props.sessionId}>
+          <ResponsiveTaskLayout {...props} />
+          <ResponsiveTaskPicker
+            key={pickerWorkspaceId}
+            workspaceId={props.workspaceId}
+            workflowId={props.workflowId}
+          />
+        </FileDraftSessionProvider>
+      </MobileNavigationGuardProvider>
     </TaskSheetSelectionProvider>
   );
 });
