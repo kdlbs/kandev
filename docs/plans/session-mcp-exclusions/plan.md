@@ -342,11 +342,14 @@ The records below supersede that historical status.
 - Managed desktop and neighbor browser suites: 13 passed. Managed phone and neighbor suites: 9 passed. Runs were sequential and used isolated fixtures.
 - Public documentation validators passed (63 validator tests, 54 pages); specification catalog/lint and whitespace checks passed.
 
-The initial broad resolver run also hit the existing native-command cancellation
-failure `TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation`.
-No command-runner code changed. Focused affected tests pass. Mock providers do
-not establish live-provider health, immediate tool revocation, or native-config
-removal. No merge, parent-branch change, additional session, or worker occurred.
+The initial broad resolver run hit a fixture portability failure in
+`TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation`: its explicit
+`/usr/bin:/bin` PATH lacked `sleep` on this Nix host. A separate one-line test fix
+preserves the host PATH. The exact required broad command then passed under race
+for mcpconfig, settings/store, and settings/handlers. Production runner behavior
+is unchanged. Mock providers do not establish live-provider health, immediate
+tool revocation, or native-config removal. No merge, parent-branch change,
+additional session, or worker occurred.
 
 Implementation refinement: exclusion actions display committed choices only and
 require a repeated explicit action after Reload choices. Addition drafts retain

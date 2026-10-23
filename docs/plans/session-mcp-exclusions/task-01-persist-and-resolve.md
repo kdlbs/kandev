@@ -125,7 +125,10 @@ actual PostgreSQL mixed writers admitted one revision and rejected the stale
 writer. SQLguard and settings-store conformance passed. Changed-Go lint passed.
 Disk reopen and rollback checks are recorded with final verification in the plan.
 
-The broad `MCP|Selection|Effective` run also discovered the pre-existing native
-command cancellation test failure (`TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation`).
-Its command runner is unchanged; focused affected tests pass. No live-provider
-connection or native-file revocation claim follows from these checks.
+The broad `MCP|Selection|Effective` command initially failed in
+`TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation`. Its fixture
+hardcoded `/usr/bin:/bin`, which lacks `sleep` on this Nix host, so the shell
+exited before cancellation. Preserving the host PATH in that test's explicit
+environment fixed the fixture. The exact broad command then passed under race
+for all three packages. No production command-runner behavior changed.
+No live-provider connection or native-file revocation claim follows from these checks.
