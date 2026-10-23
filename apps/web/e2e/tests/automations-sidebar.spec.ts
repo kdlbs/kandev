@@ -19,6 +19,9 @@ import { watchWs } from "../helpers/causal-waits";
 
 type Seed = { workspaceId: string; workflowId: string; startStepId: string };
 
+// Ten-second polling cadence plus transport and rendering allowance.
+const DEFINITION_REFRESH_TIMEOUT = 15_000;
+
 /** The section header button — the one that toggles the accordion. */
 function automationsHeader(page: Page): Locator {
   // Located by role rather than testid because the accessible name carries the
@@ -167,4 +170,62 @@ test.describe("Automations section in the app sidebar", () => {
       caption: "Expanded desktop Automations sidebar with a running automation indicator",
     });
   });
+});
+
+// @covers AC-OFFICE-AUTOMATION-RUNS-001.10 AC-OFFICE-AUTOMATION-RUNS-001.12
+test("external definitions update the mounted builtin after create, rename, and delete", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ws = watchWs(testPage);
+  await testPage.goto("/");
+  await automationsHeader(testPage).click();
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  const section = testPage.locator("#sidebar-section-automations");
+  const original = await section.elementHandle();
+  const url = testPage.url();
+  const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
+  const layout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
+
+  const createdRead = ws.waitForResponse("automation.list");
+  const created = await apiClient.wsRequest<{ id: string }>("automation.create", {
+    workspace_id: seedData.workspaceId,
+    name: "External definition",
+    enabled: false,
+    repository_mode: "none",
+  });
+  const row = testPage.getByTestId(`sidebar-automation-${created.id}`);
+  await Promise.all([
+    createdRead,
+    expect(row).toContainText("External definition", { timeout: DEFINITION_REFRESH_TIMEOUT }),
+  ]);
+  await expect(row).toHaveAttribute("href", `/automations/${created.id}`);
+
+  const renamedRead = ws.waitForResponse("automation.list");
+  await apiClient.wsRequest("automation.update", { id: created.id, name: "External rename" });
+  await Promise.all([
+    renamedRead,
+    expect(row).toContainText("External rename", { timeout: DEFINITION_REFRESH_TIMEOUT }),
+  ]);
+
+  const deletedRead = ws.waitForResponse("automation.list");
+  await apiClient.wsRequest("automation.delete", { id: created.id });
+  await Promise.all([
+    deletedRead,
+    expect(row).toHaveCount(0, { timeout: DEFINITION_REFRESH_TIMEOUT }),
+  ]);
+  await expect(testPage.getByTestId("sidebar-automations-empty")).toBeVisible();
+  await expect(automationsHeader(testPage)).toHaveAttribute("aria-expanded", "true");
+  expect(await section.evaluate((element, previous) => element === previous, original)).toBe(true);
+  expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+  await expect(testPage).toHaveURL(url);
+  expect(
+    (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ],
+  ).toEqual(layout);
+  await original?.dispose();
 });
