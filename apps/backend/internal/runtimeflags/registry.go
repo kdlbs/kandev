@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keyReplacedSessionReclaim                     = "features.replacedSessionReclaim"
+	envReplacedSessionReclaim                     = "KANDEV_FEATURES_REPLACED_SESSION_RECLAIM"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -215,6 +217,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyReplacedSessionReclaim,
+			EnvVar:          envReplacedSessionReclaim,
+			Kind:            KindFeature,
+			Label:           "Stop replaced session runtimes",
+			Description:     "When you manually make another session primary, stops the previous primary's agent process once its active turn and known pending work settle; the conversation stays resumable. Automatic promotion and workflow switches are unaffected.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "A manually replaced primary's agent process is stopped automatically without changing its session state, so its conversation stays resumable. Office and coordinator owners, parked workflow sessions, archived tasks, and sessions that cannot auto-resume are never stopped. Leave it off to keep replaced sessions running until idle suspension or manual stop.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ReplacedSessionReclaim },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ReplacedSessionReclaim = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

@@ -70,6 +70,11 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// ReplacedSessionReclaim stops the execution of a session the user
+	// replaced as primary (PromotePrimarySession), once that session has
+	// settled.
+	ReplacedSessionReclaim bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -1233,10 +1238,12 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
-	idleParkingMu         sync.Mutex
-	idleParkingCandidates map[idleParkingCandidateKey]time.Time
-	idleParkingFocusAt    map[string]time.Time
-	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+	idleParkingMu              sync.Mutex
+	replacedSessionReclaims    sync.Map // map[sessionID]replacedSessionReclaim
+	primarySessionReclaimLocks sync.Map // map[taskID]*sync.Mutex
+	idleParkingCandidates      map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt         map[string]time.Time
+	idleParkingInFlight        map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow

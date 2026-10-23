@@ -91,6 +91,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Stopping the runtime of a manually replaced primary session is opt-in;
+  # by default they keep running until idle suspension or a manual stop.
+  KANDEV_FEATURES_REPLACED_SESSION_RECLAIM:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

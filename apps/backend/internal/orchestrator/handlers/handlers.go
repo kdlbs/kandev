@@ -789,13 +789,14 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
-// wsSetPrimarySession marks a session as the task's primary session.
+// wsSetPrimarySession marks a session as the task's primary session. It is the
+// explicit user promotion, so it goes through PromotePrimarySession.
 func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := h.parseSessionAction(msg)
 	if errResp != nil {
 		return errResp, nil
 	}
-	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
+	if err := h.service.PromotePrimarySession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
 	}
