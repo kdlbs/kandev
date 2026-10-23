@@ -35,6 +35,8 @@ or rewrite the preserved checkout.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9:** A same-idempotency-key retry after a committed repair shall return the stored receipt, including from a fresh or additional-session launch that reaches the same repair path automatically.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.10:** The stored receipt shall carry non-secret evidence captured both before the repair and after the repair transaction commits, so that a divergence between the two is itself an auditable result. Every borrower shall honor the environment owner’s receipt before launching.
 
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.11:** When a worktree launch requests a checkout branch that has no exact canonical slot, but exactly one active canonical row of the same repository holds a preserved worktree on that exact branch and no other requested slot owns that row, reuse shall bind the launch to that row's slot and reuse its worktree instead of failing closed; a different branch, an ambiguous, deleted, or failed holder, or a row owned by another requested slot shall still fail closed.
+
 ## Migrated source detail
 
 This requirement was split out of
