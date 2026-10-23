@@ -597,6 +597,11 @@ type FeaturesConfig struct {
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
 
+	// SessionMemoryGuard holds launches that would add an agent process while
+	// the host is low on available memory or above its commit ceiling. Off in
+	// every shipped profile; launches otherwise follow only the session ceiling.
+	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
+
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.
 	AgentBackgroundWork bool `mapstructure:"agent_background_work" json:"agentBackgroundWork"`

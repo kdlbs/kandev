@@ -101,6 +101,7 @@ func provideOrchestrator(
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
+	serviceCfg.SessionMemoryGuardEnabled = cfg != nil && cfg.Features.SessionMemoryGuard
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)

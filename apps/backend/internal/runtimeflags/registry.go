@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keySessionMemoryGuard                         = "features.sessionMemoryGuard"
+	envSessionMemoryGuard                         = "KANDEV_FEATURES_SESSION_MEMORY_GUARD"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -215,6 +217,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keySessionMemoryGuard,
+			EnvVar:          envSessionMemoryGuard,
+			Kind:            KindFeature,
+			Label:           "Hold launches under host memory pressure",
+			Description:     "Holds new automatic agent session launches while host available memory is below KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB (default 8192) or commit charge is above KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT (default 75), and replays them when pressure clears. Manual starts, resumes, and prompts are never held. Lower the floor on hosts with 16 GiB or less.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Automatic launches wait in the launch queue while the host is short of memory. Manual starts, resumes, prompts into running sessions, dynamic hand-offs, and Office coordinator conversations are never held, and an unreadable host never holds a launch.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.SessionMemoryGuard },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.SessionMemoryGuard = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
