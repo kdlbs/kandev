@@ -15,6 +15,13 @@ afterEach(() => {
   recovery.requestLocal = false;
 });
 
+vi.mock("./use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({
+    promptSuggestion: null,
+    onPromptSuggestionDismiss: () => {},
+  }),
+}));
+
 function composerArgs(): Parameters<typeof useComposerProps>[0] {
   return {
     panelState: {

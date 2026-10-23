@@ -1943,6 +1943,7 @@ func (m *Manager) buildAdapterConfig() error {
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
 		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
+		PromptSuggestions:         m.cfg.PromptSuggestions,
 		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 

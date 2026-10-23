@@ -188,6 +188,9 @@ type CreateRequest struct {
 	// DisableAskQuestion disables the ask_user_question MCP tool (for TUI agents).
 	DisableAskQuestion bool `json:"disable_ask_question,omitempty"`
 
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool `json:"prompt_suggestions,omitempty"`
+
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 

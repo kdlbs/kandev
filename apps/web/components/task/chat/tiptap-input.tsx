@@ -33,6 +33,7 @@ import {
 } from "./tiptap-suggestion";
 import { useTipTapEditor, type TipTapInputHandle } from "./use-tiptap-editor";
 import { useSuggestionEscapeFallback } from "./use-suggestion-escape-fallback";
+import { useEditorPromptSuggestion } from "./use-prompt-suggestion-escape";
 import { getSuggestionMenuOpenState } from "./suggestion-menu-state";
 import {
   useClarificationEscapeGuard,
@@ -76,6 +77,9 @@ type TipTapInputProps = {
   planContextEnabled?: boolean;
   onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   onPlanModeChange?: (enabled: boolean) => void;
+  /** Next-prompt suggestion rendered as ghost text while the draft is empty. */
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
 };
 
 // ── Menu keyboard navigation helper ──────────────────────────────
@@ -414,6 +418,24 @@ function useEditorRefSync(editorRef: RefObject<Editor | null>, editor: Editor | 
 
 // ── Component ───────────────────────────────────────────────────────
 
+function useComposerMenus(
+  sessionId: string | null,
+  taskId: string | null,
+  workspaceId: string | null,
+) {
+  const menu = useMenuHandlers();
+  const configs = useSuggestionConfigs({
+    sessionId,
+    taskId,
+    workspaceId,
+    onMentionKeyDown: menu.onMentionKeyDown,
+    onSlashKeyDown: menu.onSlashKeyDown,
+    setMentionMenu: menu.setMentionMenu,
+    setSlashMenu: menu.setSlashMenu,
+  });
+  return { menu, ...configs };
+}
+
 export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(function TipTapInput(
   {
     value,
@@ -433,19 +455,16 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     workspaceId = null,
     entityReferencesEnabled = false,
     onImagePaste,
+    promptSuggestion: suggestion = null,
+    onPromptSuggestionDismiss: dismissSuggestion,
   },
   ref,
 ) {
-  const menu = useMenuHandlers();
-  const { mentionSuggestion, slashSuggestion, slashCommands } = useSuggestionConfigs({
+  const { menu, mentionSuggestion, slashSuggestion, slashCommands } = useComposerMenus(
     sessionId,
-    taskId: taskId ?? null,
+    taskId ?? null,
     workspaceId,
-    onMentionKeyDown: menu.onMentionKeyDown,
-    onSlashKeyDown: menu.onSlashKeyDown,
-    setMentionMenu: menu.setMentionMenu,
-    setSlashMenu: menu.setSlashMenu,
-  });
+  );
   const entityReferences = useEntityReferenceComposer({
     enabled: entityReferencesEnabled,
     workspaceId,
@@ -487,6 +506,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     ref,
   });
   useEditorRefSync(editorRef, editor);
+  useEditorPromptSuggestion(editor, editorRef, editorWrapperRef, suggestion, dismissSuggestion);
   const handleReverseSearchSelect = useReverseSearchSelectHandler(
     applyHistoryEntry,
     overlay.closeReverseSearch,

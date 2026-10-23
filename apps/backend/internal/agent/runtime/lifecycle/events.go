@@ -487,6 +487,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SupportsAudio:               event.SupportsAudio,
 		SupportsEmbeddedContext:     event.SupportsEmbeddedContext,
 		SupportsPromptQueueing:      event.SupportsPromptQueueing,
+		SupportsPromptSuggestions:   event.SupportsPromptSuggestions,
 		AuthMethods:                 event.AuthMethods,
 		CurrentModelID:              event.CurrentModelID,
 		FallbackModel:               event.FallbackModel,

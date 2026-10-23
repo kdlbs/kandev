@@ -292,6 +292,7 @@ const (
 	ActionSessionLaunchWarning          = "session.launch.warning"
 	ActionSessionMCPStatusUpdated       = "session.mcp_status_updated"
 	ActionSessionInfoUpdated            = "session.info_updated"
+	ActionSessionPromptSuggestion       = "session.prompt_suggestion"
 	ActionSessionSetMode                = "session.set_mode"
 	ActionSessionTodosUpdated           = "session.todos_updated"
 	ActionSessionPromptUsage            = "session.prompt_usage"

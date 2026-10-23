@@ -360,6 +360,9 @@ type Config struct {
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to emit them.
+	PromptSuggestions bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -393,6 +396,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
 		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
 		ProviderGatewayAuth:       c.ProviderGatewayAuth,
+		PromptSuggestions:         c.PromptSuggestions,
 	}
 }
 
