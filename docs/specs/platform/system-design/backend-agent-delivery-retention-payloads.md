@@ -78,6 +78,15 @@ missing sequence or unsupported event. The existing format-1 readers already und
 compact receipts. No new format, checkpoint reset, generation reset or wire capability
 is required.
 
+Legacy v1 receipt normalization also preserves the optional `tool_output_bytes`
+field on `streams.AgentEvent`. Keep its nullable unsigned type and serialized
+position after `tool_status`, before `normalized`: typed re-encoding is part of
+the existing v1 identity. An explicit zero remains present; an absent field stays
+absent. New producers leave this legacy read-compatibility field unset. Removing
+a producer feature must not discard fields from retained v1 serialization.
+This preserves the existing receipt check without rewriting stored evidence or
+restoring progress/stall behavior.
+
 An authenticated identical duplicate still returns its committed result without
 projection or dispatch. Changed content or envelope fails the existing conflict guard.
 State-only ACK recovery uses the retained projected cursor. Cleanup never admits a

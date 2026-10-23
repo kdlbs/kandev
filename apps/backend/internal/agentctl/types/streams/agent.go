@@ -293,6 +293,10 @@ type AgentEvent struct {
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
 
+	// ToolOutputBytes preserves legacy v1 receipt serialization, including explicit zero.
+	// New producers leave this read-compatibility field unset.
+	ToolOutputBytes *uint64 `json:"tool_output_bytes,omitempty"`
+
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.
 	NormalizedPayload *NormalizedPayload `json:"normalized,omitempty"`
