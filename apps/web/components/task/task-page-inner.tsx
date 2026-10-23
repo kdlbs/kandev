@@ -545,6 +545,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
         <PortForwardingManager sessionId={effectiveSessionId}>
           <VcsDialogsProvider
             sessionId={effectiveSessionId}
+            taskId={taskProps.taskId}
             baseBranch={taskProps.baseBranch}
             pullRequestBaseBranch={taskProps.pullRequestTarget}
             pullRequestTargetsByRepository={taskProps.pullRequestTargetsByRepository}

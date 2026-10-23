@@ -104,14 +104,6 @@ func (m *Manager) rescanCandidateWorkDir(newWorkDir string) (string, bool, error
 	}
 }
 
-func (m *Manager) commitRescanWorkspaceState(workDir string, roots []string) {
-	m.repoTrackersMu.Lock()
-	m.cfg.WorkDir = workDir
-	m.workspaceSourceRoots = append([]string(nil), roots...)
-	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
-	m.repoTrackersMu.Unlock()
-}
-
 // ReconcileRepositories makes the current-root repository tracker set exact.
 // It is reserved for rollback after a materialized checkout has been removed:
 // unlike RescanRepositories, it stops and removes trackers whose repository
@@ -284,55 +276,6 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 			t.DetachWorkspaceStreamSubscriber(sub)
 		}
 		t.Stop()
-	}
-}
-
-func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, children []repositorySubdir, roots []string, subs []types.WorkspaceStreamSubscriber) {
-	wanted := make(map[repositoryTrackerKey]struct{}, len(children))
-	for _, child := range children {
-		wanted[repositoryTrackerIdentity(child.name, child.path)] = struct{}{}
-	}
-	m.repoTrackersMu.Lock()
-	retained := make([]*WorkspaceTracker, 0, len(m.repoTrackers))
-	removed := make([]*WorkspaceTracker, 0)
-	for _, tracker := range m.repoTrackers {
-		identity := repositoryTrackerIdentity(tracker.RepositoryName(), tracker.workDir)
-		if _, ok := wanted[identity]; ok {
-			retained = append(retained, tracker)
-			delete(wanted, identity)
-			continue
-		}
-		removed = append(removed, tracker)
-	}
-	m.repoTrackersMu.Unlock()
-	newTrackers := make([]*WorkspaceTracker, 0, len(wanted))
-	for _, child := range children {
-		if _, needed := wanted[repositoryTrackerIdentity(child.name, child.path)]; !needed {
-			continue
-		}
-		tracker := m.newTrackerForRepo(child.path, child.name)
-		m.configureTracker(tracker, child.name, roots)
-		m.prepareTrackerComparisonTarget(tracker, false)
-		tracker.Start(ctx)
-		for _, sub := range subs {
-			tracker.AttachWorkspaceStreamSubscriber(sub)
-		}
-		newTrackers = append(newTrackers, tracker)
-	}
-	m.repoTrackersMu.Lock()
-	retained = append(retained, newTrackers...)
-	m.repoTrackers = retained
-	m.applyWorkspacePollModeLocked(newTrackers...)
-	m.cfg.WorkDir = workDir
-	m.workspaceSourceRoots = append([]string(nil), roots...)
-	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
-	m.repoTrackersMu.Unlock()
-
-	for _, tracker := range removed {
-		for _, sub := range subs {
-			tracker.DetachWorkspaceStreamSubscriber(sub)
-		}
-		tracker.Stop()
 	}
 }
 

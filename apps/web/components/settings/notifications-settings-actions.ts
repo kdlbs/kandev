@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { acknowledgeNotificationSave } from "./notification-save-reconciliation";
 import {
   createNotificationProvider,
   deleteNotificationProvider,
@@ -228,6 +229,7 @@ export function useNotificationsState() {
   );
   const [showAppriseForm, setShowAppriseForm] = useState(false);
   const [appriseFormMode, setAppriseFormMode] = useState<AppriseFormMode>("create");
+  const appriseFormIdentity = useRef<object>({});
   const [activeAppriseId, setActiveAppriseId] = useState<string | null>(null);
   const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   useHydrateNotificationDraft({
@@ -280,6 +282,7 @@ export function useNotificationsState() {
     setAppriseFormMode,
     activeAppriseId,
     setActiveAppriseId,
+    appriseFormIdentity,
     pendingDeletes,
     setPendingDeletes,
     setNotificationProviders,
@@ -291,26 +294,20 @@ export type { AppriseFormMode };
 export type PermissionRefresh = (error?: unknown) => void | Promise<void>;
 
 export function useSaveRequest(state: NotificationsState) {
+  const currentState = useRef(state);
+  currentState.current = state;
   const {
     providers,
     baselineProviders,
-    setProviders,
-    setBaselineProviders,
-    setAppriseEdits,
-    setAppriseNameEdits,
     pendingDeletes,
-    setPendingDeletes,
     setNotificationProviders,
     showAppriseForm,
     appriseFormMode,
     appriseName,
-    setAppriseName,
     appriseUrls,
-    setAppriseUrls,
-    setShowAppriseForm,
-    setActiveAppriseId,
   } = state;
   return useRequest(async () => {
+    const formIdentity = state.appriseFormIdentity.current;
     const createDraft =
       showAppriseForm && appriseFormMode === "create"
         ? { name: appriseName, urls: parseAppriseUrls(appriseUrls) }
@@ -349,29 +346,14 @@ export function useSaveRequest(state: NotificationsState) {
       loaded: true,
       loading: false,
     });
-    setProviders(nextProviders);
-    setBaselineProviders(nextProviders);
-    setAppriseEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = formatAppriseUrls(p.config?.urls);
-      }
-      return next;
+    acknowledgeNotificationSave({
+      submitted: state,
+      current: currentState.current,
+      accepted: nextProviders,
+      edits: buildAppriseEdits(nextProviders),
+      created,
+      formIdentity,
     });
-    setAppriseNameEdits((prev) => {
-      const next = { ...prev };
-      for (const p of nextProviders) {
-        if (p.type === "apprise") next[p.id] = p.name;
-      }
-      return next;
-    });
-    setPendingDeletes(new Set());
-    if (created) {
-      setAppriseName("");
-      setAppriseUrls("");
-      setShowAppriseForm(false);
-      setActiveAppriseId(null);
-    }
     return created ? [...updated, created] : updated;
   });
 }
@@ -436,6 +418,7 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const openAppriseForm = (mode: AppriseFormMode, provider?: NotificationProvider) => {
+    state.appriseFormIdentity.current = {};
     setAppriseFormMode(mode);
     setActiveAppriseId(provider?.id ?? null);
     if (provider) {
@@ -454,6 +437,7 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 
   const closeAppriseForm = () => {
+    state.appriseFormIdentity.current = {};
     setShowAppriseForm(false);
     setActiveAppriseId(null);
     setAppriseName("");
@@ -556,6 +540,7 @@ export function useNotificationsActions(
   };
 
   const discard = () => {
+    state.appriseFormIdentity.current = {};
     const edits = buildAppriseEdits(state.baselineProviders);
     state.setProviders(state.baselineProviders);
     state.setAppriseEdits(edits.urls);

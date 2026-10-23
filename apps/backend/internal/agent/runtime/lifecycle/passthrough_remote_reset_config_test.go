@@ -124,7 +124,7 @@ func TestSSHPassthroughResetPreflightPreservesLiveMCP(t *testing.T) {
 				Generation: 1, Files: []passthroughconfig.File{file},
 			}))
 			release()
-			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, agents.NewCommand("/bin/sh", "-c", "cat"), nil, nil)
+			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 			require.NoError(t, err)
 			execution.PassthroughProcessID = info.ID
 			execution.PassthroughStartedAt = info.StartedAt

@@ -48,10 +48,16 @@ async function injectCompetingPreview(
   return () => injected;
 }
 
-/** Observes a successful preview for the requested task and destination step. */
-function waitForPreviewResponse(page: Page, taskId: string, workflowStepId: string) {
-  const matchesRequest = movePreviewRequestPredicate(taskId, workflowStepId);
-  return page.waitForResponse((response) => matchesRequest(response.request()) && response.ok());
+/** Observes a completed successful preview for the requested task and destination step. */
+async function waitForPreviewResult(page: Page, taskId: string, workflowStepId: string) {
+  const isPreviewRequest = movePreviewRequestPredicate(taskId, workflowStepId);
+  const request = await page.waitForEvent("requestfinished", {
+    predicate: async (request) =>
+      isPreviewRequest(request) && (await request.response())?.ok() === true,
+  });
+  const response = await request.response();
+  if (!response) throw new Error("Completed preview request has no response");
+  return response.json();
 }
 
 /** Reads the response body before later UI transitions can discard it. */
@@ -67,7 +73,7 @@ async function openStepPreview(
     workflowStepId,
   );
   const [preview] = await Promise.all([
-    waitForPreviewResponse(page, taskId, workflowStepId).then((response) => response.json()),
+    waitForPreviewResult(page, taskId, workflowStepId),
     page.getByTestId(`workflow-step-${stepName}`).hover(),
   ]);
   const popover = page.locator('[data-testid="workflow-step-popover"]:visible');

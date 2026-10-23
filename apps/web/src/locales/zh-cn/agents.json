@@ -440,5 +440,17 @@
   "profileDragStart": "已选取配置档 {{name}}。第 {{position}} 个，共 {{total}} 个。",
   "profileDragOver": "配置档 {{name}} 已移动到第 {{position}} 个位置，共 {{total}} 个。",
   "profileDragEnd": "配置档 {{name}} 已放到第 {{position}} 个位置，共 {{total}} 个。",
-  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。"
+  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。",
+  "sessionRuntimeManaged": "会话运行时：由 Kandev 管理",
+  "sessionRuntimeNative": "会话运行时：原生 CLI",
+  "sessionRuntimeHarness": "会话运行时：由运行框架管理的 CLI",
+  "sessionRuntimeCustom": "会话运行时：自定义命令",
+  "sessionRuntimeUnknown": "会话运行时：未知",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "版本未知",
+  "sessionRuntimeNewSessions": "用于新会话",
+  "runtimeDiagnostics": "诊断信息",
+  "runtimeDetectedLocalCLI": "检测到本地 CLI：{{path}}",
+  "runtimeLocalCLIVersion": "本地 CLI：{{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）"
 }

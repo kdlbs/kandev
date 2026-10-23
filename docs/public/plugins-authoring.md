@@ -1697,6 +1697,18 @@ bootstrap `nonce`. Kandev then creates a session instance, which agentctl serves
 on a port it assigns, so `ResolveExecutorConnection` must route both the control
 port and any instance port Kandev requests.
 
+For private repositories, choose the workspace's managed task Git credentials
+mode (`task_git_credentials_mode: managed`) to use its connected Git provider.
+Kandev sends the scoped credential lease to the session instance, and agentctl
+uses it during repository materialization. Providers do not need to add Git
+credentials to bootstrap data or reusable runtime images. The remote runtime
+must be able to reach Kandev's Git credential broker.
+
+Fresh workspaces default to executor-owned Git credentials
+(`task_git_credentials_mode: executor`). In that mode, private repositories need
+Git access configured on the remote executor; connecting a Git provider in Kandev
+does not automatically grant the remote clone access.
+
 Return short-lived HTTPS connection leases. Put credentials in HTTP or
 WebSocket headers, never in the URL. Remote environments must reach the
 configured Kandev API URL so agentctl can complete normal session work. Kandev

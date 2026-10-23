@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -61,7 +63,7 @@ type Repository interface {
 	ListActivityEntriesByAction(ctx context.Context, workspaceID, action string, limit int) ([]*models.ActivityEntry, error)
 	ListActivityEntriesByTarget(ctx context.Context, workspaceID, targetID string, limit int) ([]*models.ActivityEntry, error)
 	ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error)
-	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
+	ListRuns(ctx context.Context, workspaceID string) ([]*runsmodels.Run, error)
 	SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*sqlite.TaskSearchResult, error)
 	ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
@@ -575,7 +577,7 @@ func (s *DashboardService) appendDeniedCommentReadEvent(
 	if s.runEvents == nil || runID == "" {
 		return
 	}
-	s.runEvents.AppendRunEvent(ctx, runID, string(models.RunEventTypeRuntimeDenied), string(models.RunEventLevelWarn), map[string]interface{}{
+	s.runEvents.AppendRunEvent(ctx, runID, string(runsmodels.RunEventTypeRuntimeDenied), string(runsmodels.RunEventLevelWarn), map[string]interface{}{
 		"action":      "read_comments",
 		"target_type": "task",
 		"target_id":   targetTaskID,
@@ -822,7 +824,7 @@ func (s *DashboardService) ListActivityForTarget(ctx context.Context, wsID, targ
 }
 
 // ListRuns returns run requests for a workspace.
-func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *DashboardService) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 

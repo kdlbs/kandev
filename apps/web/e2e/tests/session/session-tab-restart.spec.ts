@@ -111,7 +111,9 @@ test("keeps history and recovery available after restarting an interrupted turn"
     )
     .toBe(true);
   const recovery = testPage.getByTestId("failed-session-banner");
-  await expect(recovery).toContainText("The prompt outcome is uncertain.");
+  await expect(recovery).toContainText(
+    "Kandev cannot confirm whether the agent processed your message.",
+  );
   await expect(recovery.getByTestId("recovery-resume-button")).toBeEnabled();
   await assertRestartDataRetained(apiClient, fixture.task.id, fixture.sessionId, before);
   await expect(

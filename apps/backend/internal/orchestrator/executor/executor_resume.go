@@ -665,13 +665,6 @@ func (e *Executor) refreshManagedRepositoryForSessionWithState(
 	return repoclone.RemoteRefStateHasRefs, nil
 }
 
-func (e *Executor) refreshAzureDevOpsRepositoryForSession(
-	ctx context.Context, repo *models.Repository, cloneURL string,
-) error {
-	_, err := e.refreshAzureDevOpsRepositoryForSessionWithState(ctx, repo, cloneURL)
-	return err
-}
-
 func (e *Executor) refreshAzureDevOpsRepositoryForSessionWithState(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (repoclone.RemoteRefState, error) {
@@ -901,28 +894,26 @@ func gitHubCheckoutOriginURL(
 // repositories. Authentication and clone-url construction deliberately remain
 // inside Executor so callers never receive credentials or construct git calls.
 func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
-	return e.EnsureRepositoryClonedForSession(ctx, "", "", repo)
-}
-
-// EnsureRepositoryClonedForSession materializes a provider repository with
-// exact task/session scope for plugin credential resolution.
-func (e *Executor) EnsureRepositoryClonedForSession(
-	ctx context.Context, taskID, sessionID string, repo *models.Repository,
-) (string, error) {
 	if repo == nil {
 		return "", errors.New("repository is required")
 	}
 	if repo.LocalPath != "" {
 		return repo.LocalPath, nil
 	}
-	path, err := e.ensureRepoClonedForSession(ctx, taskID, sessionID, repo)
-	if err != nil {
-		return "", err
-	}
-	if path != "" {
+	path, err := e.ensureRepoClonedForSession(ctx, "", "", repo)
+	if err == nil && path != "" {
 		repo.LocalPath = path
 	}
-	return path, nil
+	return path, err
+}
+
+// EnsureRepositoryClonedForSession materializes a provider repository with
+// exact task/session scope for plugin credential resolution.
+func (e *Executor) EnsureRepositoryClonedForSession(ctx context.Context, taskID, sessionID string, repo *models.Repository) (string, error) {
+	if repo == nil {
+		return "", errors.New("repository is required")
+	}
+	return e.materializeHostAttachment(ctx, taskID, sessionID, repo)
 }
 
 // backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
@@ -2360,18 +2351,6 @@ func (e *Executor) applyResumeWorkspaceFolders(
 		}
 	}
 	return nil
-}
-
-func (e *Executor) configureResumeGitHubCredentials(
-	ctx context.Context,
-	req *LaunchAgentRequest,
-	session *models.TaskSession,
-	repositories []*repoInfo,
-	beforeCredentialLease func() error,
-) error {
-	return e.configureResumeGitHubCredentialsWithProfileEnvAndBridge(
-		ctx, req, session, repositories, beforeCredentialLease, nil, true,
-	)
 }
 
 func (e *Executor) configureResumeGitHubCredentialsWithProfileEnvAndBridge(

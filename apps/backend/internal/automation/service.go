@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"sync"
 	"time"
@@ -637,10 +638,10 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 			return nil, err
 		}
 	}
-	if _, err := s.executorActorContext(ctx, executorCreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), a.ExecutorProfileID, a.WorkspaceID); err != nil {
 		return nil, err
 	}
-	a.CreatedByUserID = executorCreatorUserID(ctx)
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if ownerInstallationID != "" {
 		if _, err := s.store.CreateManagedSchedule(ctx, a, req.Triggers, operationID, payloadDigest); err != nil {
 			return nil, fmt.Errorf("create managed schedule: %w", err)

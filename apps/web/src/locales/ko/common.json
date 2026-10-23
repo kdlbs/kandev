@@ -552,6 +552,8 @@
   "integrationSettings": "통합 설정",
   "pageNavigation": "이 페이지에서",
   "viewOptions": "보기 옵션",
+  "commandGoToArchivedTasks": "보관된 작업으로 이동",
+  "commandGoToArchivedTasksKeywords": "보관된 작업, 보관, 기록",
   "conversationSearch_open": "작업 검색",
   "conversationSearch_match": "대화 일치",
   "conversationSearch_searching": "대화 검색 중…",

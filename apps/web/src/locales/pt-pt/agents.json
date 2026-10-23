@@ -440,5 +440,17 @@
   "profileDragStart": "Perfil {{name}} selecionado. Posição {{position}} de {{total}}.",
   "profileDragOver": "Perfil {{name}} movido para a posição {{position}} de {{total}}.",
   "profileDragEnd": "Perfil {{name}} colocado na posição {{position}} de {{total}}.",
-  "profileDragCancel": "Reordenação do perfil {{name}} cancelada."
+  "profileDragCancel": "Reordenação do perfil {{name}} cancelada.",
+  "sessionRuntimeManaged": "Runtime da sessão: Gerido pelo Kandev",
+  "sessionRuntimeNative": "Runtime da sessão: CLI nativa",
+  "sessionRuntimeHarness": "Runtime da sessão: CLI gerida pelo harness",
+  "sessionRuntimeCustom": "Runtime da sessão: Comando personalizado",
+  "sessionRuntimeUnknown": "Runtime da sessão: Desconhecido",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "Versão desconhecida",
+  "sessionRuntimeNewSessions": "Para novas sessões",
+  "runtimeDiagnostics": "Diagnóstico",
+  "runtimeDetectedLocalCLI": "CLI local detetada: {{path}}",
+  "runtimeLocalCLIVersion": "CLI local: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "CLI local: {{name}}, versão desconhecida ({{reason}})"
 }

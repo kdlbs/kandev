@@ -105,7 +105,7 @@ test("phone: continuation Cancel is visible while running and preserves history"
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     const cancelResponse = gateway.waitForResponse("session.recover", {
       timeout: 35_000,
-      where: (payload) =>
+      requestWhere: (payload) =>
         payload.action === "cancel_retry" &&
         payload.task_id === fixture.taskId &&
         payload.session_id === fixture.sessionId,

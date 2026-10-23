@@ -7,6 +7,7 @@ import {
 } from "../../helpers/git-helper";
 import { createGitEnrichmentGate, routeGitStatusRefresh } from "./git-status-refresh-helpers";
 import path from "node:path";
+import { waitForSessionDone } from "../../helpers/session";
 
 test.describe("Changes panel Git refresh recovery", () => {
   test.describe.configure({ timeout: 120_000, retries: 0 });
@@ -128,8 +129,14 @@ test.describe("Changes panel Git refresh recovery", () => {
 
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
-      // Admit the foreground read after the controlled enrichment command has started.
+      // Enrichment can start before the agent finishes startup.
       await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
+      await waitForSessionDone(
+        apiClient,
+        task.id,
+        task.session_id,
+        "The Git refresh fixture should finish its initial prompt",
+      );
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);

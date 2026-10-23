@@ -703,24 +703,8 @@ func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, executi
 	return nil
 }
 
-// reDeriveRecoveredAgentIdentity implements AC-EXECUTORS-SURVIVAL-002.14's
-// last reconstruction-table row: agent identity, agent and continuation
-// commands and their arguments, and the history setting are re-derived from
-// the restored agent profile and the agent-type registry -- the same
-// computation an ordinary launch performs, never read from the adopted
-// instance, so a compromised or stale instance cannot tell the backend which
-// command to run for the session's next turn.
-//
-// Re-derivation reflects the profile and registry as they stand at recovery,
-// not as they stood before the restart (AC-EXECUTORS-SURVIVAL-002.3): a
-// profile edited or an agent type removed during the outage takes effect
-// exactly as it would on the session's next ordinary turn.
-//
-// getAgentConfigForExecution and buildFreshAgentCommand are the same
-// primitives an in-session context reset uses (manager_interaction.go's
-// prepareAgentRestart), reused as-is: both already consume nothing but
-// execution fields already restored by this point (AgentProfileID,
-// RuntimeName, metadata), with no launch-request-only dependency.
+// reDeriveRecoveredAgentIdentity derives child commands from the authorized
+// profile and registry. A retained wrapper comes from protected process state.
 func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution *AgentExecution) error {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
@@ -739,6 +723,10 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
 	execution.ContinueArgs = commands.continueArgs
+	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

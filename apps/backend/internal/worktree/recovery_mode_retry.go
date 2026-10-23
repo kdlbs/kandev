@@ -622,43 +622,6 @@ func compareRecoveryFileBytes(ctx context.Context, original, snapshot io.Reader)
 	}
 }
 
-func beginDirtyCloneRecovery(
-	ctx context.Context,
-	m *Manager,
-	wt *Worktree,
-	jobPath string,
-	claim *models.TaskEnvironmentRecoveryClaim,
-	proof *ManagedCloneRelocationProof,
-	relocation managedCloneRelocationRecord,
-) (recoveryRecord, string, *recoveryLock, error) {
-	if wt == nil || claim == nil || claim.OperationID == "" {
-		return recoveryRecord{}, "", nil, errors.New("dirty relocation recovery identity is incomplete")
-	}
-	lock, err := acquireRecoveryOperation(wt.Path + ".kandev-recovery.claim")
-	if err != nil {
-		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
-	}
-	existing, err := readRecoveryRecord(jobPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return createDirtyCloneRecovery(wt, jobPath, claim.OperationID, lock)
-	}
-	if err != nil {
-		_ = lock.Close()
-		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "recovery record is unreadable")
-	}
-	if existing.State != RecoveryStateBlocked {
-		if existing.ModeRetry != nil {
-			if err := verifyInterruptedPermissionRetry(ctx, wt.Path, existing); err != nil {
-				_ = lock.Close()
-				return recoveryRecord{}, "", nil,
-					managedCloneRelocationError(wt.TaskID, "interrupted permission retry no longer matches original evidence")
-			}
-		}
-		return adoptDirtyCloneRecovery(wt, claim, existing, lock)
-	}
-	return beginBlockedDirtyCloneRecovery(ctx, m, wt, jobPath, claim, proof, relocation, existing, lock)
-}
-
 func beginDirtyCloneRecoveryV1(
 	ctx context.Context,
 	m *Manager,

@@ -1341,9 +1341,10 @@ func (a *githubSecretAdapter) List(ctx context.Context) ([]*github.SecretListIte
 	result := make([]*github.SecretListItem, len(items))
 	for i, item := range items {
 		result[i] = &github.SecretListItem{
-			ID:       item.ID,
-			Name:     item.Name,
-			HasValue: item.HasValue,
+			ID:        item.ID,
+			Name:      item.Name,
+			HasValue:  item.HasValue,
+			UpdatedAt: item.UpdatedAt,
 		}
 	}
 	return result, nil

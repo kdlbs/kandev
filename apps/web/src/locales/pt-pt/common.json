@@ -552,6 +552,8 @@
   "integrationSettings": "Definições de integrações",
   "pageNavigation": "Nesta página",
   "viewOptions": "Opções de visualização",
+  "commandGoToArchivedTasks": "Ir para as tarefas arquivadas",
+  "commandGoToArchivedTasksKeywords": "tarefas arquivadas, arquivo, histórico",
   "conversationSearch_open": "Pesquisar tarefas",
   "conversationSearch_match": "Correspondência na conversa",
   "conversationSearch_searching": "A pesquisar conversas…",

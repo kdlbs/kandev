@@ -88,6 +88,29 @@ listings without changing the plugin package.
 Canvas listing image requirements are owned by
 [canvas marketplace and sharing](../../canvases/requirements/marketplace-sharing.md).
 
+### REQ-PLUGINS-MARKETPLACE-004: Immediate auto-update preferences
+
+The plugin system owns the operator's opt-in default and each plugin's explicit
+override, including their immediate desktop and phone settings behavior.
+
+#### Acceptance criteria
+
+- **AC-PLUGINS-MARKETPLACE-004.1:** The global default shall start off for a new
+  instance. Rows without an override shall reflect the displayed default;
+  explicit true or false overrides shall remain independent of global changes.
+- **AC-PLUGINS-MARKETPLACE-004.2:** Within one mounted settings page, rapid
+  changes shall remain immediately usable and display the latest choice while
+  pending. Successful writes shall persist in choice order; earlier receipts
+  shall not replace a later pending choice on desktop or phone.
+- **AC-PLUGINS-MARKETPLACE-004.3:** Each failed write shall report an error. After
+  pending choices settle, the controls shall reflect the last successful read
+  or write, never an unaccepted optimistic snapshot. A failed initial read shall
+  retain the existing off fallback and enable later writes; that fallback is
+  not confirmation of persisted state.
+
+Cross-page, cross-tab, remount ordering and ambiguous transport outcomes are
+excluded. Per-plugin writes, background eligibility and installation are unchanged.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/marketplace.md).

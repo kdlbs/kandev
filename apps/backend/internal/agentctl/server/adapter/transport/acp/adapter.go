@@ -474,11 +474,6 @@ func (t *promptTurnState) cursorRetriableFailure() bool {
 	return failure
 }
 
-func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
-	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
-	return failure, occurredAt
-}
-
 func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
 		return false, "", time.Time{}, false
@@ -814,6 +809,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 }
 
 func (a *Adapter) sendUpdateNow(event AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -849,6 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event = streams.BoundGenericToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

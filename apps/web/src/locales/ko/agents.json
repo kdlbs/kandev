@@ -440,5 +440,17 @@
   "profileDragStart": "프로필 {{name}}을 선택했습니다. {{total}}개 중 {{position}}번째입니다.",
   "profileDragOver": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치로 이동했습니다.",
   "profileDragEnd": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치에 놓았습니다.",
-  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다."
+  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다.",
+  "sessionRuntimeManaged": "세션 런타임: Kandev에서 관리",
+  "sessionRuntimeNative": "세션 런타임: 네이티브 CLI",
+  "sessionRuntimeHarness": "세션 런타임: 하네스에서 관리하는 CLI",
+  "sessionRuntimeCustom": "세션 런타임: 사용자 지정 명령",
+  "sessionRuntimeUnknown": "세션 런타임: 알 수 없음",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "버전 알 수 없음",
+  "sessionRuntimeNewSessions": "새 세션에 적용",
+  "runtimeDiagnostics": "진단 정보",
+  "runtimeDetectedLocalCLI": "감지된 로컬 CLI: {{path}}",
+  "runtimeLocalCLIVersion": "로컬 CLI: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "로컬 CLI: {{name}}, 버전 알 수 없음 ({{reason}})"
 }

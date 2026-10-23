@@ -223,6 +223,8 @@ function recordRefreshResponse(
   state: GitRefreshBridgeState,
 ) {
   if (frame?.type !== "response" || frame.action !== "session.git.refresh" || !payload) return;
+  if (payload.success !== true)
+    console.error("Git refresh returned success=false", JSON.stringify(frame));
   const snapshots = Array.isArray(payload.snapshots)
     ? (payload.snapshots as GitStatusSnapshot[])
     : [];

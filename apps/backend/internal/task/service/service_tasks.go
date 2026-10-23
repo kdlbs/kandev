@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/task/retention"
 	"maps"
 	"net/url"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/retention"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -3039,12 +3040,6 @@ func (s *Service) ValidateTaskDeleteWorktreesWithOptions(ctx context.Context, ta
 		worktrees = append(worktrees, inventory...)
 	}
 	return s.validateTaskDeleteWorktreeInventoryWithOptions(ctx, worktrees, options)
-}
-
-func (s *Service) validateTaskDeleteWorktreeInventory(
-	ctx context.Context, worktrees []*worktree.Worktree, discardWorktreeChanges bool,
-) error {
-	return s.validateTaskDeleteWorktreeInventoryWithOptions(ctx, worktrees, DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges})
 }
 
 func (s *Service) validateTaskDeleteWorktreeInventoryWithOptions(ctx context.Context, worktrees []*worktree.Worktree, options DeleteTaskOptions) error {

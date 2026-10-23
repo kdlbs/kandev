@@ -701,7 +701,14 @@ change the accepted chart or table.
 
 File bytes do not persist. Image file cards expand and load automatically when
 they appear in the conversation. Select **Hide preview** to collapse an image
-and **Preview** to reopen it. Other files load only after you select
+and **Preview** to reopen it. Click or tap the image to inspect it in a larger
+dialog, as with image attachments. Close the dialog to return to the preview.
+To start image cards collapsed, turn off **Show image previews by default** in
+**Settings > Preferences > Appearance** and select **Save changes**. This
+preference is saved on this device and applies when a card has no retained
+Show/Hide choice. You can always select **Preview**, then click or tap the
+visible image to open the larger dialog.
+Other files load only after you select
 **Preview**. **Open file** uses the native desktop or mobile viewer. If the
 workspace disappears, the report remains and the file preview reports that it
 is unavailable.
@@ -887,6 +894,10 @@ accepted and the response reports the successful, preserved, and failed branch o
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
 
+GitHub rate coordination is internal to Kandev. The MCP surface does not expose
+a standalone rate snapshot tool. Workflow Sync documents the operation-local
+details returned when a sync fails because of a GitHub rate limit.
+
 ### Provider-scoped review automation tools
 
 Task-mode review automation tools follow the providers attached to the task's
@@ -934,11 +945,37 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
 - Use `add_workspace_sources_kandev` for mixed source batches on an idle task. `update_repository_base_branch_kandev` changes Kandev's diff base, not a pull request's target.
 
+For eligible Local and Worktree tasks, source attachment can recreate a missing
+provider clone at its exact current workspace-managed destination. Live branch
+attachment supports this recovery on Worktree tasks. A valid managed clone is
+reused. Explicit local repositories retain their own paths, including when they
+carry provider metadata; a missing local folder is not replaced by a clone.
+
+A missing older managed clone requires explicit re-import. For a built-in
+provider, an authorized caller can create a separate registration with
+`POST /api/v1/workspaces/:id/repositories`: give it a new display name,
+`source_type: "provider"`, the same provider/host/owner/name, and no `local_path`.
+Select the returned repository ID for the new attachment. Keep the old
+registration for its existing tasks; this operation does not migrate their
+worktrees or recreate the old clone path. Invalid origins, foreign paths,
+unverifiable Git metadata and failed verified-path persistence reject the
+attachment. A verified shared clone may remain after a later task attachment
+failure so a retry can reuse it.
+
+A backend hosted in Docker uses its server filesystem for Local/Worktree tasks.
+That is different from a task using a Docker executor, which retains executor-side
+repository materialization. This recovery does not change remote executor routes.
+
+
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-When the response says that the workflow step changed, the calling turn is stale. The error identifies the launch and current steps, and a retry in that turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. An older turn stays tied to its original entry, including when the task leaves and returns to the same step.
+
+When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+
+Older turns or pending completion signals created without workflow-entry evidence are not backfilled. If completion cannot resolve the calling turn, have the user start a fresh turn in the current step before signaling again.
 
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
@@ -974,7 +1011,7 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `transfer_task_kandev` is available only to a server-attested Office CEO session. It applies the atomic, audited transfer contract above.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. GitHub rate coordination stays internal, with operation-local details documented by features such as [Workflow Sync](workflow-sync.md). Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 

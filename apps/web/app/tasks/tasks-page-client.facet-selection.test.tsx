@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
@@ -7,9 +7,10 @@ import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { Task } from "@/lib/types/http";
 
-const { replace, updateUserSettings } = vi.hoisted(() => ({
+const { replace, updateUserSettings, listTasksByWorkspace } = vi.hoisted(() => ({
   replace: vi.fn(),
   updateUserSettings: vi.fn().mockResolvedValue({}),
+  listTasksByWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace }),
@@ -19,7 +20,7 @@ vi.mock("@/lib/api", () => ({
   archiveTask: vi.fn(),
   deleteTask: vi.fn(),
   unarchiveTask: vi.fn(),
-  listTasksByWorkspace: vi.fn().mockResolvedValue({ tasks: [], total: 0 }),
+  listTasksByWorkspace,
   updateUserSettings,
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));
@@ -96,6 +97,7 @@ const tasks = [
 function renderPage(
   initialSort: "title_asc" | typeof key = "title_asc",
   initialGroup: "workflow_step" | typeof key = "workflow_step",
+  savedWorkflowId: string | null = null,
 ) {
   return render(
     <StateProvider
@@ -103,6 +105,8 @@ function renderPage(
         workspaces: { items: [], activeId: "ws1" },
         userSettings: {
           ...defaultSettingsState.userSettings,
+          workspaceId: "ws1",
+          workflowId: savedWorkflowId,
           tasksListSort: initialSort,
           tasksListGroup: initialGroup,
           loaded: true,
@@ -112,6 +116,8 @@ function renderPage(
       <StoreCapture />
       <TasksPageClient
         workspaces={[]}
+        initialWorkspaceId="ws1"
+        initialMetadataLoaded={{ workflows: true, repositories: true }}
         initialRepositories={[]}
         initialTasks={tasks}
         initialTotal={2}
@@ -123,12 +129,32 @@ function renderPage(
   );
 }
 
+beforeEach(() => {
+  listTasksByWorkspace.mockReset().mockResolvedValue({ tasks, total: tasks.length });
+});
+
 afterEach(() => {
   cleanup();
   pluginRegistry.unregisterPlugin("plugin");
   replace.mockReset();
   updateUserSettings.mockClear();
   window.history.replaceState({}, "", "/");
+});
+
+// @covers AC-TASKS-LIST-ARCHIVE-FILTERS-002.5 AC-TASKS-LIST-ARCHIVE-FILTERS-004.3
+it("uses the resolved workspace workflow without saving a stale portable default", async () => {
+  window.history.replaceState({}, "", "/tasks?q=current&repository=all");
+  renderPage("title_asc", "workflow_step", "previous-workspace-workflow");
+
+  await waitFor(() =>
+    expect(listTasksByWorkspace).toHaveBeenCalledWith(
+      "ws1",
+      expect.objectContaining({ query: "current", workflowId: null }),
+      expect.anything(),
+    ),
+  );
+  expect(capturedStore.getState().userSettings.workflowId).toBe("previous-workspace-workflow");
+  expect(updateUserSettings).not.toHaveBeenCalled();
 });
 
 describe("TasksPageClient facet preference", () => {
@@ -142,7 +168,7 @@ describe("TasksPageClient facet preference", () => {
     window.history.replaceState({}, "", "/tasks");
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Choose facet" }));
-    expect(screen.getByTestId("rows").textContent).toBe("alphabeta");
+    await waitFor(() => expect(screen.getByTestId("rows").textContent).toBe("alphabeta"));
     expect(screen.getByTestId("sort").textContent).toBe(key);
     await waitFor(() =>
       expect(updateUserSettings).toHaveBeenCalledWith(

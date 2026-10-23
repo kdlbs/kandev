@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -335,7 +337,7 @@ type lightweightRunLauncher struct {
 }
 
 func (l *lightweightRunLauncher) StartRunSession(
-	ctx context.Context, run *officemodels.Run, agent *officemodels.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *officemodels.AgentInstance,
 	launch officeservice.LaunchContext, _ *officeservice.RouteOverride,
 ) (officeservice.RunSessionLaunch, error) {
 	l.calls = append(l.calls, launch)
@@ -559,7 +561,7 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 	if err != nil || len(runs) != 2 {
 		t.Fatalf("list runs after second fire: runs=%#v err=%v", runs, err)
 	}
-	var secondRun *officemodels.Run
+	var secondRun *runsmodels.Run
 	for _, r := range runs {
 		if r.ID != firstRun.ID {
 			secondRun = r

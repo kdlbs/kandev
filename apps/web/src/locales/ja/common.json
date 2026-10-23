@@ -552,6 +552,8 @@
   "integrationSettings": "統合設定",
   "pageNavigation": "このページ",
   "viewOptions": "表示オプション",
+  "commandGoToArchivedTasks": "アーカイブ済みタスクへ移動",
+  "commandGoToArchivedTasksKeywords": "アーカイブ済みタスク, アーカイブ, 履歴",
   "conversationSearch_open": "タスクを検索",
   "conversationSearch_match": "会話の一致",
   "conversationSearch_searching": "会話を検索中…",

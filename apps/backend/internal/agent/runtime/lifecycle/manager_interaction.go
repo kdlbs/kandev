@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -926,10 +927,6 @@ func freshSessionModelCatalogReady(state *CachedModelState) bool {
 	return state != nil && (len(state.Models) > 0 || len(state.ConfigOptions) > 0 || state.ConfigOptionsSettled)
 }
 
-func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
-	return m.captureSessionRuntimeConfigForReset(ctx, execution).Model
-}
-
 func (m *Manager) captureSessionRuntimeConfigForReset(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -1652,6 +1649,10 @@ func (m *Manager) restartAgentProcess(
 	if err != nil {
 		return err
 	}
+	if err := client.ValidateLaunchWrapper(ctx, preparation.commands.wrapper); err != nil {
+		return err
+	}
+
 	if runtime := preparation.agentConfig.Runtime(); runtime != nil {
 		if err := m.prepareCursorMCPAuth(execution, preparation.profileInfo, execution.ExecutorType, runtime.ProjectMCPStrategy); err != nil {
 			return err
@@ -1825,6 +1826,7 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.ContinueCommand = commands.continue_
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
+		exec.LaunchWrapper = commands.wrapper
 		m.resetStreamingStateWithHistory(exec)
 		select {
 		case <-exec.promptDoneCh:
@@ -2275,11 +2277,15 @@ func (m *Manager) restoreExecutionAfterStreamRecovery(ctx context.Context, execu
 
 func (m *Manager) restoreRecoveredFailedExecution(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
 	if client == nil {
+		releaseClient()
 		return fmt.Errorf("agentctl client is unavailable")
 	}
 	status, err := client.GetStatus(ctx)
+	// The lease covers only the status read. Marking the execution ready takes
+	// the execution store lock and persists the row, which must not run while
+	// this execution's client lease is held.
+	releaseClient()
 	if err != nil {
 		return fmt.Errorf("failed to verify agent status after stream recovery: %w", err)
 	}
@@ -3304,12 +3310,11 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	}
 
 	opts := agents.CommandOptions{
-		Model:               model,
-		SessionID:           "", // Fresh start — no resume flags
-		AutoApprove:         autoApprove,
-		PermissionValues:    permissionValues,
-		CLIFlagTokens:       cliFlagTokens,
-		CommandPrefixTokens: commandPrefixTokens,
+		Model:            model,
+		SessionID:        "", // Fresh start — no resume flags
+		AutoApprove:      autoApprove,
+		PermissionValues: permissionValues,
+		CLIFlagTokens:    cliFlagTokens,
 		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.
@@ -3324,5 +3329,7 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	if err := validateBuiltAgentCommands(args, continueArgs); err != nil {
 		return agentCommands{}, err
 	}
-	return newAgentCommands(args, continueArgs), nil
+	commands := newAgentCommands(args, continueArgs)
+	commands.wrapper = launchwrapper.Profile(commandPrefixTokens)
+	return commands, nil
 }

@@ -905,3 +905,56 @@ skips the suite; skips and test discovery do not count as execution acceptance.
 ### Original-artifact retention rollback evidence
 
 The frozen format-1 rollback case in `tests/session/delivery-retention.spec.ts` is optional for the current retention issue fix. It reports a skip when `KANDEV_RETENTION_COMPAT_BINARY` is absent; the required suite still exercises current delivery cleanup, saved-history recovery and provider continuation on desktop and mobile. When the original binary is supplied, the test verifies its fixed hash and retains all rollback/new-write/deletion/forward-upgrade assertions. A skip is not original rollback acceptance. The 2026-10-11 user-directed scope change is recorded in `docs/plans/backend-agent-delivery-retention/task-08-integration-and-storage.md`; historical benchmark failures remain labelled there.
+
+## Release upgrade rehearsal
+
+Run this suite only through the **Release upgrade regression** GitHub Actions
+workflow on main. It runs after main pushes, nightly, or through **Run workflow**
+with main selected. The optional `baseline` input accepts `latest` (default) or
+an exact published Stable tag such as `v0.97.0`. It does not run for pull requests.
+
+After the workflow has landed on main, it can also be dispatched with:
+
+```bash
+gh workflow run upgrade-regression.yml --ref main -f baseline=latest
+```
+
+Do not run the upgrade runner, release preparation, or upgrade Playwright
+projects on a local machine. They compile multiple runtimes and start a full
+application/database/browser installation. Entry points require GitHub Actions
+metadata for main and refuse local execution. The ordinary E2E projects exclude
+these scenarios, and the managed runner rejects a local upgrade project before
+building artifacts or probing Docker. There is no local override flag.
+
+CI resolves the latest published Stable once and shares its verified archive
+and exact candidate commit across SQLite desktop, PostgreSQL 16 lifecycle, and
+SQLite phone jobs. Each job has its own hosted runner, disposable data and one
+Playwright worker. The released backend and matching agentctl create the seed
+before the candidate opens the database. Its deterministic mock provider is
+built from the release's source commit. No `_test` routes or direct database
+writes seed tasks. Production profile defaults remain selected, with explicit
+mock/process/permission overrides recorded in the manifest.
+
+The suite checks preservation, SQLite backup and integrity, PostgreSQL
+relationships/constraints, replay, pending start, old-conversation recovery,
+follow-up, new task execution, stop/resume, workflow profile switching,
+completion, archive and unarchive. Archive cleanup must finish before unarchive;
+this does not test immediate unarchive racing a running cleanup job. Desktop
+and phone checks also render preserved history and the plan and send a follow-up
+through the existing UI. Real providers and remote executors are outside this
+suite's compatibility claim.
+
+Every required scenario must run exactly once and pass. Skips, absent scenarios,
+worker errors and failed attempts fail the job. No retries are configured.
+Failure uploads retain the manifest, semantic snapshots, process/runtime logs,
+JUnit/JSON reports and Playwright traces for 14 days. Owned runtime processes,
+fixture storage and PostgreSQL services are cleaned up on failure too.
+
+The frozen SQL fixtures under backend store conformance remain independent
+historical migration gates. They do not substitute for this live rehearsal.
+
+The upgrade workflow's **Summary** tab shows the Stable release and source commit,
+verified archive digest, candidate commit, and planned matrix. Each database/browser
+job adds its actual test list, statuses, durations, and artifact name, including
+failure and missing-report cases. These summaries are published even when an
+acquisition, setup, or test step fails. The job's result remains the acceptance gate.

@@ -183,7 +183,10 @@ export function registerSilentPromptStallTests() {
               async () =>
                 (await apiClient.getTaskSession(sessionId)).session.metadata
                   ?.agent_delivery_recovery,
-              { timeout: 30_000 },
+              {
+                timeout: 30_000,
+                message: "Delivery reconciliation did not settle after runtime loss",
+              },
             )
             .toMatchObject({ phase: "uncertain" });
         }

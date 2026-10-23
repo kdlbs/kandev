@@ -12,6 +12,53 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### Main integration on 2026-10-23
+
+The pre-merge published head is `193de56ba2597b335a97b1e5ab01d09340f22647`.
+This merge integrates main `144e9e503f82001bb4d1440b603f7c33b932dd0a` from
+previous base `c17a4691aa0658070ea2a1cb26d05641bf8c1874`. The pre-merge
+head had 92 passing and 11 skipped checks, including all six required checks.
+Those results do not establish CI status for this integration.
+
+Nine file conflicts were resolved. Passthrough commands retain main's launch
+wrapper and strict profile token validation together with prepared MCP delivery
+and acceptance. Instance authentication records both the consumed control
+credential and main's narrower authenticated-control capability. Bearer and
+adoption credentials do not acquire wrapper authorization. Main's prompt-preview
+interaction implementation retains Escape dismissal and delayed-hover guards.
+Workflow move preview keeps both competing-preview injection and completed
+response-body observation.
+
+The WebSocket test helper now distinguishes request predicates (`requestWhere`)
+from main's response predicates (`where`). Existing PR callers were migrated;
+three initially failing helper tests pass. An automatic merge also omitted the
+repository owner's discard callback from the extracted state hook. A focused
+Reset regression failed before restoring its type and callback wiring, then
+passed. The incoming credential-rotation LSP fixture assumed `/bin/cat`, which
+is absent on this Nix host; it now resolves `cat` through the inherited PATH.
+No authentication or stream assertions were weakened. The prompt-hover browser
+fixture attempted to pause its clock at an already elapsed instant; its pause
+target now includes a one-second margin before pointer actions, with all existing
+interaction assertions retained.
+
+Candidate validation passed: 80 focused frontend tests, web typecheck, full web
+lint, localization checks, scoped Go lint, documentation catalog/spec lint, and
+race-enabled lifecycle, API and orchestrator checks. Native and web builds
+contain the integrated source but embed the pre-merge head with a dirty marker.
+Eight desktop browser checks passed before the clock repair; the repaired hover
+case and desktop continuation cancellation then passed with one worker and zero
+retries. An initial nine-case browser invocation failed in fixture setup:
+inherited launcher configuration bound the backend to a non-loopback address,
+while readiness checked localhost. The rerun removes inherited internal config
+paths and explicitly binds the disposable backend to loopback. These setup
+failures are not passing product coverage. The first phone run passed three
+checks but failed workflow seeding in its first worker. That worker used port
+18107; a concurrent backend from another task was confirmed listening there.
+The phone rerun passed all four checks with one worker, zero retries and an
+explicit, checked-free port offset. This establishes a port collision, not the
+exact source of the initial null workflow-step response. Final
+immutable source review and published-head CI remain separate gates.
+
 ### Cancellation ordering and browser fixtures after `eb8696da`
 
 Head `eb8696da28ff830a0d4ec74092d0b72b76024dc3` remained mergeable against

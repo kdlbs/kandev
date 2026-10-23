@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 created: 2026-08-30
-updated: 2026-10-14
+updated: 2026-10-22
 owners:
   - kandev
 ---
@@ -79,6 +79,34 @@ The orchestrator persists an effective workspace using this authority order:
 
 The source repository path is preparation input. It must not overwrite a
 materialized task workspace reported by the lifecycle response.
+
+## Comparison base and existing checkout identity
+
+For AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.4, a mutable comparison
+base is not the identity of a materialized checkout. Before canonical inventory
+validation and worktree-ID reuse, resolve an unambiguous existing Worktree slot
+from the canonical environment rows by repository and workspace-relative path.
+The retained row must carry its worktree ID, path, checkout branch, recorded
+source clone, common directory, and nonempty branch key. Incomplete legacy rows
+retain the existing guarded inventory-repair path and attestation requirements.
+Only a single logical requested slot and a single eligible physical row owned
+by the requesting task may use this rule. Inherited environments retain their
+existing exact-selection contract. Pin its recorded `branch_slug` and worktree ID into the launch
+request while retaining its current `BaseBranch` and comparison metadata.
+Do not rewrite stored slugs, Git metadata, files, or task/session states.
+An explicit inventory-repair request still validates its requested branch key
+without this preservation rule, so normal reuse cannot replace the repair
+receipt, idempotency, and post-repair attestation contract.
+
+Explicit checkout branches retain exact selection. Duplicate logical slots,
+multiple eligible rows, conflicting supplied worktree IDs, failed/deleted rows,
+and mismatched placements cannot grant fallback authority. A valid row does not
+hide an invalid selected sibling. Filesystem, origin, registration, ownership,
+executor, and recovery-attestation checks still run after selection. Local and
+remote executor contracts are unchanged. The materializing session's resume and
+attach-only launch/resume must consume the same selected canonical key.
+
+Delivery: [Workspace identity reuse fixes](../../../plans/recorded-source-path-identity/plan.md).
 
 ## Executor transition
 

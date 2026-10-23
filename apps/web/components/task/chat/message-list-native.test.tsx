@@ -3597,6 +3597,8 @@ it.each([
   { enabled: true, reading: true, pending: true, expected: 570 },
   { enabled: false, reading: false, pending: true, expected: 600 },
   { enabled: true, reading: false, pending: true, shrink: true, expected: 800 },
+  { enabled: true, reading: true, pending: true, shrink: true, expected: 470 },
+  { enabled: false, reading: false, pending: true, shrink: true, expected: 500 },
 ])(
   "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending shrink=$shrink",
   ({ enabled, reading, pending, shrink = false, expected }) => {

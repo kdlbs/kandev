@@ -265,9 +265,12 @@ func nativeResumeIncidentOwnerMatches(block models.SessionRecoveryBlock, proof *
 	return true
 }
 
+// A recovered notice can outlive its execution after a later readiness
+// failure; authenticated native retirement restores it with its historical owner.
 func nativeResumeNoticeMatches(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
 	if recovery.HarnessGeneration != proof.HarnessGeneration || (recovery.StreamID != "" && recovery.StreamID != proof.StreamID) ||
-		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting) {
+		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting &&
+			recovery.Phase != models.AgentDeliveryRecoveryRecovered) {
 		return false
 	}
 	found := false

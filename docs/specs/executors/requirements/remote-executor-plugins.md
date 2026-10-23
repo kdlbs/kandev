@@ -55,6 +55,9 @@ AC-EXECUTORS-PLUGIN-001.5 covered the initial release toggle. It is retired; the
 - **AC-EXECUTORS-PLUGIN-002.2:** Before allocation, launch shall reject incompatible repositories, unsupported workspace sharing, and missing remote-to-Kandev connectivity. Rejection shall name the incompatible input.
 - **AC-EXECUTORS-PLUGIN-002.3:** A successful launch shall use the host-selected runtime artifact and authenticated readiness check before agent startup. Setup progress and failures shall be visible.
 - **AC-EXECUTORS-PLUGIN-002.4:** Supported sessions shall provide normal prompts, events, permission responses, terminal, files, and Git. Editor and preview actions shall require explicit effective support.
+- **AC-EXECUTORS-PLUGIN-002.5:** When a workspace selects managed task Git credentials and the current session is authorized for a private repository, repository materialization shall use that session's credentials even when the provider starts its runtime without managed Git credentials in its startup environment. Initial clone, required fetches, and configured checkout operations shall observe the same authorization.
+- **AC-EXECUTORS-PLUGIN-002.6:** Materialization shall preserve the installed managed credential helper and unrelated Git configuration while using current session authorization. It shall not reuse another session's managed authorization or restore authorization removed from the current session. Executor-owned credential mode shall not implicitly acquire managed credentials.
+- **AC-EXECUTORS-PLUGIN-002.7:** Missing or rejected repository authorization shall fail through the existing sanitized materialization error path without exposing credentials in responses, logs, repository locators, or persisted Git configuration. Public repository materialization shall continue to work without a managed lease.
 
 ### REQ-EXECUTORS-PLUGIN-003: Connection authentication
 

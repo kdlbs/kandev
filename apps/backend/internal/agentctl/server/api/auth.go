@@ -32,6 +32,7 @@ const credentialInvalidatedContextKey = "credentialInvalidated"
 // Only successful control authentication marks Authorization as consumed.
 // Disabled authentication and exempt routes retain application credentials.
 const controlAuthorizationConsumedContextKey = "controlAuthorizationConsumed"
+const authenticatedControlContextKey = "authenticatedControl"
 
 // afterInstanceAuthAccepted is invoked, if non-nil, immediately after
 // instanceAuth accepts a credentialSource-backed request and captures its
@@ -126,6 +127,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 			}
 			c.Set(credentialInvalidatedContextKey, invalidated)
 			c.Set(controlAuthorizationConsumedContextKey, true)
+			c.Set(authenticatedControlContextKey, true)
 			c.Next()
 			return
 		}
@@ -135,6 +137,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 			return
 		}
 		c.Set(controlAuthorizationConsumedContextKey, true)
+		c.Set(authenticatedControlContextKey, true)
 		c.Next()
 	}
 }

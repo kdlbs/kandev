@@ -111,8 +111,12 @@ Keep metric labels bounded; session/stream identifiers belong in structured diag
 Use the existing recovery card for a localized delivery-storage explanation and Retry connection/Stop, with desktop and phone parity.
 Raw SQL cursors and internal storage paths are diagnostic details, not required user decisions.
 
-Oversized text must use the existing bounded chunk representation. Add coverage for cumulative tool-output snapshots that can multiply retained bytes.
-Do not silently truncate authoritative output. Any representation change requires the existing version and rollback compatibility checks.
+Oversized assistant/reasoning text uses the existing chunk representation.
+[Bounded tool delivery](bounded-tool-delivery.md) defines marked presentation
+reduction before acceptance, including generic nested results and duplicate
+carriers. Accepted output must not be truncated during replay or projection.
+Representation changes require the existing version and rollback checks.
+Keep coverage for cumulative snapshots that can multiply retained bytes.
 
 Idle rollover changes transport stream identity without creating a new harness conversation.
 It requires settled submissions and completed projection/acknowledgment evidence for the old stream.

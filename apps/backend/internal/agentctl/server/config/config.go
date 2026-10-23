@@ -27,6 +27,7 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -260,7 +261,9 @@ type InstanceConfig struct {
 	AgentCommand string
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
-	AgentArgs []string
+	AgentArgs             []string
+	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string
@@ -909,6 +912,10 @@ func CollectAgentEnvWithoutAdditional() []string {
 // CollectAgentEnvWithError collects environment variables for an agent instance.
 // It rejects malformed indexed Git configuration rather than changing Git's effective config.
 func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
+	return collectAgentEnvWithError(additional, false)
+}
+
+func collectAgentEnvWithError(additional map[string]string, instance bool) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -920,6 +927,14 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 			if !strings.HasPrefix(key, "AGENTCTL_") && !isNpmEnvVar(key) {
 				envMap[key] = e[idx+1:]
 			}
+		}
+	}
+
+	if instance {
+		var err error
+		envMap, err = withoutInheritedManagedGitAuthorization(envMap)
+		if err != nil {
+			return nil, err
 		}
 	}
 

@@ -191,17 +191,6 @@ func managedCloneRelocationProof(cloner any, repository *models.Repository, reco
 	}
 }
 
-func (e *Executor) repositoryLocalPath(ctx context.Context, repositoryID string) (string, error) {
-	repository, err := e.repo.GetRepository(ctx, repositoryID)
-	if err != nil {
-		return "", fmt.Errorf("load repository %q for worktree recovery: %w", repositoryID, err)
-	}
-	if repository == nil || strings.TrimSpace(repository.LocalPath) == "" {
-		return "", fmt.Errorf("load repository %q for worktree recovery: local path is missing", repositoryID)
-	}
-	return repository.LocalPath, nil
-}
-
 func (e *Executor) resolveEnvironmentForAdmission(
 	ctx context.Context,
 	taskID, environmentID string,

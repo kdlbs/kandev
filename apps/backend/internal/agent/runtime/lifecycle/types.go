@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -107,6 +108,7 @@ type AgentExecution struct {
 	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec   `json:"-"`
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -217,8 +219,12 @@ type AgentExecution struct {
 	prepareProgressRecorder *prepareProgressRecorder
 
 	// agentctl client for this execution
-	agentctl                  *agentctl.Client
-	agentctlOverride          atomic.Pointer[agentctl.Client]
+	agentctl         *agentctl.Client
+	agentctlOverride atomic.Pointer[agentctl.Client]
+	// agentctlURLFallback is the URL a replacement or detach publishes before it
+	// takes agentctlSourceMu's write side, so a concurrent persistence read never
+	// reports an empty endpoint for an execution that still has one.
+	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
@@ -1165,7 +1171,8 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 }
 
 // currentAgentCtlClient returns the unpinned client snapshot. Callers must
-// already hold agentctlLifecycleMu or be implementing the scoped lease.
+// already hold agentctlLifecycleMu, agentctlSourceMu (at least a TryRLock),
+// or be implementing the scoped lease.
 func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 	if ae == nil {
 		return nil
@@ -1211,12 +1218,24 @@ func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback f
 	return true
 }
 
+// publishAgentctlURL records the URL that reads must fall back to while a
+// client replacement or detach holds agentctlSourceMu's write side. Detach
+// retains the installed URL until the client is cleared, so persistence cannot
+// blank a still-installed endpoint while a workspace callback delays detach.
+func (ae *AgentExecution) publishAgentctlURL(url string) {
+	if ae == nil {
+		return
+	}
+	ae.agentctlURLFallback.Store(&url)
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
@@ -1230,10 +1249,16 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	url := ""
+	if client := ae.currentAgentCtlClient(); client != nil {
+		url = client.BaseURL()
+	}
+	ae.publishAgentctlURL(url)
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
+	ae.publishAgentctlURL("")
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.
@@ -1249,13 +1274,32 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // AgentctlURL returns the base URL of the agentctl HTTP server for this
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
+//
+// It never blocks and never takes the client lease. Persistence reads it under
+// the execution store lock, possibly from a caller that already holds a read
+// lease, and a terminal stop may be waiting for the lease's write side. The
+// base URL is immutable per client, so an atomic or try-locked snapshot is
+// enough. While a replacement or detach holds the source write side, the read
+// returns the URL that writer published before taking it, so a concurrent
+// persistence write never blanks a live endpoint.
 func (ae *AgentExecution) AgentctlURL() string {
-	client, release := ae.AcquireAgentCtlClient()
-	defer release()
-	if client == nil {
+	if ae == nil {
 		return ""
 	}
-	return client.BaseURL()
+	if client := ae.agentctlOverride.Load(); client != nil {
+		return client.BaseURL()
+	}
+	if !ae.agentctlSourceMu.TryRLock() {
+		if url := ae.agentctlURLFallback.Load(); url != nil {
+			return *url
+		}
+		return ""
+	}
+	defer ae.agentctlSourceMu.RUnlock()
+	if client := ae.currentAgentCtlClient(); client != nil {
+		return client.BaseURL()
+	}
+	return ""
 }
 
 // SetWorkspaceStream sets the unified workspace stream for this execution

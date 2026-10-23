@@ -129,6 +129,12 @@ grouped by area; selecting a specific control opens its owning page, scrolls it 
 it, and briefly highlights it without changing the saved value. The same search is available in
 the Settings menu on phones.
 
+To return to the page that opened Settings, select **Close settings** in the desktop
+sidebar or the **X** in the phone header. This preserves the task and selected
+session, even after visiting several Settings pages. Unsaved changes still require
+a choice before leaving. Opening Settings directly or refreshing it uses Home as
+the close destination.
+
 From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
 Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
@@ -225,6 +231,11 @@ workspace there from the menu sheet instead.
 3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
+
+If Save fails after some changes were accepted, keep the page open and select
+**Retry save**. Accepted repositories and custom scripts keep their saved identities;
+failed and newer edits stay available for retry. **Reset** restores the changes
+already accepted by the server and discards the remaining draft edits.
 
 If discovery cannot scan a root, the picker keeps repositories from successful
 roots available and retains its normal **Refresh repositories** action. Failed

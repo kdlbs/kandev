@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	officemodels "github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 )
@@ -51,7 +52,7 @@ var mergeEntryPoints = []mergeEntryPoint{
 // status "queued").
 func seedGapStripRun(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, snapshot string) {
 	t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID: id, AgentProfileID: "agent-1", Reason: shared.RunReasonRoutineDispatchCron,
 		Payload: "{}", Status: "queued", CoalescedCount: 1, ContextSnapshot: snapshot,
 	}

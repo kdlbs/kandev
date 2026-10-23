@@ -3,24 +3,12 @@ import i18n from "i18next";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import {
   canApproveAgentRuntimeUpdate,
-  latestRuntimeVersions,
   resolveRuntimeActiveVersion,
   resolveRuntimeEffectiveVersion,
   resolveRuntimeOperation,
   resolveRuntimeVersionPair,
   runtimeOperationLabelKey,
 } from "./agent-runtime-update";
-
-describe("latestRuntimeVersions", () => {
-  it("preserves the complete backend projection", () => {
-    const versions = Array.from({ length: 12 }, (_, index) => ({
-      version: `1.0.${12 - index}`,
-      latest: index === 0,
-    }));
-
-    expect(latestRuntimeVersions(versions)).toEqual(versions);
-  });
-});
 
 const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview => ({
   update_mode: "pinned",

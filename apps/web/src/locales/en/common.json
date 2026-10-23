@@ -552,6 +552,8 @@
   "integrationSettings": "Integration settings",
   "pageNavigation": "On this page",
   "viewOptions": "View options",
+  "commandGoToArchivedTasks": "Go to archived tasks",
+  "commandGoToArchivedTasksKeywords": "archived tasks, archive, history",
   "conversationSearch_open": "Search tasks",
   "conversationSearch_match": "Conversation match",
   "conversationSearch_searching": "Searching conversations…",

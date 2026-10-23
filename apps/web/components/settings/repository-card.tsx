@@ -369,6 +369,7 @@ type RepositoryCardProps = {
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
   onDeleteScript: (repoId: string, scriptId: string) => void;
   onSave: (repoId: string) => Promise<void>;
+  onDiscard?: (repoId: string) => void;
   onDelete: (repoId: string) => Promise<void> | void;
 };
 
@@ -442,10 +443,17 @@ function useRepositoryCardState({
   areScriptsDirty,
   autoOpen,
   onSave,
+  onDiscard,
   onDelete,
 }: Pick<
   RepositoryCardProps,
-  "repository" | "isRepositoryDirty" | "areScriptsDirty" | "autoOpen" | "onSave" | "onDelete"
+  | "repository"
+  | "isRepositoryDirty"
+  | "areScriptsDirty"
+  | "autoOpen"
+  | "onSave"
+  | "onDiscard"
+  | "onDelete"
 >) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -480,7 +488,7 @@ function useRepositoryCardState({
     canSave: !secretBindingValidation,
     invalidReason,
     save: handleSave,
-    discard: () => undefined,
+    discard: () => onDiscard?.(repository.id),
   });
 
   return {
@@ -507,6 +515,7 @@ export function RepositoryCard({
   onUpdateScript,
   onDeleteScript,
   onSave,
+  onDiscard,
   onDelete,
 }: RepositoryCardProps) {
   const {
@@ -523,6 +532,7 @@ export function RepositoryCard({
     areScriptsDirty,
     autoOpen,
     onSave,
+    onDiscard,
     onDelete,
   });
 

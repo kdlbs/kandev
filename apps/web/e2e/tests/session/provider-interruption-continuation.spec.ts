@@ -164,7 +164,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     }
     const cancelResponse = gateway.waitForResponse("session.recover", {
       timeout: 35_000,
-      where: (payload) =>
+      requestWhere: (payload) =>
         payload.action === "cancel_retry" &&
         payload.task_id === fixture.taskId &&
         payload.session_id === fixture.sessionId,

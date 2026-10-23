@@ -552,6 +552,8 @@
   "integrationSettings": "集成設定",
   "pageNavigation": "本頁導航",
   "viewOptions": "視圖選項",
+  "commandGoToArchivedTasks": "前往已歸檔任務",
+  "commandGoToArchivedTasksKeywords": "已歸檔任務, 歸檔, 歷史記錄",
   "conversationSearch_open": "搜尋任務",
   "conversationSearch_match": "對話匹配",
   "conversationSearch_searching": "正在搜尋對話…",

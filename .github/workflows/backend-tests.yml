@@ -1125,6 +1125,10 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -race -v ./internal/agentctl/server/utility -run '^TestRuntimeObservationRunsWindowsCommandShimWithSpaces$'
 
+      - name: Test Windows generic wrapper preparation
+        if: matrix.suite == 'native'
+        run: go test -race -v ./internal/common/launchwrapper ./internal/common/managednpm
+
       - name: Test Windows managed runtime cache repair
         if: matrix.suite == 'native'
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent

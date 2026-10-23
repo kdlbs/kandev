@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -258,6 +258,7 @@ type SentryInstanceFormProps = {
   // forms never collide (e.g. "sentry-add" vs "sentry-edit").
   idPrefix: string;
   onSaved: (cfg: SentryConfig) => void;
+  onPersisted?: () => Promise<void>;
   onCancel: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
 };
@@ -268,6 +269,7 @@ type CoordinatedSaveOptions = {
   setForm: (form: FormState) => void;
   handleSave: () => Promise<SentryConfig>;
   onSaved: (cfg: SentryConfig) => void;
+  onPersisted?: () => Promise<void>;
   canSave: boolean;
 };
 
@@ -277,9 +279,18 @@ function useCoordinatedInstanceSave({
   setForm,
   handleSave,
   onSaved,
+  onPersisted,
   canSave,
 }: CoordinatedSaveOptions) {
   const { t } = useTranslation();
+  const openingId = useId();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [baseline, setBaseline] = useState<FormState>(() => instanceToForm(instance));
   const revision = JSON.stringify(form);
   const latestRevision = useRef(revision);
@@ -287,7 +298,7 @@ function useCoordinatedInstanceSave({
   const isDirty = instance === null || revision !== JSON.stringify(baseline);
 
   useSettingsSaveContributor({
-    id: `sentry-instance:${instance?.id ?? "new"}`,
+    id: `sentry-instance:${instance?.id ?? "new"}:${openingId}`,
     revision,
     isDirty,
     canSave,
@@ -296,7 +307,10 @@ function useCoordinatedInstanceSave({
       const submitted = form;
       const saved = await handleSave();
       setBaseline(submitted);
-      if (instance === null || latestRevision.current === submittedRevision) onSaved(saved);
+      if (mounted.current && (instance === null || latestRevision.current === submittedRevision)) {
+        onSaved(saved);
+      }
+      void onPersisted?.();
     },
     discard: () => setForm(baseline),
   });
@@ -353,6 +367,7 @@ export function SentryInstanceForm({
   instance,
   idPrefix,
   onSaved,
+  onPersisted,
   onCancel,
   onDirtyChange,
 }: SentryInstanceFormProps) {
@@ -380,6 +395,7 @@ export function SentryInstanceForm({
     setForm,
     handleSave,
     onSaved,
+    onPersisted,
     canSave,
   });
   useEffect(() => onDirtyChange?.(coordinated.isDirty), [coordinated.isDirty, onDirtyChange]);

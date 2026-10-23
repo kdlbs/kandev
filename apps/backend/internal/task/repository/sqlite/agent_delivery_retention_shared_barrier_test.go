@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -234,13 +235,23 @@ func TestDeliveryRetentionConcurrencySharedSessionMutationFences(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			repo, old := newRetentionSharedBarrierFixture(t)
 			mutate, verify := retentionSharedMutation(t, repo, old, kind)
-			release, collectorDone := holdRetentionSharedCollector(t, repo)
+			var release func()
+			var collectorDone <-chan error
+			if kind == "owner" {
+				release, collectorDone = holdRetentionOwnerCollector(t, repo)
+			} else {
+				release, collectorDone = holdRetentionSharedCollector(t, repo)
+			}
 			defer release()
-			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-			err := mutate(ctx)
-			cancel()
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Errorf("%s mutation escaped event retention's shared session fence: %v", kind, err)
+			if kind == "owner" {
+				assertRetentionOwnerMutationBlocked(t, repo, old.SessionID, mutate, release)
+			} else {
+				ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+				err := mutate(ctx)
+				cancel()
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("%s mutation escaped event retention's shared session fence: %v", kind, err)
+				}
 			}
 			release()
 			if err := <-collectorDone; err != nil {
@@ -251,6 +262,108 @@ func TestDeliveryRetentionConcurrencySharedSessionMutationFences(t *testing.T) {
 			}
 			verify()
 		})
+	}
+}
+
+func holdRetentionOwnerCollector(t *testing.T, repo *Repository) (func(), <-chan error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	reached, resume, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(resume) }) }
+	done := make(chan error, 1)
+	repo.agentDeliveryRetentionFailpoint = func(point string) error {
+		if point == "before_payload" {
+			close(reached)
+			<-resume
+		}
+		return nil
+	}
+	t.Cleanup(func() {
+		cancel()
+		release()
+		<-finished
+	})
+	go func() {
+		defer close(finished)
+		result, err := repo.RunAgentDeliveryRetentionBatch(ctx, models.AgentDeliveryRetentionBatchOptions{MaxCandidates: 1})
+		if err == nil && result.EventRowsRetired != 1 {
+			err = fmt.Errorf("collector retired %d events, want 1", result.EventRowsRetired)
+		}
+		done <- err
+	}()
+	select {
+	case <-reached:
+	case err := <-done:
+		t.Fatalf("collector did not reach locked payload boundary: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("collector did not reach locked payload boundary")
+	}
+	return release, done
+}
+
+func assertRetentionOwnerMutationBlocked(t *testing.T, repo *Repository, sessionID string, mutate func(context.Context) error, release func()) {
+	t.Helper()
+	var collectorPID int
+	if err := repo.db.QueryRowxContext(t.Context(), `SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory' AND granted AND mode = 'ShareLock'
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND classid = ((hashtextextended($1, 0) >> 32) & 4294967295)::oid
+		  AND objid = (hashtextextended($1, 0) & 4294967295)::oid AND objsubid = 1`,
+		agentDeliverySessionLockNamespace+sessionID).Scan(&collectorPID); err != nil {
+		t.Fatalf("read collector's shared session lock: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	var mutationErr error
+	go func() {
+		defer close(done)
+		mutationErr = mutate(ctx)
+	}()
+	defer func() {
+		cancel()
+		release()
+		<-done
+	}()
+	waitForRetentionOwnerWaiter(t, repo, sessionID, collectorPID, done)
+	cancel()
+	<-done
+	if !errors.Is(mutationErr, context.Canceled) {
+		t.Fatalf("cancel owner mutation after observed session fence: %v", mutationErr)
+	}
+}
+
+func waitForRetentionOwnerWaiter(t *testing.T, repo *Repository, sessionID string, collectorPID int, done <-chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiterPID int
+		err := repo.db.QueryRowxContext(ctx, `SELECT w.pid FROM pg_locks w JOIN pg_locks b
+			ON b.locktype = w.locktype AND b.database = w.database
+			AND b.classid = w.classid AND b.objid = w.objid AND b.objsubid = w.objsubid
+			WHERE w.locktype = 'advisory' AND NOT w.granted AND w.mode = 'ExclusiveLock'
+			  AND b.granted AND b.mode = 'ShareLock' AND b.pid = $2
+			  AND w.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND w.classid = ((hashtextextended($1, 0) >> 32) & 4294967295)::oid
+			  AND w.objid = (hashtextextended($1, 0) & 4294967295)::oid AND w.objsubid = 1
+			  AND b.pid = ANY(pg_blocking_pids(w.pid)) LIMIT 1`,
+			agentDeliverySessionLockNamespace+sessionID, collectorPID).Scan(&waiterPID)
+		if err == nil {
+			return
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("observe owner session fence: %v", err)
+		}
+		select {
+		case <-done:
+			t.Fatal("owner mutation escaped before observed session fence")
+		case <-ctx.Done():
+			t.Fatal("owner did not wait on collector's shared session fence")
+		case <-ticker.C:
+		}
 	}
 }
 

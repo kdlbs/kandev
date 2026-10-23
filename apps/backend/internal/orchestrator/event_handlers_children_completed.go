@@ -215,6 +215,8 @@ func (s *Service) processOnChildrenCompleted(ctx context.Context, parentID strin
 	if parentID == "" || s.workflowEngine == nil || s.workflowStore == nil || s.workflowStepGetter == nil {
 		return false
 	}
+	// The parent transition must not carry the child turn's workflow delivery effect.
+	ctx = withoutWorkflowEffect(ctx)
 
 	rows, ok := s.readyChildCompletionRows(ctx, parentID)
 	if !ok {

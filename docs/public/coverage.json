@@ -409,7 +409,9 @@
         "apps/backend/internal/agent/agents/runtime_update_capability.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate.go",
         "apps/web/components/settings/agent-runtime-policies.tsx",
-        "apps/web/components/update-available-toast-bridge.tsx"
+        "apps/web/components/update-available-toast-bridge.tsx",
+        "apps/backend/internal/common/launchwrapper/prepare.go",
+        "apps/backend/internal/agentctl/server/utility/launch_wrapper.go"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -433,7 +435,11 @@
         "apps/backend/internal/agent/registry/runtime_update_coverage_test.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate_test.go",
         "apps/web/e2e/tests/settings/agent-runtime-notifications.spec.ts",
-        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts"
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts",
+        "apps/backend/internal/common/launchwrapper/prepare_test.go",
+        "apps/backend/internal/agentctl/server/utility/generic_wrapper_test.go",
+        "apps/web/e2e/tests/cli-mode/generic-launch-wrappers.spec.ts",
+        "apps/web/e2e/tests/cli-mode/mobile-generic-launch-wrappers.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",
@@ -508,7 +514,8 @@
       "stability": "stable",
       "docs": [
         "integrations",
-        "configuration"
+        "configuration",
+        "workflow-sync"
       ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",

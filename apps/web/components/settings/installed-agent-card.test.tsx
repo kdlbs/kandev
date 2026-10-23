@@ -222,7 +222,7 @@ describe("InstalledAgentCard host CLI version", () => {
     cleanup();
   });
 
-  it("shows the detected version under the path for a host-CLI agent", () => {
+  it("keeps the detected version inside initially closed diagnostics", () => {
     render(
       <InstalledAgentCard
         agent={{ ...makeDiscovery("claude"), cli_version: "2.1.220" }}
@@ -233,7 +233,10 @@ describe("InstalledAgentCard host CLI version", () => {
       </InstalledAgentCard>,
     );
 
-    expect(screen.getByTestId("cli-version-claude").textContent).toBe("Claude Code 2.1.220");
+    expect(screen.getByTestId("cli-version-claude").textContent).toBe(
+      "Local CLI: Claude Code 2.1.220",
+    );
+    expect(screen.getByTestId("agent-diagnostics-claude").hasAttribute("open")).toBe(false);
   });
 
   it("shows an unknown-version reason when detection failed", () => {
@@ -248,7 +251,7 @@ describe("InstalledAgentCard host CLI version", () => {
     );
 
     expect(screen.getByTestId("cli-version-claude").textContent).toBe(
-      "Claude Code version unknown: command timed out after 5s",
+      "Local CLI: Claude Code, version unknown (command timed out after 5s)",
     );
   });
 
@@ -264,6 +267,7 @@ describe("InstalledAgentCard host CLI version", () => {
     );
 
     expect(screen.queryByTestId("cli-version-gemini")).toBeNull();
+    expect(screen.queryByTestId("agent-diagnostics-gemini")).toBeNull();
   });
 });
 

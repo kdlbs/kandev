@@ -74,7 +74,7 @@ This capability extends the launch context of discovery.
 ## Out of scope
 
 - Updating the Codex CLI bundled inside an ACP bridge or changing runtime updater labels.
-- Selecting a runtime binary automatically or installing packages during profile refresh.
+- Selecting a runtime binary automatically or performing arbitrary package installation during profile refresh. The narrow isolated recovery of an already selected managed Codex runtime is owned by [missing bundled dependency recovery](managed-npm-runtime-recovery.md#req-agents-managed-runtime-recovery-005-missing-bundled-dependency-recovery); its draft extension does not authorize general updater behavior.
 - Remote executor probes, workspace environment overlays, repository setup scripts, and executor authentication parity.
 - Changing live session model selection, exact-model policy, provider gateway authentication, or dynamic-profile routing.
 - Changing agent-wide or workflow-only discovery when no concrete profile context is available.
@@ -85,3 +85,4 @@ Host discovery remains an editing aid. Executor startup retains its existing mod
 
 - [Profile capability discovery](../../../plans/profile-capability-discovery/plan.md)
 - [First-run agent setup and compact profile refresh](../../../plans/first-run-agent-setup/plan.md)
+- [Generic launch wrapper implementation plan](../../../plans/generic-launch-wrappers/plan.md)
