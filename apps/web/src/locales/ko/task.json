@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "세션 다시 시작을 요청했습니다",
   "sessionRestartFailed": "세션 다시 시작에 실패했습니다",
   "sessionRestartUnavailable": "현재 상태에서는 이 세션을 다시 시작할 수 없습니다.",
-  "sessionRestartConnectionUnavailable": "연결을 사용할 수 없습니다. 다시 연결한 후 다시 시도하세요."
+  "sessionRestartConnectionUnavailable": "연결을 사용할 수 없습니다. 다시 연결한 후 다시 시도하세요.",
+  "mcpReasonSessionExcluded": "이 세션에서 제외됨"
 }

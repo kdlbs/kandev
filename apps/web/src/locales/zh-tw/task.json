@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "已請求重啟工作階段",
   "sessionRestartFailed": "工作階段重啟失敗",
   "sessionRestartUnavailable": "此工作階段在目前狀態下無法重啟。",
-  "sessionRestartConnectionUnavailable": "連線不可用。請重新連線後再試。"
+  "sessionRestartConnectionUnavailable": "連線不可用。請重新連線後再試。",
+  "mcpReasonSessionExcluded": "已從此工作階段排除"
 }

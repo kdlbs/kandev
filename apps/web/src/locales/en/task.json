@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "Session restart requested",
   "sessionRestartFailed": "Session restart failed",
   "sessionRestartUnavailable": "This session cannot be restarted in its current state.",
-  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again."
+  "sessionRestartConnectionUnavailable": "The connection is unavailable. Reconnect, then try again.",
+  "mcpReasonSessionExcluded": "Excluded from this session"
 }

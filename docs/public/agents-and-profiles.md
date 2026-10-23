@@ -963,14 +963,24 @@ After a definition is configured, select it where it should apply:
   **Customize**. Desktop opens a dialog; phones open one sheet. **Connections**
   keeps server status and tool inspection available. Inherited entries show
   their profile, repository, task, or session name when available. Choose
-  additions under **Additional servers**. The **From task setup** group shows
-  inherited entries, which are read-only. Each entry separates its description
-  and setup/transport badges from a **Where it comes from** section with named
-  origin badges. A server selected by
-  several scopes shows each contributing source. These describe configuration;
-  check **Connections** for evidence of delivery or loaded tools.
+  additions under **Additional servers**. Inherited entries retain all contributing
+  origins. Choose **Exclude for this session** to leave out one inherited server,
+  or **Restore inheritance** to use its current inherited selections again.
+  Check **Connections** for evidence of delivery or loaded tools.
 
-Selections are additive. The effective set combines every selected repository, profile, task, and session definition, includes every repository attached to the task, and reports duplicate origins once. A lower scope cannot remove an inherited server. Changing a definition or selection does not alter an active turn.
+Selections combine every repository attached to the task, its profile, task,
+and session additions. An existing session can exclude a definition from this
+combined set without changing repository, profile, task, or sibling-session
+choices. Changing a definition or selection does not alter an active turn.
+
+Exclusions survive closing the editor, reload, and restart of the same session.
+They last until restored or the session or definition is deleted. A new session
+starts without exclusions. **Saved exclusions** keeps a restore action when a
+server is no longer inherited. Restore does not add that server or enable a
+workspace-disabled definition. Disabling a server in workspace settings affects
+other sessions' future setups; session exclusion affects only this session.
+Required Kandev tools remain managed separately. Independently configured
+provider servers are outside this catalog control.
 
 The plug shows a clock while saved changes wait for idle, a next-start marker
 when reconnection is unsupported, and a failure marker when application fails.
@@ -997,11 +1007,13 @@ For an existing task session, MCP changes save immediately. A compatible ACP
 provider applies them by reconnecting the same session after the current turn
 is idle. Providers without safe reconnection apply saved changes when the agent
 starts again. The state notice tells you which timing applies. If reconnect
-fails, the previous applied selection remains active and the UI offers retry.
+fails, the last accepted setup remains available for comparison and the UI
+offers retry. A failed operation can leave provider state uncertain.
 
 If another editor changes the saved choices, Kandev rejects your stale save.
-Choose **Reload choices**, review your retained draft against the latest saved
-choices, then save again. A save whose response is lost also requires a reload
+Choose **Reload choices**, review the latest saved choices and any retained
+addition draft, then repeat the intended action. Exclude and restore show saved
+state only after a successful response. A save whose response is lost also requires a reload
 before another attempt. Repository and profile editors use **Save changes**;
 session Customize saves after an explicit selection change. Application retry
 remains available for a saved session setup that failed to apply.

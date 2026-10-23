@@ -182,6 +182,9 @@ func (r *sqliteRepository) DeleteMCPTaskData(ctx context.Context, taskID string,
 			continue
 		}
 		seen[sessionID] = struct{}{}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_mcp_exclusions WHERE task_session_id = ?`), sessionID); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_session_mcp_selections WHERE task_session_id = ?`), sessionID); err != nil {
 			return err
 		}
@@ -205,6 +208,8 @@ func (r *sqliteRepository) DeleteMCPWorkspaceData(ctx context.Context, workspace
 	}
 	defer func() { _ = tx.Rollback() }()
 	queries := []string{
+		`DELETE FROM mcp_task_session_apply_state WHERE task_session_id IN (SELECT task_session_id FROM task_session_mcp_exclusions WHERE workspace_id = ?)`,
+		`DELETE FROM task_session_mcp_exclusions WHERE workspace_id = ?`,
 		`DELETE FROM workspace_agent_profile_mcp_selections WHERE workspace_id = ? OR mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
 		`DELETE FROM repository_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
 		`DELETE FROM task_mcp_selections WHERE mcp_server_id IN (SELECT id FROM mcp_server_definitions WHERE workspace_id = ?)`,
@@ -362,6 +367,7 @@ func deleteMCPSelectionRows(ctx context.Context, tx *sqlx.Tx, definitionID strin
 		"repository_mcp_selections",
 		"task_mcp_selections",
 		"task_session_mcp_selections",
+		"task_session_mcp_exclusions",
 	} {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE mcp_server_id = ?`), definitionID); err != nil {
 			return err

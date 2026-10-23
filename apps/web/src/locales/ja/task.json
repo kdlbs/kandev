@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "セッションの再起動を要求しました",
   "sessionRestartFailed": "セッションの再起動に失敗しました",
   "sessionRestartUnavailable": "現在の状態ではこのセッションを再起動できません。",
-  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。"
+  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。",
+  "mcpReasonSessionExcluded": "このセッションから除外されています"
 }

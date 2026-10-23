@@ -15,6 +15,7 @@ import (
 type mcpSelectionRequest struct {
 	WorkspaceID                   string          `json:"workspace_id"`
 	ExpectedDefinitionIDs         json.RawMessage `json:"expected_definition_ids"`
+	ExcludedDefinitionIDs         json.RawMessage `json:"excluded_definition_ids"`
 	ExpectedRevision              json.RawMessage `json:"expected_revision"`
 	ExpectedExcludedDefinitionIDs json.RawMessage `json:"expected_excluded_definition_ids"`
 	DefinitionIDs                 []string        `json:"definition_ids"`
@@ -22,12 +23,13 @@ type mcpSelectionRequest struct {
 }
 
 type mcpSelectionResponse struct {
-	WorkspaceID       string                              `json:"workspace_id"`
-	Scope             mcpconfig.SelectionScope            `json:"scope"`
-	OwnerID           string                              `json:"owner_id"`
-	DefinitionIDs     []string                            `json:"definition_ids"`
-	SelectionRevision *int64                              `json:"selection_revision,omitempty"`
-	MCPState          *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
+	WorkspaceID           string                              `json:"workspace_id"`
+	Scope                 mcpconfig.SelectionScope            `json:"scope"`
+	OwnerID               string                              `json:"owner_id"`
+	DefinitionIDs         []string                            `json:"definition_ids"`
+	ExcludedDefinitionIDs *[]string                           `json:"excluded_definition_ids,omitempty"`
+	SelectionRevision     *int64                              `json:"selection_revision,omitempty"`
+	MCPState              *mcpconfig.SessionMCPSelectionState `json:"mcp_state,omitempty"`
 }
 
 func (h *Handlers) httpListProfileMCPSelections(c *gin.Context) {
@@ -153,6 +155,13 @@ func selectionCondition(body mcpSelectionRequest, scope mcpconfig.SelectionScope
 		}
 		condition.ExpectedRevision = revision
 	}
+	if body.ExcludedDefinitionIDs != nil {
+		var ids []string
+		if err := json.Unmarshal(body.ExcludedDefinitionIDs, &ids); err != nil || ids == nil {
+			return condition, mcpconfig.ErrMCPInvalidSelection
+		}
+		condition.ExcludedDefinitionIDs = &ids
+	}
 	return condition, condition.Validate(scope)
 }
 
@@ -164,6 +173,11 @@ func (h *Handlers) writeMCPSelectionResponse(c *gin.Context, workspaceID string,
 			revision = snapshot.State.DesiredRevision
 		}
 		response.SelectionRevision = &revision
+		ids := snapshot.ExcludedDefinitionIDs
+		if ids == nil {
+			ids = []string{}
+		}
+		response.ExcludedDefinitionIDs = &ids
 	}
 	c.JSON(http.StatusOK, response)
 }

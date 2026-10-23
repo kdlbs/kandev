@@ -15,6 +15,10 @@ import {
   McpPendingChanges,
   McpPendingRowAnnotation,
 } from "./chat/mcp-explorer/mcp-selection-changes-view";
+import {
+  McpSessionExclusionAction,
+  McpDormantExclusions,
+} from "./chat/mcp-explorer/mcp-session-exclusions";
 import { MobilePickerSheet } from "./mobile/mobile-picker-sheet";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isHandledApiError } from "@/lib/api/client";
@@ -29,6 +33,9 @@ export type MCPSessionSelectorProps = {
   definitions: MCPServerDefinition[];
   definitionsLoading?: boolean;
   selectedIds: string[];
+  savedSelectedIds?: string[];
+  excludedIds?: string[];
+  onExcludedIdsChange?: (ids: string[]) => void;
   onSelectedIdsChange: (ids: string[]) => void;
   inherited?: MCPInheritedSelection[];
   state?: MCPSessionSelectionState | null;
@@ -46,10 +53,23 @@ export function MCPSessionSelectionBody({
   retrying,
   definitionsLoading,
   reload,
+  excludedIds = [],
+  onExcludedIdsChange,
   ...props
 }: MCPSessionSelectorProps & { query: string; onQueryChange: (query: string) => void }) {
   const { t } = useTranslation();
-  const changes = mcpSelectionChanges(state, props.selectedIds);
+  const changes = mcpSelectionChanges(
+    state,
+    props.savedSelectedIds ?? props.selectedIds,
+    excludedIds,
+  );
+  const inheritedIds = new Set(props.inherited?.map((item) => item.definition.id));
+  const dormant = onExcludedIdsChange
+    ? props.definitions.filter(
+        (item) => excludedIds.includes(item.id) && !inheritedIds.has(item.id),
+      )
+    : [];
+  const dormantIds = new Set(dormant.map((item) => item.id));
   return (
     <div className="min-w-0 space-y-5">
       {state && (
@@ -68,6 +88,21 @@ export function MCPSessionSelectionBody({
         </div>
       )}
       {reload && <MCPSelectionSaveFeedback error={props.error} reload={reload} />}
+      {onExcludedIdsChange && (
+        <div className="space-y-1.5 text-pretty text-xs text-muted-foreground">
+          <p>{t("settings:mcpSessionExclusionsDescription")}</p>
+          <p>{t("settings:mcpRequiredToolsSeparate")}</p>
+          <p role="status">{t("settings:mcpExclusionCount", { total: excludedIds.length })}</p>
+        </div>
+      )}
+      {onExcludedIdsChange && (
+        <McpDormantExclusions
+          definitions={dormant}
+          excludedIds={excludedIds}
+          onChange={onExcludedIdsChange}
+          disabled={props.disabled}
+        />
+      )}
       {definitionsLoading ? (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           {t("settings:mcpLoading")}
@@ -75,11 +110,32 @@ export function MCPSessionSelectionBody({
       ) : (
         <MCPSelectionContent
           {...props}
+          definitions={props.definitions.filter((item) => !dormantIds.has(item.id))}
           error={reload ? undefined : props.error}
           sessionPresentation
           renderServerAnnotation={(id) => {
             const change = changes.changes.find((item) => item.definition_id === id);
-            return change ? <McpPendingRowAnnotation change={change} /> : null;
+            const item = props.inherited?.find((item) => item.definition.id === id);
+            const excluded = excludedIds.includes(id);
+            return (
+              <>
+                {change && <McpPendingRowAnnotation change={change} />}
+                {onExcludedIdsChange && item && (
+                  <McpSessionExclusionAction
+                    definition={item.definition}
+                    excluded={excluded}
+                    disabled={props.disabled}
+                    onChange={() =>
+                      onExcludedIdsChange(
+                        excluded
+                          ? excludedIds.filter((value) => value !== id)
+                          : [...excludedIds, id],
+                      )
+                    }
+                  />
+                )}
+              </>
+            );
           }}
           sectionLabel={t("settings:mcpSessionAdditions")}
           testId={`${props.testId}-picker`}

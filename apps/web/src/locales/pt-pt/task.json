@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "Reinício da sessão solicitado",
   "sessionRestartFailed": "Falha ao reiniciar a sessão",
   "sessionRestartUnavailable": "Não é possível reiniciar esta sessão no estado atual.",
-  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente."
+  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente.",
+  "mcpReasonSessionExcluded": "Excluído desta sessão"
 }

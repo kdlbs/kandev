@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "已请求重启会话",
   "sessionRestartFailed": "会话重启失败",
   "sessionRestartUnavailable": "此会话在当前状态下无法重启。",
-  "sessionRestartConnectionUnavailable": "连接不可用。请重新连接后再试。"
+  "sessionRestartConnectionUnavailable": "连接不可用。请重新连接后再试。",
+  "mcpReasonSessionExcluded": "已从此会话排除"
 }

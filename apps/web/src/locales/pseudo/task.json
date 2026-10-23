@@ -2887,5 +2887,6 @@
   "sessionRestartRequested": "Śēśśĩōń ŕēśţàŕţ ŕēqũēśţēď",
   "sessionRestartFailed": "Śēśśĩōń ŕēśţàŕţ ƒàĩĺēď",
   "sessionRestartUnavailable": "Ţĥĩś śēśśĩōń ćàńńōţ ƀē ŕēśţàŕţēď ĩń ĩţś ćũŕŕēńţ śţàţē.",
-  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń."
+  "sessionRestartConnectionUnavailable": "Ţĥē ćōńńēćţĩōń ĩś ũńàvàĩĺàƀĺē. Ŕēćōńńēćţ, ţĥēń ţŕŷ àĝàĩń.",
+  "mcpReasonSessionExcluded": "Ēxćĺũďēď ƒŕōḿ ţĥĩś śēśśĩōń"
 }
