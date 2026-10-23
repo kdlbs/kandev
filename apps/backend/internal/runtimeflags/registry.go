@@ -78,6 +78,22 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerUsageLimits",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS",
+			Kind:            KindFeature,
+			Label:           "Provider usage and limits",
+			Description:     "Shows account-aware provider usage and applies configured shared Kandev-turn limits to task and Office prompts.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Unknown applicable account bindings stop configured admission. Utility/review inference and provider HTTP-request/token/USD budgets are not covered. Disabling retains settings and claims.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,

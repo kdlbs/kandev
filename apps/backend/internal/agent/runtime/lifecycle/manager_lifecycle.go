@@ -1049,6 +1049,13 @@ func (m *Manager) cleanupStaleExecutionWithCheckpoint(
 		}
 	}
 
+	if retired || execution.RuntimeName != "" && m.executorRegistry != nil {
+		if err := m.completeProviderExecution(ctx, execution.ID); err != nil {
+			m.logger.Error("provider turn execution settlement failed",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
+
 	// End session trace span only after the runtime has stopped. A failed stop
 	// remains retryable and should keep the execution's lifecycle intact.
 	execution.EndSessionSpan()

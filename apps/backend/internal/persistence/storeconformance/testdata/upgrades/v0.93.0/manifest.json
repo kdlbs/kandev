@@ -456,6 +456,8 @@
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
       "harness_session_generations",
+      "provider_turn_allowances",
+      "provider_turn_claims",
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
