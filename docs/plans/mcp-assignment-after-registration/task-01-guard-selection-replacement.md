@@ -181,8 +181,14 @@ Verification:
   an 8 GiB Node heap (the default 4 GiB exhausted memory). i18n checks passed.
 - Changed Go lint passed with repository-pinned golangci-lint v2.9.0.
 - An initial broader MCP race filter also selected the unrelated native-command
-  cancellation test, which returned nil instead of cancellation. The selection
-  filter above isolates this work; that unrelated test was not modified.
+  cancellation test, which returned nil instead of cancellation. The exclusions
+  sibling later traced it to the fixture's `/usr/bin:/bin` PATH on Nix, where
+  `sleep` lives outside those directories. Its committed one-line test fix from
+  `442e9f01f77bd091f9d12d8867fa027bc74cf83e` was imported by path only; sibling
+  plan files and production command-runner code were not changed. The broader
+  command then passed in this workspace:
+  `go test -trimpath -race ./internal/agent/mcpconfig ./internal/agent/settings/store ./internal/agent/settings/handlers ./internal/backendapp -run 'MCP|Selection|Effective' -count=1`
+  (from `apps/backend`). Changed-file Go lint passed with zero issues.
 
 Commit identity is recorded in the saved task plan and coordination message
 immediately after the commit (a commit cannot contain its own SHA).
