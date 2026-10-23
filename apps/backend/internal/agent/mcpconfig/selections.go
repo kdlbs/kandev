@@ -133,6 +133,7 @@ type SelectionService struct {
 	catalog           CatalogRepository
 	authorizer        WorkspaceAuthorizer
 	ownerValidator    SelectionOwnerValidator
+	additionValidator SelectionOwnerValidator
 	stateRepo         SessionMCPSelectionStateRepository
 	stateNotifier     func(context.Context, string)
 	resolutionContext func(context.Context, string, string) (ResolutionContext, error)
@@ -203,6 +204,11 @@ func (s *SelectionService) List(ctx context.Context, scope SelectionScope, works
 }
 
 func (s *SelectionService) Replace(ctx context.Context, scope SelectionScope, workspaceID, ownerID string, definitionIDs []string) error {
+	if _, ok := s.repo.(ConditionalSelectionRepository); ok {
+		_, err := s.ReplaceConditional(ctx, SelectionOrigin{Scope: scope, WorkspaceID: workspaceID, OwnerID: ownerID}, definitionIDs, SelectionCondition{})
+		return err
+	}
+
 	if err := s.validateContext(ctx, scope, workspaceID, ownerID); err != nil {
 		return err
 	}

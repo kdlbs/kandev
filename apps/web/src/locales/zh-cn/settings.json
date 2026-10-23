@@ -1064,5 +1064,7 @@
   "mcpUnsupportedVariables": "目前尚无法准备这些配置变量。请选择其他配置。",
   "mcpRequiredBadge": "必填",
   "mcpPlainInputsHelp": "请在此使用非机密值。凭据请使用下方的密钥引用。",
-  "mcpUnsupportedArguments": "此设置需要目前尚无法配置的命令参数。请选择其他配置。"
+  "mcpUnsupportedArguments": "此设置需要目前尚无法配置的命令参数。请选择其他配置。",
+  "mcpSelectionConflict": "选择已更改。请重新加载选择，检查草稿，然后再次保存。",
+  "mcpReloadChoices": "重新加载选择"
 }

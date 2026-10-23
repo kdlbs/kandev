@@ -9,14 +9,10 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useMCPWorkspaceDefinitions } from "@/hooks/domains/workspace/use-mcp-workspace-settings";
-import { isHandledApiError } from "@/lib/api/client";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
+import { useMCPSelectionDraft } from "@/hooks/domains/workspace/use-mcp-selection-draft";
+import { SettingsSaveCancelledError } from "@/components/settings/settings-save-provider";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
-
-function sameSelection(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((id) => rightSet.has(id));
-}
 
 export function RepositoryMCPSelectionSection({
   repositoryId,
@@ -32,25 +28,15 @@ export function RepositoryMCPSelectionSection({
   const editor = useMCPSelectionEditor("repository", repositoryId, workspaceId);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [baselineIds, setBaselineIds] = useState<string[]>([]);
-  const selectionKey = editor.selection
-    ? `${editor.selection.workspace_id}:${editor.selection.owner_id}:${editor.selection.definition_ids.join(",")}`
-    : "empty";
-
-  useEffect(() => {
-    if (!editor.selection) return;
-    setSelectedIds(editor.selection.definition_ids);
-    setBaselineIds(editor.selection.definition_ids);
-  }, [selectionKey]);
-
-  const dirty = Boolean(editor.selection) && !sameSelection(selectedIds, baselineIds);
+  const draft = useMCPSelectionDraft(`${workspaceId}:${repositoryId}`, editor.selection);
+  const { selectedIds, setSelectedIds, dirty } = draft;
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
   const save = async () => {
-    await editor.save(selectedIds);
-    setBaselineIds(selectedIds);
+    const response = await editor.save(selectedIds);
+    if (!response) throw new SettingsSaveCancelledError();
+    draft.acknowledge(response);
   };
   useSettingsSaveContributor({
     id: `repository-mcp-selection:${repositoryId}`,
@@ -61,9 +47,10 @@ export function RepositoryMCPSelectionSection({
       !editor.loading &&
       !editor.saving &&
       !editor.loadError &&
+      !editor.saveError &&
       !definitions.error,
     save,
-    discard: () => setSelectedIds(baselineIds),
+    discard: draft.discard,
   });
 
   return (
@@ -99,11 +86,7 @@ export function RepositoryMCPSelectionSection({
             {t("settings:mcpLoadFailed")}
           </p>
         )}
-        {Boolean(editor.saveError) && !isHandledApiError(editor.saveError) && (
-          <p className="mt-2 text-sm text-destructive" role="alert">
-            {t("settings:mcpSelectionSaveFailed")}
-          </p>
-        )}
+        <MCPSelectionSaveFeedback error={editor.saveError} reload={editor.reload} />
       </CollapsibleContent>
     </Collapsible>
   );

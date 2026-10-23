@@ -1064,5 +1064,7 @@
   "mcpUnsupportedVariables": "これらの設定変数はまだ準備できません。別の設定を選択してください。",
   "mcpRequiredBadge": "必須",
   "mcpPlainInputsHelp": "ここには機密ではない値を入力してください。認証情報には下のシークレット参照を使用してください。",
-  "mcpUnsupportedArguments": "この設定には、まだ設定できないコマンド引数が必要です。別の設定を選択してください。"
+  "mcpUnsupportedArguments": "この設定には、まだ設定できないコマンド引数が必要です。別の設定を選択してください。",
+  "mcpSelectionConflict": "選択内容が変更されました。選択内容を再読み込みして下書きを確認し、もう一度保存してください。",
+  "mcpReloadChoices": "選択内容を再読み込み"
 }

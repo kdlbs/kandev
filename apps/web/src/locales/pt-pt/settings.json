@@ -1064,5 +1064,7 @@
   "mcpUnsupportedVariables": "Estas variáveis de configuração ainda não podem ser materializadas. Escolha outra configuração.",
   "mcpRequiredBadge": "Obrigatório",
   "mcpPlainInputsHelp": "Utilize aqui valores que não sejam secretos. Para credenciais, selecione referências de segredos abaixo.",
-  "mcpUnsupportedArguments": "Esta configuração pede argumentos de comando que ainda não podem ser configurados. Escolha outra configuração."
+  "mcpUnsupportedArguments": "Esta configuração pede argumentos de comando que ainda não podem ser configurados. Escolha outra configuração.",
+  "mcpSelectionConflict": "As escolhas foram alteradas. Recarregue as escolhas, reveja o rascunho e volte a guardar.",
+  "mcpReloadChoices": "Recarregar escolhas"
 }

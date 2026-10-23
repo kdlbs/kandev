@@ -8,6 +8,7 @@ import {
   useMCPSelectionEditor,
   type MCPSelectionScopeRef,
 } from "../workspace/use-mcp-selection-editor";
+import { useMCPSelectionDraft } from "../workspace/use-mcp-selection-draft";
 import { isHandledApiError } from "@/lib/api/client";
 import type { MCPInheritedSelection, MCPSessionSelectionState } from "@/lib/types/http-mcp";
 
@@ -87,11 +88,12 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     available ? ownerWorkspace : null,
     inheritedScopes,
   );
+  const draft = useMCPSelectionDraft(contextKey, editor.selection);
   const error = editor.saveError ?? editor.loadError ?? definitions.error;
   usePendingSelectionRefresh(
     editor.selection?.mcp_state,
     editor.reload,
-    editor.saving || isHandledApiError(error),
+    editor.saving || Boolean(editor.saveError) || isHandledApiError(error),
   );
   const inherited = useMemo<MCPInheritedSelection[]>(
     () =>
@@ -103,9 +105,13 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
   );
   const save = useCallback(
     (ids: string[]) => {
-      void editor.save(ids).catch(() => undefined);
+      draft.setSelectedIds(ids);
+      void editor
+        .save(ids)
+        .then(draft.acknowledge)
+        .catch(() => undefined);
     },
-    [editor.save],
+    [editor.save, draft.setSelectedIds, draft.acknowledge],
   );
   if (!available) return null;
   return {
@@ -113,11 +119,12 @@ export function useTaskSessionMCPSelection(context: SessionMCPContext) {
     workspaceId: ownerWorkspace,
     definitions: definitions.definitions,
     definitionsLoading: definitions.loading || editor.loading,
-    selectedIds: editor.selection?.definition_ids ?? [],
+    selectedIds: draft.selectedIds,
     inherited,
     onSelectedIdsChange: save,
     state: editor.selection?.mcp_state,
-    disabled: editor.saving,
+    disabled: editor.saving || Boolean(editor.saveError),
+    reload: editor.reload,
     retry: () => save(editor.selection?.definition_ids ?? []),
     retrying: editor.saving,
     error,

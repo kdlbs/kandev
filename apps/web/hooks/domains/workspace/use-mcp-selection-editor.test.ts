@@ -209,3 +209,48 @@ describe("MCP selection refresh", () => {
     expect(result.current.saving).toBe(false);
   });
 });
+
+describe("conditional selection writes", () => {
+  // @covers AC-AGENTS-MCP-ASSIGNMENT-003.1
+  it.each(["repository", "task_session"] as const)(
+    "sends the accepted %s snapshot",
+    async (scope) => {
+      const saved = { ...selection(), scope, selection_revision: 2 };
+      vi.mocked(getMCPSelections).mockResolvedValue(saved);
+      vi.mocked(replaceMCPSelections).mockResolvedValue({ ...saved, definition_ids: ["new"] });
+      const { result } = renderHook(() => useMCPSelectionEditor(scope, "session-a", WORKSPACE_A));
+      await waitFor(() => expect(result.current.selection).toEqual(saved));
+      await act(async () => {
+        await result.current.save(["new"]);
+      });
+      expect(replaceMCPSelections).toHaveBeenCalledWith(
+        scope,
+        "session-a",
+        WORKSPACE_A,
+        ["new"],
+        scope === "task_session"
+          ? { expected_revision: 2 }
+          : { expected_definition_ids: ["saved-mcp"] },
+      );
+    },
+  );
+
+  it("blocks a second same-tick write until the first settles", async () => {
+    const pending = deferred<MCPSelectionResponse>();
+    vi.mocked(replaceMCPSelections).mockReturnValue(pending.promise);
+    const { result } = renderHook(() =>
+      useMCPSelectionEditor("task_session", "session-a", WORKSPACE_A),
+    );
+    await waitFor(() => expect(result.current.selection).not.toBeNull());
+    let first!: Promise<unknown>;
+    await act(async () => {
+      first = result.current.save(["first"]);
+      await expect(result.current.save(["second"])).rejects.toBeDefined();
+    });
+    expect(replaceMCPSelections).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve(selection());
+      await first;
+    });
+  });
+});

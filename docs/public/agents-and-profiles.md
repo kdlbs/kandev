@@ -999,6 +999,13 @@ is idle. Providers without safe reconnection apply saved changes when the agent
 starts again. The state notice tells you which timing applies. If reconnect
 fails, the previous applied selection remains active and the UI offers retry.
 
+If another editor changes the saved choices, Kandev rejects your stale save.
+Choose **Reload choices**, review your retained draft against the latest saved
+choices, then save again. A save whose response is lost also requires a reload
+before another attempt. Repository and profile editors use **Save changes**;
+session Customize saves after an explicit selection change. Application retry
+remains available for a saved session setup that failed to apply.
+
 Existing legacy profile MCP JSON is imported into workspace definitions when possible. During migration, the legacy profile configuration remains the fallback for a profile-workspace pair that has not imported successfully. New persistent profile selections use the workspace catalog.
 
 </details>

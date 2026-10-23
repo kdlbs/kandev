@@ -1064,5 +1064,7 @@
   "mcpUnsupportedVariables": "These setup variables cannot be materialized yet. Choose another setup.",
   "mcpRequiredBadge": "Required",
   "mcpPlainInputsHelp": "Use non-secret values here. Select secret references below for credentials.",
-  "mcpUnsupportedArguments": "This setup requests command arguments that cannot be configured yet. Choose another setup."
+  "mcpUnsupportedArguments": "This setup requests command arguments that cannot be configured yet. Choose another setup.",
+  "mcpSelectionConflict": "Choices changed. Reload choices, review your draft, then save again.",
+  "mcpReloadChoices": "Reload choices"
 }

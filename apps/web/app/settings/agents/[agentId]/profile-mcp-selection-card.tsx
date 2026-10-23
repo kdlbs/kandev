@@ -9,15 +9,11 @@ import { useSettingsSaveContributor } from "@/components/settings/settings-save-
 import { MCPSelectionPicker } from "@/components/mcp/mcp-selection-picker";
 import { useAppStore } from "@/components/state-provider";
 import { useMCPWorkspaceDefinitions } from "@/hooks/domains/workspace/use-mcp-workspace-settings";
-import { isHandledApiError } from "@/lib/api/client";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
+import { useMCPSelectionDraft } from "@/hooks/domains/workspace/use-mcp-selection-draft";
+import { SettingsSaveCancelledError } from "@/components/settings/settings-save-provider";
 import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
 import { SettingsCard } from "@/components/settings/settings-card";
-
-function sameSelection(left: string[], right: string[]): boolean {
-  if (left.length !== right.length) return false;
-  const rightSet = new Set(right);
-  return left.every((id) => rightSet.has(id));
-}
 
 type ProfileMCPSelectionContentProps = {
   profileId: string;
@@ -100,11 +96,7 @@ function ProfileMCPSelectionContent({
           {t("settings:mcpLoadFailed")}
         </p>
       )}
-      {Boolean(editor.saveError) && !isHandledApiError(editor.saveError) && (
-        <p className="text-sm text-destructive" role="alert">
-          {t("settings:mcpSelectionSaveFailed")}
-        </p>
-      )}
+      <MCPSelectionSaveFeedback error={editor.saveError} reload={editor.reload} />
     </CardContent>
   );
 }
@@ -119,33 +111,17 @@ export function ProfileMCPSelectionCard({
   const { t } = useTranslation();
   const workspaces = useAppStore((state) => state.workspaces.items);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(workspaceId ?? null);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [baselineIds, setBaselineIds] = useState<string[]>([]);
   const definitions = useMCPWorkspaceDefinitions(selectedWorkspaceId);
   const editor = useMCPSelectionEditor("profile", profileId, selectedWorkspaceId);
-  const selectionKey = editor.selection
-    ? `${editor.selection.workspace_id}:${editor.selection.owner_id}:${editor.selection.definition_ids.join(",")}`
-    : `${selectedWorkspaceId ?? "none"}:empty`;
-
+  const draft = useMCPSelectionDraft(`${selectedWorkspaceId}:${profileId}`, editor.selection);
+  const { selectedIds, setSelectedIds, dirty } = draft;
   useEffect(() => setSelectedWorkspaceId(workspaceId ?? null), [workspaceId]);
-  useEffect(() => {
-    if (!editor.selection) {
-      if (!selectedWorkspaceId) {
-        setSelectedIds([]);
-        setBaselineIds([]);
-      }
-      return;
-    }
-    setSelectedIds(editor.selection.definition_ids);
-    setBaselineIds(editor.selection.definition_ids);
-  }, [selectionKey, selectedWorkspaceId]);
-
-  const dirty = Boolean(editor.selection) && !sameSelection(selectedIds, baselineIds);
   const workspaceRequired = !selectedWorkspaceId;
   const save = async () => {
     if (!selectedWorkspaceId) return;
-    await editor.save(selectedIds);
-    setBaselineIds(selectedIds);
+    const response = await editor.save(selectedIds);
+    if (!response) throw new SettingsSaveCancelledError();
+    draft.acknowledge(response);
   };
   useSettingsSaveContributor({
     id: `agent-profile-mcp-selection:${profileId}`,
@@ -157,10 +133,11 @@ export function ProfileMCPSelectionCard({
       !editor.loading &&
       !editor.saving &&
       !editor.loadError &&
+      !editor.saveError &&
       !definitions.error,
     invalidReason: workspaceRequired ? t("agents:mcpWorkspaceRequired") : undefined,
     save,
-    discard: () => setSelectedIds(baselineIds),
+    discard: draft.discard,
   });
 
   return (
@@ -180,7 +157,6 @@ export function ProfileMCPSelectionCard({
         onWorkspaceChange={(value) => {
           setSelectedWorkspaceId(value);
           setSelectedIds([]);
-          setBaselineIds([]);
         }}
         onSelectedIdsChange={setSelectedIds}
       />

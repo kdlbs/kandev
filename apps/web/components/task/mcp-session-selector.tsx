@@ -6,6 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { IconChevronDown, IconX } from "@tabler/icons-react";
+import { MCPSelectionSaveFeedback } from "@/components/mcp/mcp-selection-save-feedback";
 import { MCPSelectionContent } from "@/components/mcp/mcp-selection-picker";
 import { McpSelectionNotice } from "./chat/mcp-explorer/mcp-selection-notice";
 import { mcpSelectionStateLabelKey } from "./chat/mcp-explorer/mcp-selection-presentation";
@@ -33,6 +34,7 @@ export type MCPSessionSelectorProps = {
   state?: MCPSessionSelectionState | null;
   disabled?: boolean;
   retry?: () => void;
+  reload?: () => Promise<unknown>;
   retrying?: boolean;
   error?: unknown;
   testId?: string;
@@ -43,6 +45,7 @@ export function MCPSessionSelectionBody({
   retry,
   retrying,
   definitionsLoading,
+  reload,
   ...props
 }: MCPSessionSelectorProps & { query: string; onQueryChange: (query: string) => void }) {
   const { t } = useTranslation();
@@ -64,6 +67,7 @@ export function MCPSessionSelectionBody({
           />
         </div>
       )}
+      {reload && <MCPSelectionSaveFeedback error={props.error} reload={reload} />}
       {definitionsLoading ? (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           {t("settings:mcpLoading")}
@@ -71,6 +75,7 @@ export function MCPSessionSelectionBody({
       ) : (
         <MCPSelectionContent
           {...props}
+          error={reload ? undefined : props.error}
           sessionPresentation
           renderServerAnnotation={(id) => {
             const change = changes.changes.find((item) => item.definition_id === id);
@@ -106,7 +111,7 @@ export function MCPSessionSelector({
       type="button"
       variant="outline"
       className="w-full justify-between gap-3 cursor-pointer"
-      disabled={props.disabled || handledError}
+      disabled={handledError}
       aria-expanded={open}
       aria-haspopup={isMobile ? "dialog" : undefined}
       onClick={isMobile ? () => setOpen(true) : undefined}

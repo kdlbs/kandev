@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func mcpSelectionOwnerValidator(p routeParams) mcpconfig.SelectionOwnerValidator {
@@ -83,5 +84,33 @@ func mcpSessionResolutionContext(p routeParams) func(context.Context, string, st
 			rc.RepositoryIDs = append(rc.RepositoryIDs, repository.RepositoryID)
 		}
 		return rc, nil
+	}
+}
+
+// Profile eligibility is checked in the settings transaction. Task ownership
+// remains in the task service; recheck it at admission without starting an agent.
+func mcpSelectionAdditionValidator(p routeParams) mcpconfig.SelectionOwnerValidator {
+	return func(ctx context.Context, scope mcpconfig.SelectionScope, workspaceID, ownerID string) error {
+		if scope == mcpconfig.SelectionScopeProfile {
+			return nil
+		}
+		if err := mcpSelectionOwnerValidator(p)(ctx, scope, workspaceID, ownerID); err != nil {
+			return err
+		}
+		taskID := ownerID
+		if scope == mcpconfig.SelectionScopeTaskSession {
+			session, err := p.taskSvc.GetTaskSession(ctx, ownerID)
+			if err != nil || session == nil || session.State == models.TaskSessionStateCancelled {
+				return fmt.Errorf("task session unavailable")
+			}
+			taskID = session.TaskID
+		}
+		if scope == mcpconfig.SelectionScopeTask || scope == mcpconfig.SelectionScopeTaskSession {
+			task, err := p.taskSvc.GetTask(ctx, taskID)
+			if err != nil || task == nil || task.ArchivedAt != nil {
+				return fmt.Errorf("task unavailable")
+			}
+		}
+		return nil
 	}
 }
