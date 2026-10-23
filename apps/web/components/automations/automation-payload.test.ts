@@ -23,6 +23,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     description: "",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    parentTaskId: "",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",
     taskMode: "automation_run",

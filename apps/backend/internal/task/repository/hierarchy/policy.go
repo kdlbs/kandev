@@ -96,6 +96,18 @@ func validateReparentDepth(ctx context.Context, reader TaskHierarchyReader, task
 
 // ValidateCreationParent retains creation's parent-only Office depth exemption.
 func ValidateCreationParent(ctx context.Context, reader TaskHierarchyReader, _ *models.Task, parentID string) error {
+	return validateCreationParent(ctx, reader, parentID, nil)
+}
+
+// CreationParentValidatorForWorkspace narrows an explicit caller's parent
+// selection while retaining the shared creation lookup and hierarchy policy.
+func CreationParentValidatorForWorkspace(workspaceID string) TaskParentValidator {
+	return func(ctx context.Context, reader TaskHierarchyReader, _ *models.Task, parentID string) error {
+		return validateCreationParent(ctx, reader, parentID, &workspaceID)
+	}
+}
+
+func validateCreationParent(ctx context.Context, reader TaskHierarchyReader, parentID string, workspaceID *string) error {
 	if parentID == "" {
 		return nil
 	}
@@ -105,6 +117,9 @@ func ValidateCreationParent(ctx context.Context, reader TaskHierarchyReader, _ *
 			return fmt.Errorf("invalid parent_id: %w", err)
 		}
 		return err
+	}
+	if workspaceID != nil && parent.WorkspaceID != *workspaceID {
+		return fmt.Errorf("%w: parent task must belong to the same workspace", ErrInvalidParent)
 	}
 	if parent.ParentID != "" && !parent.IsFromOffice {
 		return ErrSubtaskDepthExceeded

@@ -70,6 +70,7 @@ export type Automation = {
   description: string;
   workflow_id: string;
   workflow_step_id: string;
+  parent_task_id?: string;
   agent_profile_id: string;
   executor_profile_id: string;
   task_mode?: TaskMode;
@@ -301,6 +302,7 @@ export type CreateAutomationRequest = {
   enabled?: boolean;
   workflow_id: string;
   workflow_step_id: string;
+  parent_task_id?: string;
   agent_profile_id: string;
   executor_profile_id: string;
   repository_ids?: string[];
@@ -325,6 +327,7 @@ export type UpdateAutomationRequest = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  parent_task_id?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
   repository_ids?: string[];

@@ -125,10 +125,13 @@ type ReviewTaskRequest struct {
 	WorkspaceID    string
 	WorkflowID     string
 	WorkflowStepID string
-	Title          string
-	Description    string
-	Metadata       map[string]interface{}
-	Repositories   []ReviewTaskRepository
+	// ParentID optionally nests the created task under an existing task in the
+	// same workspace. Empty creates a top-level task.
+	ParentID     string
+	Title        string
+	Description  string
+	Metadata     map[string]interface{}
+	Repositories []ReviewTaskRepository
 	// IsEphemeral marks a quick-chat-style task. Automation runs do NOT set
 	// it: they are hidden from the board by their Origin instead, which is
 	// what lets them keep their worktree and reach a terminal run status.

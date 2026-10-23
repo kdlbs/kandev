@@ -110,6 +110,8 @@
   "openAutomations": "開啟自動化",
   "orUseWebhookInstead": "或者改用 webhook",
   "outcome": "結果",
+  "parentTaskHelp": "每次執行建立的任務都會成為此任務的子任務。留空則保持為頂層任務。",
+  "parentTaskLabel": "父任務(可選)",
   "pickAWorkflowFirst": "請先選擇工作流程",
   "prMergedDeadConfigWarning": "未選擇儲存庫；此觸發器不會觸發。請啓用「此工作區允許的所有儲存庫」或至少新增一個儲存庫。",
   "prEventOpened": "已開啟",

@@ -758,7 +758,7 @@ func initAutomationWiring(
 	automationWorkflowLocator := &automationWorkflowLocatorAdapter{svc: taskSvc, workflows: workflowSvc}
 	automationComponents.Service.SetWorkflowLocator(automationWorkflowLocator)
 	automationComponents.Service.SetWorkflowStepLocator(automationWorkflowLocator)
-	automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, log: log})
+	automationComponents.Service.SetTaskOriginLookup(&automationTaskOriginLookupAdapter{svc: taskSvc, parents: repos.Task, log: log})
 	// Profile deletion disables the automations bound to a profile before
 	// the row goes, but nothing ever checked that the binding pointed at a
 	// real profile in the first place — so a create or rebind naming an id
