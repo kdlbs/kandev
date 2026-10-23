@@ -12,6 +12,48 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `d0ca264b5`
+
+The published merge commit `d0ca264b5fb27c2a313ce7eeb6f7f4baea699d47` is
+mergeable against integrated main `144e9e503f82001bb4d1440b603f7c33b932dd0a`.
+The existing isolated review verified its parents, exact reviewed-tree equality,
+nine conflict resolutions and 71 shared automatic intersections, with no
+actionable source findings. The review's remerge-stat command emitted a partial
+clone object-fetch diagnostic; its verdict rests on direct source/tree comparisons,
+not an unqualified remerge reconstruction. Normal hooks passed without bypass
+after a shared lint lock failure and a five-minute timeout; the successful retry
+kept the original limits and used the supported serial-runner option.
+
+Exact-head CI ended with 84 passed, 10 skipped and eight failed checks. Backend
+run `39992086832` failed the workflowsync scheduler test in shard 2 plus its
+aggregate. E2E run `39992086867` failed five shards plus its aggregate because six
+cases passed only on retry: unloaded last-prompt scrolling, native wrapper resume
+input, mobile Stats read recovery, mobile retention action/status recovery,
+mobile workflow-approval link geometry, and active-task Go-cache cleanup. The
+required backend and E2E gates are therefore red. There were no pending checks,
+unresolved or hidden review threads, or actionable issue comments. Both backend
+and E2E runs on exact base `144e9e50` were green; they do not prove these failures
+are baseline failures or exclude a new interaction.
+
+The scheduler test failed five of 1,000 local race-enabled repetitions. It started
+a worker that could consume the job before `close` inspected the queue, so its
+exactly-once discard assertion did not consistently exercise the named queued-job
+case. The test now constructs the scheduler queue without a worker; existing
+worker/cancellation tests remain. The unchanged discard assertion passes with
+100 repetitions of the scheduler tests, and the complete workflowsync package
+passes three times with the race detector.
+
+The approval-link test measured 43.999969482421875 pixels against the strict
+44-pixel minimum while its drawer could still be moving. It now waits for the
+existing finite drawer animations before measuring, retaining the same assertion.
+The other three desktop cases each passed two unchanged-source local replays,
+one worker and zero retries. Those passes do not establish their CI root causes.
+All three phone cases also passed twice, including the repaired geometry check,
+with one worker and zero retries. Five browser CI causes remain unproven despite
+these focused passes. Scoped Go/web lint, formatting and documentation checks
+passed. Final delta review and fresh published-head CI remain required. No
+production behavior or timeout was changed.
+
 ### Main integration on 2026-10-23
 
 The pre-merge published head is `193de56ba2597b335a97b1e5ab01d09340f22647`.
