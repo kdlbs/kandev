@@ -246,6 +246,51 @@ describe("watchWs().waitForEvent", () => {
 // ---------------------------------------------------------------------------
 
 describe("watchWs().waitForResponse", () => {
+  it("matches a null response without treating it as an object", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("automation.list", {
+      where: (payload) => payload === null,
+      timeout: 30,
+    });
+    socket.emit("framesent", {
+      id: "empty",
+      type: "request",
+      action: "automation.list",
+      payload: {},
+    });
+    socket.emit("framereceived", {
+      id: "empty",
+      type: "response",
+      action: "automation.list",
+      payload: null,
+    });
+    await expect(pending).resolves.toMatchObject({ id: "empty" });
+  });
+
+  it("ignores correlated responses until the payload matches", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("automation.list", {
+      where: (payload) => Array.isArray(payload) && payload.some((row) => row.name === "Renamed"),
+    });
+    for (const [id, name] of [
+      ["stale-read", "Old"],
+      ["current-read", "Renamed"],
+    ]) {
+      socket.emit("framesent", { id, type: "request", action: "automation.list", payload: {} });
+      socket.emit("framereceived", {
+        id,
+        type: "response",
+        action: "automation.list",
+        payload: [{ id: "automation", name }],
+      });
+    }
+    await expect(pending).resolves.toMatchObject({ id: "current-read" });
+  });
+
   it("correlates the reply to the request it armed for, by frame id", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);

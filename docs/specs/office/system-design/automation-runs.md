@@ -341,11 +341,12 @@ owns saved visibility and ordering. ADR 0041 retains preference ownership.
 catalog owns another instance. Updating either instance does not publish rows
 to the other. Preserve those boundaries for this correction.
 
-Use the existing `listScope` to enable definition refreshes through
-`useLiveRefresh(Boolean(listScope), refreshDefinitions)`. This includes a folded
+Enable definition refreshes when `listScope` is present and the definition hook
+is not loading. Pass that gate to `useLiveRefresh` and `useForegroundRefresh`. This includes a folded
 header because its count is visible. Retain the separate `showing` gate for
-`useAutomationSummaries`. Each active definition interval reads once per
-`LIVE_REFRESH_INTERVAL_MS`. Do not add polling inside the shared definition
+`useAutomationSummaries`. After a definition read settles, the interval requests again after
+`LIVE_REFRESH_INTERVAL_MS`. While loading, disable automatic interval and
+foreground refresh so slow successful reads can publish without replacement. Do not add polling inside the shared definition
 hook, because existing catalog consumers already own refresh intervals.
 
 Use `useForegroundRefresh` for the section's definitions with the same enable

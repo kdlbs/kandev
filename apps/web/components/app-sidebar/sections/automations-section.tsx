@@ -138,11 +138,16 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const showing = !collapsed && expanded && !isMobile;
   const listScope = collapsed || isMobile ? undefined : (workspaceId ?? undefined);
   const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations, refresh: refreshDefinitions } = useWorkspaceAutomations(listScope, {
+  const {
+    automations,
+    loading: definitionsLoading,
+    refresh: refreshDefinitions,
+  } = useWorkspaceAutomations(listScope, {
     active: !isMobile,
   });
-  useLiveRefresh(Boolean(listScope), refreshDefinitions);
-  useForegroundRefresh(refreshDefinitions, Boolean(listScope), listScope);
+  const canRefreshDefinitions = Boolean(listScope) && !definitionsLoading;
+  useLiveRefresh(canRefreshDefinitions, refreshDefinitions);
+  useForegroundRefresh(refreshDefinitions, canRefreshDefinitions, listScope);
   const { summaries, refresh } = useAutomationSummaries(summaryScope);
   useLiveRefresh(showing, refresh);
   const rows = buildAutomationRows(automations, summaries);

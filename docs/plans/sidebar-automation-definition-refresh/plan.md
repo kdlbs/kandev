@@ -65,8 +65,8 @@ health refresh, not definition refresh. Neither authorizes this new patch.
 
 Follow [Sidebar definition freshness](../../specs/office/system-design/automation-runs.md#sidebar-definition-freshness).
 Destructure the definition refresh separately from the summary refresh.
-Register its existing live interval while `listScope` is present. Add the existing
-foreground hook with that scope. Keep summary polling on `showing`.
+Register its existing live interval while `listScope` is present and definitions
+are not loading. Use the same gate and scope for the foreground hook. Keep summary polling on `showing`.
 
 Keep `useWorkspaceAutomations` request generations and render-time workspace
 mask. Do not add a timer to the hook or consume the flat settings store.
@@ -123,11 +123,10 @@ Add one focused `external definitions` case to
 Keep the existing drawer open during creation and verify the new row's history
 link. This protects the existing phone path without adding another poller.
 
-Arm `watchWs` before initial navigation and each external mutation. After the
-mutation completes, await the definition response and DOM assertion concurrently.
-A catalog response can precede the builtin response by almost one interval. Bound
-each DOM change to 15 seconds: the ten-second cadence plus transport and rendering
-allowance. This bound starts at mutation completion, not at the catalog response. A timer deadline is a failure bound, not a success signal.
+Arm `watchWs` before initial navigation and each external mutation. Match the
+expected creation, rename, or deletion in the response payload before asserting
+the row with its default timeout. Correlated responses with stale data must not
+complete the causal wait. A timer deadline is a failure bound, not a success signal.
 Do not reload, switch workspaces, remount, or mutate the observed browser's store
 to make an external-change assertion pass. Run only the focused cases and files.
 
@@ -138,6 +137,9 @@ to make an external-change assertion pass. Run only the focused cases and files.
 One work order. No dependencies. Sequential execution in the primary session.
 
 ## Verification results
+
+The initial evidence below is historical. PR review remediation and its current
+verification are recorded in Task 01.
 
 Diagnosis: three expected component failures and isolated desktop creation
 failure. Phone creation control passed. Details are in [reproduction](reproduction.md).
@@ -188,3 +190,13 @@ work verifies only AC-001.3 and .9 through .12, not every migrated behavior.
   delivery guarantee. Foreground recovery and successful reads define the bound.
 - Slow or reordered responses must retain the hook's existing workspace and
   newest-request guards. Do not broaden this repair into cache ownership.
+
+## PR review remediation
+
+The initial browser timing strategy above is superseded by payload-matched
+causal response waits. A new deferred-read regression also exposed polling
+starvation: a new automatic read could replace each slow response before it
+published. The section now pauses automatic refresh while its hook is loading,
+then restarts the interval after settlement. The shared request-order and
+workspace guards remain unchanged. Follow-up verification is recorded in
+[Task 01](task-01-refresh-definitions.md#pr-review-remediation).

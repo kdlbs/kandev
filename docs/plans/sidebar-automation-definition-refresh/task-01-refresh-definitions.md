@@ -60,7 +60,8 @@ fallback code, broad suites, delegation, and infrastructure changes.
    rename, and deletion before changing production. The temporary reproduction
    used real hooks and replaced only transport results after the initial render.
 3. Add the definition interval and foreground hook in `AutomationsSection`.
-   Enable them with `Boolean(listScope)` and retain summary refresh on `showing`.
+   Enable them while `listScope` is present and definitions are not loading.
+   Retain summary refresh on `showing`.
    Keep the shared definition hook's ownership and request guards unchanged.
 4. Complete deferred-response and real-provider integration cases. Add focused
    browser coverage using an external client. Use `/e2e` and `/mobile-parity`.
@@ -145,8 +146,8 @@ collects all three. Require the expected DOM failures, not setup failures.
 Focused GREEN and existing controls:
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/app-sidebar/sections/automations-section.test.tsx components/app-sidebar/automation-definition-refresh.integration.test.tsx components/runs/use-workspace-automations.test.ts components/runs/use-automation-summaries.test.ts components/runs/use-live-refresh.test.ts hooks/domains/sidebar/use-sidebar-shortcut-catalog.test.ts)
-(cd apps/web && pnpm exec eslint components/app-sidebar/sections/automations-section.tsx components/app-sidebar/sections/automations-section.test.tsx components/app-sidebar/automation-definition-refresh.integration.test.tsx components/runs/use-workspace-automations.test.ts e2e/tests/automations-sidebar.spec.ts e2e/tests/settings/mobile-sidebar-customization.spec.ts)
+(cd apps/web && pnpm exec vitest run components/app-sidebar/sections/automations-section.test.tsx components/app-sidebar/automation-definition-refresh.integration.test.tsx components/runs/use-workspace-automations.test.ts components/runs/use-automation-summaries.test.ts components/runs/use-live-refresh.test.ts hooks/domains/sidebar/use-sidebar-shortcut-catalog.test.ts e2e/helpers/causal-waits.test.ts)
+(cd apps/web && pnpm exec eslint components/app-sidebar/sections/automations-section.tsx components/app-sidebar/sections/automations-section.test.tsx components/app-sidebar/automation-definition-refresh.integration.test.tsx components/runs/use-workspace-automations.test.ts e2e/tests/automations-sidebar.spec.ts e2e/tests/settings/mobile-sidebar-customization.spec.ts e2e/helpers/causal-waits.ts e2e/helpers/causal-waits.test.ts)
 (cd apps/web && pnpm run typecheck)
 ```
 
@@ -162,9 +163,9 @@ runs with the new case. The mobile command selects only the new parity case.
 Use a separate WebSocket API client for normal create/update/delete requests,
 or existing isolated API fixtures where they represent the operation faithfully.
 Never invoke a mutation through the observed page's hook or store. Take a baseline
-layout snapshot. Arm successful response waits before mutations, then await each
-response concurrently with its DOM assertion. Bound the DOM change to 15 seconds
-from mutation completion, since the catalog and builtin poll independently. Keep a page
+layout snapshot. Arm successful response waits before mutations and match the
+expected row transition in each payload. Await that response before the default-
+timeout DOM assertion. Keep a page
 marker and section handle to prove there was no reload or remount. Assert the
 actual builtin row, not the catalog result alone. Add a test deadline derived
 from the ten-second cadence plus transport allowance. Do not use arbitrary sleeps.
@@ -205,7 +206,8 @@ not summary activity. Preserve existing request generations under overlap.
 
 ## Results
 
-Implementation completed on 2026-10-23 after the user's explicit continuation request.
+Initial implementation evidence from 2026-10-23 follows. The PR review
+remediation below supersedes the initial polling and browser-wait details.
 
 - Permanent RED: eight expected failures across create/rename/delete, folded
   counts, foreground events, and failed-read retry. One lifecycle control passed.
@@ -240,3 +242,35 @@ Implementation completed on 2026-10-23 after the user's explicit continuation re
   was changed. No public documentation or localization change is needed.
 - Plan and work order are done. The wider migrated specs remain draft because
   only the criteria listed in this work order were verified.
+
+## PR review remediation
+
+- Reproduce slow-read starvation with two deferred definition reads that each
+  exceed the polling interval. Automatic interval and foreground refresh must
+  pause while the section's current definition read is loading. Resume the
+  interval after settlement. Keep the shared hook and explicit-refresh request
+  ordering unchanged.
+- Extend the existing causal WebSocket response wait with an optional payload
+  predicate. Cover rejection of a correlated response with stale data. Desktop
+  and phone creation waits must match the created name; rename and deletion
+  waits must match their exact row transition before default-timeout assertions.
+- RED: the slow-read test issued four requests before the first settled; the
+  payload matcher accepted the stale response. Both failed for the expected
+  reason before the changes.
+- GREEN: seven focused suites passed all 86 tests, including the existing
+  workspace, visibility, and request-order controls. Focused ESLint, web typecheck
+  with an 8 GB heap, specification catalog/lint, and diff checks passed.
+- The first desktop rerun passed the existing cases but the deletion wait failed:
+  an empty backend slice is encoded as `null`, which the watcher previously
+  normalized to `{}`. Added a failing null-payload regression, then preserved
+  the raw response for the optional predicate while retaining the existing
+  object-shaped payload for event consumers. All 31 helper tests passed.
+- Final desktop browser run: five cases passed without retries. Log:
+  `/tmp/kandev-run.e2e.yMS61cJz.log`. Final phone case: one passed without retries.
+  Log: `/tmp/kandev-run.e2e.C8PDyV3O.log`. Both used one worker and existing
+  isolated fixtures. Tests use default DOM assertion timeouts after the matching
+  definition response.
+- Desktop assets were rebuilt after the production fix. Test-only corrections
+  and the phone run used `--no-build` with those same assets.
+- Final combined run passed all 87 tests across seven focused suites.
+  CI and review status for the pushed remediation will be verified separately.

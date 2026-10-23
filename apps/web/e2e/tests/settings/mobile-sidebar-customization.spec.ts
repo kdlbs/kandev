@@ -386,7 +386,10 @@ test("external definitions appear while the phone navigation drawer stays open",
   await expect(section.getByRole("link", { name: "Open automations", exact: true })).toBeVisible();
   const original = await section.elementHandle();
   const timeOrigin = await testPage.evaluate(() => performance.timeOrigin);
-  const definitions = ws.waitForResponse("automation.list");
+  const definitions = ws.waitForResponse("automation.list", {
+    where: (rows) =>
+      Array.isArray(rows) && rows.some((row) => row.name === "Phone external creation"),
+  });
   const created = await apiClient.wsRequest<{ id: string }>("automation.create", {
     workspace_id: seedData.workspaceId,
     name: "Phone external creation",
@@ -394,8 +397,8 @@ test("external definitions appear while the phone navigation drawer stays open",
     repository_mode: "none",
   });
   const row = section.locator(`a[href="/automations/${created.id}"]`);
-  // Ten-second polling cadence plus transport and rendering allowance.
-  await Promise.all([definitions, expect(row).toBeVisible({ timeout: 15_000 })]);
+  await definitions;
+  await expect(row).toBeVisible();
   await expect(row).toContainText("Phone external creation");
   expect(await section.evaluate((element, previous) => element === previous, original)).toBe(true);
   expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);

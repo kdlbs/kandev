@@ -494,3 +494,42 @@ describe("external definitions lifecycle", () => {
     expect(mocks.listAutomations).toHaveBeenCalledTimes(finalCalls);
   });
 });
+
+describe("slow external definitions", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("lets slow reads publish before resuming automatic refresh", async () => {
+    let release!: (rows: Automation[]) => void;
+    const releases: Array<(rows: Automation[]) => void> = [];
+    mocks.listAutomations.mockImplementation(
+      () =>
+        new Promise<Automation[]>((resolve) => {
+          release = resolve;
+          releases.push(resolve);
+        }),
+    );
+    renderOpenSection();
+    try {
+      for (const name of ["Slow initial read", "Slow refreshed name"]) {
+        const calls = mocks.listAutomations.mock.calls.length;
+        await act(async () => {
+          window.dispatchEvent(new Event("focus"));
+          await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS * 2);
+        });
+        expect(mocks.listAutomations).toHaveBeenCalledTimes(calls);
+        await act(async () => release([mkAutomation({ name })]));
+        expect(screen.getByTestId(`sidebar-automation-${AUTOMATION_ID}`).textContent).toContain(
+          name,
+        );
+        await act(async () => vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS));
+        expect(mocks.listAutomations).toHaveBeenCalledTimes(calls + 1);
+      }
+    } finally {
+      await act(async () => releases.forEach((resolve) => resolve([])));
+    }
+  });
+});
