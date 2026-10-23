@@ -12,6 +12,53 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `ef96550e6`
+
+Exact head `ef96550e6c89210cf381b02729efc52c4fd811d8` completed CI with
+84 passed, 11 skipped, eight failed and zero pending checks. PostgreSQL
+partition 3 and its aggregate failed in run `40034866189`. Browser shards
+4, 5, 8, 12 and 23 and their aggregate failed in run `40034866252`. The
+previous retention concurrency failure passed. This result is not green.
+
+The PostgreSQL cancellation test received `driver: bad connection` from the
+cursor read instead of an error discoverable as `context.Canceled`. The
+projection retry boundary now returns successful attempts unchanged and joins
+failed-attempt errors with a concurrent context error. It preserves the driver
+or ambiguous commit error, performs no cancellation-triggered retry, and does
+not infer rollback. Callback controls reproduced the lost cancellation before
+the fix and cover successful attempts, ordinary errors and lock-contention
+retry. The original real-PostgreSQL commit/cancel cases and these controls pass
+under the race detector. This does not prove cancellation caused the driver
+failure; it preserves both observed error conditions.
+
+The queued-session absence helper used competing wall-clock and assertion
+poll deadlines. It now observes the full same five-second window with one
+deadline and checks the exact message list on every read, including the final
+read. The narrow PR hover and phone task-action fixtures await finite drawer
+animations before pointer actions. Phone submenu navigation also requires the
+expected accessible title. CI showed a missing tooltip and the wrong submenu;
+the original animation timing is not independently reconstructed.
+
+The synthetic mode-mismatch fixture now seeds a session without a provider
+process. A live mock provider previously competed with its injected mode state
+through subscription replay. Mode text, touch geometry, focus, scrolling and
+explicit set-mode request assertions remain. Saved fallback layout measurements
+read the badge and its owner in one DOM evaluation after visibility. They keep
+all containment and overflow assertions and require positive badge dimensions.
+The previous separate bounding-box request returned null after a successful
+text assertion; the original remount cause remains unproved.
+
+The native candidate build passed. Four affected phone cases and two desktop
+cases passed with one worker, zero retries, two CPUs and 4 GiB. The initial
+browser command refused the stale backend binary before executing tests.
+Scoped ESLint, formatting and documentation checks passed. The build embeds
+the parent commit with a dirty marker; its tested source is the candidate
+recorded in the delivery receipt. Immutable review, remaining static checks
+and exact-head CI are recorded separately there. No public documentation
+change is needed: cancellation error composition is internal, and browser
+fixtures retain product behavior. No product UI timeout, touch minimum or
+provider delivery behavior is changed by these fixture repairs.
+
 ### CI follow-up after `5c9b42656`
 
 The exact reviewed head `5c9b42656335d56dfc05d889bf51cdf0c70ca754` completed
