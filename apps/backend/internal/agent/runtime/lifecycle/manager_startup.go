@@ -34,9 +34,9 @@ func (m *Manager) contributionPreflightTimeout() time.Duration {
 // contract.
 func (m *Manager) startPassthroughExecution(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) error {
 	if execution.isResumedSession {
-		// Resume reuses the launched session id; ResumePassthroughSession does
-		// its own profile lookup for command building.
-		return m.ResumePassthroughSession(ctx, execution.SessionID)
+		// Startup retains its observed execution; terminal reconnects separately
+		// resolve whichever execution currently owns the session.
+		return m.resumePassthroughExecution(ctx, execution, "")
 	}
 	if profileInfo == nil {
 		// Snapshot-driven routing leaves profileInfo nil so we resolve fresh
@@ -186,10 +186,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if err := context.Cause(operationCtx); err != nil {
 		return err
 	}
+	if err := m.bindPassthroughStartupOrBegin(operationCtx, execution, isPassthrough); err != nil {
+		return err
+	}
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {

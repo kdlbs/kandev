@@ -1935,6 +1935,13 @@ func (m *Manager) markAgentStartPending(execution *AgentExecution) {
 	if execution == nil {
 		return
 	}
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	execution.passthroughLifecycleMu.Lock()
+	defer execution.passthroughLifecycleMu.Unlock()
+	if m.hasLiveLocalPassthroughLocked(execution) {
+		return
+	}
 	_ = m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 		current.Status = v1.AgentStatusStarting
 		current.StartedAt = time.Now()

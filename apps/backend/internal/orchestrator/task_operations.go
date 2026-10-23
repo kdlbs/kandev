@@ -4894,6 +4894,10 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) (wa
 		switch sess.State {
 		case models.TaskSessionStateWaitingForInput:
 			return nil
+		case models.TaskSessionStateStarting:
+			if ready, reconcileErr := s.reconcilePassthroughResumeReady(readyCtx, sessionID); reconcileErr != nil || ready {
+				return reconcileErr
+			}
 		case models.TaskSessionStateFailed:
 			errMsg := sess.ErrorMessage
 			if errMsg == "" {
@@ -7245,6 +7249,7 @@ func (s *Service) runPromptTurn(
 	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
 		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
+		rollback.dispatchGuard,
 	)
 	return s.finishPromptExecutorDispatch(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,

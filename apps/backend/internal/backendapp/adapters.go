@@ -1088,6 +1088,14 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID string) bool {
+	return a.mgr.IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	return a.mgr.MarkPassthroughRunningWithContext(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
 	return a.mgr.PreparePassthroughRunning(sessionID)
 }

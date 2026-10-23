@@ -652,6 +652,7 @@ test.describe("Branch refresh + filter", () => {
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
+    await expect(testPage.getByTestId("executor-profile-selector")).toBeFocused();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });

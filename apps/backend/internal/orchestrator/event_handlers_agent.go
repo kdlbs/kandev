@@ -74,9 +74,17 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	// prompt-dispatch path (PromptTask / dispatchPromptAsync) and stream
 	// tool/message events, so reacting to the boot signal here would only flicker
 	// a settled WAITING_FOR_INPUT task into the Running bucket during resume.
-	// Passthrough sessions have no PromptTask, so agent.running IS their
-	// turn-start signal: handle on_turn_start and move the session to RUNNING.
+	// Direct terminal input relies on agent.running as its turn-start signal.
+	// Orchestrator-owned PTY prompts also publish it synchronously, carrying
+	// their session guard ownership through this handler.
 	if !s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
+		return
+	}
+	if cancelInFlightGuardHeldForSession(ctx, data.SessionID) {
+		// The borrowed ownership authorizes this entry only, not nested work.
+		ctx = context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
+		ctx = context.WithValue(ctx, cancelInFlightGuardSessionContextKey{}, "")
+		s.handleAgentRunningWithGuard(ctx, data)
 		return
 	}
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
@@ -90,7 +98,10 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 			zap.Error(err))
 		return
 	}
+	s.handleAgentRunningWithGuard(ctx, data)
+}
 
+func (s *Service) handleAgentRunningWithGuard(ctx context.Context, data watcher.AgentEventData) {
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for agent running",

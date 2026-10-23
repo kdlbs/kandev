@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/passthroughconfig"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -93,7 +94,7 @@ func (m *Manager) preparePassthroughRunningWithContext(ctx context.Context, sess
 	var publishOnce sync.Once
 	return func() {
 		publishOnce.Do(func() {
-			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, payload)
+			_ = m.eventPublisher.publishAgentEventPayload(ctx, events.AgentRunning, payload)
 		})
 	}, nil
 }
@@ -103,10 +104,16 @@ func (m *Manager) preparePassthroughRunningWithContext(ctx context.Context, sess
 // publishes the AgentRunning event immediately.
 //
 // Callers that hold the per-session cancellation guard (e.g. handleAgentReady) must use
-// PreparePassthroughRunning directly and defer the returned publisher until after the guard
-// is released, to avoid re-entering the mutex through the synchronous event subscriber.
+// PreparePassthroughRunning and publish after releasing it, or use the contextual
+// method with explicit subscriber ownership for synchronous guarded publication.
 func (m *Manager) MarkPassthroughRunning(sessionID string) error {
-	publish, err := m.PreparePassthroughRunning(sessionID)
+	return m.MarkPassthroughRunningWithContext(context.Background(), sessionID)
+}
+
+// MarkPassthroughRunningWithContext preserves the caller context through synchronous
+// publication. A guarded caller must explicitly convey ownership to subscribers.
+func (m *Manager) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	publish, err := m.preparePassthroughRunningWithContext(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -958,13 +965,15 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
-	if isSSHPassthrough(execution) {
-		execution.passthroughLifecycleMu.Lock()
-		processID := execution.PassthroughProcessID
-		execution.passthroughLifecycleMu.Unlock()
-		if processID != "" && m.passthroughRunnerForExecution(execution).IsProcessReadyOrPending(processID) {
-			return nil
-		}
+	current, exists := m.executionStore.Get(execution.ID)
+	if !exists || current != execution {
+		return models.ErrExecutionRotated
+	}
+	execution.passthroughLifecycleMu.Lock()
+	processID := execution.PassthroughProcessID
+	execution.passthroughLifecycleMu.Unlock()
+	if processID != "" && m.passthroughRunnerForExecution(execution).IsProcessReadyOrPending(processID) {
+		return nil
 	}
 	progress := execution.prepareProgressRecorder
 	if progress == nil {
@@ -1221,12 +1230,17 @@ func (m *Manager) passthroughProcessMatches(execution *AgentExecution, processID
 // delayed exit recovery. expectedProcessID is set by exit recovery so an old
 // callback cannot replace a process installed by a workflow reset.
 func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expectedProcessID string) error {
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
-		return err
-	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	return m.resumePassthroughExecution(ctx, execution, expectedProcessID)
+}
+
+func (m *Manager) resumePassthroughExecution(ctx context.Context, execution *AgentExecution, expectedProcessID string) error {
+	sessionID := execution.SessionID
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
 	}
 
 	execution.remoteInstanceLifecycleMu.Lock()
@@ -1235,6 +1249,13 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	defer execution.passthroughLifecycleMu.Unlock()
 	if expectedProcessID != "" && execution.PassthroughProcessID != expectedProcessID {
 		return errPassthroughProcessReplaced
+	}
+	current, exists := m.executionStore.Get(execution.ID)
+	if !exists || current != execution {
+		return models.ErrExecutionRotated
+	}
+	if m.hasLiveLocalPassthroughLocked(execution) {
+		return nil
 	}
 
 	if isSSHPassthrough(execution) {
@@ -1254,6 +1275,12 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		}
 	}
 
+	return m.launchResumedPassthroughProcess(ctx, execution)
+}
+
+// launchResumedPassthroughProcess requires both process lifecycle locks.
+func (m *Manager) launchResumedPassthroughProcess(ctx context.Context, execution *AgentExecution) error {
+	sessionID := execution.SessionID
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)
 	if err != nil {
 		return err
@@ -1264,11 +1291,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		return fmt.Errorf("interactive runner not available")
 	}
 
-	// Skip the resume flag if a previous resume already fast-failed for this
-	// execution: re-attaching `-c` / `--resume` would just reproduce the same
-	// "No conversation found to continue" exit on every WS reconnect after
-	// backend restart. Once the sticky flag is set, every subsequent launch
-	// for this execution starts fresh.
+	// A previously rejected provider resume must start fresh on reconnect.
 	useResume := !execution.passthroughResumeFailed
 	progress := m.newCursorPassthroughPreparationRecorder(execution, resolved)
 	cmd, err := m.resumePassthroughCommandWithPreparation(ctx, execution, resolved, useResume, progress)
@@ -1324,22 +1347,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		zap.String("execution_id", execution.ID),
 		zap.String("process_id", processInfo.ID))
 
-	// Start shell session for workspace shell access (right panel terminal).
-	// This needs to be done after resume since the shell process was killed on backend restart.
-	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
-
-	// Connect to workspace stream for shell/git/file features.
-	// Only connect if not already connected (process restart reuses the same agentctl).
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	hasAgentStream := client != nil && client.HasAgentStream()
-	releaseClient()
-	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
-		m.streamManager.ConnectWorkspaceStream(execution, nil)
-	}
-	// Re-open the MCP proxy stream too (drains kandev MCP tool calls).
-	if m.streamManager != nil && client != nil && !hasAgentStream {
-		m.streamManager.ConnectMCPStream(execution)
-	}
+	m.connectPassthroughServices(ctx, execution)
 
 	return nil
 }
@@ -1607,10 +1615,8 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 }
 
 func (m *Manager) connectPassthroughServices(ctx context.Context, execution *AgentExecution) {
-	// Mirror ResumePassthroughSession's post-launch bootstrap so right-panel
-	// shell/git/file features come back too — without this the main terminal
-	// works but the user's shell session and workspace stream stay torn down.
-	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
+	// Restore shell, workspace and MCP streams after passthrough startup or reuse.
+	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	hasAgentStream := client != nil && client.HasAgentStream()
 	releaseClient()

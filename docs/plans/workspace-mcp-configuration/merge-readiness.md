@@ -12,6 +12,172 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `6a0ee44cc`
+
+The isolated review initially accepted `6a0ee44cc1ed94c3ae962de9a90938146ef40e13`;
+the later investigation below found missing resume-identity binding and a
+synchronous event-publication deadlock.
+Exact-head CI completed with 84 passed, 11 skipped, eight failed and zero
+pending checks. Backend, frontend, container tests and walkthrough generation
+passed. E2E run `40003935293` failed seven browser shards and its aggregate:
+eight cases passed only on retry. The cancellation gate and isolated SSH
+reachability checks passed. This is not a green CI result.
+
+The original phone capacity trace now establishes a delivery race in the test.
+The exhausted outcome was persisted at 18:50:07.783 UTC, but its conversation
+notification reached the phone at 18:50:13.683 UTC, after the five-second UI
+assertion had failed. Both browser contexts now wait for the session's exhausted
+conversation notification before checking the existing UI outcomes. The event
+wait uses the existing 180-second terminal-outcome budget; the UI assertions,
+eleven-dispatch count, retained execution identity and ACP trace assertions
+remain unchanged. Three focused repeats passed with one worker and zero retries.
+
+Four desktop setup corrections retain their outcome assertions: match the
+Office user comment exactly so an agent reply quoting it cannot also match;
+use the existing in-app navigation helper before pressing the saved conflicting
+shortcut; and wait for executor-picker focus restoration before opening the
+next picker in the branch refresh and URL repository reopen cases. The latter
+setup races are supported by source inspection and the disappearing picker
+trace, but their complete CI event ordering was not captured. All four cases
+passed twice under two CPUs and 4 GiB, with one worker and zero retries.
+
+All six desktop cases passed in an unchanged-source focused replay. The desktop
+partition containing the pseudo-locale failure also passed all 29 cases under
+two CPUs and 4 GiB. These passes do not explain the original locale or canvas
+failures. The canvas partition replay passed 32 cases, skipped three and failed
+one unrelated Japanese time-width case. Its screenshot contained missing glyphs;
+the host font lookup had no Japanese font. The unchanged case passed after a
+private fontconfig file exposed the already-installed Noto CJK font. No font,
+product or geometry assertion was changed. Current-main E2E passed, so no
+baseline-failure claim is made for the original CI cases.
+
+The wrapped-terminal trace shows workspace creation preceding promotion into
+passthrough resume. Its ready callback can omit the active resume identity:
+passthrough startup returned before binding it, and promotion did not inherit
+the current identity from execution creation. The existing ownership guard
+then rejects readiness. A real-PTY regression reproduced the empty callback
+identity through Launch promotion and StartAgentProcess. Startup now binds the
+admitted identity before either dispatch path, after checking cancellation.
+The lifecycle regression also requires direct PTY follow-up receipt and completion;
+it does not exercise orchestrator admission. A cancelled-start control preserves
+the previous identity and generation.
+The CI trace does not record the rejected callback identity or prove the final
+stdin stall, so that full failure is not claimed as deterministically reproduced.
+This restores the existing resume contract; public configuration and recovery
+instructions do not change. The guards for stale attempts remain in place.
+
+
+After rebuilding that candidate, the desktop native-wrapper case still failed;
+the ACP restart case passed. A scoped local goroutine capture then confirmed a
+second fault: ordinary prompt admission held the session cancellation mutex while
+synchronously publishing AgentRunning, whose subscriber tried to lock the same
+mutex. PTY input could not begin. A concurrent ready callback also waited for that
+mutex while holding a startup callback read lease. A bare delayed RUNNING event
+would risk reviving a session after immediate READY, and an added startup write
+lock would introduce another deadlock.
+
+The repair keeps RUNNING publication synchronous before PTY writes. A dedicated
+callback checks actual admission ownership and passes an exact-session marker
+through lifecycle publication. The running handler consumes that marker at entry,
+executes under the borrowed guard, and removes it from downstream context. Other
+sessions and unmarked events retain normal locking. Admission stays held through
+all chunks and successful acceptance; failed or partial writes do not report
+successful acceptance. No new lifecycle lock or delayed RUNNING event is added.
+A deterministic regression first demonstrated synchronous lock reentry. Focused
+coverage exercises ordinary prompt admission, failure before/after a chunk,
+immediate READY settlement, context propagation and unmarked/different-session
+controls. The focused race suite passed in orchestration, executor and lifecycle.
+Additional admission/publication rejection controls passed under race. The native
+runtime and fixtures rebuilt successfully. Desktop native-wrapper and ACP restart
+cases each passed twice; the phone native-wrapper case passed twice. All six
+checks used one worker and zero retries under two CPUs and 4 GiB. The tested
+binary embeds parent `6a0ee44cc` with a dirty marker; its recorded source blobs
+identify this candidate. The first Go lint run reported two issues and reached its five-minute limit:
+an explicitly ignored, already-logged event-publication error and a test switch
+style correction. Both are corrected; the retry passed with zero issues using a bounded 5 GiB Go heap.
+New exact-head CI remains pending until recorded below.
+
+The diagnostic browser repeat passed once and failed once with the confirmed
+lock cycle. An earlier diagnostic attempt failed at initial idle, before the
+follow-up; its cause remains unknown and its stack does not establish this
+cycle. These captures are separate from the original CI failure, which lacked
+a goroutine dump. The first new regression run also exposed an invalid test
+fixture assumption: its onAccepted hook needs a saved turn ID, but that fixture
+has no turn service. It now checks the existing afterDispatch acceptance boundary.
+
+The final lint-only rebuild passed both desktop wrapper cases, but its phone
+replay failed the unchanged wrapper receipt count: three starts instead of two.
+The backend log proves two local PTYs were installed for the same execution:
+terminal reconnect started one process before the promoted orchestrator resume
+started another. This is a third source defect, separate from the identity and
+synchronous-publication faults above. Real-PTY regressions reproduced both a
+second direct resume replacing a live PID and promotion replacing the terminal PID.
+
+The candidate now rechecks current process ownership under the lifecycle locks
+for local fresh and resumed starts. A live or pending PTY is reused; dead-process
+replacement and stale exit-callback rejection remain. Promotion preserves a live
+process's runtime status and binds the admitted identity to its startup generation.
+Readiness reconciliation is restricted to the current unaccepted resume while
+SQL still says STARTING, with no active/reserved/durable turn and proof of a live
+local process, completed first-idle callback, current READY status and matching
+attempt identity. It uses the existing conditional state writer, without a
+synthetic completion event or prompt acceptance. Process-lock contention defers
+the proof instead of blocking under the session admission guard. A failing
+regression first established the missing idle reconciliation. A generation-zero adoption regression also failed before the candidate stopped
+advancing a live process's generation and resetting its settings projection.
+The first combined run passed lifecycle and process tests, while the new service
+fixture exposed use of an unavailable executor wrapper. The helper now uses the
+runtime manager's context-aware execution identity lookup, as other readiness
+checks do. The expanded focused race run passed in orchestration, executor, lifecycle and
+process packages. Scoped lint found one complexity-limit violation in the new
+readiness helper; its idle ownership/turn check was extracted without dropping
+conditions. The isolated reviewer then identified a replacement-before-binding
+window. A deterministic regression confirmed a stale observed execution could
+bind its attempt to the successor. Binding now uses the observed execution pointer
+and revalidates it under the existing startup writer and store lock, rejecting
+rotation without acquiring process locks under the writer. The final focused race
+run passed all four packages, including existing binding and MarkReady controls.
+The isolated reviewer accepted the revised ownership guard at source level.
+The next lint run reported zero issues but reached its five-minute limit, so it
+is incomplete rather than passing. The warmed-cache retry passed with zero
+issues and the runtime/fixtures built. Subsequent bounded review found that
+resumed dispatch must retain the same observed execution too. Both binding and
+dispatch rotation controls failed before that correction. Startup now passes its
+expected execution into resume, while session-only terminal reconnect resolves
+the current execution before entering the same process boundary. A rotated
+observation rejects instead of falling through as a process without a live PTY.
+An expanded routing run exposed a legacy sessionless-launch regression in the
+new guard. The guard now validates execution ID and pointer, preserving the
+unchanged legacy test while rejecting removed/replaced executions. That expanded
+race run passed. Lint then flagged the renamed resume function's inherited
+complexity. Process ownership and process launch are now separate helpers under
+the same lock lifetime, and post-launch bootstrap reuses the existing equivalent
+stream-connection helper. The final focused lifecycle race run passed, including
+startup routing, binding, completion and reset controls. Final lifecycle lint
+passed with zero issues and the runtime/fixtures rebuilt successfully. The rebuilt
+binary was recorded against exact Go source hashes. Both desktop wrapper cases
+passed; the phone run passed once and failed once before restart while waiting
+for initial idle. It did not reach the duplicate-start assertion. The trace and
+backend log were retained; no baseline or fully reproduced CI-cause claim is made.
+
+That failure's log records initial READY and workflow completion, followed by
+SQL RUNNING and rejection of the workflow's next prompt as already running. The
+startup callback read STARTING but passed no expected state to its later state
+transition, so a fast completion could settle WAITING between those reads and
+then be revived. A deterministic repository interleaving reproduced that state
+revival. The callback now supplies expected STARTING to the existing guarded
+transition and conditional SQL writer. This adds no timeout, new state primitive
+or relaxed browser assertion. The focused executor startup/admission race run
+passed. Lint requested a selector simplification in the new test fixture; that
+style-only correction is applied. The final focused executor race run passed,
+scoped lint passed with zero issues, and the runtime/fixtures rebuilt. Three
+phone wrapper repetitions and both desktop wrapper cases passed on that final
+source, with one worker and zero retries under two CPUs and 4 GiB. The runtime
+binary embeds parent `6a0ee44cc` with a dirty marker; its hash and exact source
+hashes are recorded separately. Original failed runs remain evidence, and these
+local passes do not replace new exact-head CI. Final immutable source review and
+publication follow this checkpoint.
+
 ### CI follow-up after `86653face`
 
 The existing isolated review accepted `86653face8a2da662e8496534e5700acbf0b7117`

@@ -194,3 +194,17 @@ func (r *InteractiveRunner) WaitForFirstIdle(ctx context.Context, processID stri
 		return ctx.Err()
 	}
 }
+
+// HasObservedFirstIdle reports completed first-idle notification, not current inactivity.
+func (r *InteractiveRunner) HasObservedFirstIdle(processID string) bool {
+	proc, ok := r.get(processID)
+	if !ok {
+		return false
+	}
+	select {
+	case <-proc.firstIdleCh:
+		return true
+	default:
+		return false
+	}
+}
