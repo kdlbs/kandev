@@ -102,7 +102,7 @@ func TestHandleOfficeTurnCompleteUsesCanonicalOfficeProjection(t *testing.T) {
 				t.Fatalf("get session: %v", err)
 			}
 
-			handled := svc.handleOfficeTurnComplete(ctx, "t1", "s1", session, "")
+			handled := svc.handleOfficeTurnComplete(ctx, "t1", "s1", session, "", "")
 			if handled != tt.wantHandled {
 				t.Fatalf("handled = %v, want %v", handled, tt.wantHandled)
 			}
@@ -143,7 +143,7 @@ func TestHandleOfficeTurnComplete_SetsIdleAndStopsAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	handled := svc.handleOfficeTurnComplete(ctx, "t-office", "s-office", session, "")
+	handled := svc.handleOfficeTurnComplete(ctx, "t-office", "s-office", session, "", "")
 	if !handled {
 		t.Fatal("expected office turn complete to claim the event")
 	}
@@ -174,7 +174,7 @@ func TestHandleOfficeTurnComplete_KanbanFallthrough(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "sess-kanban")
-	handled := svc.handleOfficeTurnComplete(ctx, "task-kanban", "sess-kanban", session, "")
+	handled := svc.handleOfficeTurnComplete(ctx, "task-kanban", "sess-kanban", session, "", "")
 	if handled {
 		t.Error("kanban session should not be claimed by office turn-complete")
 	}
@@ -193,7 +193,7 @@ func TestHandleOfficeTurnComplete_StopAgentFailureStillIdle(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "s-stop-fail")
-	if !svc.handleOfficeTurnComplete(ctx, "t-stop-fail", "s-stop-fail", session, "") {
+	if !svc.handleOfficeTurnComplete(ctx, "t-stop-fail", "s-stop-fail", session, "", "") {
 		t.Fatal("expected handler to claim the event")
 	}
 
@@ -217,7 +217,7 @@ func TestHandleOfficeTurnComplete_NoExecutionStillIdle(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
 
 	session, _ := repo.GetTaskSession(ctx, "s-no-exec")
-	svc.handleOfficeTurnComplete(ctx, "t-no-exec", "s-no-exec", session, "")
+	svc.handleOfficeTurnComplete(ctx, "t-no-exec", "s-no-exec", session, "", "")
 
 	got, _ := repo.GetTaskSession(ctx, "s-no-exec")
 	if got.State != models.TaskSessionStateIdle {
@@ -241,7 +241,7 @@ func TestHandleOfficeTurnComplete_CancelStopReasonSkipsIdleAndTeardown(t *testin
 		t.Fatalf("get session: %v", err)
 	}
 
-	handled := svc.handleOfficeTurnComplete(ctx, "t-cancel", "s-cancel", session, "cancelled")
+	handled := svc.handleOfficeTurnComplete(ctx, "t-cancel", "s-cancel", session, "cancelled", "")
 	if handled {
 		t.Fatal("cancelled office turn must NOT be claimed; caller has to fall through to setSessionWaitingForInput")
 	}
@@ -284,7 +284,7 @@ func TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle(t *testing.T) {
 				t.Fatalf("get session: %v", err)
 			}
 
-			if !svc.handleOfficeTurnComplete(ctx, taskID, sessionID, session, tc.stopReason) {
+			if !svc.handleOfficeTurnComplete(ctx, taskID, sessionID, session, tc.stopReason, "") {
 				t.Fatalf("stop_reason %q: handler must still claim non-cancelled office turn", tc.stopReason)
 			}
 
@@ -294,6 +294,70 @@ func TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle(t *testing.T) {
 			}
 			if len(mgr.stopAgentArgs) != 1 {
 				t.Errorf("stop_reason %q: expected 1 StopAgent call, got %d", tc.stopReason, len(mgr.stopAgentArgs))
+			}
+		})
+	}
+}
+
+// A late Office teardown (it runs after the synchronous git-status capture)
+// must not stop a session that was relaunched for the next run in the
+// meantime: the next run reuses the live execution, and stopping it fails
+// that run with "has no agentctl client". A relaunch that reuses the same live
+// execution keeps the execution id and can leave the session RUNNING, so the
+// completing turn id is the signal that the session moved on.
+func TestHandleOfficeTurnComplete_SkipsTeardownAfterRelaunch(t *testing.T) {
+	cases := []struct {
+		name             string
+		snapshotState    models.TaskSessionState
+		currentState     models.TaskSessionState
+		currentExecID    string
+		completionTurnID string
+		activeTurnID     string
+	}{
+		{"relaunched to RUNNING after the park", models.TaskSessionStateWaitingForInput, models.TaskSessionStateRunning, "exec-late", "", ""},
+		{"relaunch STARTING", models.TaskSessionStateRunning, models.TaskSessionStateStarting, "exec-late", "", ""},
+		{"execution replaced", models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput, "exec-next", "", ""},
+		{"same execution, RUNNING snapshot, new turn", models.TaskSessionStateRunning, models.TaskSessionStateRunning, "exec-late", "turn-prev", "turn-next"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedOfficeSession(t, repo, "t-late", "s-late", "exec-late")
+			mgr := &mockAgentManager{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+			snapshot, err := repo.GetTaskSession(ctx, "s-late")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			snapshot.State = tc.snapshotState
+
+			if _, err := repo.DB().Exec(`UPDATE task_sessions SET state = ? WHERE id = ?`, string(tc.currentState), "s-late"); err != nil {
+				t.Fatalf("relaunch session: %v", err)
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "s-late", SessionID: "s-late", TaskID: "t-late",
+				AgentExecutionID: tc.currentExecID, Status: "ready",
+			}); err != nil {
+				t.Fatalf("update executors_running: %v", err)
+			}
+			if tc.activeTurnID != "" {
+				svc.activeTurns.Store("s-late", tc.activeTurnID)
+			}
+
+			if !svc.handleOfficeTurnComplete(ctx, "t-late", "s-late", snapshot, "", tc.completionTurnID) {
+				t.Fatal("an Office completion must stay claimed even when its teardown is skipped")
+			}
+			if len(mgr.stopAgentArgs) != 0 {
+				t.Fatalf("late teardown stopped the relaunched execution: %+v", mgr.stopAgentArgs)
+			}
+			got, err := repo.GetTaskSession(ctx, "s-late")
+			if err != nil {
+				t.Fatalf("re-read session: %v", err)
+			}
+			if got.State != tc.currentState {
+				t.Fatalf("state = %q, want %q (late teardown must not flip it to IDLE)", got.State, tc.currentState)
 			}
 		})
 	}

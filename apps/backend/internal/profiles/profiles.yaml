@@ -103,6 +103,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Office agent-error session verdict: defer an Office task run's terminal
+  # failure and its on_agent_error replacement until the failed session
+  # records its verdict. Off in every profile until it is user-ready.
+  KANDEV_FEATURES_OFFICE_AGENT_ERROR_SESSION_VERDICT:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:

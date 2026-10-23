@@ -104,11 +104,14 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	// Stub of task_sessions, mirroring the columns GetSessionAgentProfileID
 	// (RunnerProjection's fallback source, see prompt_usage_cost.go) reads,
 	// plus the AC-10 rollup columns so tests can assert the Office
-	// subscriber never writes them (AC-21).
+	// subscriber never writes them (AC-21), and the state/error columns the
+	// agent-error session verdict reads.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS task_sessions (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		agent_profile_id TEXT,
+		state TEXT NOT NULL DEFAULT 'CREATED',
+		error_message TEXT NOT NULL DEFAULT '',
 		tokens_in INTEGER NOT NULL DEFAULT 0,
 		tokens_cached_in INTEGER NOT NULL DEFAULT 0,
 		tokens_out INTEGER NOT NULL DEFAULT 0,
