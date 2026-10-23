@@ -8,6 +8,8 @@ import {
 } from "../../helpers/profile-capability-discovery";
 import { checkWrappedPassthrough } from "../../helpers/generic-wrapper-passthrough";
 
+test.use({ trace: "retain-on-failure" });
+
 test("wraps native terminal input, resume, and cancellation", async ({
   testPage,
   apiClient,

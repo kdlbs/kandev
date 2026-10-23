@@ -1,6 +1,8 @@
 import { test } from "../../fixtures/test-base";
 import { checkWrappedPassthrough } from "../../helpers/generic-wrapper-passthrough";
 
+test.use({ trace: "retain-on-failure" });
+
 test("wraps native terminal input, resume, and cancellation on a phone", async ({
   testPage,
   apiClient,

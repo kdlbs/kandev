@@ -12,6 +12,58 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `86653face`
+
+The existing isolated review accepted `86653face8a2da662e8496534e5700acbf0b7117`
+against integrated base `144e9e503f82001bb4d1440b603f7c33b932dd0a`, with no
+actionable source findings. Exact-head CI ended with 81 passed, 12 skipped and
+nine failed checks. Backend run `39997136290` failed its Windows process shard
+while downloading `google.golang.org/grpc@v1.83.2` from `proxy.golang.org` with
+HTTP/2 `INTERNAL_ERROR`; no repository assertion failed in that job. E2E run
+`39997136328` failed five shards and its aggregate because SSH reachability,
+last-prompt scrolling, phone capacity feedback, acknowledged silent cancellation,
+and resumed wrapper input passed only on retry. The earlier scheduler and drawer
+repairs passed. Walkthrough run `39997133439` reached its 600-second generation
+deadline without verification. These are failed checks, not a green result.
+
+The cancellation failure trace shows an eight-second mock acknowledgement during
+a roughly ten-second reload. The test now releases that acknowledgement explicitly
+after its pending-state/reload assertions, then requires real completion. Its
+acknowledged-case join bound is the existing 120-second test budget instead of
+12 seconds; the uncertain case retains its 12-second join and 120-second hold.
+The mock release wait is bounded and survives ACP request-context cancellation.
+Two deterministic unit failures established premature timed acknowledgement and
+premature acknowledgement through a cancelled request context. An intermediate
+browser candidate failed both phone cancellation replays because of that context
+boundary; those failures are retained separately from final verification.
+
+The SSH threshold fixture now disables scheduled probes within its scoped backend
+environment. Explicit real-SSH probes alone advance the counter, preserving the
+first-failure, second-failure and single-success assertions. Source inspection
+establishes the competing automatic probe path; the original CI interleaving has
+not been reconstructed. The existing zero-interval/manual-probe tests remain.
+
+Four traced scrolling replays and two phone capacity replays passed with one worker
+and zero retries. Their CI causes remain unknown. The reviewer found no proven
+wrapper/MCP integration defect and identified that task deletion obscured failure
+screenshots. First-failure traces and pre-cleanup wrapper page, API and backend
+evidence now preserve that boundary without changing the output assertion. No
+product behavior, public configuration or public documentation contract changes.
+Final candidate browser checks passed: three desktop and three phone cases cover
+wrapped terminal resume and both acknowledged/uncertain cancellation; two real-SSH
+replays cover manual hysteresis. All used one worker and zero retries. The private
+rootless SSH fixture used the previously verified host-gateway and cleanup wrapper;
+its daemon was stopped after confirming no containers remained. An initial SSH
+command stopped at the stale delivery-helper check before any test; rebuilding
+the helper and plugin fixture cleared that prerequisite without bypass.
+
+Complete mock-agent and reachability packages passed with the race detector.
+Typecheck, scoped Go/web lint, TypeScript formatting, catalog/specification and
+whitespace checks passed. The cancellation tests were moved to a dedicated file
+after the initial Go lint file-length failure. Native fixtures were rebuilt from
+the candidate source; their embedded identity remains dirty parent `86653face`,
+not the final commit. Immutable review and fresh published-head CI remain required.
+
 ### CI follow-up after `d0ca264b5`
 
 The published merge commit `d0ca264b5fb27c2a313ce7eeb6f7f4baea699d47` is

@@ -16,6 +16,7 @@ import { pollUntil } from "../../helpers/poll-until";
 import { SessionPage } from "../../pages/session-page";
 
 test.setTimeout(300_000);
+test.use({ trace: "retain-on-failure" });
 
 async function waitForExecutionId(
   apiClient: Parameters<typeof createRetainedCapacityFixture>[1],
