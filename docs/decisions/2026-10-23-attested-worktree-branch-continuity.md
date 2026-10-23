@@ -23,7 +23,7 @@ admission separately proves that the same owned physical checkout remains valid.
 Allow branch evolution only when both proofs succeed. Keep exact original
 branch matching for incomplete repair attestation and explicit repair retries.
 
-For completed repairs, branch evolution requires a current reciprocal Git proof
+For completed repairs, each admission requires a current reciprocal Git proof
 within existing launch admission. It performs no repair or attestation write
 and adds no environment-wide lock. Preserve task, workspace,
 repository-slot, worktree, and canonical-path boundaries. Preserve the original
@@ -38,7 +38,8 @@ must agree with the actual registered checkout.
 ## Consequences
 
 - Normal branch changes no longer permanently block repaired workspaces.
-- A bounded Git inspection is required when a completed receipt's branch differs.
+- A Git identity inspection is required for every completed repaired row. It
+  does not scan file content or the staged index, even after branch changes.
 - Missing, negative, contradictory, or cross-owner evidence remains blocked.
 - Recovery needs no receipt migration and never changes local files or refs.
 - This decision does not settle unknown prompt outcomes or authorize deployment.

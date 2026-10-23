@@ -69,7 +69,7 @@ Repeat it after the fix, then run the remaining commands.
 (cd apps/backend && go test -trimpath -race ./internal/orchestrator/executor -run '^TestInventoryAdmission' -count=1)
 (cd apps/backend && go test -trimpath ./internal/orchestrator -run '^TestWorkspaceRecoveryBlock' -count=1)
 (cd apps/backend && go test -trimpath ./internal/worktree -run '^(TestInspectPreservedCheckout|TestPreservation)' -count=1)
-bash scripts/lint-go-changed apps/backend/internal/orchestrator/executor/executor_workspace_inventory_recovery.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_test.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_integration_test.go
+bash scripts/lint-go-changed apps/backend/internal/orchestrator/executor/executor_workspace_inventory_recovery.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_test.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_integration_test.go apps/backend/internal/orchestrator/executor/executor_inventory_branch_identity_test.go apps/backend/internal/orchestrator/executor/executor_workspace_inventory_receipt_identity_test.go apps/backend/internal/worktree/checkout_identity.go apps/backend/internal/worktree/preservation.go
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -88,6 +88,10 @@ declaring the work order complete.
 ## Changed files
 
 - `apps/backend/internal/orchestrator/executor/executor_workspace_inventory_recovery.go`
+- `apps/backend/internal/worktree/checkout_identity.go` (new)
+- `apps/backend/internal/worktree/preservation.go`
+- `apps/backend/internal/orchestrator/executor/executor_inventory_branch_identity_test.go` (new)
+- `apps/backend/internal/orchestrator/executor/executor_workspace_inventory_receipt_identity_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity.go` (new)
 - `apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_test.go` (new)
 - `apps/backend/internal/orchestrator/executor/executor_inventory_branch_continuity_integration_test.go` (new)
@@ -135,7 +139,7 @@ Implemented and verified on 23 October 2026.
   broad `-run 'Preserv'` command also selected unrelated relocation tests and
   failed `TestManagedCloneRecoveryPrivateArtifactsPreserveContent`: the shell's
   `0077` umask made its fixture `0700`, although it asserted `0755`. That exact
-  test passed with `umask 022`. No worktree source or test was changed. The
+  test passed with `umask 022`. That failure did not require a source or test change. The
   command above now selects the inspector this fix actually reuses.
 - Public docs: all 63 validator tests and all 54 published pages passed.
   Catalog validation passed for 400 decisions and 1,718 specifications; all
@@ -144,6 +148,12 @@ Implemented and verified on 23 October 2026.
 - Changed-file lint passed with zero issues, using golangci-lint 2.9.0 (the CI
   version) from `/tmp/kandev-mcp-assignment-tools` because it was absent from
   the default `PATH`. `git diff --check` passed.
+- PR review regressions reproduced an unrecorded branch change reaching launch
+  and unreadable ignored content blocking Resume. Completed-repair admission
+  now checks actual Git identity for both matching and changed recorded branches,
+  using shared identity checks without scanning checkout content or the index.
+  Full repair and unfinished attestation retain preservation hashing. The
+  executor and worktree race suites passed after these changes.
 - No store or dialect-sensitive SQL changes, schema migration, new dependency,
   new lock, receipt rewrite, deployment, restart, or live task mutation.
 

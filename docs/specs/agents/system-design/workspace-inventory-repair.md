@@ -200,18 +200,19 @@ Keep two separate proofs at the row-scoped admission boundary:
    preservation evidence. Validate this proof before considering branch drift.
 2. Current checkout proof: the environment owner's task, workspace, environment,
    task-repository slot, repository, branch slot, worktree ID, and canonical path
-   still match. For a changed observed branch, prove the current branch/ref
-   against the actual checkout and reciprocal Git registration.
+   still match. Prove the current branch/ref against the actual checkout and
+   reciprocal Git registration, including when the row still names the original
+   branch. A matching historical branch cannot substitute for current proof.
 
 Only a completed positive receipt can use the changed-branch path. Retain the
-ordinary matching-branch path and strict historical comparisons for unfinished
+full preservation attestation and strict historical comparisons for unfinished
 attestation. Negative or inconsistent receipts never use current observations
 to replace their historical result. Explicit same-key repair retries retain
 the original request-hash contract; a changed derived repair request still
 conflicts. Ordinary Resume and additional-session admission are separate from
 replaying an explicit repair request.
 
-The changed-branch proof uses a narrow executor helper beside
+The completed-repair checkout proof uses a narrow executor helper beside
 `executor_workspace_inventory_recovery.go`. Reuse existing session launch
 serialization, canonical inventory validation, and normal runtime admission.
 This path only reads the completed receipt and current checkout. It does not
@@ -220,8 +221,11 @@ and does not prohibit an otherwise valid shared session. Existing claims still
 protect actual repair and incomplete attestation.
 
 Use `validateWorkspaceInventoryRepairCandidate` and
-`inspectWorkspaceInventoryCandidate` for the selected current row. The latter
-uses the callback-safe, bounded `worktree.InspectPreservedCheckout` inspector.
+`worktree.InspectCheckoutIdentity` for the selected current row. This inspector
+reuses the callback-safe reciprocal Git identity checks from full preservation
+inspection. It does not scan checkout content, status, or the staged index.
+Full preservation inspection remains required for repair and unfinished
+attestation.
 Compare its current worktree ID and path hash with the historical physical
 identity, and its branch/ref with the current canonical row. Do not compare
 current HEAD, content, index, or status hashes with the repair-time values:
@@ -238,7 +242,8 @@ No schema migration or offline metadata edit is needed for existing positive
 receipts. A second, independent delivery failure can still block Resume.
 
 Regression coverage must exercise actual branch switches and renames, current
-branch disagreement, unchanged receipt bytes, dirty/staged/untracked files,
+branch disagreement (including a stale original branch), unreadable ignored
+content, unchanged receipt bytes, dirty/staged/untracked files,
 missing and negative attestations, owner/borrower scope, competing consumers,
 and a mixed multi-repository inventory. Exercise Resume and
 `LaunchPreparedSession` through real Git and SQLite fixtures with a stubbed

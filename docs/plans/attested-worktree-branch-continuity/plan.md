@@ -137,7 +137,8 @@ with zero issues. The [work order](task-01-proven-branch-evolution.md#results) r
 red/green result, executor race suites, preservation tests, delivery-block
 checks, and the unrelated umask-sensitive test selected by the original broad
 filter. Production changes are limited to the shared executor receipt gate
-and a 44-line helper file. Existing claims and database operations are unchanged.
+and its helper, plus a shared Git identity inspector extracted from the existing
+full preservation inspector. Existing claims and database operations are unchanged.
 
 Design validation on 23 October:
 

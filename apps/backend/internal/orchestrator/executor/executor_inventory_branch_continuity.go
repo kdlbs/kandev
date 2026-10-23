@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 func workspaceInventoryReceiptHasMatchingAttestation(receipt *models.WorkspaceInventoryRecoveryReceipt) bool {
@@ -15,8 +16,8 @@ func workspaceInventoryReceiptHasMatchingAttestation(receipt *models.WorkspaceIn
 		)
 }
 
-// A completed repair attests historical content. Later branch changes require
-// current Git ownership proof for the same checkout, without rewriting history.
+// A completed repair attests historical content. Admission requires current
+// Git ownership proof for the same checkout, without rewriting history.
 func validateWorkspaceInventoryBranchContinuity(
 	ctx context.Context,
 	receipt *models.WorkspaceInventoryRecoveryReceipt,
@@ -24,16 +25,19 @@ func validateWorkspaceInventoryBranchContinuity(
 	info *repoInfo,
 	row *models.TaskEnvironmentRepo,
 ) error {
-	if receipt.Preservation.ObservedBranch == row.WorktreeBranch {
-		return nil
-	}
 	if !workspaceInventoryReceiptHasMatchingAttestation(receipt) {
+		if receipt.Preservation.ObservedBranch == row.WorktreeBranch {
+			return nil // Incomplete repairs still require full preservation attestation.
+		}
 		return fmt.Errorf("%w: branch changed without completed repair attestation", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
 	if err := validateWorkspaceInventoryRepairCandidate(env, info, row); err != nil {
 		return err
 	}
-	current, err := inspectWorkspaceInventoryCandidate(ctx, info, row)
+	current, err := worktree.InspectCheckoutIdentity(ctx, worktree.PreservationRequest{
+		RepositoryPath: info.RepositoryPath, WorktreePath: row.WorktreePath,
+		ExpectedBranch: row.WorktreeBranch, WorktreeID: row.WorktreeID,
+	})
 	if err != nil {
 		return fmt.Errorf("%w: cannot verify current checkout branch: %v", models.ErrWorkspaceInventoryRecoveryConflict, err)
 	}
