@@ -77,3 +77,19 @@ func (r *Repository) lockStepCompletionEntryTx(ctx context.Context, tx *sql.Tx, 
 	}
 	return entry, nil
 }
+
+// rebaseCompletionHandoff overlays only the carry slot owned by this completion.
+// All unrelated task metadata comes from the locked current row.
+func rebaseCompletionHandoff(ctx context.Context, requested, current *models.Task, stepID string) {
+	if !models.WorkflowStepCompletionOwnsHandoff(ctx, requested.ID, stepID) {
+		return
+	}
+	if current.Metadata == nil {
+		current.Metadata = make(map[string]interface{})
+	}
+	if carry, present := requested.Metadata[models.MetaKeyStepHandoffCarry]; present {
+		current.Metadata[models.MetaKeyStepHandoffCarry] = carry
+	} else {
+		delete(current.Metadata, models.MetaKeyStepHandoffCarry)
+	}
+}

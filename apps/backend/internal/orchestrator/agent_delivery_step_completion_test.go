@@ -96,8 +96,9 @@ func (r *completionMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx
 }
 
 func TestDeliveryFallbackStepCompletionMoveRace(t *testing.T) {
-	for _, enginePath := range []bool{false, true} {
-		t.Run(map[bool]string{false: "legacy", true: "engine"}[enginePath], func(t *testing.T) {
+	for _, path := range []string{"legacy", "legacy_successor", "engine"} {
+		t.Run(path, func(t *testing.T) {
+			enginePath := path == "engine"
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "task", "session", "step1")
 			_, _, entry, err := repo.GetTaskWorkflowStepEntry(t.Context(), "task")
@@ -118,6 +119,10 @@ func TestDeliveryFallbackStepCompletionMoveRace(t *testing.T) {
 					task.WorkflowStepID = step
 					require.NoError(t, repo.UpdateTask(t.Context(), task))
 				}
+				if path == "legacy_successor" {
+					_, _, err = repo.ClaimStepCompletionSignal(t.Context(), "task", "session", models.PendingStepCompletionSignal{StepID: "step1", WorkflowStepTransitionID: signalEntryForSession(t, repo, "session"), Summary: "successor"})
+					require.NoError(t, err)
+				}
 			}}
 			if enginePath {
 				svc.initWorkflowEngine()
@@ -135,6 +140,16 @@ func TestDeliveryFallbackStepCompletionMoveRace(t *testing.T) {
 			task, err = repo.GetTask(t.Context(), "task")
 			require.NoError(t, err)
 			require.Equal(t, "step1", task.WorkflowStepID, "a move after eligibility must invalidate completion at commit")
+			if !enginePath {
+				settled, err := repo.GetTaskSession(t.Context(), "session")
+				require.NoError(t, err)
+				require.Equal(t, models.TaskSessionStateWaitingForInput, settled.State)
+				signal, pending := models.LoadPendingStepSignal(settled.Metadata)
+				require.Equal(t, path == "legacy_successor", pending, "rejected completion must clear only its observed signal")
+				if pending {
+					require.Equal(t, "successor", signal.Summary)
+				}
+			}
 		})
 	}
 }

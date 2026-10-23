@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -84,4 +85,17 @@ func exercisePostgresCompletionMove(t *testing.T, stage string) {
 	require.NoError(t, err)
 	_, has := models.LoadPendingStepSignal(session.Metadata)
 	require.False(t, has)
+}
+
+func TestPostgresStepCompletionEntryHandoffRebase(t *testing.T) {
+	for _, completion := range []bool{false, true} {
+		for _, handoff := range []string{"new context", ""} {
+			t.Run(fmt.Sprintf("completion=%t/handoff=%q", completion, handoff), func(t *testing.T) {
+				db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+				repo, err := NewWithDB(db, db, nil)
+				require.NoError(t, err)
+				exerciseStepCompletionEntryHandoffRebase(t, repo, completion, handoff)
+			})
+		}
+	}
 }

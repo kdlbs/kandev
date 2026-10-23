@@ -1850,7 +1850,8 @@ func (r *Repository) deleteDeferredMoveGuardTx(
 // metadata keys) to land in between. Writing that stale snapshot would
 // silently clobber the concurrent edit. Only the fields this operation owns
 // (workflow id, the deferred-moves metadata sub-map) are carried forward
-// from the caller's request; everything else comes from the fresh row.
+// from the caller's request. Completion guards also preserve their owned handoff
+// carry update or removal; everything else comes from the fresh row.
 //
 // The unconditional (expectedStepID == "") callers — manual/bulk/feeder
 // moves — must NOT call this: their caller-built `task` already carries
@@ -1896,6 +1897,7 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 	if requestedWorkflowID == "" {
 		requestedWorkflowID = currentTask.WorkflowID
 	}
+	rebaseCompletionHandoff(ctx, task, currentTask, expectedStepID)
 	*task = *currentTask
 	if requestedWorkflowID != "" {
 		task.WorkflowID = requestedWorkflowID

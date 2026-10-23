@@ -272,3 +272,14 @@ request authorizes committing the complete tested change.
 - At the original design handoff, implementation and delivery were pending.
   The later implementation results above and in both work orders supersede
   that checkpoint without changing the historical diagnostic evidence.
+
+## Review remediation validation
+
+The initial published head passed 84 checks (19 skipped, one neutral), with no
+failed or pending checks. One inline handoff finding and one aggregate legacy
+lifecycle finding required remediation. Permanent failing regressions preceded
+the fixes; final focused orchestrator race checks pass (3.137 s), as do the
+SQLite/real PostgreSQL handoff rebase and CAS race checks (16.011 s). Task 02
+records exact commands and source-ownership semantics. Initial CI is historical;
+final head and advanced-base delivery checks remain externally pending until
+recorded on the PR/task.

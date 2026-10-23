@@ -254,3 +254,55 @@ Continue authorized commit/push/PR remediation and merge only after exact-head
 CI/review gates pass. No release is authorized. Commit/PR SHAs are recorded by
 the delivery artifacts rather than embedding a self-referential commit hash here.
 
+
+## PR review remediation
+
+The first published head passed CI (84 passed, 19 skipped, one neutral, zero
+failed/pending). Review identified two integration gaps in the newly guarded
+path: source-owned handoff updates/removals were lost during CAS rebasing, and a
+legacy rejected move could leave the session running with its obsolete signal.
+These findings are in scope for this work order's carry and lifecycle evidence.
+
+Permanent regressions extend the real signal-gated engine/legacy paths for
+handoff write/removal with admitted and WIP-queued destinations, and assert
+legacy rejected-move session/signal settlement. Preserve only completion-owned
+handoff intent during the locked CAS rebase; unrelated guarded moves must keep
+the freshly read carry slot. Rejected moves clear only the observed signal and
+settle the completed legacy turn through the existing waiting-state path.
+
+Remediation red command:
+`go test -race ./internal/orchestrator -run
+'TestStepCompletionEntryHandoff|TestDeliveryFallbackStepCompletionMoveRace'
+-count=1`: expected FAIL (1.086 s). Both engine/legacy admitted/queued handoff
+write/removal cases retained the old token, and legacy state remained RUNNING.
+The first green focused consumer run passed in 3.723 s.
+
+Repository remediation command:
+`KANDEV_TEST_POSTGRES_DSN=<disposable PostgreSQL 17 DSN> go test -race -v
+./internal/task/repository/sqlite -run
+'Test.*StepCompletionEntry|TestPostgresUpdateTaskWithWorkflowStepAdmissionIfAtStep'
+-count=1`: PASS, 16.011 s. Includes SQLite/PostgreSQL completion-owned updates,
+removals, unrelated guard behavior and concurrent metadata preservation.
+
+Final consumer command:
+`go test -race ./internal/orchestrator -run
+'TestStepCompletionEntryHandoff|TestDeliveryFallbackStepCompletion|Test.*Handoff|Test.*StepHistory|Test.*StepCompletion'
+-count=1`: PASS, 3.137 s, including successor-signal preservation.
+Scoped lint uses normal commit hooks on all remediation Go paths. Specification
+catalog/lint and whitespace checks pass after the design update.
+
+Exact-head delivery and current-base synthetic validation remain pending. Initial CI evidence is
+historical after a new push; final CI/review must be rerun. Main independently
+advanced to `12bc3f1a38d91a40f787ceaa2cda66e9f88915b6` (bounded tool-display data).
+Its paths are disjoint; final delivery requires synthetic merge validation of
+canonical payload/turn/handler consumers against that authoritative base.
+
+The Greptile handoff finding and CodeRabbit aggregate lifecycle finding are
+addressed by these changes and tests. The latter is an aggregate review body,
+not an unresolved inline thread. No extra local review agent was launched.
+
+The first remediation commit attempt stopped at Go lint for one test-helper
+if/else chain. Rewritten as a switch; targeted SQLite/real PostgreSQL race
+command `go test -race ./internal/task/repository/sqlite -run
+'Test.*StepCompletionEntryHandoffRebase' -count=1` passed (8.552 s) with the
+real disposable DSN. Retry uses normal hooks with no bypass.

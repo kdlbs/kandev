@@ -44,7 +44,7 @@ func (s *Service) withStepCompletionEntryGuard(ctx context.Context, taskID strin
 	if signal.WorkflowStepTransitionID != nil {
 		entry = *signal.WorkflowStepTransitionID
 	}
-	return models.WithWorkflowStepTransitionGuard(ctx, taskID, step.ID, entry)
+	return models.WithWorkflowStepCompletionGuard(ctx, taskID, step.ID, entry)
 }
 
 // clearConsumedStepSignal only removes the observed bag value. A delayed source

@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -105,4 +106,50 @@ func TestStepCompletionEntryUnledgeredTask(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, signal.WorkflowStepTransitionID)
 	require.Zero(t, *signal.WorkflowStepTransitionID)
+}
+
+func exerciseStepCompletionEntryHandoffRebase(t *testing.T, repo *Repository, completion bool, handoff string) {
+	t.Helper()
+	seedTurnStepStampSession(t, repo, "task", "step-a", "session")
+	require.NoError(t, repo.SetTaskMetadataKey(t.Context(), "task", models.MetaKeyStepHandoffCarry, "original"))
+	task, err := repo.GetTask(t.Context(), "task")
+	require.NoError(t, err)
+	_, _, entry, err := repo.GetTaskWorkflowStepEntry(t.Context(), "task")
+	require.NoError(t, err)
+	require.NoError(t, repo.SetTaskMetadataKey(t.Context(), "task", "concurrent", "keep current"))
+	require.NoError(t, repo.SetTaskMetadataKey(t.Context(), "task", models.MetaKeyStepHandoffCarry, "current"))
+	if handoff == "" {
+		delete(task.Metadata, models.MetaKeyStepHandoffCarry)
+	} else {
+		task.Metadata[models.MetaKeyStepHandoffCarry] = handoff
+	}
+	ctx := models.WithWorkflowStepTransitionGuard(t.Context(), "task", "step-a", entry)
+	if completion {
+		ctx = models.WithWorkflowStepCompletionGuard(t.Context(), "task", "step-a", entry)
+	}
+	applied, err := repo.UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx, task, "step-a", "step-b", 0)
+	require.NoError(t, err)
+	require.True(t, applied)
+	stored, err := repo.GetTask(t.Context(), "task")
+	require.NoError(t, err)
+	require.Equal(t, "keep current", stored.Metadata["concurrent"])
+	carry, present := stored.Metadata[models.MetaKeyStepHandoffCarry]
+	switch {
+	case !completion:
+		require.Equal(t, "current", carry)
+	case handoff == "":
+		require.False(t, present)
+	default:
+		require.Equal(t, handoff, carry)
+	}
+}
+
+func TestStepCompletionEntryHandoffRebase(t *testing.T) {
+	for _, completion := range []bool{false, true} {
+		for _, handoff := range []string{"new context", ""} {
+			t.Run(fmt.Sprintf("completion=%t/handoff=%q", completion, handoff), func(t *testing.T) {
+				exerciseStepCompletionEntryHandoffRebase(t, newTurnStepStampTestRepo(t), completion, handoff)
+			})
+		}
+	}
 }

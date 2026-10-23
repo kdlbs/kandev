@@ -562,6 +562,12 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 	if !applied {
+		if models.WorkflowStepCompletionOwnsHandoff(transitionCtx, taskID, fromStepID) {
+			if signalSession != nil && consumedSignal != nil {
+				s.clearConsumedStepSignal(ctx, signalSession)
+			}
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		}
 		return
 	}
 	queued := task.QueuedForStepID != ""

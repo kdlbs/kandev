@@ -246,12 +246,17 @@ cannot mask a fresh eligible completion. Publish failures retry the same claim.
 
 Both turn-end implementations and the waiting-session subscriber/watchdog must
 require matching entry evidence when consuming signals. Propagate the stored
-entry into `models.WithWorkflowStepTransitionGuard` so the existing task move
+entry into `models.WithWorkflowStepCompletionGuard` so the existing task move
 CAS (`taskStepTransitionGuardMatches`) checks it again under the task lock at
 the transition boundary. Preserve cancellation, clarification, and workflow
 policy guards. A read or fence failure creates no transition or delivery receipt
 that claims one occurred. Context guards apply only to the source task/step;
-destination entry actions keep their existing admission rules.
+destination entry actions keep their existing admission rules. The completion
+variant also marks ownership of the handoff carry slot: the locked CAS rebase
+retains its prepared update or removal while refreshing unrelated metadata.
+Ordinary arrival guards do not acquire that ownership. A rejected legacy
+completion move conditionally clears its observed signal and settles the finished
+turn to waiting through the existing session-state path.
 
 Delayed bus events remain wakeups to reread durable state; their payload is not
 authority to overwrite the bag. Stale cleanup must condition its removal on the
