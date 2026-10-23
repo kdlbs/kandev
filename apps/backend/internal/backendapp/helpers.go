@@ -1181,6 +1181,7 @@ func registerRoutes(p routeParams) {
 	// clear that session's parked-projection tracking (spec:
 	// docs/specs/disambiguate-waiting).
 	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
+	p.taskSvc.SetRuntimeFootprintProvider(p.lifecycleMgr)
 	p.taskSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools

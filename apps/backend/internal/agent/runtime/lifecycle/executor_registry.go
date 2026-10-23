@@ -69,6 +69,22 @@ func (r *ExecutorRegistry) List() []executor.Name {
 	return names
 }
 
+// RuntimeFootprintReader selects only an unambiguous host-local reader.
+func (r *ExecutorRegistry) RuntimeFootprintReader() (RuntimeFootprintReader, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var selected RuntimeFootprintReader
+	for _, backend := range r.backends {
+		if reader, ok := backend.(RuntimeFootprintReader); ok {
+			if selected != nil {
+				return nil, false
+			}
+			selected = reader
+		}
+	}
+	return selected, selected != nil
+}
+
 // HealthCheckAll performs health checks on all registered runtimes.
 // Returns a map of runtime names to errors. A nil error indicates the runtime is healthy.
 func (r *ExecutorRegistry) HealthCheckAll(ctx context.Context) map[executor.Name]error {

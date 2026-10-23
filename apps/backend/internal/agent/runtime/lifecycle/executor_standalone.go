@@ -421,6 +421,16 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}, nil
 }
 
+// ReadRuntimeFootprints borrows the current authenticated control binding.
+func (r *StandaloneExecutor) ReadRuntimeFootprints(ctx context.Context) ([]agentctl.RuntimeFootprint, error) {
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return control.ListRuntimeFootprints(controlCtx)
+}
+
 func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance.StandaloneInstanceID == "" {
 		return nil // No standalone instance to stop
