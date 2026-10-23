@@ -1066,5 +1066,9 @@
   "mcpPlainInputsHelp": "請在此使用非機密值。認證資訊請使用下方的金鑰引用。",
   "mcpUnsupportedArguments": "此設定需要目前尚無法設定的命令引數。請選擇其他設定。",
   "mcpSelectionConflict": "選擇已更改。請重新載入選擇，檢查草稿，然後再次儲存。",
-  "mcpReloadChoices": "重新載入選擇"
+  "mcpReloadChoices": "重新載入選擇",
+  "mcpRegistrationSavedTo": "已儲存到 {{workspace}}",
+  "mcpRegistrationSavedOnly": "此伺服器已儲存，但尚未為任何儲存庫、設定檔或工作階段選用。",
+  "mcpRegistrationUncertain": "無法確認是否儲存成功。請先檢視已設定的伺服器，再新增其他伺服器。",
+  "mcpReviewSavedServers": "檢視已儲存的伺服器"
 }

@@ -1066,5 +1066,9 @@
   "mcpPlainInputsHelp": "Utilize aqui valores que não sejam secretos. Para credenciais, selecione referências de segredos abaixo.",
   "mcpUnsupportedArguments": "Esta configuração pede argumentos de comando que ainda não podem ser configurados. Escolha outra configuração.",
   "mcpSelectionConflict": "As escolhas foram alteradas. Recarregue as escolhas, reveja o rascunho e volte a guardar.",
-  "mcpReloadChoices": "Recarregar escolhas"
+  "mcpReloadChoices": "Recarregar escolhas",
+  "mcpRegistrationSavedTo": "Guardado em {{workspace}}",
+  "mcpRegistrationSavedOnly": "Este servidor está guardado. Não está selecionado para nenhum repositório, perfil ou sessão.",
+  "mcpRegistrationUncertain": "Não foi possível confirmar que o servidor foi guardado. Reveja os servidores configurados antes de adicionar outro.",
+  "mcpReviewSavedServers": "Rever servidores guardados"
 }

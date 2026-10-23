@@ -1066,5 +1066,9 @@
   "mcpPlainInputsHelp": "Use non-secret values here. Select secret references below for credentials.",
   "mcpUnsupportedArguments": "This setup requests command arguments that cannot be configured yet. Choose another setup.",
   "mcpSelectionConflict": "Choices changed. Reload choices, review your draft, then save again.",
-  "mcpReloadChoices": "Reload choices"
+  "mcpReloadChoices": "Reload choices",
+  "mcpRegistrationSavedTo": "Saved to {{workspace}}",
+  "mcpRegistrationSavedOnly": "This server is saved. It is not selected for a repository, profile, or session.",
+  "mcpRegistrationUncertain": "We could not confirm the save. Review the configured servers before adding another.",
+  "mcpReviewSavedServers": "Review saved servers"
 }

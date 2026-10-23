@@ -12,6 +12,11 @@ requirements:
 
 ## Boundaries and evidence
 
+Implementation checkpoint (2026-10-23): work orders 01 and 02 implement the
+conditional selection write and saved-only receipt below. Owner handoff and
+`mcpServerId` highlighting remain planned until the management sibling's
+committed navigation prerequisite is available. The full initiative is incomplete.
+
 This design extends [workspace MCP configuration](workspace-mcp-configuration.md)
 and [setup delivery](workspace-mcp-resolution-delivery.md). Agents retains
 definition, selection, and runtime authority. The settings coordinator retains
@@ -248,7 +253,9 @@ earlier whichever-lands-first proposal. Record the committed operation and lock
 identity in work order 01's results for the sibling to consume. Exclusions owns
 mixed positive/exclusion client race tests after integration. Do not implement
 exclusion storage or controls here, or copy uncommitted sibling code. Management
-owns neither CAS API. These ownership choices remain draft design coordination.
+owns neither CAS API. Assignment work order 01 now supplies the committed
+primitive; the exclusions extension remains separately owned and unimplemented
+in this branch.
 
 An inherited server excluded by that later capability stays excluded when an
 addition-only request succeeds. Assignment must not claim runtime inclusion or

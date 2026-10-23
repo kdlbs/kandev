@@ -1066,5 +1066,9 @@
   "mcpPlainInputsHelp": "Ũśē ńōń-śēćŕēţ vàĺũēś ĥēŕē. Śēĺēćţ śēćŕēţ ŕēƒēŕēńćēś ƀēĺōŵ ƒōŕ ćŕēďēńţĩàĺś.",
   "mcpUnsupportedArguments": "Ţĥĩś śēţũƥ ŕēqũēśţś ćōḿḿàńď àŕĝũḿēńţś ţĥàţ ćàńńōţ ƀē ćōńƒĩĝũŕēď ŷēţ. Ćĥōōśē àńōţĥēŕ śēţũƥ.",
   "mcpSelectionConflict": "Ćĥōĩćēś ćĥàńĝēď. Ŕēĺōàď ćĥōĩćēś, ŕēvĩēŵ ŷōũŕ ďŕàƒţ, ţĥēń śàvē àĝàĩń.",
-  "mcpReloadChoices": "Ŕēĺōàď ćĥōĩćēś"
+  "mcpReloadChoices": "Ŕēĺōàď ćĥōĩćēś",
+  "mcpRegistrationSavedTo": "Śàvēď ţō {{workspace}}",
+  "mcpRegistrationSavedOnly": "Ţĥĩś śēŕvēŕ ĩś śàvēď. Ĩţ ĩś ńōţ śēĺēćţēď ƒōŕ à ŕēƥōśĩţōŕŷ, ƥŕōƒĩĺē, ōŕ śēśśĩōń.",
+  "mcpRegistrationUncertain": "Ŵē ćōũĺď ńōţ ćōńƒĩŕḿ ţĥē śàvē. Ŕēvĩēŵ ţĥē ćōńƒĩĝũŕēď śēŕvēŕś ƀēƒōŕē àďďĩńĝ àńōţĥēŕ.",
+  "mcpReviewSavedServers": "Ŕēvĩēŵ śàvēď śēŕvēŕś"
 }

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-22
-status: draft
+status: in_progress
 requirements:
   - REQ-AGENTS-MCP-ASSIGNMENT-001
   - REQ-AGENTS-MCP-ASSIGNMENT-002
@@ -20,8 +20,8 @@ Use in opens an existing owner editor without changing a selection. The owner
 retains save behavior and runtime timing. Build conditional selection safety,
 then saved-only completion, then the three owner handoffs and recovery.
 
-Implementation was explicitly authorized on 2026-10-23. Work order 01 is
-complete. Work orders 02 and 03 remain pending; 03 requires the committed
+Implementation was explicitly authorized on 2026-10-23. Work orders 01 and 02 are
+complete. Work order 03 is pending and requires the committed
 management navigation prerequisite. Parent PR #3293 remains open at the verified
 193de56ba2597b335a97b1e5ab01d09340f22647 tip.
 
@@ -207,7 +207,7 @@ overlapping full suites. Commands below are executed sequentially.
 ## Work orders
 
 - [x] [01: Guard selection replacement](task-01-guard-selection-replacement.md)
-- [ ] [02: Preserve saved registration completion](task-02-registration-completion.md)
+- [x] [02: Preserve saved registration completion](task-02-registration-completion.md)
 - [ ] [03: Connect optional owner handoffs](task-03-owner-handoff.md)
 
 Order: 01, 02, then management sibling navigation prerequisite, then 03.
@@ -228,7 +228,15 @@ Design checks completed on 2026-10-22:
 
 Historical design checkpoint: runtime, product unit, and E2E checks were not run. No
 production or permanent test files changed. Planned implementation commands
-and evidence belong in the corresponding work orders. Work order 01 now records implementation evidence; none of the parent guide's historical counts were reused.
+and evidence belong in the corresponding work orders. Work orders 01 and 02 now record implementation evidence; none of the parent guide's historical counts were reused.
+
+Implementation checkpoint 2026-10-23: conditional writes and saved-only
+registration are implemented and tested. Six desktop/phone E2E cases passed.
+Management plan version `40b577c3-0d95-43b5-9a57-ae8af8ee149b` is unchanged
+and still records uncommitted design only. Its committed task 02 navigation
+prerequisite is unavailable. Work order 03 remains pending; no optional owner
+chooser, owner-route hint, or full-feature completion is claimed. Do not copy
+uncommitted sibling code or implement its ownership here.
 
 ## Risks
 

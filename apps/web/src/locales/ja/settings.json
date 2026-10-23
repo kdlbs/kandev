@@ -1066,5 +1066,9 @@
   "mcpPlainInputsHelp": "ここには機密ではない値を入力してください。認証情報には下のシークレット参照を使用してください。",
   "mcpUnsupportedArguments": "この設定には、まだ設定できないコマンド引数が必要です。別の設定を選択してください。",
   "mcpSelectionConflict": "選択内容が変更されました。選択内容を再読み込みして下書きを確認し、もう一度保存してください。",
-  "mcpReloadChoices": "選択内容を再読み込み"
+  "mcpReloadChoices": "選択内容を再読み込み",
+  "mcpRegistrationSavedTo": "{{workspace}} に保存しました",
+  "mcpRegistrationSavedOnly": "このサーバーは保存されています。リポジトリ、プロファイル、セッションではまだ選択されていません。",
+  "mcpRegistrationUncertain": "保存を確認できませんでした。別のサーバーを追加する前に、設定済みのサーバーを確認してください。",
+  "mcpReviewSavedServers": "保存済みサーバーを確認"
 }

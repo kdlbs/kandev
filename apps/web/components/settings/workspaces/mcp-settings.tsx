@@ -24,6 +24,9 @@ import type {
   MCPServerDefinition,
   MCPSelectionImpact,
 } from "@/lib/types/http-mcp";
+import { SettingsSaveCancelledError } from "@/components/settings/settings-save-provider";
+import { MCPRegistrationCompletion, MCPRegistrationUncertain } from "./mcp-registration-completion";
+import type { MCPRegistrationResult } from "@/hooks/domains/workspace/use-mcp-registration-completion";
 import { MCPDefinitionForm } from "./mcp-definition-form";
 import { MCPMarketplace } from "./mcp-marketplace";
 
@@ -143,7 +146,7 @@ function ServerCard({
   );
 }
 
-function EmptyCatalog({ onAdd }: { onAdd: () => void }) {
+function EmptyCatalog({ onAdd, addDisabled }: { onAdd: () => void; addDisabled: boolean }) {
   const { t } = useTranslation();
   return (
     <Card>
@@ -154,6 +157,7 @@ function EmptyCatalog({ onAdd }: { onAdd: () => void }) {
           type="button"
           className={controlSizingClassName("standard", "mt-4 cursor-pointer")}
           onClick={onAdd}
+          disabled={addDisabled}
         >
           <IconPlus className="mr-2 size-4" />
           {t("settings:addMcpServer")}
@@ -168,6 +172,7 @@ function ConfiguredMCPServers({
   loading,
   isMobile,
   onAdd,
+  addDisabled,
   onEdit,
   onToggle,
   onDelete,
@@ -176,11 +181,13 @@ function ConfiguredMCPServers({
   loading: boolean;
   isMobile: boolean;
   onAdd: () => void;
+  addDisabled: boolean;
   onEdit: (server: MCPServerDefinition) => void;
   onToggle: (server: MCPServerDefinition) => void;
   onDelete: (server: MCPServerDefinition) => void;
 }) {
-  if (servers.length === 0 && !loading) return <EmptyCatalog onAdd={onAdd} />;
+  if (servers.length === 0 && !loading)
+    return <EmptyCatalog onAdd={onAdd} addDisabled={addDisabled} />;
   const gridClass = isMobile ? "grid grid-cols-1 gap-3" : "grid grid-cols-1 gap-4 xl:grid-cols-2";
   return (
     <div className={gridClass}>
@@ -204,7 +211,7 @@ function MCPMarketplaceView({
 }: {
   workspaceId: string;
   data: ReturnType<typeof useMCPWorkspaceSettings>;
-  onSaved: () => void;
+  onSaved: (result: MCPRegistrationResult) => void;
 }) {
   return (
     <MCPMarketplace
@@ -220,8 +227,7 @@ function MCPMarketplaceView({
         await data.refresh();
       }}
       onInstall={async (payload) => {
-        await data.install(payload);
-        onSaved();
+        onSaved(await data.install(payload));
       }}
     />
   );
@@ -230,9 +236,11 @@ function MCPMarketplaceView({
 function MCPViewTabs({
   view,
   onChange,
+  marketplaceDisabled,
 }: {
   view: "configured" | "marketplace";
   onChange: (view: "configured" | "marketplace") => void;
+  marketplaceDisabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -254,6 +262,7 @@ function MCPViewTabs({
         variant={view === "marketplace" ? "secondary" : "ghost"}
         className={STANDARD_ACTION_CLASS}
         onClick={() => onChange("marketplace")}
+        disabled={marketplaceDisabled}
       >
         {t("settings:mcpMarketplace")}
       </Button>
@@ -310,22 +319,14 @@ function DeleteMCPServerDialog({
 }
 
 export function MCPSettings({ workspaceId }: MCPSettingsProps) {
+  return <MCPSettingsContent key={workspaceId} workspaceId={workspaceId} />;
+}
+
+function useMCPServerActions(data: ReturnType<typeof useMCPWorkspaceSettings>) {
   const { t } = useTranslation();
-  const { isMobile } = useResponsiveBreakpoint();
   const { toast } = useToast();
-  const data = useMCPWorkspaceSettings(workspaceId);
-  const [view, setView] = useState<"configured" | "marketplace">("configured");
-  const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<MCPServerDefinition | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  const saveDefinition = async (payload: MCPDefinitionInput, server?: MCPServerDefinition) => {
-    if (server) await data.update(server.id, { ...payload, expected_revision: server.revision });
-    else await data.create(payload);
-    setEditor(undefined);
-    toast({ title: t("settings:mcpSaved"), variant: "success" });
-  };
-
   const toggleServer = async (server: MCPServerDefinition) => {
     try {
       await data.update(server.id, {
@@ -343,12 +344,49 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
     try {
       await data.remove(deleteTarget, true);
       setDeleteTarget(null);
+      if (data.registration.receipt?.definitionId === deleteTarget.id) data.registration.dismiss();
       toast({ title: t("settings:mcpDeleted"), variant: "success" });
     } catch {
       toast({ title: t("settings:mcpDeleteFailed"), variant: "error" });
     } finally {
       setDeleting(false);
     }
+  };
+
+  return { deleteTarget, setDeleteTarget, deleting, toggleServer, deleteServer };
+}
+
+function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const { toast } = useToast();
+  const data = useMCPWorkspaceSettings(workspaceId);
+  const [view, setView] = useState<"configured" | "marketplace">("configured");
+  const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
+  const { deleteTarget, setDeleteTarget, deleting, toggleServer, deleteServer } =
+    useMCPServerActions(data);
+
+  const finishRegistration = (result: MCPRegistrationResult) => {
+    if (result.status === "ignored") return;
+    setEditor(undefined);
+    setView("configured");
+  };
+  const openEditor = (server: MCPServerDefinition | null) => {
+    data.registration.dismiss();
+    setEditor(server);
+  };
+  const addDisabled = data.registration.uncertain || data.registration.pending;
+
+  const saveDefinition = async (payload: MCPDefinitionInput, server?: MCPServerDefinition) => {
+    if (server) {
+      await data.update(server.id, { ...payload, expected_revision: server.revision });
+      setEditor(undefined);
+      toast({ title: t("settings:mcpSaved"), variant: "success" });
+      return;
+    }
+    const result = await data.create(payload);
+    finishRegistration(result);
+    if (result.status !== "saved") throw new SettingsSaveCancelledError();
   };
 
   if (editor !== undefined)
@@ -370,14 +408,24 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
           <Button
             type="button"
             className={controlSizingClassName("standard", "w-full cursor-pointer md:w-auto")}
-            onClick={() => setEditor(null)}
+            onClick={() => openEditor(null)}
+            disabled={addDisabled}
           >
             <IconPlus className="mr-2 size-4" />
             {t("settings:addMcpServer")}
           </Button>
         }
       />
-      <MCPViewTabs view={view} onChange={setView} />
+      <MCPViewTabs view={view} onChange={setView} marketplaceDisabled={addDisabled} />
+      {data.registration.uncertain && (
+        <MCPRegistrationUncertain onReview={data.reviewRegistration} />
+      )}
+      {view === "configured" && data.registration.receipt && (
+        <MCPRegistrationCompletion
+          receipt={data.registration.receipt}
+          onDone={data.registration.dismiss}
+        />
+      )}
       {Boolean(data.error) && (
         <p
           className="rounded-md border border-destructive/40 p-3 text-sm text-destructive"
@@ -391,17 +439,14 @@ export function MCPSettings({ workspaceId }: MCPSettingsProps) {
           servers={data.servers}
           loading={data.loading}
           isMobile={isMobile}
-          onAdd={() => setEditor(null)}
-          onEdit={setEditor}
+          onAdd={() => openEditor(null)}
+          addDisabled={addDisabled}
+          onEdit={openEditor}
           onToggle={(server) => void toggleServer(server)}
           onDelete={setDeleteTarget}
         />
       ) : (
-        <MCPMarketplaceView
-          workspaceId={workspaceId}
-          data={data}
-          onSaved={() => toast({ title: t("settings:mcpSaved"), variant: "success" })}
-        />
+        <MCPMarketplaceView workspaceId={workspaceId} data={data} onSaved={finishRegistration} />
       )}
       <DeleteMCPServerDialog
         target={deleteTarget}
