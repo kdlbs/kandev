@@ -12,6 +12,44 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `dcecf2a37`
+
+Exact head `dcecf2a37bed99a13ecd4c58bed0d07425ccf730` completed CI with
+85 passed, 13 skipped, five failed and zero pending checks. Backend checks,
+including PostgreSQL partition 3, passed. E2E run `40038394810` failed in
+browser shards 22 and 24, container shard 5, and the aggregate. Walkthrough
+run `40038392437` reached its 600-second generation deadline while gathering
+source evidence; it produced no verified walkthrough. This result is not green.
+
+The pseudo-locale secrets page reported stored `GitLab token` names as
+untranslated copy. Its oracle now reads authenticated secret metadata and
+exempts the matching row's name data element and the name interpolation
+in a recognized translated secret-action attribute. It retains the surrounding action frame, bare labels,
+other rows and identical text outside the row. A regression reproduces the
+stored-name failure. Review also found that removing every name occurrence
+could hide an untranslated action with the same words. A suffix-only
+exception could also hide Delete for a record named elete. Negative controls
+cover repeated, bare and suffix-colliding labels, plus matching data outside
+the row. The final oracle retains every unrecognized label frame. No production copy, UI behavior or translation assertion is removed.
+
+The archived-session recovery failure was a disabled Resume button after the
+error disclosure appeared. Its unchanged focused local case passed; the
+original disabled guard remains unidentified. The SSH failure showed failed
+frontend recovery after backend restart while direct file reads succeeded.
+An initial local SSH command instead stopped before that scenario because a
+pre-commit runtime and the current-checkout helper manifest had different
+commit identities. That setup failure does not reproduce the CI failure. After rebuilding the
+runtime and helpers with matching identities, the unchanged SSH case passed
+with one worker and zero retries through both reconnects. This local run used
+an owned rootless Docker daemon and its existing host-network/cleanup wrapper,
+so it is not an identical CI environment.
+The final focused browser run passed all five cases (both collision controls,
+secrets page, migrated-attribute control and unchanged recovery disclosure),
+with one worker and zero retries. Scoped ESLint and documentation validation
+passed. The isolated reviewer accepted the bounded two-file source candidate.
+Remaining static, immutable-review and exact-head CI results are recorded in
+the delivery receipt. No baseline or root-cause claim is made for either browser failure.
+
 ### CI follow-up after `ef96550e6`
 
 Exact head `ef96550e6c89210cf381b02729efc52c4fd811d8` completed CI with
