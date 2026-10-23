@@ -256,7 +256,7 @@ func (a *Adapter) LoadSession(ctx context.Context, threadID string, servers []ag
 		Config:         codexConfig(servers),
 	}
 	var response protocol.ThreadStartResponse
-	if err := client.Call(ctx, protocol.MethodThreadResume, params, &response); err != nil {
+	if err := a.resumeRetainedThread(ctx, client, params, &response); err != nil {
 		return fmt.Errorf("resume Codex thread %q: %w", threadID, err)
 	}
 	if response.Thread.ID != "" && response.Thread.ID != threadID {

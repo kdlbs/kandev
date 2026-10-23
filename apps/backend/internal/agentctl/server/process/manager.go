@@ -1934,6 +1934,7 @@ func (m *Manager) buildAdapterConfig() error {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
+		Extra:                     map[string]string{"allow_archived_thread_restore": lookupEnvValue(m.cfg.AgentEnv, "KANDEV_FEATURES_AUTO_CONTINUE_FROM_HISTORY")},
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.adapterAutoApprove(),
 		McpServers:                mcpServers,

@@ -173,7 +173,12 @@ export function normalizeAgentErrorCauses(value: unknown): AgentErrorCause[] {
 }
 
 function readCleanupPromptEvidence(cause: AgentErrorCause, record: Record<string, unknown>) {
-  if (cause.code === "runtime_cleanup_failed" && typeof record.prompt_not_sent === "boolean") {
+  if (
+    ["runtime_cleanup_failed", "native_state_missing", "native_resume_unsupported"].includes(
+      cause.code ?? "",
+    ) &&
+    typeof record.prompt_not_sent === "boolean"
+  ) {
     cause.prompt_not_sent = record.prompt_not_sent;
   }
 }

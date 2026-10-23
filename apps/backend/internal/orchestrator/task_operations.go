@@ -3746,7 +3746,7 @@ func (s *Service) admitResumeSessionLaunch(
 			return preReserved, false, nil
 		}
 		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, launchOrigin(options.Origin),
-			seam4ResumePayloadWithBinding(sessionID, options, entryBinding))
+			seam4ResumePayloadWithBinding(sessionID, options, entryBinding, automaticHistoryAttempt(ctx)))
 	}()
 	if err != nil || deferred {
 		return seam4Res, deferred, err
@@ -3844,6 +3844,11 @@ func (s *Service) prepareResumeSessionAdmission(
 	candidate, err := s.loadResumeSessionCandidate(ctx, taskID, sessionID, options, entryBinding)
 	if err != nil {
 		return nil, err
+	}
+	if !hasContinuation {
+		if existing, joined, joinErr := s.joinLiveNativeResume(ctx, candidate, taskID, sessionID); joined || joinErr != nil {
+			return &resumeSessionAdmission{existingExecution: existing}, joinErr
+		}
 	}
 	if candidate.options.RequireIdleSuspensionProvenance {
 		shortcut, provenanceErr := s.idleSuspensionResumeShortcut(

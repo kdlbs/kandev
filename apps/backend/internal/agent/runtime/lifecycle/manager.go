@@ -181,7 +181,8 @@ type Manager struct {
 	// branch instead of the terminating one (design 01/02 kill-path #4). Set
 	// once during startup wiring via SetAgentSurvivalEnabled; false (today's
 	// unconditional terminating stop) is the correct zero value.
-	agentSurvivalEnabled bool
+	agentSurvivalEnabled           bool
+	autoContinueFromHistoryEnabled bool
 
 	// inheritedRecordScope records what this launch found at the recorded
 	// control endpoint, so classifyStandaloneLiveness can judge records
