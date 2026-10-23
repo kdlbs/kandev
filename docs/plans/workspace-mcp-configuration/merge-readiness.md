@@ -12,6 +12,28 @@ are unavailable on this machine. They do not establish current readiness.
 
 ## Current-base integration and fixture repair
 
+### CI follow-up after `7c9fdc427`
+
+The isolated review accepted the exact published commit
+`7c9fdc4270673c18d690fed61d15fda70b478b90`. Its complete CI result was
+90 passed, 11 skipped, two failed and zero pending checks. E2E run
+`40026651456` failed shard 8/28 and its aggregate because the routine catch-up
+policy save case passed only on retry. Backend, frontend, all other browser
+shards, containers and walkthrough checks passed. GitHub reported no merge
+conflicts or actionable review threads. This is not a green CI result.
+
+The failing snapshot shows the selected draft policy while Save still displays
+its disabled Saving state. The test called `waitForLoadState("load")` after
+clicking Save; the current document already satisfied that state, so the test
+could read persisted data before the PATCH completed. The test now arms an
+exact-routine PATCH response observer and a future document load event before
+clicking Save. It checks the response status, then retains the rendered-policy
+and persisted-value assertions after the reload. No product behavior or timeout
+changed. All four tests in that file passed with one worker, zero retries,
+two CPUs and 4 GiB against the previously verified unchanged runtime build.
+Scoped ESLint and formatting checks passed. The next commit's source review
+and exact-head CI remain separate delivery gates.
+
 ### CI follow-up after `6a0ee44cc`
 
 The isolated review initially accepted `6a0ee44cc1ed94c3ae962de9a90938146ef40e13`;
