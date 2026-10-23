@@ -1,6 +1,7 @@
 import { expect, type Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 
+/** Resize the tile through its host while retaining the desktop viewport and real flex layout. */
 export async function setDesktopTileWidth(
   board: Locator,
   tile: Locator,
@@ -18,6 +19,7 @@ export async function setDesktopTileWidth(
   expect(tile.page().viewportSize()!.width).toBeGreaterThan(768);
 }
 
+/** Attach one merged or closed PR to a task through the mock GitHub provider. */
 export async function associateTerminalPR(
   apiClient: ApiClient,
   taskId: string,
@@ -37,6 +39,7 @@ export async function associateTerminalPR(
   });
 }
 
+/** Require room for ordinary words and contain the message and controls within the banner. */
 export async function expectReadableNotice(banner: Locator) {
   await expect(banner).toBeVisible();
   const message = banner.locator(":scope > span").first();
@@ -61,6 +64,7 @@ export async function expectReadableNotice(banner: Locator) {
   }
 }
 
+/** Require the minimum hit size and an unobscured center for each banner button. */
 export async function expectNoticeTargets(banner: Locator, minimum: number) {
   for (const button of await banner.locator(":scope > button").all()) {
     const box = (await button.boundingBox())!;

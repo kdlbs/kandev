@@ -50,14 +50,26 @@ for (const layout of ["columns", "grid"] as const) {
         await expect(bar.getByTestId("proceed-next-step")).toBeVisible();
         await expect(bar.getByTestId("auto-scroll-toggle-button")).toBeVisible();
         await expect(bar.getByTestId("share-task-button")).toBeVisible();
+        const actionGroups = [
+          bar.getByTestId("chat-status-bar-right-controls"),
+          bar.getByTestId("proceed-next-step"),
+        ];
         const columns = layout === "columns" ? 2 : 1;
         for (const width of [360, 384, 480]) {
           await setDesktopTileWidth(board, tile, width, columns);
           await expectReadableNotice(banner);
           await expectNoticeTargets(banner, 24);
           const noticeBox = (await banner.boundingBox())!;
-          const actionsBox = (await bar.getByTestId("chat-status-bar-actions").boundingBox())!;
-          expect(actionsBox.y).toBeGreaterThanOrEqual(noticeBox.y + noticeBox.height);
+          const barBox = (await bar.boundingBox())!;
+          for (const group of actionGroups) {
+            const actionsBox = (await group.boundingBox())!;
+            expect(
+              actionsBox.y >= noticeBox.y + noticeBox.height ||
+                actionsBox.x >= noticeBox.x + noticeBox.width,
+              "actions must fit beside or below the readable notice",
+            ).toBe(true);
+            expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(barBox.x + barBox.width);
+          }
         }
         await testInfo.attach("narrow-desktop-notice", {
           body: await tile.screenshot({ path: testInfo.outputPath("narrow-desktop-notice.png") }),
@@ -67,8 +79,10 @@ for (const layout of ["columns", "grid"] as const) {
         await setDesktopTileWidth(board, tile, 900, columns);
         await expectReadableNotice(banner);
         const notice = (await banner.boundingBox())!;
-        const actions = (await bar.getByTestId("chat-status-bar-actions").boundingBox())!;
-        expect(actions.y + actions.height / 2).toBeCloseTo(notice.y + notice.height / 2, 0);
+        for (const group of actionGroups) {
+          const actions = (await group.boundingBox())!;
+          expect(actions.y + actions.height / 2).toBeCloseTo(notice.y + notice.height / 2, 0);
+        }
         await banner.getByTestId(`pr-${state}-archive-button`).click();
         await expect(testPage.getByTestId(`pr-${state}-archive-confirm`)).toBeEnabled();
         await testPage.getByRole("button", { name: "Cancel", exact: true }).click();

@@ -176,3 +176,23 @@ Desktop Columns and Grid screenshots were inspected. They show readable
 notice text above compact utility controls. The phone screenshot preserves
 the short full-width notice, Archive/dismiss targets, and workflow row above
 utilities. Captures remain outside the tracked source tree.
+
+## PR compatibility follow-up
+
+The current base moved archive notices inside `chat-status-bar-actions`.
+The original desktop geometry assertion treated that container as a sibling
+below the notice. A synthetic merge reproduced four failures even though the
+notice remained readable. The updated assertions measure utility controls and
+Proceed directly. They require each group to fit beside or below the notice
+without overlap or horizontal overflow, and retain wide inline alignment.
+This permits the valid partial wrap at 480px while protecting 360px and 384px.
+
+The three component suites passed 59 tests on the combined code. All five
+updated desktop scenarios passed both there and on the PR branch:
+`/tmp/kandev-run.e2e.pnCGUCb8.log` and
+`/tmp/kandev-run.e2e.PEm8Cwlw.log`. Prettier and targeted ESLint passed.
+
+All 12 mobile compatibility cases passed on the combined code, including the
+new Threads case: `/tmp/kandev-run.e2e.FG6nWLMN.log`. CodeRabbit's summary
+requested docstrings for the new helpers; each helper now states its contract.
+No production behavior changed during this follow-up.
