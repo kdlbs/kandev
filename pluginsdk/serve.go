@@ -1,0 +1,423 @@
+// serve.go wires plugin authors (via Serve) and kandev's runtime manager
+// (via the exported GRPCPlugin type) onto hashicorp/go-plugin, per §2/§3 of
+// docs/plans/plugins/GRPC-CONTRACT.md.
+//
+// # Host injection
+//
+// The frozen Plugin service (§3) has no RPC for negotiating a broker ID, so
+// the two sides can't use go-plugin's usual "allocate an ID and pass it in
+// the request" bidirectional pattern for the Host service. Instead they
+// agree on a constant, hostBrokerID:
+//
+//   - kandev (host side, GRPCPlugin.GRPCClient — called once when kandev
+//     dispenses the plugin) starts serving its own Host implementation on
+//     hostBrokerID via broker.AcceptAndServe.
+//   - The plugin subprocess (GRPCPlugin.GRPCServer — called once at
+//     subprocess startup, before the process has even accepted a
+//     connection from kandev) cannot dial hostBrokerID synchronously: the
+//     broker's control stream to kandev doesn't exist yet, so a blocking
+//     Dial here would deadlock startup. It instead spawns a background
+//     goroutine that retries broker.Dial(hostBrokerID) with backoff until
+//     it succeeds or HostDialTimeout elapses, then injects the resulting
+//     Host into Impl via the optional HostSetter interface —
+//     UnimplementedPlugin implements HostSetter, so embedding it is enough
+//     to opt in. A Plugin that doesn't implement HostSetter simply never
+//     receives a Host (fine for plugins that don't need one).
+//
+// GRPCPlugin is exported specifically so kandev's runtime manager can reuse
+// it on the host side with plugin.NewClient — see the GRPCPlugin doc
+// comment for the exact wiring.
+package pluginsdk
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	hcplugin "github.com/hashicorp/go-plugin"
+	pluginv1 "github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// Handshake is the go-plugin handshake shared by kandev and every plugin
+// backend (§2 of docs/plans/plugins/GRPC-CONTRACT.md). Both sides must use
+// this exact value — Serve uses it automatically; kandev's runtime manager
+// must set it on plugin.ClientConfig.HandshakeConfig.
+var Handshake = hcplugin.HandshakeConfig{
+	ProtocolVersion:  1,
+	MagicCookieKey:   "KANDEV_PLUGIN",
+	MagicCookieValue: "kandev-plugin-v1",
+}
+
+// PluginMapKey is the go-plugin plugin-map key both Serve (plugin side) and
+// kandev's runtime manager (host side, plugin.ClientConfig.Plugins) use.
+const PluginMapKey = "plugin"
+
+// hostBrokerID is the well-known go-plugin broker stream ID used for the
+// Host service. See the "Host injection" section in the file header.
+const hostBrokerID = 1
+
+// defaultHostDialTimeout bounds how long the plugin subprocess retries
+// dialing hostBrokerID before giving up and leaving Host unset.
+const defaultHostDialTimeout = 30 * time.Second
+
+// GRPCPlugin adapts a Plugin (subprocess side) and/or a Host (kandev side)
+// to hashicorp/go-plugin's plugin.GRPCPlugin interface. It is the shared
+// type both sides use:
+//
+//   - Plugin authors never construct it directly; Serve does so internally.
+//
+//   - kandev's runtime manager constructs it directly:
+//
+//     client := plugin.NewClient(&plugin.ClientConfig{
+//     HandshakeConfig:  pluginsdk.Handshake,
+//     Plugins:          map[string]plugin.Plugin{pluginsdk.PluginMapKey: &pluginsdk.GRPCPlugin{Host: myHostImpl}},
+//     AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC},
+//     AutoMTLS:         true,
+//     Cmd:              exec.Command(pluginBinaryPath),
+//     })
+//     rpcClient, _ := client.Client()
+//     raw, _ := rpcClient.Dispense(pluginsdk.PluginMapKey)
+//     remote := raw.(*pluginsdk.RemotePlugin)
+//
+// See the file header for how Host injection works across the two sides.
+type GRPCPlugin struct {
+	hcplugin.NetRPCUnsupportedPlugin
+
+	// Impl is the plugin author's implementation. Set by Serve on the
+	// plugin subprocess side.
+	Impl Plugin
+
+	// Host is kandev's Go-native Host implementation. Set by kandev's
+	// runtime manager on the host side.
+	Host Host
+
+	// HostDialTimeout overrides defaultHostDialTimeout. Zero means use the
+	// default; mainly useful in tests.
+	HostDialTimeout time.Duration
+}
+
+var _ hcplugin.GRPCPlugin = (*GRPCPlugin)(nil)
+
+// GRPCServer is called once inside the plugin subprocess (by plugin.Serve,
+// via Serve) to register the Plugin service and — if Impl implements
+// HostSetter — kick off the background Host dial described in the file
+// header.
+func (p *GRPCPlugin) GRPCServer(broker *hcplugin.GRPCBroker, s *grpc.Server) error {
+	pluginv1.RegisterPluginServer(s, &grpcPluginServer{impl: p.Impl})
+
+	setter, ok := p.Impl.(HostSetter)
+	if !ok {
+		return nil
+	}
+	timeout := p.HostDialTimeout
+	if timeout <= 0 {
+		timeout = defaultHostDialTimeout
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		conn, err := dialBrokerWithRetry(ctx, broker, hostBrokerID)
+		if err != nil {
+			return
+		}
+		setter.SetHost(newHostClient(conn))
+	}()
+	return nil
+}
+
+// GRPCClient is called once inside kandev (by plugin.NewClient's Dispense)
+// to build the RemotePlugin used to call the plugin, and — if Host is set —
+// to start serving it on hostBrokerID so the plugin subprocess can call
+// back. See the file header.
+func (p *GRPCPlugin) GRPCClient(_ context.Context, broker *hcplugin.GRPCBroker, conn *grpc.ClientConn) (interface{}, error) {
+	if p.Host != nil {
+		go broker.AcceptAndServe(hostBrokerID, func(opts []grpc.ServerOption) *grpc.Server {
+			s := grpc.NewServer(opts...)
+			registerHostServer(s, p.Host)
+			return s
+		})
+	}
+	return &RemotePlugin{client: pluginv1.NewPluginClient(conn)}, nil
+}
+
+// dialBrokerWithRetry retries broker.Dial(id) with backoff until it
+// succeeds or ctx is done. A single Dial attempt can legitimately fail
+// while the peer hasn't called AcceptAndServe(id, ...) yet (see the file
+// header); retrying absorbs that startup race.
+func dialBrokerWithRetry(ctx context.Context, broker *hcplugin.GRPCBroker, id uint32) (*grpc.ClientConn, error) {
+	backoff := 100 * time.Millisecond
+	const maxBackoff = 2 * time.Second
+	for {
+		conn, err := broker.Dial(id)
+		if err == nil {
+			return conn, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("pluginsdk: dial broker id %d: %w", id, ctx.Err())
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			backoff *= 2
+		}
+	}
+}
+
+// RemotePlugin is the Go-native client kandev's runtime manager uses to
+// call a running plugin, returned by Dispense(pluginsdk.PluginMapKey).
+type RemotePlugin struct {
+	client pluginv1.PluginClient
+}
+
+// DeliverEvent calls the plugin's DeliverEvent RPC. Timeout/retry policy
+// (§5: 10s timeout, 3 retries) is the caller's responsibility — this method
+// is a thin, context-respecting proxy.
+func (r *RemotePlugin) DeliverEvent(ctx context.Context, e *Event) error {
+	proto, err := e.toProto()
+	if err != nil {
+		return err
+	}
+	_, err = r.client.DeliverEvent(ctx, proto)
+	return err
+}
+
+// HandleWebhook calls the plugin's HandleWebhook RPC.
+func (r *RemotePlugin) HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error) {
+	resp, err := r.client.HandleWebhook(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return webhookResponseFromProto(resp), nil
+}
+
+// HandleAction calls an optional authenticated plugin action.
+func (r *RemotePlugin) HandleAction(ctx context.Context, req *PluginActionRequest) (*PluginActionResponse, error) {
+	resp, err := r.client.HandleAction(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return pluginActionResponseFromProto(resp), nil
+}
+
+// SearchEntityReferences calls an optional manifest-owned reference source.
+func (r *RemotePlugin) SearchEntityReferences(ctx context.Context, req *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error) {
+	resp, err := r.client.SearchEntityReferences(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return searchEntityReferencesResponseFromProto(resp)
+}
+
+// AuthorizeEntityReference calls an optional live reference authorizer.
+func (r *RemotePlugin) AuthorizeEntityReference(ctx context.Context, req *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error) {
+	protoReq, err := req.toProto()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.client.AuthorizeEntityReference(ctx, protoReq)
+	if err != nil {
+		return nil, err
+	}
+	return authorizeEntityReferenceResponseFromProto(resp), nil
+}
+
+// ResolveGitCredential calls an optional declared-provider credential resolver.
+func (r *RemotePlugin) ResolveGitCredential(ctx context.Context, req *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error) {
+	resp, err := r.client.ResolveGitCredential(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return resolveGitCredentialResponseFromProto(resp), nil
+}
+
+// GetGitCredentialBinding calls an optional non-secret credential-binding
+// extension for an exact host-verified lease scope.
+func (r *RemotePlugin) GetGitCredentialBinding(ctx context.Context, req *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error) {
+	resp, err := r.client.GetGitCredentialBinding(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return gitCredentialBindingResponseFromProto(resp), nil
+}
+
+// InvokeAgentTool calls the optional plugin agent-tool RPC. The caller owns
+// timeout and retry policy because tool calls may have side effects.
+func (r *RemotePlugin) InvokeAgentTool(ctx context.Context, req *AgentToolRequest) (*AgentToolResult, error) {
+	protoReq, err := req.toProto()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.client.InvokeAgentTool(ctx, protoReq)
+	if err != nil {
+		return nil, err
+	}
+	return agentToolResultFromProto(resp)
+}
+
+// grpcPluginServer adapts the author-facing Plugin interface to the
+// generated pluginv1.PluginServer interface. Registered inside the plugin
+// subprocess by GRPCPlugin.GRPCServer.
+type grpcPluginServer struct {
+	pluginv1.UnimplementedPluginServer
+	impl Plugin
+}
+
+func (s *grpcPluginServer) DeliverEvent(ctx context.Context, req *pluginv1.Event) (*pluginv1.EventAck, error) {
+	e, err := eventFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.impl.OnEvent(ctx, e); err != nil {
+		return nil, err
+	}
+	return &pluginv1.EventAck{}, nil
+}
+
+func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.WebhookRequest) (*pluginv1.WebhookResponse, error) {
+	resp, err := s.impl.HandleWebhook(ctx, webhookRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) HandleAction(ctx context.Context, req *pluginv1.PluginActionRequest) (*pluginv1.PluginActionResponse, error) {
+	handler, ok := s.impl.(ActionHandler)
+	if !ok {
+		return nil, unsupportedPluginExtension("action handler")
+	}
+	resp, err := handler.HandleAction(ctx, pluginActionRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: action handler returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) SearchEntityReferences(ctx context.Context, req *pluginv1.SearchEntityReferencesRequest) (*pluginv1.SearchEntityReferencesResponse, error) {
+	handler, ok := s.impl.(EntityReferenceSearcher)
+	if !ok {
+		return nil, unsupportedPluginExtension("entity reference searcher")
+	}
+	resp, err := handler.SearchEntityReferences(ctx, searchEntityReferencesRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: entity reference searcher returned nil response")
+	}
+	return resp.toProto()
+}
+
+func (s *grpcPluginServer) AuthorizeEntityReference(ctx context.Context, req *pluginv1.AuthorizeEntityReferenceRequest) (*pluginv1.AuthorizeEntityReferenceResponse, error) {
+	handler, ok := s.impl.(EntityReferenceAuthorizer)
+	if !ok {
+		return nil, unsupportedPluginExtension("entity reference authorizer")
+	}
+	native, err := authorizeEntityReferenceRequestFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := handler.AuthorizeEntityReference(ctx, native)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: entity reference authorizer returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) ResolveGitCredential(ctx context.Context, req *pluginv1.ResolveGitCredentialRequest) (*pluginv1.ResolveGitCredentialResponse, error) {
+	handler, ok := s.impl.(GitCredentialResolver)
+	if !ok {
+		return nil, unsupportedPluginExtension("git credential resolver")
+	}
+	resp, err := handler.ResolveGitCredential(ctx, resolveGitCredentialRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: git credential resolver returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) GetGitCredentialBinding(ctx context.Context, req *pluginv1.GitCredentialBindingRequest) (*pluginv1.GitCredentialBindingResponse, error) {
+	handler, ok := s.impl.(GitCredentialBinder)
+	if !ok {
+		return nil, unsupportedPluginExtension("git credential binder")
+	}
+	resp, err := handler.GetGitCredentialBinding(ctx, gitCredentialBindingRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: git credential binder returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) InvokeAgentTool(ctx context.Context, req *pluginv1.AgentToolRequest) (*pluginv1.AgentToolResponse, error) {
+	handler, ok := s.impl.(AgentToolPlugin)
+	if !ok {
+		return nil, unsupportedPluginExtension("agent tool invocation")
+	}
+	converted, err := agentToolRequestFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	result, err := handler.InvokeAgentTool(ctx, converted)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, status.Error(codes.Internal, "plugin returned a nil agent tool result")
+	}
+	return result.toProto()
+}
+
+func unsupportedPluginExtension(extension string) error {
+	return status.Errorf(codes.Unimplemented, "pluginsdk: plugin does not implement %s", extension)
+}
+
+var _ pluginv1.PluginServer = (*grpcPluginServer)(nil)
+
+// Option configures Serve.
+type Option func(*serveConfig)
+
+type serveConfig struct {
+	hostDialTimeout time.Duration
+}
+
+// WithHostDialTimeout overrides how long Serve retries dialing kandev's
+// Host broker connection before giving up (default 30s). Mainly useful in
+// tests that want a tighter bound than production.
+func WithHostDialTimeout(d time.Duration) Option {
+	return func(c *serveConfig) { c.hostDialTimeout = d }
+}
+
+// Serve wires p up as a kandev plugin backend and blocks until the process
+// is terminated by kandev. It owns all go-plugin/grpc plumbing: the
+// handshake (Handshake), the plugin map (PluginMapKey), and the Host broker
+// dial + injection described in the file header.
+func Serve(p Plugin, opts ...Option) {
+	cfg := &serveConfig{hostDialTimeout: defaultHostDialTimeout}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	gp := &GRPCPlugin{Impl: p, HostDialTimeout: cfg.hostDialTimeout}
+	hcplugin.Serve(&hcplugin.ServeConfig{
+		HandshakeConfig: Handshake,
+		Plugins:         map[string]hcplugin.Plugin{PluginMapKey: gp},
+		GRPCServer: func(options []grpc.ServerOption) *grpc.Server {
+			// The webhook HTTP body may be 16 MiB; leave room for protobuf metadata.
+			return grpc.NewServer(append(options, grpc.MaxRecvMsgSize(17<<20))...)
+		},
+	})
+}

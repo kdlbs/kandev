@@ -31,6 +31,89 @@ support, not a starter repository.
 6. Smoke-test every declared hook and capability, then bump the version for
    the next iteration.
 
+## Install and migrate SDK dependencies
+
+The standalone SDK starts at **0.1.0**. This source change does not establish
+public availability: wait for a successful Stable SDK publication and its
+verified host mapping before running the public installation commands below.
+The general and coordinator templates have separate migration handoffs.
+
+The Go and npm packages share an SDK version, independent of Kandev's version.
+Each package includes `sdk-release.json`: `host_release` names the originating
+Stable host, `min_kandev_version` is the SDK-wide host floor, and `api_versions`
+lists supported manifest API versions. A package version is not a manifest
+`api_version`, a handshake version, or a plugin's own version.
+
+After the selected SDK version is publicly verified:
+
+1. Change Go imports from `github.com/kandev/kandev/pkg/pluginsdk` to
+   `github.com/kdlbs/kandev/pluginsdk`. Generated wire imports move from
+   `github.com/kandev/kandev/proto/kandev/plugin/v1` to
+   `github.com/kdlbs/kandev/pluginsdk/proto/kandev/plugin/v1`.
+2. Remove the old backend requirement and its local replacement from `go.mod`.
+   Install the exact SDK release, then regenerate `go.sum`:
+
+   ```bash
+   go get github.com/kdlbs/kandev/pluginsdk@v0.1.0
+   go mod tidy
+   ```
+
+3. Replace frontend `file:`, `link:`, or workspace SDK dependencies with an exact
+   registry version and commit the generated lockfile:
+
+   ```bash
+   npm install --save-dev --save-exact @kandev/plugin-sdk@0.1.0
+   ```
+
+4. Set `manifest.yaml`'s `min_kandev_version` to at least the highest floor of
+   the SDKs actually installed. Select an `api_version` supported by all of
+   them. Inspect the installed npm record with
+   `node -p 'require("./node_modules/@kandev/plugin-sdk/sdk-release.json")'`.
+   Do not invent the initial host number from these examples.
+5. Add the compatibility check before build/package in CI, after dependency
+   installation. Run it from the plugin's Go module and manifest directory:
+
+   ```bash
+   go run github.com/kdlbs/kandev/pluginsdk/cmd/kandev-sdk-check@v0.1.0 \
+     --manifest manifest.yaml --frontend-sdk node_modules/@kandev/plugin-sdk
+   ```
+
+Omit `--frontend-sdk` for Go-only plugins. Add `--frontend-only` for a project
+that only checks frontend dependencies. The checker reads the Go module version
+selected by Go, which can be higher than the direct requirement. It checks the
+installed frontend package against npm lockfile v2/v3 or pnpm lockfile v9.
+Run frontend checks from that package's project root; use `--manifest` to select
+a manifest elsewhere. It rejects SDK replacements, arbitrary symlinks, local
+lockfile resolutions, missing metadata, insufficient host minima, and unsupported
+API versions. It does not rewrite project files.
+
+Keep exact pins and upgrade deliberately. Before committing an upgrade, install
+the new versions, rerun the checker and plugin tests, and test on the declared
+minimum host. A plugin that uses only a small part of an SDK still inherits that
+SDK's whole host floor. The local Kandev workspace replacement is for host
+contributors; it is not the external plugin release path.
+
+### Support for existing plugins
+
+Moving source packages does not change the plugin wire protocol or handshake.
+An already built plugin does not need a rebuild just because the import path
+changed. Its existing manifest, API, permissions, and host compatibility still
+apply. The extraction includes a legacy-binary handshake and Host roundtrip test;
+that test is not a certification of every third-party plugin.
+
+Source builds that still import the old path will fail against the new checkout.
+Keep their previously tested Kandev commit pinned until migration is possible.
+There is no forwarding package at the old path. Migrate dependencies and rerun
+tests before publishing a new plugin release; a higher declared host minimum
+can intentionally exclude older hosts.
+
+SDK publication removes the sibling checkout requirement for SDK compilation
+and typechecking. `plugin-pack` remains a backend-owned packaging tool. A
+repository that uses it must retain a separately pinned tooling checkout or
+provide an equivalent validated packaging path. Do not delete all checkout steps
+without inspecting their purpose. See [SDK release and recovery](release-process.md#plugin-sdk-publication)
+for maintainer prerequisites and artifact verification.
+
 ## Lifecycle
 
 ![Plugin authoring lifecycle: package validation and safe extraction feed the supervised Go runtime path and the browser native-UI path, which ends in plugin initialization.](../screenshots/plugin-authoring-lifecycle.svg)
@@ -389,8 +472,8 @@ of truth and must be updated together when the contract changes:
   apps/web/lib/plugins/types.ts. These may contain compatibility-only host
   details that are deliberately absent from the public SDK.
 - Concrete frontend Host exports: apps/web/lib/plugins/host-api.ts.
-- Backend author API: apps/backend/pkg/pluginsdk.
-- Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
+- Backend author API: pluginsdk.
+- Wire contract: pluginsdk/proto/kandev/plugin/v1/plugin.proto.
 - Manifest model and semantic validation: apps/backend/internal/plugins/manifest.
 - Package integrity and installation: apps/backend/internal/plugins/pkgtar.
 - Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md),
@@ -961,7 +1044,7 @@ subscription vocabulary and wildcard rules are in the
 | Agent conversations        | AgentConversations(host): Ensure, Dispatch, Delete                                                                               | agent_conversation: true                                                                                                                          | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin                                                                                     |
 
 The Go signatures, filters, DTOs, and pagination types live in
-apps/backend/pkg/pluginsdk/host.go and data_types.go. api_write task/message
+pluginsdk/host.go and data_types.go. api_write task/message
 methods are implemented in the current branch; do not repeat older docs that
 call them reserved.
 
@@ -1761,7 +1844,7 @@ ui:
 // server/main.go
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
+import "github.com/kdlbs/kandev/pluginsdk"
 
 func main() { pluginsdk.Serve(&pluginsdk.UnimplementedPlugin{}) }
 ```
@@ -1940,7 +2023,7 @@ event bus for delivery to any subscriber (including other plugins).
 The data-reader accessors return typed, paginated readers, for example
 `host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
-next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
+next page. See `pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
 
@@ -3729,7 +3812,7 @@ repackaging.
 - **Leaving stale frontend registrations:** use destroy, unsubscribe store/WS
   listeners, clear timers, and rely on host bulk revocation after disable or
   uninstall.
-- **Importing direct DB/internal packages:** use apps/backend/pkg/pluginsdk and
+- **Importing direct DB/internal packages:** use pluginsdk and
   typed Host methods. Direct database access is outside the plugin contract.
 - **Trusting webhook metadata:** `webhooks[].method` is informational. Public
   routes are not authenticated by Kandev, so validate method, signature, timestamp, replay

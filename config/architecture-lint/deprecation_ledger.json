@@ -18,11 +18,6 @@
       "marker": "Deprecated:"
     },
     {
-      "path": "apps/backend/pkg/pluginsdk/data_types.go",
-      "declaration": "field:Task.Labels#1",
-      "marker": "Deprecated:"
-    },
-    {
       "path": "apps/web/components/task-create-dialog-types.ts",
       "declaration": "property:TaskCreateDialogInitialValues.githubUrl#1",
       "marker": "@deprecated"

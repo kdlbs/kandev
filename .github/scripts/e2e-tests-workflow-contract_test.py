@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for the E2E workflow and prebuilt images."""
 
+import shutil
 import hashlib
 import json
 import re
@@ -97,7 +98,7 @@ class E2EWorkflowContractTest(unittest.TestCase):
 
     def test_independent_helper_cache_snapshots_refresh_after_source_changes(self) -> None:
         workflow = E2E_WORKFLOW.read_text()
-        dependency = "${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}"
+        dependency = "${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum', 'pluginsdk/go.mod', 'pluginsdk/go.sum') }}"
         block = job_block(workflow, "helper_compile", "build")
         prefix = f"go-e2e-helpers-{dependency}"
         self.assertIn(f"key: {prefix}-${{{{ github.sha }}}}", block)
@@ -223,7 +224,7 @@ if (( count <= FAKE_DOCKER_FAILURES )); then
 fi
 if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS )); then
   echo "stalled registry lookup" >&2
-  /bin/sleep 1
+  "${REAL_SLEEP}" 1
   exit 1
 fi
 if (( count <= FAKE_DOCKER_FAILURES + FAKE_DOCKER_STALLS + FAKE_DOCKER_INVALID_RESPONSES )); then
@@ -244,6 +245,7 @@ cat "${FAKE_DOCKER_MANIFEST}"
             env.update(
                 {
                     "PATH": f"{bin_dir}:{env['PATH']}",
+                    "REAL_SLEEP": shutil.which("sleep"),
                     "FAKE_DOCKER_COUNT": str(count_file),
                     "FAKE_DOCKER_FAILURES": str(failures_before_success),
                     "FAKE_DOCKER_STALLS": str(stalls_before_success),
