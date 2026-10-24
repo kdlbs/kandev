@@ -6,6 +6,7 @@ package types
 
 import (
 	"context"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -176,9 +177,10 @@ type McpServer struct {
 	Headers map[string]string `json:"headers,omitempty"` // HTTP headers (SSE/HTTP transport)
 	// The following fields are backend-only evidence metadata. They are
 	// intentionally omitted from protocol JSON sent to agentctl and providers.
-	DefinitionID       string            `json:"-"`
-	DefinitionRevision int64             `json:"-"`
-	Origins            []McpServerOrigin `json:"-"`
+	BuiltinPackage     mcpprofile.PackageID `json:"-"`
+	DefinitionID       string               `json:"-"`
+	DefinitionRevision int64                `json:"-"`
+	Origins            []McpServerOrigin    `json:"-"`
 }
 
 // McpServerOrigin is backend-owned scope metadata carried alongside an MCP
@@ -403,4 +405,10 @@ type VscodeOpenFileRequest struct {
 type VscodeOpenFileResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+// IsInjectedBuiltin identifies host-generated package entries. The provenance
+// field is never accepted from agent or provider JSON.
+func (s McpServer) IsInjectedBuiltin() bool {
+	return s.BuiltinPackage != "" && mcpprofile.BuiltinPackageForRuntimeName(s.Name) == s.BuiltinPackage
 }

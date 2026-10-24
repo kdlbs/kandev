@@ -11,6 +11,7 @@ package sysprompt
 
 import (
 	"fmt"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"regexp"
 	"strconv"
 	"strings"
@@ -181,15 +182,7 @@ const officeStepCompleteInstruction = "This workflow step requires an explicit c
 // workflow step. The imperative completion instruction is present only when
 // the step's auto-advance policy requires the signal.
 func FormatOfficeContextWithOptions(taskID, sessionID string, requiresSignal bool) string {
-	instruction := ""
-	if requiresSignal {
-		instruction = officeStepCompleteInstruction
-	}
-	return Resolve("office-context", map[string]string{
-		"task_id":                   taskID,
-		"session_id":                sessionID,
-		"step_complete_instruction": instruction,
-	})
+	return FormatOfficeContextWithPackages(taskID, sessionID, requiresSignal, nil)
 }
 
 // InjectOfficeContext ensures a first-turn prompt has the restricted Office context.
@@ -221,14 +214,14 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 // task, session, capability, and question placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
-	return Resolve("kandev-context", map[string]string{
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"canvas_guidance_section":          "",
 		"rich_output_section":              richOutputSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
-	})
+	}, nil)
 }
 
 const userQuestionSection = `- ask_user_question_kandev: Ask the user 1-4 related questions and wait for all answers. Keep shared context to 1-3 short sentences or brief bullets (about 100 words or fewer); put full reports, logs, and repeated conversation outside this call, before it. Keep each question and its options self-contained. Treat this as a hard user-input barrier: do no more work, make no tool calls, or send a final response until completed answers or structured rejection. On validation error before question creation, correct and retry. If an accepted call returns incomplete (including timeout, disconnect, or pending wait), end the turn without inferring an answer or continuing work.
@@ -305,6 +298,7 @@ func PendingTaskTitlePassthroughInstruction() string {
 // KandevContextOptions controls capability-dependent sections in the first-turn
 // Kandev context.
 type KandevContextOptions struct {
+	BuiltinPackages                *mcpprofile.BuiltinManifest
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
 	IncludeTaskTitleTool           bool
@@ -356,7 +350,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCanvasGuidance {
 		canvasGuidance = canvasGuidanceSection
 	}
-	return Resolve("kandev-context", map[string]string{
+	return resolveBuiltinPrompt("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
@@ -366,7 +360,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		"rich_output_section":              richOutputSection,
 		"autopilot_section":                autopilot,
 		"question_tool_section":            questionTool,
-	})
+	}, options.BuiltinPackages)
 }
 
 // ConfigContext returns the system prompt for config-mode MCP sessions.

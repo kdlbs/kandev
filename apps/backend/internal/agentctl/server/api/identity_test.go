@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 )
 
 // TestHandleIdentityIsReachableWithoutAuthAndReportsIdentityAndCapabilities
@@ -95,6 +97,9 @@ func TestGetIdentityRoundTripsThroughTheRealClient(t *testing.T) {
 	}
 	if identity.ServerIdentity != cfg.ServerIdentity {
 		t.Errorf("ServerIdentity = %q, want %q", identity.ServerIdentity, cfg.ServerIdentity)
+	}
+	if identity.BuiltinMCPCatalogVersion != 1 || !slices.Contains(identity.Capabilities, mcpprofile.BuiltinPackagesCapability) {
+		t.Fatal("identity must advertise the built-in package capability and catalog version")
 	}
 	if len(identity.Capabilities) == 0 {
 		t.Error("Capabilities is empty, want the advertised capability set")

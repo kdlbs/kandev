@@ -5,6 +5,8 @@ Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
 Use these IDs when a tool requires task_id or session_id.
 
+{builtin_package_section}
+
 Available tools:
 - ask_user_question_kandev: Ask the user one or more clarifying questions in a single call. Required: questions (1-4 items, each with prompt and 2-6 labeled options). Optional: context.
 - create_task_plan_kandev: Save an implementation plan. This replaces existing content only with the current expected_version; use edit_task_plan_kandev for a local change or update_task_plan_kandev with mode="append" for a new section. Required: task_id, content. Optional: title, expected_version, allow_truncation.
@@ -15,7 +17,7 @@ Available tools:
 - get_task_plan_revision_kandev: Read one exact task-plan revision, including its unchanged content and revision_version. Required: task_id, revision_id.
 - restore_task_plan_revision_kandev: Restore one task-plan revision as a new revision. Requires expected_version and expected_revision_version. Required: task_id, revision_id, expected_version, expected_revision_version.
 - delete_task_plan_kandev: Delete the current task plan. Required: task_id.
-- show_rich_output_kandev: For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now. Compose version=2,catalog_version=1,spec.root/spec.elements from the discovered catalog (Stack,Group,Text,Chart,Table,StatusList,Callout,Metrics,FilePreview). Inline and workspace CSV charts and tables are supported. Get exact properties and examples through tool discovery. No ASCII/SVG/HTML/separate app. Otherwise prose or small Markdown tables. Kandev owns axes, legends, tooltips, layout, and styling. Label series with units. Use Table for structured comparisons, StatusList for recorded checks, and Callout for key findings.
+{office_rich_output_section}
 - list_related_tasks_kandev: List parent, child, sibling, blocker, and blocked tasks. Optional: task_id (defaults to the current task), verbose (include task descriptions; omitted by default).
 - list_task_documents_kandev: List documents on an accessible related task. Required: task_id.
 - get_task_document_kandev: Read one document on an accessible related task. Required: task_id, document_key.

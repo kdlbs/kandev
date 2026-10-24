@@ -1522,7 +1522,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpMode = mcpMode
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, true)
+	profileContext, err := e.PrepareTaskSessionMCPProfile(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, err
 	}

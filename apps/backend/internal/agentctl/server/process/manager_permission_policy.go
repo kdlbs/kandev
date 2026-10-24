@@ -56,8 +56,8 @@ func (m *Manager) autoApproveCoordinatorPermission(req *adapter.PermissionReques
 }
 
 func (m *Manager) autoApproveInjectedKandevPermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, bool) {
-	server, tool, option, ok := m.resolveInjectedKandevPermission(req)
-	if !ok || server != injectedKandevMCPServerName {
+	_, tool, option, ok := m.resolveInjectedKandevPermission(req)
+	if !ok {
 		return nil, false
 	}
 	m.logger.Info("auto-approving injected Kandev MCP permission",
@@ -84,6 +84,13 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 	}
 	server, tool, parsed := types.ParseQualifiedMCPToolName(*req.ToolName)
 	if !parsed {
+		return "", "", adapter.PermissionOption{}, false
+	}
+	if m.cfg.McpProfile != nil && m.cfg.McpProfile.BuiltinPackages != nil {
+		if !m.builtinPermissionAllowed(server, tool) {
+			return "", "", adapter.PermissionOption{}, false
+		}
+	} else if server != injectedKandevMCPServerName {
 		return "", "", adapter.PermissionOption{}, false
 	}
 	option, ok = injectedKandevPermissionOption(req.Options)

@@ -372,6 +372,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
 		}
 	}
+	putBuiltinLaunchMetadata(metadata, req.McpProfile)
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -381,7 +382,7 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[k] = v
 			continue
 		}
-		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey || k == mcpprofile.BuiltinBindingMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -1863,6 +1864,11 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	if req.McpProfile != nil && req.McpProfile.BuiltinPackages != nil {
+		if err := m.validateBuiltinOwner(ctx, req.TaskID, req.SessionID, req.WorkspaceID, req.McpProfile); err != nil {
+			return nil, err
+		}
+	}
 	if m.executorAdmission != nil {
 		var err error
 		ctx, err = m.executorAdmission(ctx, req.SessionID, getMetadataString(req.Metadata, "executor_id"), getMetadataString(req.Metadata, MetadataKeyExecutorProfileID))
@@ -1980,13 +1986,19 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, acquireErr
 		}
 		defer activityLease.Release()
+		if execution.AgentCommand != "" {
+			return nil, nil
+		}
+		if err := m.prepareBuiltinWorkspaceExecution(sharedCtx, execution, req); err != nil {
+			return nil, err
+		}
 		if len(req.McpProviders) > 0 {
 			client, releaseClient := execution.AcquireAgentCtlClient()
 			defer releaseClient()
 			if client == nil {
 				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
 			}
-			if err := client.SetMcpProviders(sharedCtx, req.McpProviders); err != nil {
+			if err := m.updateBuiltinProfile(sharedCtx, execution, builtinProviderUpdate(req.McpProviders), func() error { return client.SetMcpProviders(sharedCtx, req.McpProviders) }); err != nil {
 				return nil, fmt.Errorf("set MCP providers during workspace execution promotion: %w", err)
 			}
 		}
@@ -2952,7 +2964,7 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
-	return client.SetMcpMode(ctx, mode)
+	return m.updateBuiltinProfile(ctx, execution, builtinModeUpdate(mode), func() error { return client.SetMcpMode(ctx, mode) })
 }
 
 // SetMcpProvidersForSession replaces the task-mode MCP provider capabilities
@@ -2975,7 +2987,7 @@ func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID strin
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	if err := client.SetMcpProviders(ctx, providers); err != nil {
+	if err := m.updateBuiltinProfile(ctx, execution, builtinProviderUpdate(providers), func() error { return client.SetMcpProviders(ctx, providers) }); err != nil {
 		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
 	}
 	return nil

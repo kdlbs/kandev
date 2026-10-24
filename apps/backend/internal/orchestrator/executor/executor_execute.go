@@ -2037,7 +2037,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 			}
 		}
 		if opts.McpProfile == nil {
-			profileContext, profileErr := e.resolveTaskSessionMCPProfile(ctx, task.ID, session, opts.StartAgent)
+			profileContext, profileErr := e.launchMCPProfile(ctx, task.ID, session, opts.StartAgent)
 			if profileErr != nil {
 				return nil, profileErr
 			}

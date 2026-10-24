@@ -462,7 +462,7 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(server.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if server.Name == kandevMCPServerName {
+	if server.Name == kandevMCPServerName || server.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
 	a.sendUpdate(AgentEvent{

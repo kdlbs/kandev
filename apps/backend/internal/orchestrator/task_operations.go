@@ -1022,6 +1022,10 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
 		}
 	}
+	ctx, err = s.executor.PrepareMCPLaunch(ctx, taskID, session, true)
+	if err != nil {
+		return nil, fmt.Errorf("prepare built-in MCP launch: %w", err)
+	}
 	planModeActive := planMode
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
@@ -1234,15 +1238,17 @@ func (s *Service) wrapCreatedSessionPrompt(
 		}
 		return prompt
 	case isOfficeTask:
-		return sysprompt.InjectOfficeContextWithOptions(
+		return sysprompt.InjectOfficeContextWithPackages(
 			taskID, sessionID, prompt,
 			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			preparedBuiltinPackages(ctx, taskID, sessionID),
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
 	case dbTask.Origin == models.TaskOriginCoordinator:
 		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			BuiltinPackages:                preparedBuiltinPackages(ctx, taskID, sessionID),
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
@@ -2059,6 +2065,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 
+	ctx, err = s.executor.PrepareMCPLaunch(ctx, task.ID, launchSession, true)
+	if err != nil {
+		return nil, failPreparedLaunch(fmt.Errorf("prepare built-in MCP launch: %w", err))
+	}
+
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists
 	// the wrapped form to task_session_messages; Message.ToAPI strips the
@@ -2248,13 +2259,15 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	// that whitelists it as trusted content.
 	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
 	if p.isOfficeTask {
-		return sysprompt.InjectOfficeContextWithOptions(
+		return sysprompt.InjectOfficeContextWithPackages(
 			p.taskID, p.sessionID, prompt,
 			s.StepRequiresCompletionSignal(ctx, p.taskID),
+			preparedBuiltinPackages(ctx, p.taskID, p.sessionID),
 			p.referenceContext, spawnContext, pullRequestTargetContext,
 		)
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
+		BuiltinPackages:                preparedBuiltinPackages(ctx, p.taskID, p.sessionID),
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,

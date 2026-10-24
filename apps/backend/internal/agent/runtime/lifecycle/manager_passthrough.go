@@ -521,11 +521,6 @@ func (m *Manager) passthroughMCPServers(
 	if port <= 0 {
 		return nil, fmt.Errorf("standalone port unavailable for passthrough MCP config")
 	}
-	servers := []agentctltypes.McpServer{{
-		Name: kandevMCPServerName,
-		Type: string(mcpconfig.ServerTypeHTTP),
-		URL:  m.agentMCPURL(execution, port, "/mcp"),
-	}}
 	var operation *preparedMCPOperation
 	if len(operations) > 0 {
 		operation = operations[0]
@@ -537,14 +532,7 @@ func (m *Manager) passthroughMCPServers(
 			return nil, err
 		}
 	}
-	profileServers := operation.servers
-	for _, srv := range profileServers {
-		if srv.Name == kandevMCPServerName {
-			continue
-		}
-		servers = append(servers, srv)
-	}
-	return servers, nil
+	return builtinPassthroughMCPServers(execution, m.agentMCPURL(execution, port, builtinCoreMCPPath), operation.servers)
 }
 
 // passthroughMCPPaths computes the filesystem locations a strategy may use: a
@@ -1055,18 +1043,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 	m.startPassthroughShell(ctx, execution, "failed to start shell for passthrough session")
 
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	hasAgentStream := client != nil && client.HasAgentStream()
-	releaseClient()
-	if m.streamManager != nil && client != nil {
-		m.streamManager.ConnectWorkspaceStream(execution, nil)
-		// Also open the agent updates stream so the agentctl instance can proxy
-		// kandev MCP tool calls to the backend (passthrough has no ACP stream
-		// otherwise, so MCP tool calls would hang).
-		if !hasAgentStream {
-			m.streamManager.ConnectMCPStream(execution)
-		}
-	}
+	m.connectPassthroughMCPStream(execution)
 
 	go m.autoInjectInitialPrompt(execution, pt, processInfo.ID)
 
