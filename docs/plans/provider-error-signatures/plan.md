@@ -29,11 +29,14 @@ signatures. See [task 01](task-01-match-provider-signatures.md).
 
 - The provider rule patterns in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
 - Table tests for prose that must not classify and signatures that must.
+- The narrow context-length follow-up in `provider_neutral_rules.go`, its
+  phase-aware call in `routingerr.go`, and the existing exact consumer in
+  `orchestrator/event_handlers_transient_messages.go`.
 
 ### Out of scope
 
 - Rule order, confidence, and classification flags.
-- Provider-neutral and runtime-environment rules.
+- Other provider-neutral and runtime-environment rules.
 - How classified failures are attributed or acted on by dynamic routing.
 
 ## Verification
@@ -45,3 +48,24 @@ signatures. See [task 01](task-01-match-provider-signatures.md).
   packages on the base revision.
 - `golangci-lint run ./internal/agent/runtime/routingerr/...`
 - `make -C apps/backend build`
+
+## Context-length producer/consumer follow-up
+
+The original work above remains implemented. Criterion 001.7 adds only a named
+prompt-send context-length producer and its existing exact pre-result consumer.
+A producer without the consumer fix would leave the formerly anonymous failure
+outside the accepted route; a consumer without the producer absent from main
+would be unused compatibility code. Both pieces are prepared together.
+
+Startup classification, typed-limit priority, false global retry/fallback
+flags and diagnostic/output/effect fences stay intact. The separate structured-
+envelope criterion 001.6 and remaining catalogue/quota/notice work are not ported.
+Disposable baseline and producer-only entrypoint checks failed as expected:
+the former had no named producer (0.023s), and the latter returned the named
+runtime error outside the accepted exact consumer (0.062s). The complete
+candidate and selected existing controls passed once under `-race`:
+`routingerr` 1.285s, `dynamic` 1.048s and `orchestrator` 3.003s. This includes
+startup/later-phase preservation, typed-limit priority, diagnostic/output/effect
+fences, repeat-result stability, ordinary manual recovery and workflow-claim
+fences. Temporary overlays are removed after delivery. No standing test,
+whole-build requirement or operating mutation is added.

@@ -63,9 +63,19 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** At prompt-send, a line that
+  opens with an optional error label and reports `maximum context length is
+  <n> tokens` shall classify at high confidence under
+  `provider.context_length_exceeded.v1`, retaining `agent_runtime_error`,
+  `FallbackAllowed: false` and `AutoRetryable: false`. The existing exact
+  terminal-provider consumer shall preserve its repeated-unclassified-failure
+  route only with complete diagnostic identity, known pre-result evidence and
+  no observed output or effect. Startup and later phases, ordinary manual
+  recovery, typed-limit precedence and existing routing policy remain unchanged.
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags.
-- Changing the provider-neutral rules or the runtime-environment rules.
+- Changing other provider-neutral rules or the runtime-environment rules. The
+  named prompt-send context-length signature in criterion 001.7 is in scope.
 - Changing how classified failures suspend candidates or select a successor.

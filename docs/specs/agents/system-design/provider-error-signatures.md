@@ -11,14 +11,17 @@ requirements:
 
 The Agents system owns provider-error classification. This design describes
 how the provider rule table separates provider limit signatures from agent
-prose. It does not change rule order, confidence, classification flags, the
-provider-neutral rules, or how dynamic routing acts on a classified failure.
+prose. The original limit-signature work does not change rule order, confidence,
+classification flags, provider-neutral rules or how dynamic routing acts on a
+classified failure. The context-length follow-up below adds only a named
+prompt-send producer and its existing exact consumer compatibility.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+| `AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7` | [Context-length producer and consumer](#context-length-producer-and-consumer) |
 
 ## Components and responsibilities
 
@@ -68,3 +71,23 @@ provider-neutral rules, or the phase default.
 
 The existing `agent failure classified for provider routing` log records the
 rule ID. Rule IDs are unchanged.
+
+## Context-length producer and consumer
+
+The provider-neutral table adds `provider.context_length_exceeded.v1` for a
+line-opening context-window rejection, using the captured signature and
+high-confidence runtime-error code. Its matcher receives the phase and applies
+this one new rule only at prompt-send. Existing structured/provider-specific
+rules retain precedence; other neutral rules keep their matching and phases.
+
+`classifyKanbanFailure` keeps its existing diagnostic/evidence path. Within
+that path, the exact pre-result consumer accepts the named rule alongside its
+existing anonymous post-start classification. The named rule additionally
+requires prompt-send. Existing code/class checks, complete diagnostic source
+and identity, known dynamic attempt and no-output/effect checks remain.
+Only that consumer copies the result to `unknown_provider_error`, retaining
+confidence, rule ID and false retry/fallback flags for the existing repeated-
+failure policy. No general fallback, new policy, timer or feature flag is added.
+
+The separate structured-envelope signature, quota catalogue, prefilter and
+assistant-notice work remain with their original delivery owner.

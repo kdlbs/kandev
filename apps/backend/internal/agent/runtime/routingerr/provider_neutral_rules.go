@@ -29,6 +29,14 @@ var providerNeutralRules = []rule{
 		CodeNetworkUnavailable,
 		ConfHigh,
 	),
+	// Context rejection is a prompt result; startup and later phases retain
+	// their existing classification rather than gaining a new recovery route.
+	mustRule(
+		"provider.context_length_exceeded.v1",
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
+		ConfHigh,
+	),
 	mustRule(
 		"provider.unavailable.v1",
 		`(?i)(?:\b(?:provider|service|upstream|gateway)\b[^\n]{0,64}\b(?:temporarily\s+)?unavailable\b|\btemporarily\s+unavailable\b)`,
@@ -37,11 +45,14 @@ var providerNeutralRules = []rule{
 	),
 }
 
-func matchProviderNeutralRules(text string) (*Error, bool) {
+func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
+		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
+			continue
+		}
 		if r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,

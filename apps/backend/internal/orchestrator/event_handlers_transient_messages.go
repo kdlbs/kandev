@@ -284,7 +284,10 @@ func hasCompleteProviderDiagnostic(providerError *streams.ProviderError) bool {
 
 func isUnknownPostStartClassification(classified *routingerr.Error) bool {
 	return classified != nil && classified.Code == routingerr.CodeAgentRuntime &&
-		classified.Class == routingerr.ClassUnclassified && classified.ClassifierRule == "phase.poststart.unknown"
+		classified.Class == routingerr.ClassUnclassified &&
+		(classified.ClassifierRule == "phase.poststart.unknown" ||
+			(classified.ClassifierRule == "provider.context_length_exceeded.v1" &&
+				classified.Phase == routingerr.PhasePromptSend))
 }
 
 func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {

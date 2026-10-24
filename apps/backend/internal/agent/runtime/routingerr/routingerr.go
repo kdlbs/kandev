@@ -230,7 +230,7 @@ func classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchProviderNeutralRules(excerpt); ok {
+	if e, ok := matchProviderNeutralRules(excerpt, in.Phase); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
