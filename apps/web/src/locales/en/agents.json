@@ -452,5 +452,18 @@
   "runtimeDiagnostics": "Diagnostics",
   "runtimeDetectedLocalCLI": "Detected local CLI: {{path}}",
   "runtimeLocalCLIVersion": "Local CLI: {{name}} {{version}}",
-  "runtimeLocalCLIVersionUnknown": "Local CLI: {{name}}, version unknown ({{reason}})"
+  "runtimeLocalCLIVersionUnknown": "Local CLI: {{name}}, version unknown ({{reason}})",
+  "dynamicPolicyUnclassified": "Fall back after repeated unclassified failures",
+  "dynamicPolicyUnclassifiedHelp": "Opt-in recovery for failures that the classifier cannot place in the transient or hard classes. It stays off by default, so unclassified failures keep requiring manual recovery. Only verified provider, process-start, or empty-turn failures with no output or effects qualify. A workflow step can disable fallback.",
+  "dynamicUnclassifiedApplyAll": "Apply to all candidates",
+  "dynamicUnclassifiedApplyAllConfirmAction": "Apply to all",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "Set each candidate's unclassified policy to enabled with a threshold of 2. Candidate order, priority groups, model options, and the transient and hard policies stay unchanged.",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "Enable unclassified fallback for every candidate",
+  "dynamicUnclassifiedDescription": "Applies when a failure cannot be classified as transient or hard, including a turn that produced no output. After this candidate fails that way the threshold number of times in a row, Kandev selects the next candidate once. Exhaustion still requires manual recovery.",
+  "dynamicUnclassifiedErrors": "Unclassified failures",
+  "dynamicUnclassifiedSummaryOff": "Unclassified fallback: off",
+  "dynamicUnclassifiedSummaryOn": "Unclassified fallback: {{threshold}} in a row",
+  "dynamicUnclassifiedSwitchDescription": "Count identical unclassified failures for this candidate and move to the next candidate at the threshold. Only verified provider, process-start, or empty-turn failures with no output or effects qualify. A workflow step can disable fallback.",
+  "dynamicUnclassifiedThreshold": "Consecutive unclassified failures",
+  "dynamicUnclassifiedThresholdValidation": "Enter a threshold between 2 and 10."
 }
