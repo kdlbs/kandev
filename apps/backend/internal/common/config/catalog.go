@@ -147,6 +147,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: InternalConfigHomeFileEnv, Class: "internal wiring", Reason: "launcher-selected home-file handoff"},
 	{EnvVar: InternalAgentctlStartupConfigEnv, Class: "internal wiring", Reason: "resolved agentctl child configuration handoff"},
 	{EnvVar: "KANDEV_LAUNCHER_PARENT_PID", Class: "internal wiring", Reason: "launcher parent-watchdog handoff"},
+	{EnvVar: "KANDEV_INTERNAL_WINDOWS_JOB_NAME", Class: "internal wiring", Reason: "launcher-owned Windows Job Object name handoff to agentctl"},
 	{EnvVar: "KANDEV_BACKEND_PID_FILE", Class: "internal wiring", Reason: "supervisor-owned process state"},
 	{EnvVar: "KANDEV_DESKTOP_HEALTH_TOKEN", Class: "generated", Reason: "per-launch health authentication token"},
 	{EnvVar: "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", Class: "internal wiring", Reason: "desktop shell capability handoff"},
