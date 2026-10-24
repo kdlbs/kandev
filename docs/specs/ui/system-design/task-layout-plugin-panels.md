@@ -255,9 +255,13 @@ retain precedence; vertical roots never enter horizontal target refresh.
 `reusable-root-geometry.ts` shares one bounded automatic restoration path between
 mounted and proactive enforcement. Retain numeric source widths/pinning and
 normalized panel anchors, not constrained live proportions or whole panel
-payloads. Match anchors in root order without requiring captured group IDs;
-chat/session identity normalization and additional tabs in an existing child do
-not change root ownership. Resolve the right target and preserve other pinned
+payloads. Match anchors in root order without requiring captured group IDs.
+Every surviving root must retain at least one original normalized panel anchor;
+an original anchor still present anywhere must remain in its original root.
+Chat/session identity normalization, additional tabs and removal/re-addition of
+conditional tabs do not change root ownership while those roots survive. Moving
+an original tab to a different root still releases the allocation, even if root
+count is unchanged. Resolve the right target and preserve other pinned
 children's actual live extents (including the measured embedded sidebar), then
 reuse `computeColumnWidths` to distribute the remaining width by source weights.
 The already-resolved pinned extents must not be capped again against the browser
@@ -275,6 +279,18 @@ ends, scoped to the environment captured at drag start. Nested/unrelated DOM
 sashes do not release another layout's allocation. Existing right-source/manual/null-staging policy
 remains unchanged. Whole-source reset/replacement on environment switch,
 explicit profile application or vertical transition also resets root allocation.
+
+A retained hidden right pane is a host projection, not a root edit. Both
+enforcement boundaries pass the existing retained column and its source index
+into the shared adapter. Match source anchors against the live columns with
+that retained child reinserted for structural validation only. Skip all-root
+redistribution while it is absent; continue ordinary live Files/right target
+and cap enforcement. A genuine structural change while hidden therefore still
+permanently releases allocation, even if undone before reveal. After reveal,
+validate the actual complete structure before redistributing. Root-sash
+completion still releases genuine width edits. Maximize keeps its existing
+enforcement exclusion. No portable default is re-read to recreate released
+source weights.
 
 `getPinnedRightColumn` locates the actual live horizontal pinned right root child
 through the existing tree capture and returns its index and every group beneath

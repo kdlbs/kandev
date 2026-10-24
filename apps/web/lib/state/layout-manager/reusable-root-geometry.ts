@@ -1,4 +1,5 @@
 import type { DockviewApi } from "dockview-react";
+import type { HiddenRightPane } from "../dockview-right-pane";
 import { getRootSplitview } from "./applier";
 import { fromDockviewApi } from "./serializer";
 import { getReusableRightWidth, resolveReusableRootSizes } from "./pinned-targets";
@@ -9,12 +10,18 @@ export function restoreReusableRootGeometry(
   envId: string | null | undefined,
   width: number | undefined,
   rightTarget: number,
-  manualWidth: number | null,
+  {
+    manualWidth,
+    hiddenRightPane,
+  }: {
+    manualWidth: number | null;
+    hiddenRightPane?: HiddenRightPane | null;
+  },
 ): boolean {
   if (manualWidth !== null || width === undefined || getReusableRightWidth(envId, width) === null)
     return false;
   const live = fromDockviewApi(api);
-  const sizes = resolveReusableRootSizes(envId, live, width, rightTarget);
+  const sizes = resolveReusableRootSizes(envId, live, width, rightTarget, hiddenRightPane);
   const sv = getRootSplitview(api);
   if (!sizes || !sv || sizes.length !== sv.length) return false;
   try {

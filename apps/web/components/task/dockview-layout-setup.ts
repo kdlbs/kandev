@@ -205,7 +205,10 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
           store.currentLayoutEnvId,
           measuredWidth,
           Math.min(target, maximumWidth),
-          manualRightWidth,
+          {
+            manualWidth: manualRightWidth,
+            hiddenRightPane: store.hiddenRightPane,
+          },
         )
       ) {
         restoreColumnToTarget(sv, right.index, target, maximumWidth);

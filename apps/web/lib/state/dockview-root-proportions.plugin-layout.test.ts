@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { splitPanel } from "@/components/settings/layouts/layout-editor-actions";
+import { movePanelToGroup, splitPanel } from "@/components/settings/layouts/layout-editor-actions";
+import {
+  resolveCanonicalReviewPanelState,
+  syncCanonicalReviewPanel,
+} from "@/components/task/dockview-review-panel-sync";
 import {
   setupSashDragCapToggle,
   syncDockviewContainerSize,
@@ -27,6 +31,7 @@ const ENV = "env-root-proportions";
 const HEIGHT = 700;
 const CHAT = { id: "chat", component: "chat", title: "Agent" };
 const FILES = { id: "files", component: "files", title: "Files" };
+const REVIEW = { id: "pr-detail", component: "pr-detail", title: "PR Details" };
 const PLUGIN = {
   id: "plugin:kandev-plugin-e2e:notes",
   component: "plugin-panel",
@@ -61,14 +66,18 @@ function expectGeometry(api: DockviewApi, expected: number[]) {
   expect(root.data.map((child) => child.size)).toEqual(expected);
 }
 
-function sourceFromSettings(widths: number[], capture: boolean): LayoutState {
+function sourceFromSettings(widths: number[], capture: boolean, review = false): LayoutState {
   const width = widths.reduce((sum, size) => sum + size, 0);
   const editor = mount(width);
   applyLayout(
     editor,
     {
       columns: [
-        { id: "center", width: width / 2, groups: [{ id: "group-center", panels: [CHAT] }] },
+        {
+          id: "center",
+          width: width / 2,
+          groups: [{ id: "group-center", panels: review ? [CHAT, REVIEW] : [CHAT] }],
+        },
         {
           id: "right",
           pinned: true,
@@ -125,6 +134,7 @@ function resize(api: DockviewApi, width: number, boundary: Boundary) {
       rightPanelsVisible: true,
       maximized: false,
       envId: useDockviewStore.getState().currentLayoutEnvId,
+      hiddenRightPane: useDockviewStore.getState().hiddenRightPane,
     });
   } else {
     const container = document.createElement("div");
@@ -339,6 +349,156 @@ describe.each(["mounted", "state"] as const)(
         await settle();
         expectGeometry(api, [400, 1000, editedWidth, 400 - editedWidth]);
         expect(getManualRightWidth(ENV)).toBeNull();
+      },
+    );
+  },
+);
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.6, AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["mounted", "state"] as const)(
+  "conditional tabs preserve root geometry through %s enforcement",
+  (boundary) => {
+    it.each([true, false])(
+      "keeps remove/add transitions with review initially %s",
+      async (review) => {
+        const source = sourceFromSettings([400, 1000, 200], true, review);
+        const immutable = structuredClone(source);
+        const api = await build(source, boundary);
+        const groups = api.groups.map((group) => group.id);
+        const options = {
+          sessionId: "root-review-session",
+          centerGroupId: api.getPanel("chat")!.group.id,
+          reviewsLoaded: true,
+          isRestoringLayout: false,
+          isMaximized: false,
+          wasOffered: false,
+        };
+        const present = resolveCanonicalReviewPanelState(
+          [],
+          [],
+          [
+            {
+              providerId: "example-review",
+              reviewKey: "example/repository/42",
+              title: "Example review",
+              url: "https://example.test/repository/42",
+              connectionScope: "https://example.test",
+              repositoryId: "example/repository",
+              changeRequestNumber: 42,
+              state: "OPEN",
+            },
+          ],
+        );
+        const absent = resolveCanonicalReviewPanelState([], []);
+        expectGeometry(api, [320, 320, 160]);
+        for (const state of [absent, present, absent]) {
+          syncCanonicalReviewPanel(api, state, options);
+          await settle();
+          expect(!!api.getPanel("pr-detail")).toBe(state.kind !== "empty");
+          expect(api.groups.map((group) => group.id)).toEqual(groups);
+          resize(api, 1600, boundary);
+          await settle();
+          expectGeometry(api, [400, 1000, 200]);
+          resize(api, 800, boundary);
+          await settle();
+          expectGeometry(api, [320, 320, 160]);
+        }
+        expect(source).toEqual(immutable);
+        expect(getManualRightWidth(ENV)).toBeNull();
+      },
+    );
+
+    it("releases weights when an original tab moves between roots, without reviving on undo", async () => {
+      const api = await build(sourceFromSettings([400, 1000, 200], true, true), boundary);
+      const centerGroupId = api.getPanel("chat")!.group.id;
+      expect(movePanelToGroup(api, REVIEW.id, api.getPanel(PLUGIN.id)!.group.id)).toBe(true);
+      resize(api, 800, boundary);
+      await settle();
+      expect(movePanelToGroup(api, REVIEW.id, centerGroupId)).toBe(true);
+      getRootSplitview(api).resizeView(0, 280);
+      resize(api, 800, boundary);
+      await settle();
+      expect(api.getPanel("chat")!.group.width).toBe(280);
+      resize(api, 1600, boundary);
+      await settle();
+      expect(api.getPanel("chat")!.group.width).not.toBe(400);
+      expect(api.getPanel("files")!.group.width).toBe(1000);
+      expect(getManualRightWidth(ENV)).toBeNull();
+    });
+  },
+);
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["mounted", "state"] as const)(
+  "retained host projections through %s enforcement",
+  (boundary) => {
+    it.each(
+      [true, false].flatMap((threeRoots) =>
+        (["hide", "maximize"] as const).map((action) => ({ threeRoots, action })),
+      ),
+    )(
+      "keeps source weights through $action with three roots $threeRoots",
+      async ({ threeRoots, action }) => {
+        const wide = threeRoots ? [400, 1000, 200] : [1200, 400];
+        const narrow = threeRoots ? [320, 320, 160] : [600, 200];
+        const source = sourceFromSettings(wide, true);
+        const immutable = structuredClone(source);
+        const api = await build(source, boundary);
+        expectGeometry(api, narrow);
+        if (action === "hide") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().maximizeGroup(api.getPanel("chat")!.group.id);
+        await settle();
+        expect(api.getPanel(PLUGIN.id)).toBeUndefined();
+        resize(api, 1600, boundary);
+        await settle();
+        if (action === "hide" && threeRoots) {
+          expectGeometry(api, [600, 1000]);
+          expect(api.getPanel("files")!.group.width).toBe(1000);
+        }
+        if (action === "hide") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().exitMaximizedLayout();
+        await settle();
+        expectGeometry(api, wide);
+        resize(api, 800, boundary);
+        await settle();
+        expectGeometry(api, narrow);
+        resize(api, 1600, boundary);
+        await settle();
+        expectGeometry(api, wide);
+        expect(source).toEqual(immutable);
+        expect(getManualRightWidth(ENV)).toBeNull();
+      },
+    );
+
+    it.each([false, true])(
+      "releases genuine hidden edits with undo before reveal %s",
+      async (undoBeforeReveal) => {
+        const api = await build(sourceFromSettings([400, 1000, 200], true), boundary);
+        useDockviewStore.getState().toggleRightPanels();
+        await settle();
+        api.addPanel({
+          id: "todos",
+          component: "todos",
+          position: { referencePanel: "chat", direction: "right" },
+        });
+        resize(api, 800, boundary);
+        await settle();
+        if (undoBeforeReveal) {
+          api.getPanel("todos")!.api.close();
+          await settle();
+        }
+        useDockviewStore.getState().toggleRightPanels();
+        await settle();
+        expect(sizes(api)).toHaveLength(undoBeforeReveal ? 3 : 4);
+        if (!undoBeforeReveal) api.getPanel("todos")!.api.close();
+        getRootSplitview(api).resizeView(0, 280);
+        resize(api, 800, boundary);
+        await settle();
+        expect(api.getPanel("chat")!.group.width).toBe(280);
+        resize(api, 1600, boundary);
+        await settle();
+        expect(api.getPanel("chat")!.group.width).not.toBe(400);
+        expect(api.getPanel("files")!.group.width).toBe(1000);
       },
     );
   },

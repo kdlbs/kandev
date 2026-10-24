@@ -1277,3 +1277,174 @@ Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
   current package documents: `ok: true`, `status: covered`, no errors, both
   owning requirement/design references accepted. Full result retained in
   `/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-coverage.json`.
+
+### Round9 conditional-tab and retained-pane source lifecycle
+
+- Starting HEAD `a48aa6767616155b07c30a39ef8a88bacbc029a9`, clean.
+  Current session metadata still reports exact profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`; no workers or substitutions.
+- F1 sequential consumer RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round9-f1-red.json`:
+  **2 failed, 40 passed**. Actual settings Split Right and ID-free workbench
+  capture produce a valid 400/1000/200 source with Agent and ordinary PR Details
+  sharing the first root. Actual `syncCanonicalReviewPanel` removal preserves
+  every group ID but expansion gives 500/1000/100 at both mounted and proactive
+  boundaries. No undefined-param validation rejection is involved.
+- Replaced all-original-tabs-present matching with surviving-root matching:
+  every child must retain an original normalized anchor, and any original
+  anchor still live must remain in its source root. Removed/added conditional
+  tabs do not change those roots; a tab moved across roots still permanently
+  releases allocation. No PR ID special case, eligibility weakening or schema
+  change. One-file GREEN: **42 passed**. Controls exercise actual remove/add/
+  remove synchronization with review initially present and absent, and actual
+  cross-root tab move/undo nonrevival. Every live/serialized root, original
+  source immutability and null manual storage are asserted.
+- F2 sequential consumer RED, same command with
+  `--outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round9-f2-red.json`:
+  **2 failed, 50 passed**. Shipped three-root hide leaves pinned Files live.
+  Hidden resize still correctly enforces Files at 1000px, but reveal gives
+  500/1000/100 instead of 400/1000/200 at both boundaries.
+- The first implementation passed the existing retained-hidden-pane fact into
+  the common adapter and suspended matching while hidden. Reveal revalidated
+  the complete structure; normal Files width/caps remained enforced. This
+  initial one-file GREEN was **52 passed**, before the stronger undo control
+  below. No portable default rebuild or second ownership record.
+  Two-/three-root hide and maximize controls,
+  repeated cap contraction/release and genuine structure edit while hidden
+  prove preservation and permanent invalidation remain separate.
+- Added a browser lifecycle scenario rather than replacing prior coverage.
+  It uses actual settings Split tab > Right and a valid source containing
+  Agent/Todos in the first root. The real preference action on the existing
+  exposed AppStore drives the shipped conditional Todos hook while the same
+  geometry owner remains mounted; backend preferences are saved too.
+  It checks all live and serialized roots through removal, addition and
+  removal, then shipped hide/resize/reveal with pinned Files still visible.
+  No synthetic plugin registration, mocked sync/resize, or geometry injection.
+  Exact review removal/add uses the real synchronizer in the consumer suite;
+  browser conditional visibility uses Todos because the installed fixture
+  intentionally supplies registered reviews for every task.
+- Browser RED used the starting Round8 production artifacts, before rebuilding:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project chromium tests/settings/layout-profiles.spec.ts
+  --grep 'preserves three-root geometry through conditional tabs and retained pane lifecycle'
+  --retries=0`: **1 failed**, exact geometry 500/1000/100 versus 400/1000/200
+  after conditional removal. Log `kandev-run.e2e.uDyIgyYx.log`; inspected and
+  preserved the failing screenshot in `round9-visual/red/conditional-root-weights.png`.
+  Those paths are under the task-owned review scratch directory above.
+- The hide portion explicitly closes the incidental Bitbucket review tab
+  through shipped UI before capturing the projection, preserving the earlier
+  excluded undefined-provider serialization boundary. It does not claim
+  PR-tab-present reveal. This prerequisite does not classify F1 as excluded.
+  Prior PR/reveal coverage and validation are unchanged.
+- Additional sequential hidden-edit/undo RED:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round9-hidden-undo-red.json`:
+  **2 failed, 52 passed**. A real new root added and then removed while hidden
+  escaped the blanket matching suspension; after reveal, stale allocation
+  reverted a deliberate 280px center to 320px at both boundaries.
+  Replaced that blanket flag with the existing retained column/source index.
+  Source matching reconstructs the complete root membership for validation
+  only, detects genuine hidden edits immediately, and returns without width
+  allocation while projected. Reveal still validates the actual full layout.
+  One-file GREEN: **54 passed**, including undo before and after reveal,
+  root/tab rearrangements and existing one-pixel/genuine sash controls.
+- An intermediate adjacent run passed 41 files/586 tests and formatting/lint.
+  Its 10GiB typecheck caught a missing required `connectionScope` on the new
+  review fixture; supplied its actual example origin without changing runtime
+  review params or validation. The final gates below include the stronger
+  retained-context implementation and corrected fixture.
+- Final static gates after the last production edit, from `apps/web`:
+  - `pnpm exec prettier --write components/task/dockview-layout-setup.ts
+    lib/state/dockview-pinned-enforce.ts lib/state/dockview-store.ts
+    lib/state/layout-manager/pinned-targets.ts
+    lib/state/layout-manager/reusable-root-geometry.ts
+    lib/state/dockview-root-proportions.plugin-layout.test.ts
+    e2e/tests/settings/layout-profiles.spec.ts` passed.
+  - `pnpm exec eslint --max-warnings 0` on those same seven paths passed.
+  - `pnpm exec vitest run
+    components/task/dockview-desktop-layout.env-switch.test.tsx
+    components/task/dockview-layout-restore lib/state/dockview-env-switch
+    lib/state/dockview-root-proportions.plugin-layout.test.ts
+    lib/state/dockview-three-root.plugin-layout.test.ts
+    components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+    lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+    lib/state/layout-manager components/settings/layouts
+    lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts
+    components/task/dockview-review-panel-sync.test.ts
+    components/task/dockview-todo-panel-sync`: **41 files, 588 tests passed**,
+    including all 54 root-proportion consumer regressions and real conditional
+    review/Todos hook suites.
+  - `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+- LSP status remained "No language servers configured"; mapped every shared
+  adapter/context/resolver consumer with focused repository searches before
+  changing internal arguments. Manual width and retained context share one
+  options argument to respect the five-parameter limit. Extracted the duplicate
+  browser serialized-root reader rather than suppressing identical-function
+  lint. No new portable/plugin API or source schema.
+- Final fresh managed desktop verification:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **24 passed**, one worker, one clean aggregate with no retries or isolated
+  failure recovery. Rebuilt backend, Vite production assets and packaged fixture.
+  Log `kandev-run.e2e.iM2c3uhL.log` in the task-owned scratch `tmp` directory.
+  Existing cap-binding, manual, saved SPA/cold/reload, generated Below/Right,
+  two-/three-root sash and restore cases remain in the exercised suite.
+- Same-artifact mobile verification, sequential after desktop:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, log `kandev-run.e2e.P84TAwMI.log`.
+  Inspected custom and built-in override phone captures and preserved all
+  three images under `round9-visual/mobile/`. Shared phone settings composition
+  remains unchanged; no mobile task-layout feature was introduced.
+- The managed runner resets `.pr-assets` at each invocation. Mobile startup
+  replaced the successful desktop screenshots before they were copied.
+  The fresh desktop aggregate and its geometry assertions above passed; the
+  separate same-build lifecycle capture below is the retained desktop visual
+  evidence, not a second fresh build or a substitute for that aggregate.
+- Same-build desktop visual capture:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project chromium tests/settings/layout-profiles.spec.ts
+  --grep 'preserves three-root geometry through conditional tabs and retained pane lifecycle'
+  --retries=0`: **1 passed**, log `kandev-run.e2e.LTTEJynC.log`.
+  Inspected the actual Agent/Files/packaged-plugin surface after restore at
+  400/1000/200 and retained its image/manifest under `round9-visual/desktop/`.
+  All roots and serialized extents, portable source immutability and absence
+  of manual storage were asserted through the actual lifecycle. This run
+  reused the final fresh build; no source changed after that build.
+- All managed runs completed task-owned runtime teardown. Final fresh desktop,
+  same-artifact mobile and the separate visual capture have no aggregate
+  failure, retry, isolated recovery or remaining runtime prerequisite blocker.
+  No full `make test` rerun or exact-head real Prompt History package re-smoke;
+  historical limits remain unchanged. Only the packaged in-tree fixture was
+  exercised here. The primary instance/settings/runtime was untouched.
+- Companion design documents surviving-root anchors, cross-root move
+  invalidation and retained-column structural validation. Public docs and
+  historical CHANGELOG are unchanged because these fixes restore the existing
+  geometry/conditional-visibility contract. Requirement/design acceptance
+  statuses and previous evidence remain unchanged.
+- Task-defined documentation gates: `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`,
+  `python3 scripts/lint-spec-files.test.py`, `git diff --check`, and
+  `validateCoverage` over all nine intended paths and the six package documents.
+  Coverage result: `round9-coverage.json` under the task-owned review scratch.
+- Normal-hook delivery receipts are outside the checkout:
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round9-hook-receipt.json`
+  and companion `round9-commit-hooks.log`. No amend, hook bypass, push, PR,
+  deployment, `step_complete`, parent archive or new reviewer/worker.

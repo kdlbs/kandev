@@ -131,21 +131,33 @@ export function resolveReusableRootSizes(
   live: LayoutState,
   width: number,
   rightTarget: number,
+  retainedColumn?: { sourceIndex: number; column: LayoutColumn } | null,
 ): number[] | null {
   const owned = reusableRightTarget;
   if (!owned || owned.envId !== envId || !owned.root || live.rootOrientation === "VERTICAL")
     return null;
   const geometry = owned.root;
+  const columns = retainedColumn
+    ? live.columns.toSpliced(retainedColumn.sourceIndex, 0, retainedColumn.column)
+    : live.columns;
+  const liveAnchors = columns.map(rootPanelIds);
   const matches =
-    live.columns.length === geometry.columns.length &&
+    columns.length === geometry.columns.length &&
     geometry.anchors.every((ids, index) => {
-      const liveIds = rootPanelIds(live.columns[index]);
-      return [...ids].every((id) => liveIds.has(id));
+      let survives = false;
+      for (const id of ids) {
+        if (liveAnchors[index].has(id)) survives = true;
+        // Removed tabs do not edit a surviving root; moving an original tab does.
+        else if (liveAnchors.some((other) => other.has(id))) return false;
+      }
+      return survives;
     });
   if (!matches) {
     owned.root = null;
     return null;
   }
+  // Validate the complete retained structure, but never allocate widths to absent live roots.
+  if (retainedColumn) return null;
   const pinned = new Map<string, number>();
   geometry.columns.forEach((column, index) => {
     if (column.pinned)

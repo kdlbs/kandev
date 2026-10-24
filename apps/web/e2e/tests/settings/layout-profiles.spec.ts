@@ -4,6 +4,7 @@ import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
+import type { AppState } from "@/lib/state/store";
 import { dwell } from "../../helpers/causal-waits";
 import {
   installFixturePlugin,
@@ -173,6 +174,16 @@ async function openTask(page: Page, taskId: string): Promise<SessionPage> {
   await session.waitForLoad();
   await session.waitForDockviewReady();
   return session;
+}
+
+async function serializedRootSizes(page: Page): Promise<number[]> {
+  return page.evaluate(() => {
+    const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+    const root = api?.toJSON().grid.root;
+    if (root?.type !== "branch" || !Array.isArray(root.data))
+      throw new Error("Dockview root branch not available");
+    return root.data.map((child) => child.size);
+  });
 }
 
 /**
@@ -1065,14 +1076,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     await layouts.save();
     const captured = await savedLayout(apiClient, "root-cap-release");
     expect(captured.columns.map((column) => column.id)).toEqual(["center", "right", PROMPT_ID]);
-    const serializedSizes = () =>
-      testPage.evaluate(() => {
-        const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
-        const root = api?.toJSON().grid.root;
-        if (root?.type !== "branch" || !Array.isArray(root.data))
-          throw new Error("Dockview root branch not available");
-        return root.data.map((child) => child.size);
-      });
+    const serializedSizes = () => serializedRootSizes(testPage);
     for (const geometry of [
       { widths: [400, 1000, 200], narrow: [320, 320, 160], wide: 1600 },
       { widths: [800, 1200, 800], narrow: [240, 320, 240], wide: 2800 },
@@ -1110,6 +1114,87 @@ test.describe("Plugin panel geometry in applied profiles", () => {
           "Cap release restores every saved root proportion without changing the portable source",
       });
     }
+  });
+
+  test("preserves three-root geometry through conditional tabs and retained pane lifecycle", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    const base = filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    base.columns[0].groups[0].panels.push({ id: "todos", component: "todos", title: "Todos" });
+    await apiClient.saveUserSettings({
+      show_todo_list_panel: true,
+      show_todo_list_panel_only_when_not_empty: false,
+      saved_layouts: [savedProfile("root-lifecycle", "Root lifecycle", base)],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel(PROMPT_TITLE);
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.save();
+    const source = await savedLayout(apiClient, "root-lifecycle");
+    source.columns.forEach((column, index) => {
+      column.width = [400, 1000, 200][index];
+    });
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("root-lifecycle", "Root lifecycle", source)],
+    });
+    await testPage.setViewportSize({ width: 1120, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Root lifecycle geometry");
+    await openTask(testPage, task.id);
+    await expect.poll(() => rootSizes(testPage)).toEqual([320, 320, 160]);
+    await expect.poll(() => panelPlacement(testPage, "todos")).not.toBeNull();
+    const serializedSizes = () => serializedRootSizes(testPage);
+    for (const enabled of [false, true, false]) {
+      await apiClient.saveUserSettings({ show_todo_list_panel: enabled });
+      // Drive the shipped preference action, leaving the same workbench and geometry owner mounted.
+      await testPage.evaluate((showTodoListPanel) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } }
+        ).__KANDEV_E2E_STORE__?.getState();
+        if (!state) throw new Error("App store not exposed");
+        state.setUserSettings({ ...state.userSettings, showTodoListPanel });
+      }, enabled);
+      await expect.poll(async () => !!(await panelPlacement(testPage, "todos"))).toBe(enabled);
+      for (const width of [1600, 800]) {
+        await testPage.setViewportSize({ width: width + 320, height: 900 });
+        await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(width);
+        const expected = width === 800 ? [320, 320, 160] : [400, 1000, 200];
+        await expect.poll(() => rootSizes(testPage)).toEqual(expected);
+        await expect.poll(serializedSizes).toEqual(expected);
+      }
+    }
+    // Normal UI close isolates the pre-existing undefined-provider serialization boundary.
+    const fixtureReview = testPage.locator(".dv-tab", { hasText: "Bitbucket Pull Request #42" });
+    await expect(fixtureReview).toHaveCount(1);
+    await fixtureReview.hover();
+    await fixtureReview.locator(".dv-default-tab-action").click();
+    await expect(fixtureReview).toHaveCount(0);
+    const toggle = testPage.getByTestId("task-right-panels-toggle");
+    await toggle.click();
+    await expect.poll(() => panelPlacement(testPage, PROMPT_ID)).toBeNull();
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(1600);
+    await expect.poll(() => rootSizes(testPage)).toEqual([600, 1000]);
+    await expect.poll(serializedSizes).toEqual([600, 1000]);
+    await toggle.click();
+    await expect.poll(() => rootSizes(testPage)).toEqual([400, 1000, 200]);
+    await expect.poll(serializedSizes).toEqual([400, 1000, 200]);
+    await testPage.locator(".dv-tab", { hasText: "Files" }).click();
+    await expect(testPage.getByTestId("files-panel")).toBeVisible();
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+    expect(await savedLayout(apiClient, "root-lifecycle")).toEqual(source);
+    await prCapture.screenshot("settings-root-lifecycle-restored", {
+      caption:
+        "Conditional tab removal and hidden-root projection preserve every source proportion",
+    });
   });
 
   test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({

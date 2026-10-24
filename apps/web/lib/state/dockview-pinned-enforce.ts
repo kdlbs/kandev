@@ -32,6 +32,7 @@ import { restoreReusableRootGeometry } from "./layout-manager/reusable-root-geom
 import { computeRightMaxPx, LAYOUT_PINNED_MIN_PX } from "./layout-manager/caps";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
+import type { HiddenRightPane } from "./dockview-right-pane";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { measureDockviewGridWidth } from "./dockview-measure";
 
@@ -80,6 +81,8 @@ export type EnforcePinnedTargetsCtx = {
    *  enforcement so we don't fight the 2-column maximize overlay. */
   maximized: boolean;
   envId?: string | null;
+  /** A hidden pane retains the complete root source until its full structure returns. */
+  hiddenRightPane?: HiddenRightPane | null;
 };
 
 type RightSplitview = {
@@ -115,7 +118,13 @@ function enforceRightColumn(
       group.api.setConstraints({ maximumWidth, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
     setPinnedTarget("right", target);
-    if (restoreReusableRootGeometry(api, ctx.envId, width, target, manualWidth)) return;
+    if (
+      restoreReusableRootGeometry(api, ctx.envId, width, target, {
+        manualWidth,
+        hiddenRightPane: ctx.hiddenRightPane,
+      })
+    )
+      return;
   }
   restoreColumnToTarget(sv, right?.index ?? sv.length - 1, target);
 }

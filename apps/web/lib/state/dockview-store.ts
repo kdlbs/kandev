@@ -627,6 +627,7 @@ function enforceFromStore(api: DockviewApi, get: StoreGet): void {
     rightPanelsVisible: s.rightPanelsVisible,
     maximized: s.preMaximizeLayout !== null,
     envId: s.currentLayoutEnvId,
+    hiddenRightPane: s.hiddenRightPane,
   });
 }
 
