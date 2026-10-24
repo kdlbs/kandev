@@ -191,6 +191,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowID:                  req.WorkflowID,
 		WorkflowStepID:              req.WorkflowStepID,
 		WorkflowAgentOverrides:      req.WorkflowAgentOverrides,
+		ExplicitAgentProfileID:      strings.TrimSpace(req.AgentProfileID),
 		ExecutorID:                  req.ExecutorID,
 		ExecutorProfileID:           req.ExecutorProfileID,
 		Title:                       title,

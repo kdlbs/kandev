@@ -100,6 +100,7 @@ type IssueTaskCreator interface {
 
 // IssueTaskRequest contains the data for creating a task from an issue watch event.
 type IssueTaskRequest struct {
+	AgentProfileID string
 	WorkspaceID    string
 	WorkflowID     string
 	WorkflowStepID string
@@ -140,6 +141,11 @@ type ReviewTaskRequest struct {
 	// automation dispatch (see models.MetaKeyAutomationStartOwned).
 	AutomationStartOwned bool
 	AutomationStartOwner string
+	// AgentProfileID is the caller's explicit agent-profile selection, carried
+	// through the internal create request so a workflow that requires an
+	// explicit profile (require_explicit_agent_profile) recognizes it instead
+	// of rejecting the create. It is not read from Metadata.
+	AgentProfileID string
 	// ExternalID is the stable provider identity for retry task creation.
 	ExternalID string
 }
@@ -632,6 +638,7 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 		metadata[models.MetaKeyForkPRRequiresManualStart] = true
 	}
 	return &ReviewTaskRequest{
+		AgentProfileID: evt.AgentProfileID,
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,
@@ -1850,6 +1857,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 	repositories := s.resolveIssueRepository(ctx, evt.WorkspaceID, issue)
 
 	req := &IssueTaskRequest{
+		AgentProfileID: evt.AgentProfileID,
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,

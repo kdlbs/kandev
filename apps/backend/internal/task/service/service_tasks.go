@@ -378,11 +378,27 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 			return nil, err
 		}
 	}
-	if err := s.validateTaskWorkflow(ctx, req); err != nil {
+	workflow, err := s.validateTaskWorkflow(ctx, req)
+	if err != nil {
 		return nil, err
 	}
 	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
+	}
+	// Resolve the destination step once and share it with the explicit-profile
+	// policy below: resolving twice would consult the step resolver twice and
+	// could route the policy check and the task row to different steps when
+	// the resolver answers differently between calls. The resolver error is
+	// propagated only on the policy path that needs the destination (opt-in
+	// workflow with validated overrides); every other create keeps the
+	// historical tolerant behavior (warn and continue with an empty step).
+	workflowStepID, resolveErr := s.resolveWorkflowStepE(ctx, req)
+	if err := s.enforceExplicitAgentProfilePolicy(ctx, req, workflow, workflowStepID, resolveErr); err != nil {
+		return nil, err
+	}
+	if resolveErr != nil {
+		s.logger.Warn("failed to resolve start step, using empty",
+			zap.String("workflow_id", req.WorkflowID), zap.Error(resolveErr))
 	}
 	if req.RequireAssigneeAgentProfileValidation {
 		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
@@ -402,7 +418,6 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 		return nil, err
 	}
 
-	workflowStepID := s.resolveWorkflowStep(ctx, req)
 	// Only the untrusted HTTP create path (RequireAssigneeAgentProfileValidation)
 	// promises a runner seat for its assignee; internal callers that set
 	// AssigneeAgentProfileID without it already know their step resolves.
@@ -901,37 +916,40 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	return nil
 }
 
-func (s *Service) validateTaskWorkflow(ctx context.Context, req *CreateTaskRequest) error {
+// validateTaskWorkflow validates the requested workflow and step and returns
+// the loaded workflow for callers that need its policy fields. A request
+// without a workflow returns a nil workflow and no error.
+func (s *Service) validateTaskWorkflow(ctx context.Context, req *CreateTaskRequest) (*models.Workflow, error) {
 	if req.WorkflowID == "" {
 		if req.WorkflowStepID != "" {
-			return fmt.Errorf("%w: workflow_step_id requires workflow_id", ErrInvalidTaskWorkflow)
+			return nil, fmt.Errorf("%w: workflow_step_id requires workflow_id", ErrInvalidTaskWorkflow)
 		}
-		return nil
+		return nil, nil
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if workflow == nil {
-		return fmt.Errorf("%w: workflow not found", ErrInvalidTaskWorkflow)
+		return nil, fmt.Errorf("%w: workflow not found", ErrInvalidTaskWorkflow)
 	}
 	if workflow.WorkspaceID != req.WorkspaceID {
-		return repoerrors.ErrWorkspaceNotFound
+		return nil, repoerrors.ErrWorkspaceNotFound
 	}
 	if req.WorkflowStepID == "" {
-		return nil
+		return workflow, nil
 	}
 	if s.workflowStepGetter == nil {
-		return fmt.Errorf("%w: workflow step validation unavailable", ErrInvalidTaskWorkflow)
+		return nil, fmt.Errorf("%w: workflow step validation unavailable", ErrInvalidTaskWorkflow)
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, req.WorkflowStepID)
 	if err != nil {
-		return fmt.Errorf("%w: workflow_step_id: %w", ErrInvalidTaskWorkflow, err)
+		return nil, fmt.Errorf("%w: workflow_step_id: %w", ErrInvalidTaskWorkflow, err)
 	}
 	if step == nil || step.WorkflowID != req.WorkflowID {
-		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, req.WorkflowStepID)
+		return nil, fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, req.WorkflowStepID)
 	}
-	return nil
+	return workflow, nil
 }
 
 // validateSubtaskDepth prevents nesting deeper than one level for kanban
@@ -975,6 +993,20 @@ func (s *Service) resolveOfficeWorkflow(ctx context.Context, req *CreateTaskRequ
 // the start step silently made the two synonymous. It went unnoticed because
 // every built-in template puts both on the same step.
 func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskRequest) string {
+	stepID, err := s.resolveWorkflowStepE(ctx, req)
+	if err != nil {
+		s.logger.Warn("failed to resolve start step, using empty",
+			zap.String("workflow_id", req.WorkflowID),
+			zap.Error(err))
+		return ""
+	}
+	return stepID
+}
+
+// resolveWorkflowStepE is resolveWorkflowStep with the resolver failure
+// propagated: callers that must distinguish "no step" from "lookup failed"
+// use this so a transient storage error is never mistaken for an absent step.
+func (s *Service) resolveWorkflowStepE(ctx context.Context, req *CreateTaskRequest) (string, error) {
 	workflowStepID := req.WorkflowStepID
 	if workflowStepID == "" && req.WorkflowID != "" && s.startStepResolver != nil {
 		var resolvedID string
@@ -988,14 +1020,11 @@ func (s *Service) resolveWorkflowStep(ctx context.Context, req *CreateTaskReques
 			resolvedID, err = s.startStepResolver.ResolveStartStep(ctx, req.WorkflowID)
 		}
 		if err != nil {
-			s.logger.Warn("failed to resolve start step, using empty",
-				zap.String("workflow_id", req.WorkflowID),
-				zap.Error(err))
-		} else {
-			workflowStepID = resolvedID
+			return "", err
 		}
+		workflowStepID = resolvedID
 	}
-	return workflowStepID
+	return workflowStepID, nil
 }
 
 // buildTask constructs a Task model from the CreateTaskRequest.

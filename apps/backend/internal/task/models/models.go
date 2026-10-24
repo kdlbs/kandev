@@ -1876,6 +1876,13 @@ type Workflow struct {
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
+	// RequireExplicitAgentProfile opts this workflow into rejecting task
+	// creation when the caller supplies neither an explicit agent_profile_id
+	// nor a valid workflow_agent_overrides selection. It is an opt-in create
+	// policy, independent of whether the destination step pins a profile, and
+	// defaults false so existing workflows, Office flows, and recovery paths
+	// keep their current fallback resolution.
+	RequireExplicitAgentProfile bool `json:"require_explicit_agent_profile,omitempty"`
 	// Source records where the workflow definition came from ("manual" or
 	// "github"). SourcePath is the repo-relative file path the definition
 	// was synced from; empty for manual workflows.

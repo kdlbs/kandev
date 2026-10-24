@@ -978,6 +978,23 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	// External-ID Found preflight (docs/specs/tasks/system-design/
+	// external-id-idempotency.md, "Request ordering and error precedence"):
+	// when the request carries an external_id, return an already-held
+	// identity before running create-specific resolution that can drift —
+	// override normalization, profile/step resolution, launch metadata — so
+	// a retry still recovers the existing task after its replacement
+	// profile was disabled or its step changed. Workspace write
+	// authorization and external_id validation/normalization already ran
+	// above, so this lookup weakens nothing; a miss continues to the normal
+	// create path, where CreateTask repeats the lookup and its
+	// unique-violation backstop still protects the race.
+	if strings.TrimSpace(req.ExternalID) != "" {
+		if found, handled := h.preflightMCPFoundCreateTask(ctx, msg, &req, admission); handled {
+			return found, nil
+		}
+	}
+
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {
@@ -1022,6 +1039,36 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
+	// The task-aware runtime resolver substitutes a fixed step's source profile
+	// with the caller's replacement. Resolve it through the shared service
+	// normalization so the profile reported to the caller (task metadata and the
+	// deferred-launch record) matches the one that will actually run.
+	if replacement, replaced, overrideErr := h.resolveMCPWorkflowAgentOverride(ctx, &req, resolvedStepID); overrideErr != nil {
+		// The preflight above already returned a held identity, but a
+		// concurrent create can settle between that miss and this
+		// validation. Recover it through the service lookup/backstop
+		// contract before surfacing the override error, so a retry still
+		// recovers the existing task instead of failing on a selection
+		// that drifted after the first attempt.
+		if recovered, ok := h.recoverMCPFoundAfterPreCreateFailure(ctx, msg, &req, admission); ok {
+			return recovered, nil
+		}
+		code := ws.ErrorCodeInternalError
+		if errors.Is(overrideErr, models.ErrInvalidWorkflowAgentOverrides) {
+			code = ws.ErrorCodeValidation
+		}
+		return ws.NewError(msg.ID, msg.Action, code, overrideErr.Error(), nil)
+	} else if replaced && replacement != launchConfig.AgentProfileID {
+		// The replacement is a different profile: drop the creator-copied
+		// initial runtime config (its model/mode/options belong to the source
+		// profile) rather than re-tagging it, and let the selected profile's own
+		// canonical values apply at launch.
+		launchConfig.AgentProfileID = replacement
+		launchConfig.InitialRuntimeConfig = nil
+		metadata[models.MetaKeyAgentProfileID] = replacement
+		delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
+		delete(metadata, models.MetaKeyInitialSessionRuntimeConfigProfileID)
+	}
 	launchConfig.InitialCreatePrompt = startAgent && explicitWorkflowStep && req.WorkflowStepID != "" && strings.TrimSpace(req.Description) != ""
 	metadata = workspacePolicy.MergeMetadataBlock(metadata)
 	var deferredLaunch map[string]interface{}
@@ -1053,6 +1100,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
 		WorkflowStepID:         resolvedStepID,
+		WorkflowAgentOverrides: req.WorkflowAgentOverrides,
+		ExplicitAgentProfileID: strings.TrimSpace(req.AgentProfileID),
 		Title:                  req.Title,
 		Description:            req.Description,
 		Autopilot:              req.Autopilot,
@@ -1202,6 +1251,7 @@ func classifyCreateTaskError(err error) string {
 		return ws.ErrorCodeValidation
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
+		errors.Is(err, service.ErrExplicitAgentProfileRequired),
 		errors.Is(err, service.ErrExternalIDInvalid),
 		errors.Is(err, service.ErrReservedMetadata),
 		// A reference the caller supplied that does not resolve is a
@@ -1720,6 +1770,25 @@ func (h *Handlers) resolveMCPFinalAgentProfile(
 		return *workspace.DefaultAgentProfileID, false, nil
 	}
 	return agentProfileID, false, nil
+}
+
+// resolveMCPWorkflowAgentOverride resolves the replacement profile the
+// caller's workflow_agent_overrides map applies to the destination step,
+// through the same service normalization the create path uses (source-key
+// trimming, SessionTarget exclusion, replacement eligibility). It returns
+// replaced=false when no override applies to that step. A resolution failure is
+// surfaced to the caller rather than silently falling back to the source
+// profile, so the reported and recorded launch profile cannot disagree with the
+// runtime resolver.
+func (h *Handlers) resolveMCPWorkflowAgentOverride(
+	ctx context.Context, req *mcpCreateTaskRequest, workflowStepID string,
+) (string, bool, error) {
+	if len(req.WorkflowAgentOverrides) == 0 || strings.TrimSpace(workflowStepID) == "" || h.taskSvc == nil {
+		return "", false, nil
+	}
+	return h.taskSvc.ResolveWorkflowAgentOverrideReplacement(
+		ctx, req.WorkspaceID, req.WorkflowID, workflowStepID, req.WorkflowAgentOverrides,
+	)
 }
 
 func (h *Handlers) resolveMCPCreatorSession(ctx context.Context, sourceTaskID, sourceSessionID string) (*models.TaskSession, error) {
