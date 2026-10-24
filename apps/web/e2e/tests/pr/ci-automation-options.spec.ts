@@ -13,6 +13,7 @@ async function seedTaskWithPR(
   seedData: SeedData,
   title: string,
   prOverrides: Partial<Parameters<ApiClient["mockGitHubAssociateTaskPR"]>[0]> = {},
+  taskDescription = "/e2e:simple-message",
 ) {
   // The task-mode MCP catalog is derived from the providers attached to the
   // task repository before the agent session starts. Keep this fixture's
@@ -26,12 +27,15 @@ async function seedTaskWithPR(
   });
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
+  await apiClient.mockGitHubAddRepos(OWNER, [
+    { full_name: `${OWNER}/${REPO}`, owner: OWNER, name: REPO },
+  ]);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
     seedData.agentProfileId,
     {
-      description: "/e2e:simple-message",
+      description: taskDescription,
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
@@ -340,7 +344,15 @@ test.describe("PR CI automation options", () => {
     await expect(promptDialog).toContainText("actionable queue-removal context");
     await testPage.getByRole("button", { name: "Cancel" }).click();
 
+    // Keep the repair active while repeated provider feedback is checked for deduplication.
+    await apiClient.updateTaskCIAutomationOptions(taskId, {
+      auto_fix_prompt_override:
+        '{{pr.feedback}}\ne2e:message("Conflict repair active")\ne2e:delay(60000)',
+    });
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
+    await expect(
+      session.activeChat().getByText("Conflict repair active", { exact: true }),
+    ).toBeVisible();
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: taskId,
       workspace_id: seedData.workspaceId,
@@ -378,9 +390,7 @@ test.describe("PR CI automation options", () => {
     await session.prTopbarPopover().getByTestId("ci-auto-fix-round-help").hover();
     await expect(
       testPage.getByRole("tooltip").getByTestId("ci-auto-fix-round-explanation"),
-    ).toContainText(
-      "If a turn ends without a recorded outcome, Kandev can retry the same settled feedback",
-    );
+    ).toContainText("If the agent reports no outcome, Kandev may retry the same feedback");
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
     const [firstMessage] = await listAutoFixMessages(apiClient, sessionId);
     expect(firstMessage).toBeDefined();
@@ -417,6 +427,8 @@ test.describe("PR CI automation options", () => {
       })
       .toBe(1);
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
+    await apiClient.updateTaskCIAutomationOptions(taskId, { auto_fix_enabled: false });
+    await apiClient.stopSession({ session_id: sessionId, force: true });
   });
 
   test("desktop popover keeps two linked PRs' automation switches independent", async ({
@@ -606,18 +618,25 @@ test.describe("PR CI automation options", () => {
     test.setTimeout(120_000);
     const queuedHead = "head-queued-desktop";
     const replacementHead = "head-replacement-desktop";
-    const taskId = await seedTaskWithPR(apiClient, seedData, "CI merge queue recovery", {
-      head_sha: queuedHead,
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-      unresolved_review_threads: 0,
-      mergeable_state: "clean",
-      merge_queue_state: "queued",
-      merge_queue_position: 1,
-      merge_queue_entry_id: "entry-desktop-a",
-      merge_queue_entry_head_sha: queuedHead,
-    });
+    // Keep the repair queued while this journey verifies provider transitions and requeue.
+    const taskId = await seedTaskWithPR(
+      apiClient,
+      seedData,
+      "CI merge queue recovery",
+      {
+        head_sha: queuedHead,
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+        unresolved_review_threads: 0,
+        mergeable_state: "clean",
+        merge_queue_state: "queued",
+        merge_queue_position: 1,
+        merge_queue_entry_id: "entry-desktop-a",
+        merge_queue_entry_head_sha: queuedHead,
+      },
+      'e2e:delay(60000)\ne2e:message("queue recovery fixture still running")',
+    );
     await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
 
     const session = await openTask(testPage, taskId);

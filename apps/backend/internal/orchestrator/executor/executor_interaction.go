@@ -584,7 +584,7 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", false, nil,
 		preloadedSession...,
 	)
 }
@@ -596,12 +596,12 @@ func (e *Executor) PromptWithAdmissionCallback(
 	taskID, sessionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "", false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "", false, nil,
 		preloadedSession...,
 	)
 }
@@ -614,13 +614,14 @@ func (e *Executor) PromptWithAdmissionCallbackAndSubmissionID(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
+	markPassthroughRunning func() error,
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID, false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID, false, markPassthroughRunning,
 		preloadedSession...,
 	)
 }
@@ -638,7 +639,7 @@ func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, submissionID, false,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, submissionID, false, nil,
 		preloadedSession...,
 	)
 }
@@ -648,7 +649,7 @@ func (e *Executor) PromptWithDispatchCallbackAndSubmissionID(
 // action, so the caller keeps admission serialized until agentctl accepts it.
 func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	return e.promptWithAdmissionCallbackAndSubmissionID(
-		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", true,
+		ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, onDispatched, "", true, nil,
 		preloadedSession...,
 	)
 }
@@ -658,11 +659,11 @@ type promptAgentWithDispatchCallback interface {
 }
 
 type promptAgentWithAdmissionCallback interface {
-	PromptAgentWithAdmissionCallback(context.Context, string, string, []v1.MessageAttachment, bool, func() error, func()) (*PromptResult, error)
+	PromptAgentWithAdmissionCallback(context.Context, string, string, []v1.MessageAttachment, bool, func(context.Context, string, []v1.MessageAttachment) error, func()) (*PromptResult, error)
 }
 
 type promptAgentWithAdmissionCallbackAndSubmissionID interface {
-	PromptAgentWithAdmissionCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func() error, func(), string) (*PromptResult, error)
+	PromptAgentWithAdmissionCallbackAndSubmissionID(context.Context, string, string, []v1.MessageAttachment, bool, func(context.Context, string, []v1.MessageAttachment) error, func(), string) (*PromptResult, error)
 }
 
 type promptAgentWithDispatchCallbackAndSubmissionID interface {
@@ -689,7 +690,7 @@ func (e *Executor) dispatchToAgent(
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	steer bool,
 	submissionID string,
@@ -760,10 +761,11 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 	taskID, sessionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 	steer bool,
+	markPassthroughRunning func() error,
 	preloadedSession ...*models.TaskSession,
 ) (*PromptResult, error) {
 	var session *models.TaskSession
@@ -802,7 +804,7 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
 	// fire-and-forget, so the flag has no analogue in passthrough mode.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
-		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments, beforeAdmission)
+		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments, beforeAdmission, markPassthroughRunning)
 		if err == nil && onDispatched != nil {
 			onDispatched()
 		}
@@ -832,9 +834,9 @@ func (e *Executor) promptWithAdmissionCallbackAndSubmissionID(
 //
 // A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
 // as an error so Service.handlePromptError can revert session state and surface
-// the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
-// data is already in the PTY; only the AgentRunning event is missed.
-func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment, beforeAdmission func() error) (*PromptResult, error) {
+// the failure to the user. An explicit running callback must succeed before
+// any PTY input. Legacy MarkPassthroughRunning failures remain non-fatal.
+func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, markRunning func() error) (*PromptResult, error) {
 	sessionID := session.ID
 	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(ctx, session, prompt, attachments)
 	if err != nil {
@@ -843,8 +845,9 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	if strings.TrimSpace(promptWithAttachments) == "" {
 		return nil, fmt.Errorf("passthrough prompt cannot be empty")
 	}
+	// Passthrough admission fences source intent; PTY text is not an agentctl journal payload.
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -856,10 +859,13 @@ func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session
 	// blocked by checkSessionPromptable during the inter-chunk SubmitDelay
 	// window (150ms for Claude). Otherwise a rapid double-send or workflow
 	// event firing in parallel passes the WAITING_FOR_INPUT guard and writes
-	// a second prompt onto the same PTY stdin mid-submit. Mark-error stays
-	// non-fatal — at worst we miss the AgentRunning event but the prompt
-	// still gets through.
-	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+	// a second prompt onto the same PTY stdin mid-submit. Guarded publication
+	// must preserve synchronous subscriber ownership before input is written.
+	if markRunning != nil {
+		if err := markRunning(); err != nil {
+			return nil, err
+		}
+	} else if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
 		e.logger.Warn("failed to mark passthrough as running before prompt; concurrent send window is open",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -1413,14 +1419,14 @@ func (e *Executor) registerInitialPromptAdmissionCallbacks(
 	onFailure func(),
 ) error {
 	registrar, ok := e.agentManager.(interface {
-		RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+		RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 	})
 	if !ok {
 		return errors.New("agent manager cannot register initial prompt admission callbacks")
 	}
 	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
 		executionID,
-		func() error { return beforeAdmission(executionID) },
+		func(_ context.Context, _ string, _ []v1.MessageAttachment) error { return beforeAdmission(executionID) },
 		func() {
 			if onDispatched != nil {
 				onDispatched(executionID)
@@ -1461,16 +1467,30 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 	return nil
 }
 
+// Launch admission carries the prepared payload; model-switch admission only fences ownership.
 func (e *Executor) registerInitialPromptCallbacks(
 	executionID string,
-	beforeAdmission func(executionID string) error,
+	beforeAdmission func(context.Context, string, string, []v1.MessageAttachment) error,
 	onDispatched func(executionID string),
 	onFailure func(),
 ) error {
-	if beforeAdmission != nil {
-		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	if beforeAdmission == nil {
+		return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 	}
-	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt admission callbacks")
+	}
+	return registrar.RegisterInitialPromptAdmissionCallbacks(executionID,
+		func(ctx context.Context, prompt string, attachments []v1.MessageAttachment) error {
+			return beforeAdmission(ctx, executionID, prompt, attachments)
+		}, func() {
+			if onDispatched != nil {
+				onDispatched(executionID)
+			}
+		}, onFailure)
 }
 
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying

@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import type { ListeningPort, TunnelInfo } from "../../../lib/api/domains/port-api";
 
 type PortAction = "port.list" | "port.tunnel.list" | "port.tunnel.start" | "port.tunnel.stop";
 type Request = {
@@ -11,7 +12,18 @@ type Request = {
 export async function routePortForwarding(page: Page, options: { empty?: boolean } = {}) {
   let sessionId = "";
   const tunnels = new Map(options.empty ? [] : [[9000, 49152]]);
+  let detectedPorts: ListeningPort[] = options.empty
+    ? []
+    : [
+        {
+          port: 3000,
+          address: "*",
+          process: "a-very-long-service-process-name-for-narrow-layouts",
+        },
+        { port: 9000, address: "127.0.0.1", process: "node" },
+      ];
   let failure: PortAction | undefined;
+  const requestCounts = new Map<PortAction, number>();
   let hold: PortAction | undefined;
   let release: (() => void) | undefined;
   await page.routeWebSocket(/\/ws$/, (socket) => {
@@ -29,6 +41,7 @@ export async function routePortForwarding(page: Page, options: { empty?: boolean
           server.send(part);
           continue;
         }
+        requestCounts.set(frame.action, (requestCounts.get(frame.action) ?? 0) + 1);
         if (failure === frame.action) {
           failure = undefined;
           socket.send(
@@ -41,7 +54,7 @@ export async function routePortForwarding(page: Page, options: { empty?: boolean
           );
           continue;
         }
-        const payload = portResponse(frame, tunnels, options.empty);
+        const payload = portResponse(frame, tunnels, detectedPorts);
         const respond = () =>
           socket.send(
             JSON.stringify({ type: "response", id: frame.id, action: frame.action, payload }),
@@ -57,6 +70,14 @@ export async function routePortForwarding(page: Page, options: { empty?: boolean
     setSession: (id: string) => {
       sessionId = id;
     },
+    setDetectedPorts: (ports: ListeningPort[]) => {
+      detectedPorts = ports;
+    },
+    setTunnels: (snapshot: TunnelInfo[]) => {
+      tunnels.clear();
+      for (const tunnel of snapshot) tunnels.set(tunnel.port, tunnel.tunnel_port);
+    },
+    requestCount: (action: PortAction) => requestCounts.get(action) ?? 0,
     failNext: (action: PortAction) => {
       failure = action;
     },
@@ -72,21 +93,10 @@ export async function routePortForwarding(page: Page, options: { empty?: boolean
   };
 }
 
-function portResponse(frame: Request, tunnels: Map<number, number>, empty = false) {
+function portResponse(frame: Request, tunnels: Map<number, number>, ports: ListeningPort[]) {
   switch (frame.action) {
     case "port.list":
-      return {
-        ports: empty
-          ? []
-          : [
-              {
-                port: 3000,
-                address: "*",
-                process: "a-very-long-service-process-name-for-narrow-layouts",
-              },
-              { port: 9000, address: "127.0.0.1", process: "node" },
-            ],
-      };
+      return { ports };
     case "port.tunnel.list":
       return { tunnels: [...tunnels].map(([port, tunnel_port]) => ({ port, tunnel_port })) };
     case "port.tunnel.start":

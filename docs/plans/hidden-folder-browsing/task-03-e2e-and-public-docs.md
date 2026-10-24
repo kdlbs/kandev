@@ -1,7 +1,7 @@
 ---
 id: "03-e2e-and-public-docs"
 title: "End-to-end coverage and public documentation"
-status: done
+status: completed
 wave: 2
 depends_on:
   - "01-backend-visibility-input"
@@ -168,3 +168,20 @@ are unchanged. Production CSS and behavior are unchanged.
 - Focused Prettier and ESLint passed. Hosted verification follows the next pushed head.
 
 - Desktop parity: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/directory-browser-hidden-folders.spec.ts -- --retries 0`: all four cases passed in 30.9 seconds.
+
+
+## PR #3680 entry-point compatibility (2026-10-10)
+
+The retained CI traces failed before directory browsing: both desktop cases
+opened the Files overflow and waited for its removed attachment menu item.
+Desktop, narrow-screen and phone fixtures now open `files-create-menu` and
+select `Add repositories or folders`. Hidden visibility, persisted preference,
+keyboard, selection, focus, sizing and viewport assertions remain unchanged.
+This follows the completed workspace-source placement contract and preserves
+this work order's directory-browser acceptance criteria. All four desktop
+directory-browser cases and both phone cases passed with retries disabled.
+They ran in the combined managed browser checks: 10 Chromium cases (2.8
+minutes) and four phone cases (59.2 seconds), including recovery and ordering
+controls. Targeted ESLint, documentation catalog, full specification lint and
+whitespace checks passed. No product copy,
+layout or hidden-directory behavior changed.

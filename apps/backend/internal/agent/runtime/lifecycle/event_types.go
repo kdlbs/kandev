@@ -44,6 +44,7 @@ type AgentEventPayload struct {
 	StartupFailureNPMCode     string                           `json:"startup_npm_code,omitempty"`
 	ProviderError             *streams.ProviderError           `json:"provider_error,omitempty"`
 	PromptFailureDisposition  streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
+	CausingRunID              string                           `json:"causing_run_id,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.
@@ -81,8 +82,7 @@ type PromptAttemptEvidence struct {
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
-// The activity epoch lets the consumer reject a stale watchdog snapshot. A
-// never-started prompt is terminal only when its snapshot remains current.
+// The activity epoch lets the consumer reject a stale watchdog snapshot.
 type AgentStalledPayload struct {
 	AgentExecutionID string        `json:"agent_execution_id"`
 	TaskID           string        `json:"task_id"`
@@ -95,8 +95,10 @@ type AgentStalledPayload struct {
 	ToolName         string        `json:"tool_name,omitempty"`
 	ToolTitle        string        `json:"tool_title,omitempty"`
 	ToolStatus       string        `json:"tool_status,omitempty"`
-	// NeverStarted is true when the agent has not emitted a single event since
-	// this prompt was dispatched — a terminal failure, not a mid-work pause.
+	PromptAccepted   bool          `json:"prompt_accepted"`
+	OutputObserved   bool          `json:"output_observed"`
+	// NeverStarted is a compatibility alias for !OutputObserved. It does not
+	// establish startup failure or authorize process teardown.
 	NeverStarted bool `json:"never_started"`
 }
 
@@ -152,6 +154,9 @@ type ACPSessionCreatedPayload struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
+	// succeeds the committed harness generation.
+	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
@@ -230,6 +235,7 @@ type AgentStreamEventData struct {
 	TurnID                      string                           `json:"turn_id,omitempty"`
 	Data                        interface{}                      `json:"data,omitempty"`
 	CanonicalProjection         bool                             `json:"canonical_projection,omitempty"`
+	ShellOutputHasContent       bool                             `json:"shell_output_has_content,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

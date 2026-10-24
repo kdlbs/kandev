@@ -1,15 +1,18 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { dwell } from "../../helpers/causal-waits";
+import { createStandardProfile } from "../../helpers/git-helper";
 
 test("task details omit native coordination controls for ordinary and configured tasks", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
+  const profile = await createStandardProfile(apiClient, "coordination-removal");
   const ordinaryTask = await apiClient.createTask(seedData.workspaceId, "Ordinary task detail", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
+    agent_profile_id: profile.id,
   });
   const configuredTask = await apiClient.createTask(
     seedData.workspaceId,
@@ -17,8 +20,21 @@ test("task details omit native coordination controls for ordinary and configured
     {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
+      agent_profile_id: profile.id,
     },
   );
+  for (const task of [ordinaryTask, configuredTask]) {
+    await apiClient.launchSession({
+      task_id: task.id,
+      agent_profile_id: profile.id,
+      intent: "prepare",
+      auto_start: false,
+      launch_workspace: true,
+    });
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status)
+      .toBe("ready");
+  }
   const claimResponse = await apiClient.rawRequest(
     "POST",
     `/api/v1/_test/tasks/${configuredTask.id}/management-claim`,
@@ -132,5 +148,6 @@ test("task details omit native coordination controls for ordinary and configured
   } finally {
     await apiClient.deleteTask(ordinaryTask.id).catch(() => undefined);
     await apiClient.deleteTask(configuredTask.id).catch(() => undefined);
+    await apiClient.deleteAgentProfile(profile.id).catch(() => undefined);
   }
 });

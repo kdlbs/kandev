@@ -9,6 +9,7 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-005
   - REQ-EXECUTORS-PLUGIN-006
   - REQ-EXECUTORS-PLUGIN-007
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
 ---
 
 # Remote executor plugins system design
@@ -36,6 +37,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 | REQ-EXECUTORS-PLUGIN-005 | Plugin lifecycle |
 | REQ-EXECUTORS-PLUGIN-006 | Effective capabilities and expiry |
 | REQ-EXECUTORS-PLUGIN-007 | User interfaces |
+| REQ-EXECUTORS-PORT-COLLISION-SAFETY-001 | Bootstrap and reverse connectivity (loopback probe for Windows test listeners and the task-process port allocator) |
 
 ## Registration and profiles
 
@@ -148,6 +150,19 @@ already configured for remote executors, and replaces any launch-supplied value.
 credentials; reject loopback-only or missing addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
+On Windows the fixture's own unit tests advertise a loopback address
+(`KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK=1`) so the ephemeral test binary binds loopback instead of
+a non-loopback interface and does not request Firewall access. The fixture's default advertised
+address and listener are unchanged outside tests. This mapping is scoped to the loopback probe: the
+loopback-only regression policy also covers the launcher's Windows port-occupied regression test,
+which holds the probed port with a loopback listener, while production port probing and backend
+port ownership remain owned by the
+[port collision and backend ownership safety](../requirements/port-collision-safety.md) requirement.
+The task-process port allocator (`portutil.AllocatePort`) only needs a port number, so its probe
+binds `127.0.0.1:0` rather than a wildcard address, the same loopback availability signal.
+It closes the probe before returning. The caller must bind the port and may lose
+that race; the result is neither a reservation nor a guarantee of uniqueness or
+availability on wildcard or non-loopback interfaces.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases
@@ -222,6 +237,40 @@ Provider lifecycle and task-session state remain separate concepts.
 
 One unresolved allocation blocks a later launch for that session. No new idempotency key is generated
 to escape uncertainty. Provider implementations must support recovery by the original identity.
+
+## Repository materialization credentials
+
+Materialization implements AC-EXECUTORS-PLUGIN-002.5 through
+AC-EXECUTORS-PLUGIN-002.7. Providers retain the existing bootstrap contract;
+Git broker issuance, scope checks, and reissue remain authoritative.
+
+Instance admission removes inherited managed broker authorization and generated
+credential config before merging `CreateRequest.Env`. Runtime helper tools and
+unrelated Git configuration remain available. Standalone default collection keeps
+its existing behavior. The request becomes `InstanceConfig.AgentEnv`. Agentctl takes
+a detached snapshot of the current instance Git environment under the process
+manager's existing lock. One request uses one snapshot throughout clone, fetch,
+PR-base preparation, sparse checkout, and checkout. An explicit operation-scoped
+Git runner carries this environment through both `materializeGitOutput` and
+`materializeCheckoutGit`; no process-global environment mutation is permitted.
+
+Build the command environment using the current instance snapshot as the source
+of managed authorization. Preserve process-installed helper tooling when absent
+from that snapshot, including `KANDEV_GITHUB_CREDENTIAL_HELPER_PATH`. Capture
+installed tooling during manager construction, as existing managed Git activation
+does; do not re-read mutable ambient credentials per command. Do not fall back to
+startup broker leases when the instance lacks current authorization. Use `internal/gitconfigenv` to preserve and validate unrelated indexed config.
+
+Both runners retain `subproc.NewGitCommand`, classified `GitLifecycle` capacity,
+existing verb-specific timeouts, cancellation, stdin handling, and final
+noninteractive Git environment enforcement. Preparation failures retain sanitized
+errors. Repository validation, cleanup, origin scrubbing, and response shapes
+remain unchanged. Secrets remain transient command environment values, never
+serialized into the repository or a provider checkpoint.
+
+No workspace credential-mode default changes: `executor` uses credentials already
+available on the remote executor; `managed` permits host-issued scoped credentials.
+Public documentation must explain that distinction for private plugin repositories.
 
 ## Recovery and cleanup
 

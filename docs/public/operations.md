@@ -31,7 +31,23 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
 
-The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+Provider startup can take longer when network requests time out. Native startup has a two-minute budget for each automatic restore attempt. If startup fails, Kandev verifies that the failed runtime stopped before allowing a replacement. Missing execution evidence keeps recovery blocked.
+
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+
+If an older crash left journal acknowledgments ahead of saved output, Kandev
+can restore a verified conversation on a new delivery generation while keeping
+the missing history explicit. **Resume** uses the same guarded recovery. A
+notice remains beside the composer when some earlier output is unavailable;
+the interrupted prompt's outcome remains unknown. Only a new instruction you
+send starts new work. Available retained output is synchronized normally.
+
+Recovery remains blocked if the original or replacement process cannot be
+proven terminated, native state is missing, records conflict, or retained work
+still needs acknowledgment. An older agent runtime may require an update
+before Resume can verify a history gap. Backend SQLite commits use FULL
+synchronization before output acknowledgments so new acknowledgments do not
+outlive their committed receipts after a power loss.
 
 ## Prevent host sleep during active tasks
 
@@ -228,6 +244,33 @@ deleted. The worker runs after the database transaction and retries after a
 restart. Do not delete `<home>/plugins/webapps/` files while their release rows
 or cleanup jobs still exist.
 
+### Incremental shell delivery
+
+New compatible agentctl runtimes use delivery protocol v2 for supported foreground
+ACP shell output. Incremental output and progress-based checkpoints reduce repeated
+journal, inbox and canonical-output writes while preserving the existing output
+viewer on desktop and phones. Retained v1 runtimes continue using their original
+snapshot contract and storage cost. Backend delivery cleanup still uses the existing
+payload grace and projection proof; unacknowledged output does not expire.
+
+A new agentctl validates and upgrades an owned v1 journal to format v2 atomically.
+Existing event bytes, sequence numbers and submission evidence remain unchanged.
+An old backend cannot consume compact records: v2 data and submission endpoints
+require explicit reader support. Status and Stop remain available when a reader
+is incompatible. Do not delete recovery evidence or resend an uncertain prompt
+as a workaround.
+
+Use forward repair with compatible binaries for recovery. There is no transparent
+in-place downgrade: older backends do not understand the new canonical output
+chunks, and older agentctl binaries reject the newer journal format. Rollback
+requires an offline, verified, matched pre-upgrade database and journal backup.
+That backup restores only the state it captured; work accepted afterward and
+external tool effects need explicit reconciliation.
+
+The change reduces new repeated writes. It does not shrink existing SQLite files:
+free pages can remain allocated after cleanup. Physical file reclamation and
+manual database compaction are separate maintenance operations.
+
 ## Storage maintenance
 
 > **Destructive:** **Force clear all** permanently removes eligible quarantine entries and discards their restore windows.
@@ -336,10 +379,11 @@ cache contents are currently live.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs. Use a full **Run now** or
 a quarantine action to purge eligible historical entries.
 
-Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
-worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
-on disk and gets a durable recheck after about 24 hours. The worker removes it after Git reports it
-clean, even when scheduled storage cleanup is disabled. Git-ignored files are outside this check.
+Archived Git worktrees use the task cleanup worker, not the optional storage schedule. Archive
+removes eligible managed worktrees and all local changes during its cleanup attempt, including
+untracked and ignored files. Existing worktrees retained under the earlier dirtiness policy are
+reconsidered after upgrade without its 24-hour cleanliness delay. Runtime-stop failures, active
+borrowers, ownership conflicts, and deletion failures can still defer cleanup.
 Active archived worktree paths protect their task workspace from storage quarantine and purge,
 including **Force clear all**. An older Kandev version can move an active worktree into quarantine.
 If this happens, choose **Restore** to return the workspace to its original path.
@@ -522,17 +566,26 @@ This cleanup is separate from **Message compaction** and agentctl journal prunin
 
 The default payload grace is one hour. Eligible projected event payloads and fully settled prompt payloads expire after this grace.
 Cleanup retains compact identities, hashes, outcomes, and settlement evidence.
+Independently projected nonterminal output can lose its redundant raw body even when
+an older terminal is unresolved or legacy submission bookkeeping is missing. Its
+exact committed projection receipt, authenticated cursor and replay hash must survive.
+The unresolved terminal and prompt keep their stronger recovery protections.
 Recent duplicate receipts remain for up to 24 hours or 10000 events per stream.
 Contiguous retirement checkpoints reject older events without applying them again.
+Fully projected known control notifications, such as capability and model reports,
+also become eligible after their exact consumer receipts complete. They do not
+permanently pin output from later events in the contiguous sequence once those
+events become eligible for expiry. Unknown notifications, pending effects and
+unresolved evidence still stop the retirement checkpoint.
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
 
 Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
-Cleanup starts after the first normal interval, which defaults to one minute.
+Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
-Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work, with a 100 ms pause between batches. A pass starts no further batch after five seconds.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds. When productive work remains, the next pass starts immediately; exhausted or busy-only passes wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
@@ -544,8 +597,13 @@ Unavailable backlog or age values use `-1`. These counters do not label session 
 
 ### Delivery retention upgrades and rollback
 
+After upgrade, the normal worker revisits eligible historical payloads in bounded
+batches using its persisted scan frontiers. No session reset or manual bookkeeping
+deletion is needed. Large backlogs take multiple passes; unresolved recovery evidence
+and canonical history remain protected.
+
 **Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
-SQLite version changes create a `VACUUM INTO` snapshot before migration.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
 Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
 PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
 
@@ -575,6 +633,15 @@ Backups can still contain payload bytes removed from the live database.
 ### SQLite
 
 SQLite is the default and is appropriate for a desktop, CLI, service, or single-replica container installation. Kandev uses one writer connection and a read pool in WAL mode. Only one Kandev backend should own the file.
+
+After a WAL reset, Kandev limits the retained WAL file to 64 MiB. Writes can
+temporarily grow the WAL beyond that size between resets. This does not change
+write durability, checkpoint timing, or the separate database compaction action.
+
+At SQLite startup and before creating a system backup, Kandev reclaims private
+`.kandev-backup-*` staging directories when neither the directory nor any direct
+entry has changed for six hours. Recent crash debris remains until a later boot
+or backup creation. Published backups and other staging prefixes are preserved.
 
 #### Default database continuity and recovery
 
@@ -623,8 +690,8 @@ the SQLite file size.
 
 Compaction is an explicit maintenance operation, separate from backup, migration,
 and readiness. Startup does not compact the live database. The pre-migration
-snapshot uses `VACUUM INTO` to create a separate backup; it does not shrink the
-live file.
+snapshot copies SQLite pages into a separate backup, preserving free pages;
+it does not shrink the live file.
 
 1. Wait for the upgraded backend to become ready. Check history before proceeding.
 2. Copy the verified pre-upgrade backup outside the automatic retention directory
@@ -765,7 +832,7 @@ The UI flow applies to the configured SQLite path:
 
 1. Stop or finish active agent sessions and preserve unpushed work.
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
-3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files. The restore job remains available long enough to report `restart_required` before process shutdown.
+3. Kandev copies the selected snapshot to `<configured-database-path>.new` and checks the staged SQLite file for integrity. If the snapshot is damaged, truncated, or not a SQLite database, the job fails, removes the staged copy, and leaves current data and database-backed work available without requiring a restart. After verification succeeds, Kandev stops scheduling, active executions, and database-backed workers, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files. The restore job remains available long enough to report `restart_required` before process shutdown.
 4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
 5. Check `/ready`, **System > Status**, database schema version, secrets, and representative tasks.
 
@@ -832,7 +899,7 @@ When reporting an incident, record timestamp/timezone, Kandev version and commit
 
 **Settings > System > Status** walks `data`, worktrees, repositories, sessions, tasks, quick chat, and the default `data/backups` directory. Results are cached for two hours; **Refresh** forces a new single-flight walk. Permission failures appear as warnings. Backup files outside the resolved home are not included in the total. The displayed total intentionally counts `data/backups` both inside the `data` row and again as the separate `backups` row, so use filesystem or volume metrics for quota enforcement.
 
-Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive removes a Git worktree only when Git reports it clean. A worktree with tracked or untracked Git changes stays on disk and receives a task-lifecycle recheck after about 24 hours. This recheck runs independently of the optional scheduled storage cleanup. When Git reports a worktree clean, Kandev removes its directory. Unpublished and ambiguous local branches remain. Kandev can remove an integrated managed branch. The environment identity remains for later recovery. Delete can also remove the local task branch. Other cleanup can remove a container, the exact Kubernetes Pod, and a Kandev-managed PVC. It keeps an existing claim. It can destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
+Archiving or deleting a task stops active sessions and starts durable asynchronous cleanup. Archive removes eligible managed Git worktrees and their local changes during cleanup, including staged, unstaged, untracked, and ignored files. It does not wait for a clean checkout. Existing worktrees retained under the earlier policy are reconsidered after upgrade without the old 24-hour cleanliness delay. This task cleanup runs independently of optional scheduled storage cleanup. Unpublished and ambiguous local branches remain. Kandev can remove an integrated managed branch. The environment identity remains for later recovery. Delete can also remove the local task branch. Other cleanup can remove a container, the exact Kubernetes Pod, and a Kandev-managed PVC. It keeps an existing claim. It can destroy a Sprite, reap a host-local agent process tree, or stop a remote SSH controller. SSH cleanup removes only the per-session runtime directory. Failed cleanup remains retryable across a backend restart. Kandev does not sweep arbitrary files from the shared temporary directory during archive or delete. The remote SSH task directory and existing Kubernetes claims remain for deliberate cleanup. The task can disappear from the UI before cleanup finishes.
 
 **Reset Environment** uses a separate teardown path. For Sprites, the current reset request can lose the profile credential context and report success while leaving the provider sandbox behind. After a Sprites reset, inspect **Settings > Executors > Sprites.dev** and explicitly destroy the old sandbox there if it remains. See [Executors](executors.md#spritesdev) for the executor-specific lifecycle.
 
@@ -849,6 +916,12 @@ Never delete a managed task directory merely because its database row looks term
 ### Recover a preserved Worktree inventory mismatch
 
 If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
+
+For duplicate physical-worktree claims or copied child environments, use the
+[offline inventory repair procedure](git-operations.md#repair-inconsistent-worktree-inventory).
+It requires an explicit canonical selection and preserves conversations and files.
+A successful repair does not complete a pending archive or delete cleanup.
+
 
 The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, appends an immutable receipt identity, verifies the checkout again, durably records monotonic matching post-repair evidence on that receipt, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
 

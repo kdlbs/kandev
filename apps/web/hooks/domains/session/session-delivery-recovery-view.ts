@@ -15,6 +15,10 @@ export function deliveryRecoveryRequestIdentity(
       recovery.incarnationId,
       recovery.harnessGeneration,
       recovery.promptGeneration,
+      block?.id,
+      block?.incarnation_id,
+      block?.expected_generation,
+      block?.updated_at,
     ]);
   }
   if (!block) return null;
@@ -26,6 +30,16 @@ export function persistedDeliveryRecoveryNotice(
   block: SessionRecoveryBlockProjection | undefined,
   t: TFunction,
 ): string | null {
+  if (canResumeDeliveryBlock(recovery, block)) return t("task:deliveryRecoveryLegacyResume");
+  if (
+    recovery?.historyGap &&
+    (recovery.phase === "uncertain" || recovery.phase === "reconnecting")
+  ) {
+    return sessionDeliveryRecoveryReasonMessage("delivery_history_gap", t);
+  }
+  if (block && recovery && recovery.phase !== "uncertain" && recovery.phase !== "reconnecting") {
+    return sessionDeliveryRecoveryReasonMessage(block.reason, t);
+  }
   if (recovery?.reconstruction) {
     return recovery.reconstruction.processIdentityKnown
       ? null
@@ -43,4 +57,18 @@ export function isDeliveryRecoveryResultCurrent(
   if (!localResultIsCurrent) return false;
   if (!result?.allowed_actions?.length || recoveryRevision === undefined) return true;
   return result.recovery_revision === recoveryRevision;
+}
+
+export function canResumeDeliveryBlock(
+  recovery: AgentDeliveryRecovery | null,
+  block: SessionRecoveryBlockProjection | undefined,
+): boolean {
+  if (recovery?.phase === "uncertain" || recovery?.phase === "reconnecting") return false;
+  if (block?.consumer_reference !== "agent_delivery") return false;
+  if (block.reason === "unknown_prompt_outcome" && block.delivery_submission_id) return true;
+  return (
+    block.reason === "unresolved_durable_work" &&
+    !block.delivery_submission_id &&
+    !block.delivery_stream_id
+  );
 }

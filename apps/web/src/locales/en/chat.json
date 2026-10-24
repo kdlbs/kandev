@@ -187,5 +187,10 @@
   "providerRecoveryDisabledBody": "Automatic continuation is disabled. Resume to try again, or start a fresh session.",
   "providerRecoveryUnsafeBody": "Automatic continuation stopped because an action is pending or its outcome is uncertain. Review the work before resuming.",
   "providerRecoveryUnsupportedBody": "This agent cannot automatically restore the interrupted conversation. Resume to try again, or start a fresh session.",
-  "providerRecoveryEvidenceBody": "Automatic continuation stopped because conversation identity or safety evidence is missing. Review the work before resuming."
+  "providerRecoveryEvidenceBody": "Automatic continuation stopped because conversation identity or safety evidence is missing. Review the work before resuming.",
+  "capacityRetryWindowEndsAt": "Recovery window ends at {{time}}.",
+  "retainedTurnRecoveryWindowExpiredBody_one": "Automatic recovery window ended after {{count}} attempt. You can send another message.",
+  "retainedTurnRecoveryWindowExpiredBody_other": "Automatic recovery window ended after {{count}} attempts. You can send another message.",
+  "retainedTurnRecoveryRestartBody": "Automatic recovery stopped after Kandev restarted. You can send another message.",
+  "capacityRetryWindowEnding": "Recovery window ends in {{countdown}}."
 }

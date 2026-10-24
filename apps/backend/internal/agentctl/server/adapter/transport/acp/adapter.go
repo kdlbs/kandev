@@ -145,6 +145,11 @@ type Adapter struct {
 
 	// Update channel
 	updatesCh chan AgentEvent
+	// Emission is serialized independently of mu so control events flush pending
+	// shell output without holding the adapter state lock during backpressure.
+	updateEmitMu       sync.Mutex
+	shellSnapshots     shellSnapshotState
+	shellSnapshotTimer *time.Timer
 
 	// notifQueue decouples the ACP SDK's notification goroutine from the
 	// per-notification processing we do in handleACPUpdate. The SDK's inbound
@@ -469,11 +474,6 @@ func (t *promptTurnState) cursorRetriableFailure() bool {
 	return failure
 }
 
-func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
-	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
-	return failure, occurredAt
-}
-
 func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
 		return false, "", time.Time{}, false
@@ -484,6 +484,8 @@ func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Ti
 }
 
 type asyncTurnFinalizer struct {
+	messageID   string
+	activeTools map[string]struct{}
 	timer       *time.Timer
 	seq         uint64
 	promptEpoch uint64
@@ -524,6 +526,8 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
 	}
+	a.shellSnapshotTimer = time.NewTimer(shellSnapshotInterval)
+	a.shellSnapshotTimer.Stop()
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
 	// the SDK (Initialize, or any future direct wiring) always has a live
@@ -685,6 +689,23 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
+}
+
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
@@ -780,6 +801,15 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 // context makes the wait cancelable during shutdown. Do not hold a.mu while
 // waiting; Close needs the write lock to cancel the context and unblock us.
 func (a *Adapter) sendUpdate(event AgentEvent) {
+	a.updateEmitMu.Lock()
+	defer a.updateEmitMu.Unlock()
+	a.flushShellSnapshotLocked()
+	a.shellSnapshots = shellSnapshotState{}
+	a.sendUpdateNow(event)
+}
+
+func (a *Adapter) sendUpdateNow(event AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -815,6 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event = streams.BoundGenericToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

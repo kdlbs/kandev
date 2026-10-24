@@ -117,13 +117,33 @@ async function verifySidebarViewReuse(
   // The view sorts newest first; lower rows can grow as their metadata hydrates.
   const firstTaskId = taskIds.at(-1)!;
   const settledRowTop = await taskRowTop(surface, firstTaskId);
-  const filters = mobile
+  const viewControls = mobile
     ? {
         selectViewByName: async (name: string) => {
           await surface.getByRole("button", { name, exact: true }).tap();
         },
       }
     : new SidebarFilterPopoverPage(page);
+  const filters = {
+    selectViewByName: async (name: string) => {
+      const activeViewId = name === "Repositories" ? "reuse-a" : "reuse-b";
+      // Rows update optimistically; a later reload needs the saved preference.
+      const saved = page.waitForResponse((response) => {
+        const request = response.request();
+        if (
+          request.method() !== "PATCH" ||
+          new URL(response.url()).pathname !== "/api/v1/user/settings"
+        )
+          return false;
+        const selection = request.postDataJSON().sidebar_view_state;
+        return (
+          selection?.workspace_id === seed.workspaceId && selection.active_view_id === activeViewId
+        );
+      });
+      await viewControls.selectViewByName(name);
+      expect((await saved).ok()).toBe(true);
+    },
+  };
   const loadedB = waitForHttp(page, "POST", /\/sidebar\/query$/);
   await filters.selectViewByName("Other");
   await loadedB;

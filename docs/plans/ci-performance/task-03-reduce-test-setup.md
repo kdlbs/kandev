@@ -156,3 +156,77 @@ pairs also passed: 96 files and 925 tests per run, exact identity/outcome parity
 median command elapsed 60.608s baseline versus 20.400s candidate (66.3% lower).
 The curated full and sample reports are linked from the October evidence.
 Hosted acceptance remains pending, so this work order stays in progress.
+
+### October 12 continuation
+
+Reviewed 581 additional files: 47 Node and 534 English browser assignments.
+Before this batch, the October 11 E2E cleanup added
+`e2e/helpers/backend-fixture-lifecycle.test.ts` to Node, taking the prior count
+from 420 to 421. The 47 reviewed migrations then brought it to 468.
+The registry at that snapshot contains 468 Node and 1,401 browser files; 995 unreviewed/multilingual
+files retain full setup at this 2,864-file source snapshot. Test bodies, assertions,
+skips, setup implementations, isolation and worker budgets are unchanged for this
+batch. See [the review ledger](../../audits/frontend-test-setup-2026-10-12.md) and
+[per-file evidence](../../audits/frontend-test-setup-2026-10-12.csv).
+
+The complete production-environment pair passed identical files, test identities,
+and outcomes: 25,554 passed and four skipped. Vitest elapsed time fell 1,455.77 to
+1,350.39 seconds (7.2% less). Three alternating 36-file/234-test sample pairs at
+two workers reduced median wall time from 25.625 to 9.602 seconds (62.5%). These
+are separate measurements; the sample percentage does not describe the full suite.
+A missing Portuguese preload deliberately failed its announcement assertion, and
+the restored full-setup keeper passed. Raw report hashes are recorded in the ledger.
+
+Hosted Actions comparison is pending. Three comparable hosted full samples and
+the 40% execution target remain unmet; keep this work order in progress.
+
+### Additional 50% target
+
+The October 12 user request raises the execution target to 50%. Use committed
+head `dc36fe3f709ebe35bce51dbdb203c66ae213f4eb` as this continuation's reference:
+2,008 seconds for frontend Run tests, with a target of 1,004 seconds. Report
+workflow elapsed time and runner-minutes separately. The E2E continuation uses
+2,159 seconds for its longest normal test step, targeting 1,079.5 seconds.
+These targets are not achieved by a sample benchmark or an earlier baseline.
+
+The next batch reviews 897 additional English-browser assignments, restores two
+interop-sensitive browser suites to full setup, and measures
+JSON catalog parsing plus a cold Node compile cache. No test-body,
+isolation, worker-budget or selection-trigger change is included. A VM-thread
+experiment was slower and rejected; global dependency optimization was rejected after
+full verification exposed module-identity and mock-interoperability failures.
+The scoped candidate bundles dependencies only in the explicitly reviewed browser
+project; the three affected suites retain native loading in the full project.
+Complete corrected-suite verification and hosted measurements remain pending; see [the continuation audit](../../audits/ci-half-runtime-2026-10-12.md).
+
+The scoped complete run passes 2,864 files, 25,554 tests and four skips, with
+exact file/title/outcome parity. Vitest time is 731.89 seconds versus 1,350.39
+seconds at the reference head (45.8% lower locally). Three alternating 75-file
+pairs preserve 617 passes and four skips each; median command time is 39.882
+versus 30.506 seconds (23.5% lower). These are separate measurements. A forks
+pool experiment was slower and rejected. Typecheck, ESLint, formatting, the
+nine frontend workflow contract tests, discovery and documentation validation
+pass. Hosted acceptance and the 50% target remain open.
+
+The first hosted optimized run (`38322865444`, head `b81c562`) passed in
+1,091 seconds for Run tests versus 2,008 seconds at `dc36fe3`: 45.7% lower,
+87 seconds above the 50% target. Workflow elapsed was 1,448 seconds versus
+2,595 seconds. The tested merge base advanced: all 2,872 reference files remain,
+with five additional files and extra cases from upstream (2,877 files, 25,668
+passes, four skips). This is one historical pair, not the required hosted
+median. The work order and stricter continuation target remain open.
+
+### Merge-readiness typecheck remediation
+
+After incorporating main, hosted frontend run 38381773696 failed before unit
+tests: the complete TypeScript graph exhausted Node's default 4 GiB heap.
+The same command reproduced the heap failure locally; with an 8 GiB heap it
+completed successfully. The workflow now scopes that heap ceiling to the
+typecheck step alone. Unit-test workers, isolation, selection and memory
+configuration remain unchanged. This restores mandatory verification rather
+than claiming an execution-time improvement. Targeted workflow contracts and
+the complete typecheck are the remediation gates; fresh hosted evidence is
+required after the fix is pushed. The fresh full typecheck with an isolated
+incremental-cache path passed with the 8 GiB ceiling. All nine frontend workflow
+contracts, workflow YAML parsing and step-scope checks, documentation catalog
+validation and full specification lint passed. Hosted verification is pending.

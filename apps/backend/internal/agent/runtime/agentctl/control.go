@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -39,15 +40,20 @@ type ControlClient struct {
 
 var ErrControlCredentialsRejected = errors.New("agentctl control credentials rejected")
 
+const createInstanceHTTPTimeout = 120 * time.Second
+
 // McpServerConfig holds configuration for an MCP server.
 type McpServerConfig struct {
-	Name    string            `json:"name"`
-	URL     string            `json:"url,omitempty"`
-	Type    string            `json:"type,omitempty"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
+	Name               string                          `json:"name"`
+	URL                string                          `json:"url,omitempty"`
+	Type               string                          `json:"type,omitempty"`
+	Command            string                          `json:"command,omitempty"`
+	Args               []string                        `json:"args,omitempty"`
+	Env                map[string]string               `json:"env,omitempty"`
+	Headers            map[string]string               `json:"headers,omitempty"`
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
@@ -321,7 +327,14 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	// Instance creation starts its process manager and workspace trackers before
+	// responding, so it needs a longer bound than ordinary control requests.
+	// Copy under c.mu: credential rotation replaces the transport under it.
+	c.mu.Lock()
+	createClient := *c.httpClient
+	c.mu.Unlock()
+	createClient.Timeout = createInstanceHTTPTimeout
+	resp, err := createClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}

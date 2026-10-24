@@ -613,7 +613,11 @@ func (m *continuationAdmissionAgentManager) CleanupStaleExecutionBySessionID(
 	ctx context.Context,
 	sessionID string,
 ) error {
-	return m.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+	err := m.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (m *continuationAdmissionAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(

@@ -18,9 +18,9 @@ The existing URL resolver reads `origin`; this correction does not introduce rem
 
 | Criteria | Design section |
 | --- | --- |
-| AC-EXECUTORS-REPOSITORY-BRANCH-001.1, .2 | Branch conversion |
+| AC-EXECUTORS-REPOSITORY-BRANCH-001.1, .2 | Branch conversion; Template expansion |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.3 | Preserved state |
-| AC-EXECUTORS-REPOSITORY-BRANCH-001.4 | Script integration |
+| AC-EXECUTORS-REPOSITORY-BRANCH-001.4 | Script integration; Template expansion |
 | AC-EXECUTORS-REPOSITORY-BRANCH-001.5 | Failure behavior |
 
 ## Branch conversion
@@ -58,6 +58,59 @@ Both paths require the converted branch name.
 Normalization precedes shell quoting. Existing quoting and command-injection regression tests remain mandatory.
 Tests must include a quoted branch value and prove that shell evaluation preserves literal data.
 
+## Template expansion
+
+`scriptengine.Resolver.Resolve` expands placeholders from the original assembled
+template once. Inserted values are opaque to that expansion, including values
+that contain the exact spelling of another registered placeholder. For example,
+the plain branch `topic/{{workspace.path}}` remains that literal branch after
+`repository.branch` is inserted, regardless of the workspace path or map order.
+Shell quoting protects shell evaluation; it does not protect data from a later
+text-replacement pass.
+
+Keep `mergedVars` and registration semantics unchanged: providers override
+static values, later providers override earlier providers, and later static
+registrations replace earlier static values. Providers are evaluated once per
+nonempty resolution, in registration order. Empty input bypasses providers;
+an empty merged map returns the input unchanged. Each exact registered
+`{{key}}` occurrence in the original template is replaced, including repeated
+occurrences and empty values. Unknown placeholders remain literal. Do not add
+a key grammar, whitespace normalization, or a recursive expansion mode.
+
+Build literal pattern/value pairs from the merged map and perform one
+`strings.NewReplacer(...).Replace(script)` operation. The replacement operation
+does not scan inserted values. Repeated `ReplaceAll` calls over evolving output,
+sorting those calls, and expansion to a fixed point do not implement this contract.
+No provider, quoting helper, branch converter, storage format, or executor
+lifecycle change is needed.
+
+### Script fragments and caller compatibility
+
+`RepositoryProvider` supplies `repository.setup_script` as verbatim shell text.
+`AgentInstallProvider` supplies its already-trimmed and deduplicated install
+fragment; agentctl, Git identity, and GitHub authentication providers construct
+their commands before resolution. These fragments remain executable shell text
+when inserted, without additional quoting, trimming, or placeholder expansion.
+Test byte equality against each provider's returned value, including an embedded
+known placeholder, a newline, quotes, and shell parameter syntax.
+
+The production callers in `docker_launch.go`, `executor_sprites_operations.go`,
+`executor_sprites_lifecycle.go`, `executor_ssh_scripts.go`,
+`executor_kubernetes_bootstrap.go`, `executor_kubernetes_cleanup.go`, and
+`preparer_script.go` assemble templates and then resolve once. Their generated
+checkout fragments are appended to the template before resolution; they are
+distinct from provider values inserted during resolution.
+The placeholder registry, fragment tests, and public executor documentation
+do not establish nested interpolation inside provider-returned script text.
+Custom fragments that depended on accidental map-order expansion will instead
+retain their bytes. This correction does not promise recursive interpolation.
+
+SSH's existing `resolveSSHScript` rejects any remaining `{{` sequence after
+resolution, including a literal sequence inside data or a fragment. That
+caller validation remains an independent limitation; resolver coverage does
+not establish successful SSH launch for such values. Local native Git tests
+establish command construction and checkout without claiming live executor coverage.
+
 ## Failure behavior
 
 The change performs no network lookup and adds no retry.
@@ -72,10 +125,23 @@ It covers the current fetch template and a saved clone template, then checks HEA
 A missing branch case proves that preparation does not select the default branch.
 These tests use isolated directories and require no Sprites account or user workspace.
 
+Resolver regression coverage uses the actual repository and workspace providers,
+with a temporary native Git remote containing distinct `main` and
+`topic/{{workspace.path}}` commits and sentinel bytes. Execute current fetch-style
+and saved clone-style templates and verify branch, HEAD, and exact sentinel
+bytes. A missing literal branch must fail without selecting `main`.
+A bounded render assertion checks every result against independently constructed
+literal command text; a detected mutation is executed once to expose the Git
+failure. A separate literal-command control proves fixture validity.
+Compatibility tests cover ordinary branches, repeated and unknown tokens,
+empty inputs/maps/values, precedence, and opaque script fragments. The complete
+`internal/scriptengine` package runs with the race detector after correction.
+
 ## Implementation plans
 
 - [Remote clone branch correction](../../../plans/remote-clone-branch/plan.md)
 - [Remote PR review checkout](../../../plans/remote-pr-review-checkout/plan.md)
+- [Literal executor placeholder expansion](../../../plans/executor-literal-placeholder-expansion/plan.md)
 
 ## Selected remote checkout
 

@@ -84,7 +84,7 @@ type retainedPromptFailureAcknowledger interface {
 }
 
 type initialPromptAdmissionRegistrar interface {
-	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 }
 
 type initialPromptDispatchRegistrar interface {
@@ -110,7 +110,7 @@ type admissionSubmissionAwarePromptProvider interface {
 		string,
 		[]v1.MessageAttachment,
 		bool,
-		func() error,
+		func(context.Context, string, []v1.MessageAttachment) error,
 		func(),
 		string,
 	) (*orchestratorexecutor.PromptResult, error)
@@ -212,12 +212,12 @@ func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T)
 		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's final admission callback")
 	}
 	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
-		"exec-model-switch-restart", func() error { return nil }, func() {}, func() {},
+		"exec-model-switch-restart", func(context.Context, string, []v1.MessageAttachment) error { return nil }, func() {}, func() {},
 	); err != nil {
 		t.Fatalf("register replacement startup admission: %v", err)
 	}
 	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
-		"missing-model-switch-restart", func() error { return nil }, nil, nil,
+		"missing-model-switch-restart", func(context.Context, string, []v1.MessageAttachment) error { return nil }, nil, nil,
 	); err == nil {
 		t.Fatal("adapter did not forward lifecycle execution lookup errors")
 	}

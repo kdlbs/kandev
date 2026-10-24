@@ -44,7 +44,11 @@ import type {
   LayoutPanel,
   LayoutState,
 } from "./layout-manager";
-import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
+import type {
+  ChangeLayer,
+  CommitDetailTarget,
+  HistoricalTurnDiffTarget,
+} from "@/lib/state/diff-target-types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import {
   performEnvSwitch,
@@ -184,6 +188,10 @@ export type FileEditorState = {
   hasRemoteUpdate?: boolean;
   remoteContent?: string;
   remoteOriginalHash?: string;
+  /** Last changed workspace observation; transient and never persisted. */
+  workspaceSnapshot?: { content: string; hash: string };
+  /** Last workspace snapshot accepted as baseline; warnings do not replace it. */
+  acceptedWorkspaceSnapshot?: { content: string; hash: string };
   renderedPreview?: boolean;
 };
 
@@ -307,8 +315,10 @@ type DockviewStore = {
   ) => void;
   /** Read-only output panel for the repository dev script. */
   addDevServerPanel: (groupId?: string) => void;
-  selectedDiff: { path: string; content?: string } | null;
-  setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
+  selectedDiff: { path: string; content?: string; historical?: HistoricalTurnDiffTarget } | null;
+  setSelectedDiff: (
+    diff: { path: string; content?: string; historical?: HistoricalTurnDiffTarget } | null,
+  ) => void;
   scrollTarget: TranscriptScrollTarget | null;
   scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => boolean;
   clearScrollTarget: (token: number) => void;
@@ -325,7 +335,6 @@ type DockviewStore = {
   hiddenRightPane: HiddenRightPane | null;
   /** Identity of the active built-in or saved custom layout profile. */
   activeLayoutProfile: LayoutProfileIdentity;
-  toggleSidebar: () => void;
   toggleRightPanels: () => void;
   setSidebarVisible: (visible: boolean) => void;
   setRightPanelsVisible: (visible: boolean) => void;
@@ -689,12 +698,6 @@ function visibilityForLayout(
 /** Build the store's visibility actions for the contextual right pane. */
 function buildVisibilityActions(set: StoreSet, get: StoreGet) {
   return {
-    // Legacy dockview-embedded sidebar is gone after the unified AppSidebar
-    // landed; the keybinding redirects to the AppSidebar toggle elsewhere.
-    // We keep these on the store as no-ops so any stragglers compile cleanly.
-    toggleSidebar: () => {
-      /* moved to UI slice: toggleAppSidebar */
-    },
     toggleRightPanels: () => {
       const { api, hiddenRightPane, preMaximizeLayout } = get();
       if (!api || preMaximizeLayout) return;
@@ -818,7 +821,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
       }
       set({
         ...ids,
-        sidebarVisible: true,
+        sidebarVisible: !!api.getPanel("sidebar"),
         ...visibilityForLayout(state, null),
         pinnedWidths: cleanedWidths,
       });
@@ -1865,9 +1868,8 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   centerGroupId: CENTER_GROUP,
   rightTopGroupId: RIGHT_TOP_GROUP,
   rightBottomGroupId: RIGHT_BOTTOM_GROUP,
-  // Legacy fields preserved for backwards compatibility with code that still
-  // reads them; the embedded dockview sidebar pane was removed in favour of
-  // the unified AppSidebar. Treated as inert: sidebarVisible is always false.
+  // Legacy saved layouts can still contain a sidebar panel. Visibility follows
+  // the applied layout so its width is reserved only when the panel exists.
   sidebarGroupId: SIDEBAR_GROUP,
   sidebarVisible: false,
   rightPanelsVisible: true,

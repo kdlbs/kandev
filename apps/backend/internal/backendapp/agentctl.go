@@ -43,9 +43,44 @@ type agentctlLauncherResult struct {
 	peerCapabilities []string
 }
 
+// managedAgentctl is the part of a launched agentctl process that
+// spawnFreshAgentctl reads back.
+type managedAgentctl interface {
+	BinaryPath() string
+	Port() int
+	Pid() int
+	ProcessIdentity() processidentity.Identity
+	AuthToken() string
+}
+
+// startManagedAgentctl launches the agentctl binary. Tests replace it so the
+// fresh-spawn wiring can run without a real binary.
+var startManagedAgentctl = func(ctx context.Context, cfg launcher.Config, log *logger.Logger) (managedAgentctl, func() error, error) {
+	l, cleanup, err := launcher.Provide(ctx, cfg, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	return l, cleanup, nil
+}
+
+// ownershipRenewalInterval and adoptedMonitorInterval are the loop cadences;
+// tests shorten them.
+var (
+	ownershipRenewalInterval = ownershipperiod.RenewalInterval
+	adoptedMonitorInterval   = 5 * time.Second
+)
+
 type agentctlProvisionOptions struct {
 	onRuntimeLoss        agentctlclient.RuntimeLossHandler
 	requireControlRecord bool
+	// lifetimeCtx bounds the loops that must run for as long as the server
+	// is this backend's runtime: the ownership-renewal loop and the adopted
+	// runtime monitor. A runtime replacement provisions under a short
+	// per-attempt ctx that is cancelled as soon as the attempt returns;
+	// starting those loops on it stops renewal at once, and the server's
+	// unowned reaper then shuts it down one unowned period later, which
+	// triggers the next replacement with the same defect. Nil means ctx.
+	lifetimeCtx context.Context
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -67,18 +102,22 @@ func provideAgentctlLauncher(
 	secretStore secrets.SecretStore,
 	options agentctlProvisionOptions,
 ) (*agentctlLauncherResult, error) {
+	lifetimeCtx := options.lifetimeCtx
+	if lifetimeCtx == nil {
+		lifetimeCtx = ctx
+	}
 	candidate, err := availability.PrepareBinding()
 	if err != nil {
 		return nil, err
 	}
-	result, scope := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore)
+	result, scope := resolveSurvivingAgentctl(ctx, lifetimeCtx, cfg, log, store, secretStore)
 	if result != nil {
 		var adoptedMonitor *agentctlclient.AdoptedRuntimeMonitor
 		if result.adopted {
 			probe := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
 				agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 			adoptedMonitor = agentctlclient.NewAdoptedRuntimeMonitor(probe, result.serverIdentity,
-				result.processIdentity, 5*time.Second, cfg.Agentctl.RecoveryReadTimeout,
+				result.processIdentity, adoptedMonitorInterval, cfg.Agentctl.RecoveryReadTimeout,
 				cfg.Agentctl.RecoveryReadRetries, nil, func(observation agentctlclient.RuntimeObservation) {
 					log.Warn("adopted agentctl runtime requires recovery action",
 						zap.String("evidence", string(observation.Evidence)))
@@ -133,11 +172,11 @@ func provideAgentctlLauncher(
 			return nil, err
 		}
 		if adoptedMonitor != nil {
-			adoptedMonitor.Start(ctx)
+			adoptedMonitor.Start(lifetimeCtx)
 		}
 		return result, nil
 	}
-	fresh, err := spawnFreshAgentctl(ctx, cfg, log, candidate, store, secretStore, options)
+	fresh, err := spawnFreshAgentctl(ctx, lifetimeCtx, cfg, log, candidate, store, secretStore, options)
 	if err != nil {
 		_ = candidate.Abort()
 	}
@@ -159,6 +198,7 @@ func provideAgentctlLauncher(
 // the caller spawns fresh.
 func resolveSurvivingAgentctl(
 	ctx context.Context,
+	lifetimeCtx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	store agentruntime.AdoptionRecordStore,
@@ -169,7 +209,7 @@ func resolveSurvivingAgentctl(
 			cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries, log)
 		return nil, agentruntime.InheritedRecordScopeNoServer
 	}
-	return adoptSurvivingAgentctl(ctx, cfg, log, store, secretStore)
+	return adoptSurvivingAgentctl(ctx, lifetimeCtx, cfg, log, store, secretStore)
 }
 
 // refusedAdoptionScope maps a refused adoption to what recovery may conclude
@@ -192,6 +232,7 @@ func refusedAdoptionScope(outcome agentruntime.AdoptionOutcome) agentruntime.Inh
 // a fresh server exactly as it would with the capability disabled.
 func adoptSurvivingAgentctl(
 	ctx context.Context,
+	lifetimeCtx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	store agentruntime.AdoptionRecordStore,
@@ -231,7 +272,7 @@ func adoptSurvivingAgentctl(
 	// renewing on a stale/mismatched cadence lets the server's own reaper
 	// fire while this backend still believes it owns it (Review round 3,
 	// finding 5).
-	renewer := startOwnershipRenewal(ctx, log, outcome.Endpoint, outcome.Credential,
+	renewer := startOwnershipRenewal(lifetimeCtx, log, outcome.Endpoint, outcome.Credential,
 		resolveAdoptedRenewalPeriod(outcome.UnownedPeriod))
 
 	return &agentctlLauncherResult{
@@ -269,6 +310,7 @@ func adoptSurvivingAgentctl(
 // finds no record and spawns fresh again.
 func spawnFreshAgentctl(
 	ctx context.Context,
+	lifetimeCtx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	candidate *agentctlclient.RuntimeBindingCandidate,
@@ -288,7 +330,7 @@ func spawnFreshAgentctl(
 			current.Stop()
 		}
 	}
-	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
+	l, cleanup, err := startManagedAgentctl(ctx, launcher.Config{
 		Host:          cfg.Agent.StandaloneHost,
 		Port:          cfg.Agent.StandalonePort,
 		StartupConfig: cfg.ManagedAgentctlStartupConfig(),
@@ -342,7 +384,7 @@ func spawnFreshAgentctl(
 		// (unlike the adopted path above) the local resolution IS the value
 		// the server itself enforces.
 		period, _ := ownershipperiod.Resolve(cfg.Agentctl.UnownedPeriod, cfg.Agentctl.IdleTimeout)
-		startedRenewer := startOwnershipRenewal(ctx, log, endpoint, l.AuthToken(), period)
+		startedRenewer := startOwnershipRenewal(lifetimeCtx, log, endpoint, l.AuthToken(), period)
 		renewalMu.Lock()
 		if exitObserved {
 			renewalMu.Unlock()
@@ -415,7 +457,7 @@ func startOwnershipRenewal(
 	}
 	client := agentctlclient.NewControlClient(host, port, log)
 	client.SetAuthToken(credential)
-	renewer := agentruntime.NewOwnershipRenewer(client, ownershipperiod.RenewalInterval(period), log)
+	renewer := agentruntime.NewOwnershipRenewer(client, ownershipRenewalInterval(period), log)
 	renewer.Start(ctx)
 	return renewer
 }

@@ -36,19 +36,23 @@ export function resolveRecoveryHistoryState(
   metadata: ActionMeta | undefined,
   ownerMessageId: string | undefined,
   sessionMetadata: Record<string, unknown> | null | undefined,
-): { activeOwner: boolean } | null {
+): true | null {
   if (!metadata?.recovery_actions) return null;
   const currentError = readLastAgentError(sessionMetadata);
   const messageStamp = metadata.recovery_stamp ?? metadata.error_stamp;
   const currentStamp = currentError ? lastAgentErrorStamp(currentError) : undefined;
   const activeOwner = ownerMessageId === comment.id;
   const isHistorical = Boolean(messageStamp && currentStamp && messageStamp !== currentStamp);
+  const cleanupFailure = normalizeAgentErrorCauses(metadata.causes).some(
+    (cause) => cause.operation === "resume" && cause.code === "runtime_cleanup_failed",
+  );
   if (
     activeOwner ||
     isRecoveryMessageDismissed(comment, metadata, sessionMetadata) ||
-    isHistorical
+    isHistorical ||
+    cleanupFailure
   ) {
-    return { activeOwner };
+    return true;
   }
   return null;
 }
@@ -56,11 +60,9 @@ export function resolveRecoveryHistoryState(
 export function RecoveryHistory({
   comment,
   metadata,
-  activeOwner = false,
 }: {
   comment: Message;
   metadata?: ActionMeta;
-  activeOwner?: boolean;
 }) {
   const { t } = useTranslation();
   const sessionMetadata = useAppStore((state) =>
@@ -72,56 +74,40 @@ export function RecoveryHistory({
   const status = recoveryHistoryStatus(comment, metadata, sessionMetadata, messages);
   const typed = historicalRecoveryPresentation(comment, metadata, t);
   return (
-    <RecoveryHistoryView
-      comment={comment}
-      metadata={metadata}
-      activeOwner={activeOwner}
-      status={status}
-      typed={typed}
-    />
+    <RecoveryHistoryView comment={comment} metadata={metadata} status={status} typed={typed} />
   );
 }
 
 function RecoveryHistoryView({
   comment,
   metadata,
-  activeOwner,
   status,
   typed,
 }: {
   comment: Message;
   metadata?: ActionMeta;
-  activeOwner: boolean;
   status: "resolved" | "dismissed" | null;
   typed: ReturnType<typeof historicalRecoveryPresentation>;
 }) {
   const { t } = useTranslation();
   const summary =
     typed?.summary ?? readableFailureSummary(comment.content) ?? t("task:anErrorOccurred");
-  const legacyDetails = typed ? "" : (metadata?.error_output ?? comment.content);
-  const showDetails = Boolean(
-    typed?.detailFields.length || (legacyDetails && legacyDetails !== summary),
-  );
+  const detailText = typed ? comment.content : (metadata?.error_output ?? comment.content);
+  const showDetails = Boolean(typed?.detailFields.length || (detailText && detailText !== summary));
   return (
     <div
       className="min-w-0 py-2 text-xs text-muted-foreground"
       data-testid="session-recovery-history"
     >
       {status && <RecoveryStatusBadge status={status} />}
-      {activeOwner ? (
-        <p className="wrap-anywhere">{t("task:sessionRecoveryDetailsAbove")}</p>
-      ) : (
-        <>
-          <p className="wrap-anywhere">{summary}</p>
-          {showDetails && (
-            <SessionErrorDetails
-              testId="session-recovery-history-details"
-              structuredFields={typed?.detailFields}
-            >
-              {legacyDetails}
-            </SessionErrorDetails>
-          )}
-        </>
+      <p className="wrap-anywhere">{summary}</p>
+      {showDetails && (
+        <SessionErrorDetails
+          testId="session-recovery-history-details"
+          structuredFields={typed?.detailFields}
+        >
+          {detailText !== summary ? detailText : ""}
+        </SessionErrorDetails>
       )}
     </div>
   );

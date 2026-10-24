@@ -16,6 +16,7 @@ import {
   type WorkspaceBoard,
 } from "@/hooks/domains/coordinator/use-workspace-boards";
 import type { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
+import { ProjectsFields, type ProjectsFieldsProps } from "./projects-fields";
 
 type Control = ReturnType<typeof useControlDraft>;
 
@@ -78,6 +79,8 @@ export type WatchesFieldsProps = {
   canManage: boolean;
   onChange: (next: WatchesDraft) => void;
   errorMessage?: string | null;
+  /** The Projects part; absent while the Projects scope is not offered. */
+  projects?: ProjectsFieldsProps;
 };
 
 export function WatchesFields({
@@ -88,6 +91,7 @@ export function WatchesFields({
   canManage,
   onChange,
   errorMessage,
+  projects,
 }: WatchesFieldsProps) {
   const { t } = useTranslation();
   const { scope, workflowIds } = watches;
@@ -164,13 +168,14 @@ export function WatchesFields({
           )}
         </>
       )}
+      {projects && <ProjectsFields {...projects} />}
     </div>
   );
 }
 
 export function WatchesSection({ workspaceId, canManage, control }: WatchesSectionProps) {
   const { t } = useTranslation();
-  const { draft, status, retry, setWatches } = control;
+  const { draft, status, retry, setWatches, setProjects, projectsRead } = control;
   const boardsRead = useWorkspaceBoards(workspaceId, draft !== null);
 
   if (!draft) {
@@ -195,6 +200,19 @@ export function WatchesSection({ workspaceId, canManage, control }: WatchesSecti
       onBoardsRetry={boardsRead.retry}
       canManage={canManage}
       onChange={setWatches}
+      projects={
+        draft.projects
+          ? {
+              projects: draft.projects,
+              sets: projectsRead.sets,
+              loose: projectsRead.loose,
+              status: projectsRead.status,
+              onRetry: projectsRead.retry,
+              canManage,
+              onChange: setProjects,
+            }
+          : undefined
+      }
     />
   );
 }

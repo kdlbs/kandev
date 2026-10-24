@@ -53,6 +53,19 @@ test.describe("Mobile delete task redirect", () => {
       },
     );
 
+    // The test holds the deletion response after the initial agent turns finish.
+    for (const taskID of [first.id, last.id]) {
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(taskID);
+            return sessions[0]?.state;
+          },
+          { timeout: 60_000, message: "initial turn must finish before deletion preview" },
+        )
+        .toBe("WAITING_FOR_INPUT");
+    }
+
     await testPage.goto(`/t/${first.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();

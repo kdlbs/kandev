@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { ObservedPrompts } from "@/lib/session-last-prompt";
+import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 
 export type ActiveTurnWindowObservation = {
   activeTurnId: string | null;
@@ -76,6 +77,12 @@ export type TurnsState = {
    * Turns started after the boundary (genuine resumes) are unaffected.
    */
   settledBoundaryBySession: Record<string, string>;
+};
+
+export type TurnChangesState = {
+  bySession: Record<string, TurnChangeSetSummary[]>;
+  nextOffsetBySession: Record<string, number | null>;
+  loadedBySession: Record<string, boolean>;
 };
 
 export type TaskSessionsState = {
@@ -291,6 +298,7 @@ export type SessionSliceState = {
   messages: MessagesState;
   messagePrompts: PromptsState;
   turns: TurnsState;
+  turnChanges: TurnChangesState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
   pendingActionProjectionsBySessionId: Record<string, PendingActionOrphanProjection>;
@@ -407,6 +415,13 @@ export type SessionSliceActions = {
   reconcileActiveTurnAfterHydration: (sessionId: string, hydrationEpoch: number) => void;
   /** Records that the session's full persisted turn history is in the store. */
   markTurnsLoaded: (sessionId: string) => void;
+  mergeTurnChangePage: (
+    sessionId: string,
+    summaries: TurnChangeSetSummary[],
+    page: { offset: number; nextOffset?: number },
+  ) => void;
+  mergeTurnChangeSummary: (sessionId: string, summary: TurnChangeSetSummary) => void;
+  markTurnChangesLoaded: (sessionId: string, nextOffset: number | undefined) => void;
   /**
    * Source adoption is an authoritative idle boundary for the listed
    * sessions. `boundaryTimestamp` MUST be server-issued (the WS envelope
@@ -457,6 +472,8 @@ export type SessionSliceActions = {
   setActiveModel: (sessionId: string, modelId: string) => void;
   clearActiveModel: (sessionId: string) => void;
   // Task plan actions
+  beginTaskPlanRead: (taskId: string) => symbol;
+  finishTaskPlanRead: (taskId: string, token: symbol, plan?: TaskPlan | null) => boolean;
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;

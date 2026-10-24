@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -69,6 +70,13 @@ func (s *Service) createTurn(
 	defer unlock()
 
 	metadata := turnStartRuntimeMetadata(session)
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		if identity.Synthetic {
+			metadata[models.TurnMetaKeyTurnChangeSyntheticActor] = true
+		} else if identity.UserID != "" {
+			metadata[models.TurnMetaKeyTurnChangeActorUserID] = identity.UserID
+		}
+	}
 	if recovery != nil {
 		metadata[models.TurnMetaKeyPromptDispatchPending] = true
 		metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] = recovery.PendingID
@@ -85,6 +93,12 @@ func (s *Service) createTurn(
 		Metadata:           metadata,
 		CreatedAt:          time.Now().UTC(),
 		UpdatedAt:          time.Now().UTC(),
+	}
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != session.TaskID || identity.SessionID != sessionID {
+			return nil, errors.New("reserved launch belongs to another task session")
+		}
+		turn.ID = identity.TurnID
 	}
 
 	var (
@@ -820,12 +834,12 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		taskID = session.TaskID
 	}
 
-	// Get workspace path from the session's worktree(s).
-	// Multi-repo: every per-repo worktree sits as a sibling under the task root
-	// (~/.kandev/tasks/{taskDirName}/{repoName}/), so the workspace path agentctl
-	// needs is the parent of any one of them. Picking the first repo's path here
-	// would point agentctl at a single repo subdir and disable the per-repo
-	// tracker fan-out that scanRepositorySubdirs relies on.
+	// Get a provisional workspace path from the session's worktree(s). A
+	// classified durable task environment replaces this value because explicit
+	// nested attachments can place a worktree below the current repository
+	// without changing the agent root. Unclassified legacy rows keep the
+	// session-derived path when one exists; older tests and records used a
+	// generic environment path before task-root metadata was persisted.
 	var workspacePath string
 	if len(session.Worktrees) > 1 {
 		workspacePath = filepath.Dir(session.Worktrees[0].WorktreePath)
@@ -918,7 +932,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		for _, folder := range folders {
 			if folder != nil {
-				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath})
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath, WorkspaceRelativePath: folder.WorkspaceRelativePath})
 			}
 		}
 	}
@@ -1154,14 +1168,21 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		return nil, err
 	}
 	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
+	worktreesByRepository := indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees)
 	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	repositories := indexWorkspaceRepositoryEntities(projections)
+	projectionCounts := make(map[string]int, len(projections))
+	for _, projection := range projections {
+		projectionCounts[projection.taskRepository.RepositoryID]++
+	}
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(projection, branchPlans[index].IdentitySlug, worktreesByIdentity))
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(
+			projection, branchPlans[index].IdentitySlug, worktreesByIdentity, worktreesByRepository, projectionCounts,
+		))
 	}
 	return repositories, nil
 }
@@ -1188,6 +1209,26 @@ func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map
 	return worktreesByIdentity
 }
 
+func indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees []*models.TaskEnvironmentRepo) map[string]*models.TaskEnvironmentRepo {
+	worktrees := make(map[string]*models.TaskEnvironmentRepo, len(sessionWorktrees))
+	ambiguous := make(map[string]struct{})
+	for _, worktree := range sessionWorktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
+		}
+		if _, exists := ambiguous[worktree.RepositoryID]; exists {
+			continue
+		}
+		if _, exists := worktrees[worktree.RepositoryID]; exists {
+			delete(worktrees, worktree.RepositoryID)
+			ambiguous[worktree.RepositoryID] = struct{}{}
+			continue
+		}
+		worktrees[worktree.RepositoryID] = worktree
+	}
+	return worktrees
+}
+
 func indexWorkspaceRepositoryEntities(projections []workspaceRepositoryProjection) map[string]*models.Repository {
 	repositories := make(map[string]*models.Repository, len(projections))
 	for _, projection := range projections {
@@ -1200,6 +1241,8 @@ func (s *Service) workspaceRepositorySpec(
 	projection workspaceRepositoryProjection,
 	branchIdentitySlug string,
 	worktreesByIdentity map[workspaceWorktreeKey]*models.TaskEnvironmentRepo,
+	worktreesByRepository map[string]*models.TaskEnvironmentRepo,
+	projectionCounts map[string]int,
 ) lifecycle.WorkspaceRepositorySpec {
 	taskRepository, repository := projection.taskRepository, projection.repository
 	branchTemplate := repository.WorktreeBranchTemplate
@@ -1208,18 +1251,29 @@ func (s *Service) workspaceRepositorySpec(
 	}
 	cloneRelocation := s.managedCloneRelocationProof(repository)
 	spec := lifecycle.WorkspaceRepositorySpec{
-		RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
-		CloneRelocation: cloneRelocation,
-		BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		RepositoryID: taskRepository.RepositoryID, TaskRepositoryID: taskRepository.ID,
+		RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
+		CloneRelocation:       cloneRelocation,
+		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
+		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
-	if selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]; selected != nil {
+	selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]
+	if selected == nil && projectionCounts[taskRepository.RepositoryID] == 1 {
+		selected = worktreesByRepository[taskRepository.RepositoryID]
+	}
+	if selected != nil {
+		spec.TaskEnvironmentRepoID = selected.ID
+		if spec.WorkspaceRelativePath == "" {
+			spec.WorkspaceRelativePath = selected.WorkspaceRelativePath
+		}
 		spec.WorktreeID = selected.WorktreeID
 		spec.WorktreePath = selected.WorktreePath
 		spec.WorktreeBranch = selected.WorktreeBranch
 		spec.BranchSlug = selected.BranchSlug
-		spec.BranchIdentitySlug = selected.BranchSlug
+		spec.BranchIdentitySlug = branchIdentitySlug
 		spec.WorktreeSourceClonePath = selected.WorktreeSourceClonePath
 		spec.WorktreeSourceCommonDir = selected.WorktreeSourceCommonDir
 		if cloneRelocation != nil {
@@ -1390,10 +1444,12 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	info.TaskEnvironmentID = env.ID
 	info.EnvironmentOwnerTaskID = env.TaskID
 	info.OwnershipGeneration = env.OwnershipGeneration
+	effectiveLayout := EffectiveTaskEnvironmentWorkspaceLayout(env)
+	info.WorkspaceLayout = effectiveLayout
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}
-	if info.WorkspacePath == "" || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath)) {
+	if env.WorkspacePath != "" && (info.WorkspacePath == "" || env.WorkspaceLayout != "" || env.TaskDirName != "" || effectiveLayout == WorkspaceLayoutTaskRoot || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath))) {
 		info.WorkspacePath = env.WorkspacePath
 	}
 	if env.ContainerID != "" {

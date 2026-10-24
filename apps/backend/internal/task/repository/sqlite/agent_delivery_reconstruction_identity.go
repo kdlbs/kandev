@@ -21,3 +21,21 @@ func canEnrichReconstructedIdentity(owner *agentDeliveryReconstructionOwner, sub
 	candidate.Recovery.Reconstruction = owner.current.Reconstruction
 	return reconstructionAlreadyCommitted(owner, submission, block, &candidate)
 }
+
+func canRecordReconstructedHistoryGap(owner *agentDeliveryReconstructionOwner, submission models.AgentDeliverySubmission, request *models.AgentDeliveryReconstructionRequest) bool {
+	current, next := owner.current, request.Recovery
+	if !owner.exists || current.HistoryGap != nil || next.HistoryGap == nil {
+		return false
+	}
+	return (current.Phase == models.AgentDeliveryRecoveryUncertain || current.Phase == models.AgentDeliveryRecoveryReconnecting) &&
+		sameReconstructedRecoveryOwner(current, next) &&
+		(submission.State == models.DeliverySubmissionInterruptedUnknown || submission.State == models.DeliverySubmissionDispatching)
+}
+
+func sameReconstructedRecoveryOwner(current, next models.AgentDeliveryRecovery) bool {
+	return current.Revision == next.Revision && current.SessionID == next.SessionID &&
+		current.IncarnationID == next.IncarnationID && current.HarnessGeneration == next.HarnessGeneration &&
+		current.StreamID == next.StreamID && current.SubmissionID == next.SubmissionID &&
+		current.AgentExecutionID == next.AgentExecutionID && current.PromptGeneration == next.PromptGeneration &&
+		current.OriginalRuntime == next.OriginalRuntime
+}

@@ -3,6 +3,7 @@ package launcher
 import (
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -196,12 +197,15 @@ func TestPickPortsIgnoresOccupiedWebPort(t *testing.T) {
 	}
 }
 
-func TestCanBindDetectsWildcardListener(t *testing.T) {
-	// A running backend binds the wildcard address. On macOS/BSD a bind to the
-	// specific 127.0.0.1 address succeeds against an active wildcard listener
-	// (Go also sets SO_REUSEADDR), so a bind-only probe falsely reports the busy
-	// port as free. The probe must connect-check both loopback families first.
-	ln, err := net.Listen("tcp", ":0")
+func TestCanBindDetectsOccupiedListener(t *testing.T) {
+	// On macOS/BSD a loopback bind may succeed against a wildcard listener, so
+	// the probe must connect-check both loopback families. Windows uses a
+	// loopback occupant to avoid a Firewall prompt from the temporary test binary.
+	listenAddress := ":0"
+	if runtime.GOOS == "windows" {
+		listenAddress = "127.0.0.1:0"
+	}
+	ln, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,12 +213,12 @@ func TestCanBindDetectsWildcardListener(t *testing.T) {
 
 	port := ln.Addr().(*net.TCPAddr).Port
 	if canBind(port) {
-		t.Fatalf("canBind(%d) = true while a wildcard listener holds the port", port)
+		t.Fatalf("canBind(%d) = true while a test listener holds the port", port)
 	}
 	if got, err := pickAvailablePortExcept(port, map[int]bool{}); err != nil {
 		t.Fatalf("pickAvailablePortExcept(%d) failed: %v", port, err)
 	} else if got == port {
-		t.Fatalf("pickAvailablePortExcept returned the occupied wildcard port %d", port)
+		t.Fatalf("pickAvailablePortExcept returned the occupied port %d", port)
 	}
 }
 

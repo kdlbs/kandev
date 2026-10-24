@@ -7,9 +7,21 @@ e2e_allow_unsafe_parallelism() {
   [[ "${KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM:-}" == "1" ]]
 }
 
+e2e_resolve_cgroup_root() {
+  local root="${1:-/sys/fs/cgroup}" membership="${2:-/proc/self/cgroup}" scope=""
+  if [[ -r "$membership" ]]; then
+    scope="$(awk -F: '$1 == "0" && $2 == "" { print $3; exit }' "$membership")"
+  fi
+  if [[ "$scope" == /* && -r "$root$scope/memory.max" && -r "$root$scope/memory.current" ]]; then
+    printf '%s' "$root$scope"
+  else
+    printf '%s' "$root"
+  fi
+}
+
 e2e_available_memory_kib() {
   local meminfo_path="${1:-/proc/meminfo}"
-  local cgroup_root="${2:-/sys/fs/cgroup}"
+  local cgroup_root="${2:-$(e2e_resolve_cgroup_root)}"
   local host_available=0
   if [[ -r "$meminfo_path" ]]; then
     host_available="$(awk '/^MemAvailable:/ { print $2; exit }' "$meminfo_path")"
@@ -72,7 +84,7 @@ e2e_cgroup_remaining_kib() {
 
 e2e_max_local_shards() {
   local available_kib
-  available_kib="$(e2e_available_memory_kib "${1:-/proc/meminfo}" "${2:-/sys/fs/cgroup}")"
+  available_kib="$(e2e_available_memory_kib "${1:-/proc/meminfo}" "${2:-}")"
 
   # Unknown memory is not permission to start several browser stacks. Keep
   # the safe single-shard default until an actual host or cgroup budget is
@@ -82,6 +94,18 @@ e2e_max_local_shards() {
     maximum=3
     (( available_kib < 12582912 )) && maximum=2
     (( available_kib < 6291456 )) && maximum=1
+  fi
+  printf '%s' "$maximum"
+}
+
+e2e_max_planned_processes() {
+  local available_kib maximum=1
+  available_kib="$(e2e_available_memory_kib "${1:-/proc/meminfo}" "${2:-}")"
+  if [[ "$available_kib" =~ ^[0-9]+$ && "$available_kib" != 0 ]]; then
+    # Planned CI stacks reserve two GiB, then two GiB per isolated process.
+    maximum=$(( (available_kib - 2097152) / 2097152 ))
+    (( maximum < 1 )) && maximum=1
+    (( maximum > 4 )) && maximum=4
   fi
   printf '%s' "$maximum"
 }

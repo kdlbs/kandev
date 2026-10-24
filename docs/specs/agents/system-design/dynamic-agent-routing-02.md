@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-08
+updated: 2026-10-12
 owners:
   - cfl
 ---
@@ -115,6 +115,9 @@ require the current exclusive probe lease.
   the earliest known recovery time and remediation actions.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
+- If a route action targets a session whose selected profile is not dynamic,
+  the orchestrator returns a typed sentinel error and the WebSocket handler maps
+  it to a validation error with that reason. No route or session state changes.
 - A failure is fenced to the route generation and candidate that produced it.
   The route records a successor before the predecessor's process is replaced,
   and a deferred successor launch leaves the predecessor serving the session.
@@ -141,6 +144,31 @@ require the current exclusive probe lease.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
   route state and does not launch or resume downstream ACP until the feature is
   enabled again.
+- If a resumed or prepared runtime settles to WAITING_FOR_INPUT before the
+  process-start callback runs, the callback still marks the claimed route
+  generation active for that execution, and the resume-ready path does the same
+  for a route it re-claimed as `starting` or `retrying`. A route left
+  `starting` would make every later explicit recovery report
+  `dynamic_route_pending`.
+- A resume-ready durable activation failure returns to the actual resume caller
+  without stopping or replacing the healthy runtime. A later resume admission
+  may reconcile the same starting generation after storage recovery, provided
+  the live prompt-ready execution matches the session's claimed execution and
+  the session is not cancelled or terminal. The generation/status-fenced write
+  remains authoritative; a predecessor runtime cannot activate a successor.
+- If an explicit recovery action finds the route `starting` and no runtime is
+  live for the session, it re-claims the same persisted candidate and resumes.
+  A live launch owner, a passive resume, and other non-active states keep the
+  `dynamic_route_pending` guard. An explicit recovery that is still blocked
+  returns that error to its caller instead of a success response with no
+  execution; a passive session open keeps its waiting response.
+- At startup the orphan-route sweep treats a session parked in
+  WAITING_FOR_INPUT whose route is still `starting` and which has no
+  `executors_running` row as a stranded launch owner, and marks it
+  `action_required`: no launch reached `MarkActive`, the ordinary session UI
+  cannot release the route while no runtime backs it, and no other pass
+  recovers it. A live executor row, an unreadable row, a stale generation, and
+  any other parked state keep the existing exclusion.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.
@@ -257,3 +285,7 @@ require the current exclusive probe lease.
   actions, or health policy outside a dynamic profile.
 - Automatically converting legacy Office routing rows into dynamic profiles or
   deleting those rows during this feature's rollout.
+
+Activation reconciliation also verifies the execution record's concrete profile against the current route candidate. Matching the session's execution ID alone is insufficient while a detached successor has been recorded but its predecessor still runs. The shared cancellation/settlement guard serializes observation and activation with successor launch, and a guarded session read revalidates the observed generation, candidate, execution, and nonterminal state.
+
+After durable activation, reconciliation reads back the same-generation active route and the persisted session projection. A failed projection mirror keeps admission guarded until a later attempt repairs it; the admitted session copies the persisted route state, reason, and timestamp. Candidate, execution, and nonterminal session checks remain under the shared cancellation guard.

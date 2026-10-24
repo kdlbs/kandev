@@ -504,6 +504,8 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
+	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.
@@ -578,6 +580,17 @@ type FeaturesConfig struct {
 	// watches, standing orders, goals, activity log and the new proposal
 	// kinds). It only takes effect together with Coordinator.
 	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
+	// CoordinatorPhase3 gates coordinator autonomy (unattended wakes, the
+	// spend ceiling, automatic decisions). It only takes effect together
+	// with Coordinator and CoordinatorPhase2.
+	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
+
+	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
+	// the Projects scope editor, and everything that reads or acts on the
+	// recorded turn ledger. Recording itself runs without it. It only takes
+	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol

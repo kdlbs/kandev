@@ -261,16 +261,27 @@ export async function waitForActiveSessionCancellationPending(
   page: Page,
   pending: boolean,
   targetSessionId?: string,
+  minimumCancellationRevision?: number,
 ): Promise<void> {
   await page.waitForFunction(
-    ({ expected, sessionId: targetSessionId }) => {
+    ({ expected, sessionId: targetSessionId, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
       const sessionId = targetSessionId ?? store.getState().tasks.activeSessionId;
       if (!sessionId) return false;
-      return store.getState().taskSessions.items[sessionId]?.cancellation_pending === expected;
+      const session = store.getState().taskSessions.items[sessionId];
+      return (
+        session?.cancellation_pending === expected &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
+      );
     },
-    { expected: pending, sessionId: targetSessionId },
+    {
+      expected: pending,
+      sessionId: targetSessionId,
+      minimumRevision: minimumCancellationRevision,
+    },
     {
       timeout: 45_000,
       message: `Session ${targetSessionId ?? "active"} did not reach cancellation_pending=${pending}`,
@@ -371,9 +382,10 @@ export async function waitForQuickChatSessionSettled(
   page: Page,
   sessionId: string,
   timeoutMs = 20_000,
+  minimumCancellationRevision?: number,
 ): Promise<void> {
   await page.waitForFunction(
-    (sid) => {
+    ({ sid, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       const session = store?.getState().taskSessions.items[sid];
       if (!session) return false;
@@ -382,10 +394,13 @@ export async function waitForQuickChatSessionSettled(
           String(session.state),
         ) &&
         session.cancellation_pending === false &&
-        session.foreground_activity == null
+        session.foreground_activity == null &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
       );
     },
-    sessionId,
+    { sid: sessionId, minimumRevision: minimumCancellationRevision },
     { timeout: timeoutMs, message: `Quick Chat session ${sessionId} did not settle` },
   );
 }

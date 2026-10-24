@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { releaseAnimation } from "@kandev/ui/animation-utils";
 
 const MOTION_SELECTOR = "[data-settings-search-motion-key]";
 const MOTION_EASING = "cubic-bezier(0.2, 0, 0, 1)";
@@ -40,20 +41,14 @@ export function useSettingsSearchMotion(layoutKey: string) {
     }
 
     for (const entry of entries) {
-      animations.get(entry.key)?.cancel();
+      const previous = animations.get(entry.key);
+      if (previous) releaseSearchAnimation(previous);
       animations.delete(entry.key);
       const previousTop = previousPositionsRef.current.get(entry.key);
       const animation = animateEntry(entry, previousTop);
       if (!animation) continue;
 
-      animations.set(entry.key, animation);
-      animation.addEventListener(
-        "finish",
-        () => {
-          if (animations.get(entry.key) === animation) animations.delete(entry.key);
-        },
-        { once: true },
-      );
+      trackAnimation(animations, entry.key, animation);
     }
 
     previousPositionsRef.current = nextPositions;
@@ -96,16 +91,30 @@ function animateEntry(entry: MotionEntry, previousTop: number | undefined): Anim
   );
 }
 
+function trackAnimation(animations: Map<string, Animation>, key: string, animation: Animation) {
+  animations.set(key, animation);
+  animation.onfinish = () => {
+    if (animations.get(key) !== animation) return;
+    releaseSearchAnimation(animation);
+    animations.delete(key);
+  };
+}
+
+function releaseSearchAnimation(animation: Animation) {
+  animation.onfinish = null;
+  releaseAnimation(animation);
+}
+
 function cancelRemovedAnimations(animations: Map<string, Animation>, activeKeys: Set<string>) {
   for (const [key, animation] of animations) {
     if (activeKeys.has(key)) continue;
-    animation.cancel();
+    releaseSearchAnimation(animation);
     animations.delete(key);
   }
 }
 
 function cancelAnimations(animations: Map<string, Animation>) {
-  for (const animation of animations.values()) animation.cancel();
+  for (const animation of animations.values()) releaseSearchAnimation(animation);
   animations.clear();
 }
 

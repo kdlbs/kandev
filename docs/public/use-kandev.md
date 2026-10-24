@@ -102,12 +102,38 @@ If model discovery requires authentication, the tour's **Settings** link opens t
 saved agent profile without saving the tour draft or marking it complete. Use the
 profile's authentication controls, then return to the tour.
 
+## Browse coordinator conversations across workspaces
+
+Enable **Integrated control** and **Workspace coordinators** in
+**Settings > System > Feature Toggles** and
+restart Kandev, then select **Integrated control** in the workspace picker. The
+toggle is off by default. Its dedicated navigation lists available workspaces,
+coordinators and each coordinator’s existing current conversation. The phone
+navigation menu provides the same tree.
+
+Select a conversation to open its original task and runtime sessions in the
+center while keeping this navigation visible. The conversation keeps its source
+workspace, permissions and draft; browsing it does not switch the active
+workspace or start an agent. An unavailable conversation shows its state rather
+than creating a replacement. This first view does not create additional
+coordinator conversations or aggregate archived conversations.
+
+The **Provider / model** and **History** views summarize the current coordinator
+records available in this first slice. They do not provide provider usage totals
+or a searchable archive of past conversations.
+
 ## Find a setting
 
 Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are
 grouped by area; selecting a specific control opens its owning page, scrolls it into view, focuses
 it, and briefly highlights it without changing the saved value. The same search is available in
 the Settings menu on phones.
+
+To return to the page that opened Settings, select **Close settings** in the desktop
+sidebar or the **X** in the phone header. This preserves the task and selected
+session, even after visiting several Settings pages. Unsaved changes still require
+a choice before leaving. Opening Settings directly or refreshing it uses Home as
+the close destination.
 
 From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
 settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
@@ -185,6 +211,10 @@ full list. This labelled link sits inside the group on desktop and phones, like
 The workspace picker sits in the sidebar header, next to the Kandev brand. It lists every
 workspace with a **Kanban** or **Office** badge and ends with the workspace-creation actions.
 
+Office is experimental and disabled by default. To evaluate a persistent agent team,
+follow [Get started with Office](office-getting-started.md); the [Office guide](office.md)
+covers its separate project, task, review, routine, and operations flows.
+
 From anywhere, press `Cmd/Ctrl+E` to open it with the keyboard: focus lands inside the menu,
 so arrow keys move between workspaces and **Enter** switches to the highlighted one. If the sidebar
 is collapsed, the shortcut expands it first. Rebind it under
@@ -201,6 +231,11 @@ workspace there from the menu sheet instead.
 3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
+
+If Save fails after some changes were accepted, keep the page open and select
+**Retry save**. Accepted repositories and custom scripts keep their saved identities;
+failed and newer edits stay available for retry. **Reset** restores the changes
+already accepted by the server and discards the remaining draft edits.
 
 If discovery cannot scan a root, the picker keeps repositories from successful
 roots available and retains its normal **Refresh repositories** action. Failed

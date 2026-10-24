@@ -13,8 +13,11 @@ import {
   type SessionId,
   type TaskId,
   type TaskSessionState,
+  type SessionRecoveryBlockProjection,
 } from "@/lib/types/http";
 import {
+  runtimeCleanupFailureCauses,
+  resolveRequestErrorMessage,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   sessionRecoveryGuardDetails,
@@ -72,10 +75,12 @@ export type SessionRecoveryFailure =
   | {
       outcome: "workspace_read_only";
       resumeError: string;
+      resumeCauses?: import("@/lib/types/task-status-summary").AgentErrorCause[];
     }
   | {
       outcome: "recovery_failed";
       resumeError: string;
+      resumeCauses?: import("@/lib/types/task-status-summary").AgentErrorCause[];
       restoreError: string;
       workspaceAttemptId?: string;
     }
@@ -100,6 +105,7 @@ export type ResumeStateSetter = {
     updated_at: string;
     queue_incarnation_id?: string;
     resume_projection_id?: string;
+    session_recovery_blocks?: SessionRecoveryBlockProjection[];
   }) => void;
   /** Updates the captured session row even when the active view has changed. */
   setTaskSessionUnscoped?: ResumeStateSetter["setTaskSession"];
@@ -122,6 +128,7 @@ export type SessionLike = {
   state?: string;
   queue_incarnation_id?: string;
   resume_projection_id?: string;
+  session_recovery_blocks?: SessionRecoveryBlockProjection[];
 } | null;
 
 const TASK_SESSION_STATES = new Set<TaskSessionState>([
@@ -409,13 +416,15 @@ async function restoreAfterResumeFailure(
     context,
   );
   if (!canContinue()) return false;
+  const resumeCauses = runtimeCleanupFailureCauses(resumeAttempt.error, sessionId);
   if (restoreAttempt.ok) {
     setters.setError(null);
     setters.setNotice?.(t("task:resumeFailedWorkspaceReadOnly"));
     setters.setNoticeKind?.("workspace_read_only");
     setters.setRecoveryFailure?.({
       outcome: "workspace_read_only",
-      resumeError: resumeAttempt.error.message,
+      resumeError: resolveRequestErrorMessage(resumeAttempt.error, t),
+      ...(resumeCauses.length ? { resumeCauses } : {}),
     });
     return true;
   }
@@ -428,7 +437,8 @@ async function restoreAfterResumeFailure(
   setters.setNoticeKind?.(null);
   setters.setRecoveryFailure?.({
     outcome: "recovery_failed",
-    resumeError: resumeAttempt.error.message,
+    resumeError: resolveRequestErrorMessage(resumeAttempt.error, t),
+    ...(resumeCauses.length ? { resumeCauses } : {}),
     restoreError: restoreAttempt.error.message,
     ...(restoreAttempt.workspaceAttemptId
       ? { workspaceAttemptId: restoreAttempt.workspaceAttemptId }

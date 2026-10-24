@@ -65,6 +65,21 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
+		// Route the bounded DeepSeek missing-reasoning diagnostic through the
+		// existing manual fresh-session recovery policy across adapters.
+		// Require the raw signature too, so redaction cannot shorten its gap.
+		id:       reasoningContentNonReplayableRuleID,
+		pattern:  reasoningContentMissingRe,
+		rawMatch: reasoningContentMissingRe.MatchString,
+		build: func(string) *Error {
+			return &Error{
+				Code:            CodeResumeCorrupted,
+				Confidence:      ConfHigh,
+				RemediationPath: RemediationStartFreshSession,
+			}
+		},
+	},
+	{
 		// Anthropic 529 Overloaded surfaced over ACP as a prompt-time error
 		// event: a transient, server-side condition the orchestrator should
 		// retry with backoff rather than tear down. Provider-agnostic because
@@ -187,6 +202,8 @@ var managedRuntimeNpmResolutionRe = regexp.MustCompile(
 var cancellationOrDeadlineRe = regexp.MustCompile(`(?i)\bcontext (?:canceled|deadline exceeded)\b|\bcancel escalated\b`)
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
+
+const reasoningContentNonReplayableRuleID = "deepseek.reasoning_content.nonreplayable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
@@ -332,12 +349,24 @@ func isTransientProviderError(e *Error) bool {
 // an unrelated "cannot be modified".
 var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
 
-// IsResumeCorrupted reports whether the error message carries the
-// resume-corrupted (thinking-blocks-immutable) signature. Exposed for callers
-// outside the classify path (e.g. the orchestrator's recovery UI) that need to
-// steer the user toward a fresh session without re-running full Classify.
+// reasoningContentMissingRe accepts the canonical bare DeepSeek diagnostic or
+// an error line carrying both phrases within 80 characters. Anchoring rejects
+// agent prose quoting the diagnostic. The signature does not identify whether
+// saved history or the adapter omitted the required reasoning field.
+var reasoningContentMissingRe = regexp.MustCompile(
+	`(?i)(?:\A\s*The \x60?reasoning_content\x60? in the thinking mode must be passed back to the API\.\s*\z|` +
+		`(?:\A|\n)[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[^\n]*reasoning_content[^\n]{0,80}must be passed back)`,
+)
+
+// IsResumeCorrupted reports whether the message matches an Anthropic
+// thinking-blocks-immutable or DeepSeek missing-reasoning signature assigned
+// to the existing fresh-session guidance. Callers outside the classify path
+// can select that guidance without re-running full Classify.
 func IsResumeCorrupted(message string) bool {
-	return message != "" && thinkingBlocksImmutableRe.MatchString(message)
+	if message == "" {
+		return false
+	}
+	return thinkingBlocksImmutableRe.MatchString(message) || reasoningContentMissingRe.MatchString(message)
 }
 
 type runtimeRule struct {
@@ -369,10 +398,6 @@ func extractNpxCachePath(text string) string {
 
 func matchRuntimeEnvironmentRules(text string) (*Error, bool) {
 	return matchRuntimeRules(text, text, "", false)
-}
-
-func matchLegacyRuntimeEnvironmentRules(text string) (*Error, bool) {
-	return matchRuntimeRules(text, text, "", true)
 }
 
 func matchRuntimeEnvironmentRulesForProvider(providerID, text, rawText string) (*Error, bool) {

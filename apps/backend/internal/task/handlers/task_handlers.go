@@ -31,6 +31,7 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
+	workspaceAdoptionCallerGuard  func(*gin.Context) bool
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
 	configChatRetirer             ConfigChatSessionRetirer
@@ -210,9 +211,11 @@ func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *serv
 }
 
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
+	h.registerWorkspaceAdoptionHTTP(router)
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
+	api.GET("/workspaces/:id/tasks/conversations", h.httpSearchTaskConversations)
 	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
 	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
@@ -237,6 +240,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/environment/live", h.httpGetTaskEnvironmentLive)
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
+	api.GET("/task-sessions/:id/turn-changes", h.httpListTurnChangeHistory)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID", h.httpGetTurnChangeHistory)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID/repositories/:repositoryChangeID/files", h.httpListTurnChangeFiles)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID/files/:fileChangeID/content", h.httpReadTurnChangeContent)
 	api.POST("/tasks", h.httpCreateTask)
 	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
@@ -244,6 +251,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
+	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)

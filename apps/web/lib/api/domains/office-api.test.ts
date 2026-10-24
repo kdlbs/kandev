@@ -4,7 +4,7 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
-import { updateAgentProfile } from "./office-api";
+import { getCostsBreakdown, updateAgentProfile } from "./office-api";
 
 const OFFICE_AGENT_ID = "office-agent";
 const DYNAMIC_PROFILE_ID = "dynamic-profile";
@@ -59,5 +59,32 @@ describe("Office agent execution profile binding", () => {
 
     const [, init] = fetchSpy.mock.calls[0] ?? [];
     expect(JSON.parse(init?.body as string)).toEqual({ agent_profile_id: "" });
+  });
+});
+
+// @covers AC-OFFICE-COSTS-001.2 AC-OFFICE-COSTS-001.8
+describe("Office cost breakdown range", () => {
+  it("retains the lifetime URL when range is omitted", async () => {
+    await getCostsBreakdown("cost-workspace");
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
+      "http://api.test/api/v1/office/workspaces/cost-workspace/costs/breakdown",
+    );
+  });
+  it.each(["mtd", "30d"] as const)("sends %s while preserving transport options", async (range) => {
+    const controller = new AbortController();
+    await getCostsBreakdown("cost-workspace", {
+      range,
+      baseUrl: "http://override.test",
+      cache: "no-store",
+      init: { signal: controller.signal, headers: { "X-Range-Test": "kept" } },
+    });
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      `http://override.test/api/v1/office/workspaces/cost-workspace/costs/breakdown?range=${range}`,
+    );
+    expect(init?.signal).toBe(controller.signal);
+    expect(init?.cache).toBe("no-store");
+    expect(new Headers(init?.headers).get("X-Range-Test")).toBe("kept");
+    expect(init).not.toHaveProperty("range");
   });
 });

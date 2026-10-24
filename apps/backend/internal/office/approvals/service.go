@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -34,7 +36,7 @@ type RunQueuer interface {
 	QueueRunWithActor(
 		ctx context.Context,
 		agentInstanceID, reason, payload, idempotencyKey string,
-		actorKind models.ActorKind, actorID string,
+		actorKind runsmodels.ActorKind, actorID string,
 		causingRunID string,
 	) (runsservice.QueueOutcome, error)
 }
@@ -96,7 +98,7 @@ func (s *ApprovalService) CreateApprovalWithActivity(ctx context.Context, approv
 func (s *ApprovalService) DecideApproval(
 	ctx context.Context,
 	approvalID, status, decidedBy string,
-	actorKind models.ActorKind,
+	actorKind runsmodels.ActorKind,
 	note string,
 ) (*Approval, error) {
 	if status != StatusApproved && status != StatusRejected {
@@ -157,7 +159,7 @@ func (s *ApprovalService) ListApprovals(ctx context.Context, wsID string) ([]*Ap
 // decided. Each case is intentionally simple; complex orchestration belongs
 // in the scheduler/run layer.
 func (s *ApprovalService) applyApprovalSideEffects(
-	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+	ctx context.Context, approval *Approval, actorKind runsmodels.ActorKind,
 ) error {
 	if approval.Status == StatusRejected {
 		if approval.Type == ApprovalTypeHireAgent {
@@ -181,7 +183,7 @@ func (s *ApprovalService) applyApprovalSideEffects(
 }
 
 func (s *ApprovalService) onHireAgentApproved(
-	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+	ctx context.Context, approval *Approval, actorKind runsmodels.ActorKind,
 ) error {
 	agentID := extractAgentProfileID(approval.Payload)
 	if agentID != "" && s.agentWriter != nil {
@@ -195,7 +197,7 @@ func (s *ApprovalService) onHireAgentApproved(
 }
 
 func (s *ApprovalService) onHireAgentRejected(
-	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+	ctx context.Context, approval *Approval, actorKind runsmodels.ActorKind,
 ) error {
 	agentID := extractAgentProfileID(approval.Payload)
 	if agentID != "" && s.agentWriter != nil {
@@ -222,7 +224,7 @@ func extractAgentProfileID(payload string) string {
 }
 
 func (s *ApprovalService) queueApprovalRun(
-	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+	ctx context.Context, approval *Approval, actorKind runsmodels.ActorKind,
 ) error {
 	if approval.RequestedByAgentProfileID == "" {
 		return nil

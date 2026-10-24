@@ -24,12 +24,18 @@ const (
 	ActionProposeMove    = mcpcontract.ActionProposeMove
 )
 
+// ActionProposeImprovement is mcpcontract.ActionProposeImprovement, re-exported.
+const ActionProposeImprovement = mcpcontract.ActionProposeImprovement
+
 // ActionGetItem is mcpcontract.ActionGetItem, re-exported
 // (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = mcpcontract.ActionGetItem
 
 // ActionListActivity is mcpcontract.ActionListActivity, re-exported.
 const ActionListActivity = mcpcontract.ActionListActivity
+
+// ActionListTurns is mcpcontract.ActionListTurns, re-exported.
+const ActionListTurns = mcpcontract.ActionListTurns
 
 // ActionApproveProposal, ActionRejectProposal and DecisionActions re-export
 // mcpcontract's reserved decision action names
@@ -38,6 +44,8 @@ const ActionListActivity = mcpcontract.ActionListActivity
 const (
 	ActionApproveProposal = mcpcontract.ActionApproveProposal
 	ActionRejectProposal  = mcpcontract.ActionRejectProposal
+	ActionReplyProposal   = mcpcontract.ActionReplyProposal
+	ActionDeliverReply    = mcpcontract.ActionDeliverReply
 )
 
 // DecisionActions is mcpcontract.DecisionActions, re-exported.
@@ -55,6 +63,23 @@ type Coordinator struct {
 	ConfigRevision     int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+
+	// TaskAgentProfileID and TaskExecutorProfileID are the Agent for created
+	// tasks pair the approval path adds to a created task when nothing else
+	// names an agent.
+	TaskAgentProfileID    string
+	TaskExecutorProfileID string
+
+	// AutonomyEnabled and CostCeilingSubcents are the phase 3 settings; the
+	// ceiling is in hundredths of a cent, nil when unset.
+	AutonomyEnabled     bool
+	CostCeilingSubcents *int64
+
+	// PausedAt and PausedBy are the Pause state: set when a manager paused the
+	// coordinator, nil and empty otherwise. PausedBy may be empty when the
+	// pausing user is unknown.
+	PausedAt *time.Time
+	PausedBy string
 
 	// PolicyJSON is the stored permission map, nil for a phase-1 coordinator.
 	PolicyJSON     *string
@@ -74,6 +99,9 @@ const (
 	ProposalStatusApproved  ProposalStatus = "approved"
 	ProposalStatusRejected  ProposalStatus = "rejected"
 	ProposalStatusFailed    ProposalStatus = "failed"
+	// ProposalStatusReturned is set only from pending, by a manager's reply
+	// with a condition. It is settled and not open.
+	ProposalStatusReturned ProposalStatus = "returned"
 )
 
 // ProposalSpec is the proposed task's shape, serialized into spec_json /
@@ -112,20 +140,42 @@ type Proposal struct {
 	TargetTaskID     *string
 	StandingOrderIDs []string
 	StartsAgent      bool
-	OutcomeJSON      *string
+	// RunsWith is computed by the proposal read and list routes only.
+	RunsWith    *RunsWith
+	OutcomeJSON *string
 	// RawSpec is the stored spec JSON of a non-create_task kind, whose shape
 	// this package does not parse.
 	RawSpec string
 	// RawFinalSpec is the frozen spec of a non-create_task kind, set once claimed.
 	RawFinalSpec string
+
+	// ReplyText, ReplyDeliveredAt and ReplyDeliveryClaimedAt are set by a
+	// reply with a condition; InReplyTo names the returned proposal a revised
+	// proposal answers.
+	ReplyText              *string
+	ReplyDeliveredAt       *time.Time
+	ReplyDeliveryClaimedAt *time.Time
+	InReplyTo              *string
+	// ChangeStatus is the status of the pending change an approved improvement
+	// produced; nil for every other proposal.
+	ChangeStatus *string
+
+	// DecidedAutomatically and AutomaticAt record that the automatic path
+	// claimed the proposal, and when; a later failure or recovery keeps them.
+	// ClaimedAutomatically is true while the current claim (or its terminal
+	// row) is the automatic path's, false after a manager's claim.
+	DecidedAutomatically bool
+	ClaimedAutomatically bool
+	AutomaticAt          *time.Time
 }
 
 // Proposal kinds.
 const (
-	ProposalKindCreateTask = "create_task"
-	ProposalKindMessage    = "message"
-	ProposalKindMove       = "move"
-	ProposalKindResume     = "resume"
+	ProposalKindCreateTask  = "create_task"
+	ProposalKindMessage     = "message"
+	ProposalKindMove        = "move"
+	ProposalKindResume      = "resume"
+	ProposalKindImprovement = "improvement"
 )
 
 // Stall is a coordinator_stalls row: the most recent task.stalled episode

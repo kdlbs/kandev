@@ -87,6 +87,7 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	executorType string,
 	strategy mcpconfig.PassthroughMCPStrategy,
 	progress *prepareProgressRecorder,
+	operations ...*preparedMCPOperation,
 ) error {
 	if execution == nil || execution.WorkspacePath == "" || !isCursorMCPAuthStrategy(strategy) {
 		return nil
@@ -103,7 +104,7 @@ func (m *Manager) reconcileAndMaterializeCursorProjectMCPWithPreparation(
 	defer finishCursorProjectMCPPreparation(workspaceKey, generation)
 
 	// 1. Resolve runtime policy & Profile MCP servers
-	policy, allowedProfileServers, reservedProfileNames, err := m.resolveCursorProfileAndPolicy(prepCtx, execution, profileInfo, executorType)
+	policy, allowedProfileServers, reservedProfileNames, err := m.resolveCursorProfileAndPolicy(prepCtx, execution, profileInfo, executorType, operations...)
 	if err != nil {
 		return err
 	}
@@ -484,6 +485,7 @@ func (m *Manager) resolveCursorProfileAndPolicy(
 	execution *AgentExecution,
 	profileInfo *AgentProfileInfo,
 	executorType string,
+	operations ...*preparedMCPOperation,
 ) (mcpconfig.Policy, []agentctltypes.McpServer, map[string]struct{}, error) {
 	backendName := executor.ExecutorTypeToBackend(models.ExecutorType(executorType))
 	policy := mcpconfig.DefaultPolicyForRuntime(backendName)
@@ -495,6 +497,34 @@ func (m *Manager) resolveCursorProfileAndPolicy(
 		}
 	}
 
+	var operation *preparedMCPOperation
+	if len(operations) > 0 {
+		operation = operations[0]
+	}
+	if operation == nil && (m.mcpResolver == nil || execution.WorkspaceID == "") {
+		return m.resolveLegacyCursorProfile(ctx, profileInfo, policy)
+	}
+	if operation == nil {
+		agentConfig, err := m.getAgentConfigForExecution(execution)
+		if err != nil {
+			return policy, nil, nil, err
+		}
+		operation, err = m.prepareExecutionMCP(ctx, execution, agentConfig)
+		if err != nil {
+			return policy, nil, nil, err
+		}
+	}
+	reserved := make(map[string]struct{})
+	for _, server := range operation.servers {
+		reserved[strings.ToLower(strings.TrimSpace(server.Name))] = struct{}{}
+	}
+	for _, entry := range operation.metadata {
+		reserved[strings.ToLower(strings.TrimSpace(entry.RuntimeName))] = struct{}{}
+	}
+	return policy, operation.servers, reserved, nil
+}
+
+func (m *Manager) resolveLegacyCursorProfile(ctx context.Context, profileInfo *AgentProfileInfo, policy mcpconfig.Policy) (mcpconfig.Policy, []agentctltypes.McpServer, map[string]struct{}, error) {
 	reservedProfileNames := make(map[string]struct{})
 	var allowedProfileServers []agentctltypes.McpServer
 	if profileInfo != nil && m.mcpProvider != nil {

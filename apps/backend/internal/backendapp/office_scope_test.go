@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/auth"
@@ -15,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -111,11 +112,11 @@ func seedOfficeResources(t *testing.T, repo *officesqlite.Repository, workspaceI
 	exec(`INSERT INTO office_labels (id, workspace_id, name) VALUES (?, ?, ?)`,
 		"label-"+suffix, workspaceID, "l-"+suffix)
 	exec(`INSERT INTO office_task_labels (task_id, label_id) VALUES (?, ?)`, "task-"+suffix, "label-"+suffix)
-	if err := repo.CreateRun(ctx, &models.Run{
+	if err := repo.CreateRun(ctx, &runsmodels.Run{
 		ID:             "run-" + suffix,
 		AgentProfileID: "agent-" + suffix,
 		Reason:         "task_assigned",
-		Status:         models.RunStatus("queued"),
+		Status:         runsmodels.RunStatus("queued"),
 		CoalescedCount: 1,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

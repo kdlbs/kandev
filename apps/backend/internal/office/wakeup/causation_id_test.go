@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
@@ -21,12 +23,12 @@ func (h *testHarness) seedWakeupWithCausation(id, source, payload, causationID s
 
 func (h *testHarness) seedRunWithReasonAndCausation(id, status, reason, causationID string) {
 	h.t.Helper()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		ID:              id,
 		AgentProfileID:  h.agentID,
 		Reason:          reason,
 		Payload:         "{}",
-		Status:          officemodels.RunStatus(status),
+		Status:          runsmodels.RunStatus(status),
 		CoalescedCount:  1,
 		ContextSnapshot: `{"prior":"snapshot"}`,
 		CausationID:     causationID,

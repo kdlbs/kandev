@@ -3,6 +3,7 @@
 package inventoryrepair
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,17 +13,20 @@ import (
 )
 
 type Plan struct {
-	Version      int                 `json:"version"`
-	OperationID  string              `json:"operation_id"`
-	Home         string              `json:"home"`
-	Database     string              `json:"database"`
-	Driver       string              `json:"driver"`
-	TasksRoot    string              `json:"tasks_root"`
-	Repairs      []Repair            `json:"repairs"`
-	Workspaces   []WorkspaceRepair   `json:"workspaces,omitempty"`
-	CleanupJobs  []string            `json:"cleanup_jobs,omitempty"`
-	ExpectedRows map[string]string   `json:"expected_rows,omitempty"`
-	ExpectedGit  map[string]GitState `json:"expected_git,omitempty"`
+	ExpectedConsumerPaths []string            `json:"expected_consumer_paths,omitempty"`
+	Aliases               []AliasSelection    `json:"aliases,omitempty"`
+	RedundantEnvironments []EnvironmentRebind `json:"redundant_environments,omitempty"`
+	Version               int                 `json:"version"`
+	OperationID           string              `json:"operation_id"`
+	Home                  string              `json:"home"`
+	Database              string              `json:"database"`
+	Driver                string              `json:"driver"`
+	TasksRoot             string              `json:"tasks_root"`
+	Repairs               []Repair            `json:"repairs"`
+	Workspaces            []WorkspaceRepair   `json:"workspaces,omitempty"`
+	CleanupJobs           []string            `json:"cleanup_jobs,omitempty"`
+	ExpectedRows          map[string]string   `json:"expected_rows,omitempty"`
+	ExpectedGit           map[string]GitState `json:"expected_git,omitempty"`
 }
 
 type Repair struct {
@@ -71,7 +75,14 @@ var operationPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$`)
 
 func Decode(r io.Reader) (Plan, error) {
 	var p Plan
-	decoder := json.NewDecoder(io.LimitReader(r, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(r, (1<<20)+1))
+	if err != nil {
+		return p, err
+	}
+	if len(data) > 1<<20 {
+		return p, errors.New("repair plan exceeds 1 MiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&p); err != nil {
 		return p, err
@@ -83,8 +94,8 @@ func Decode(r io.Reader) (Plan, error) {
 }
 
 func (p Plan) validate() error {
-	if p.Version != 1 || p.Driver != "sqlite" || !operationPattern.MatchString(p.OperationID) {
-		return errors.New("repair requires version 1, sqlite, and a bounded operation ID")
+	if (p.Version != 1 && p.Version != 2) || p.Driver != "sqlite" || !operationPattern.MatchString(p.OperationID) {
+		return errors.New("repair requires version 1 or 2, sqlite, and a bounded operation ID")
 	}
 	if len(p.Repairs) == 0 || len(p.Repairs) > 16 || len(p.Workspaces) > 16 || len(p.CleanupJobs) > 16 {
 		return errors.New("repair must select 1-16 worktrees and at most 16 workspaces/jobs")
@@ -103,6 +114,9 @@ func (p Plan) validate() error {
 		if err := r.validatePaths(); err != nil {
 			return err
 		}
+	}
+	if err := p.validateAliases(); err != nil {
+		return err
 	}
 	return p.validateLocations()
 }

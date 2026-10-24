@@ -16,17 +16,21 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
-const phaseComplete = "complete"
+const (
+	phaseComplete = "complete"
+	phasePrepared = "prepared"
+)
 
 // ErrRepairPending distinguishes an unresolved repair from a running backend.
 var ErrRepairPending = errors.New("inventory repair is unresolved")
 
 type journal struct {
-	Plan         Plan          `json:"plan"`
-	Phase        string        `json:"phase"`
-	BackupSHA256 string        `json:"backup_sha256"`
-	Changes      []mutation    `json:"changes"`
-	Observations []observation `json:"observations"`
+	Plan               Plan           `json:"plan"`
+	Phase              string         `json:"phase"`
+	BackupSHA256       string         `json:"backup_sha256"`
+	Changes            []mutation     `json:"changes"`
+	Observations       []observation  `json:"observations"`
+	ForeignKeyBaseline map[string]int `json:"foreign_key_baseline,omitempty"`
 }
 
 func journalPath(p Plan) string {
@@ -215,7 +219,7 @@ func prepareJournal(ctx context.Context, in *inspection, db *sql.DB) (*journal, 
 	if _, err = os.Lstat(backup); !errors.Is(err, os.ErrNotExist) {
 		return nil, errors.New("backup destination already exists or cannot be inspected; use a new operation ID")
 	}
-	if _, err = persistence.SnapshotSQLiteContext(ctx, sqlx.NewDb(db, "sqlite3"), backup); err != nil {
+	if _, err = persistence.CopySQLiteSnapshotContext(ctx, sqlx.NewDb(db, "sqlite3"), backup); err != nil {
 		return nil, err
 	}
 	if err = os.Chmod(backup, 0600); err != nil {
@@ -237,7 +241,7 @@ func prepareJournal(ctx context.Context, in *inspection, db *sql.DB) (*journal, 
 	if err != nil {
 		return nil, err
 	}
-	j := &journal{Plan: p, Phase: "prepared", BackupSHA256: hash, Changes: changes, Observations: in.guards}
+	j := &journal{Plan: p, Phase: phasePrepared, BackupSHA256: hash, Changes: changes, Observations: in.guards, ForeignKeyBaseline: in.foreignKeys}
 	if err = j.save(); err != nil {
 		return nil, err
 	}

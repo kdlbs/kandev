@@ -240,7 +240,8 @@ export function RecoveryCardContent({
   const summary = needsManagedCloneRelocation
     ? t("task:managedCloneRelocationBody")
     : model.summary;
-  const details = model.hasTypedSelectionCause ? "" : (error.details ?? "");
+  const details =
+    model.hasTypedSelectionCause || model.hasTypedCleanupCause ? "" : (error.details ?? "");
   return (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">

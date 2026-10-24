@@ -15,7 +15,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -358,7 +357,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		c.JSON(http.StatusGone, gin.H{"code": "tool_payload_removed", "message_id": message.ID, "removed_at": marker["removed_at"], "summary": message.Content})
 		return
 	}
-	if message.PayloadDigest != "" {
+	if message.PayloadDigest != "" || models.HasIncrementalShellOutput(message.Metadata) {
 		// Large output was externalized at write time (see
 		// externalizeMessagePayload) and message.Metadata currently holds
 		// only the small has_output/stdout_bytes/... summary
@@ -1190,9 +1189,7 @@ func (h *MessageHandlers) addMessageReplayResponse(
 			)
 			return response, true
 		}
-		if authErr := h.service.AuthorizeSessionScope(
-			ctx, existing.TaskSessionID, authz.ScopeSessionPrompt,
-		); authErr != nil {
+		if authErr := h.service.AuthorizeSessionPromptAccess(ctx, existing.TaskSessionID); authErr != nil {
 			if service.IsForbidden(authErr) {
 				response, _ := ws.NewError(
 					msg.ID, msg.Action, ws.ErrorCodeForbidden, "Cannot send messages to this session", nil,

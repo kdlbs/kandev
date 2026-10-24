@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
@@ -18,13 +20,13 @@ import (
 // stays untouched — Wave 1.B owns this slice and we don't want to
 // edit the larger Repository interface.
 type RunDetailRepo interface {
-	GetRunWithCosts(ctx context.Context, runID string) (*models.Run, *sqlite.RunCostRollup, error)
+	GetRunWithCosts(ctx context.Context, runID string) (*runsmodels.Run, *sqlite.RunCostRollup, error)
 	ListTasksTouchedByRun(ctx context.Context, runID string) ([]string, error)
-	ListRunEvents(ctx context.Context, runID string, afterSeq, limit int) ([]*models.RunEvent, error)
+	ListRunEvents(ctx context.Context, runID string, afterSeq, limit int) ([]*runsmodels.RunEvent, error)
 	ListRunSkillSnapshots(ctx context.Context, runID string) ([]models.RunSkillSnapshot, error)
 	ListRunsForAgentPaged(
 		ctx context.Context, agentInstanceID string, cursor time.Time, cursorID string, limit int,
-	) ([]*models.Run, error)
+	) ([]*runsmodels.Run, error)
 	GetAgentInstance(ctx context.Context, id string) (*models.AgentInstance, error)
 	ListRouteAttempts(ctx context.Context, runID string) ([]models.RouteAttempt, error)
 }
@@ -70,7 +72,7 @@ func formatTime(t *time.Time) string {
 // runDuration returns the elapsed milliseconds between claimed_at
 // and finished_at; falls back to (now - claimed_at) when the run is
 // still active. Returns 0 when the run hasn't been claimed yet.
-func runDuration(run *models.Run) int64 {
+func runDuration(run *runsmodels.Run) int64 {
 	if run.ClaimedAt == nil || run.ClaimedAt.IsZero() {
 		return 0
 	}
@@ -147,7 +149,7 @@ func sessionIDFromPayload(payload string) string {
 }
 
 // buildRunSummaryDTO converts a Run row into the list-summary DTO.
-func buildRunSummaryDTO(run *models.Run) AgentRunSummaryDTO {
+func buildRunSummaryDTO(run *runsmodels.Run) AgentRunSummaryDTO {
 	commentID, payloadRoutineID := runLinkIDsFromPayload(run.Payload)
 	routineID := run.RoutineID
 	if routineID == "" {
@@ -316,7 +318,7 @@ func GetRunDetail(
 // Returns (nil, nil) when the run has no routing snapshot and no
 // attempts — the column-typed fields are nullable on legacy rows.
 func buildRunRouting(
-	ctx context.Context, repo RunDetailRepo, run *models.Run,
+	ctx context.Context, repo RunDetailRepo, run *runsmodels.Run,
 ) (*RunRouting, error) {
 	attempts, err := repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {
@@ -360,7 +362,7 @@ func buildRunRouting(
 	return out, nil
 }
 
-func runHasRoutingSnapshot(run *models.Run) bool {
+func runHasRoutingSnapshot(run *runsmodels.Run) bool {
 	if run == nil {
 		return false
 	}
@@ -399,7 +401,7 @@ func decodeOrderSnapshot(raw *string) []string {
 	return out
 }
 
-func buildRuntimeDTO(ctx context.Context, repo RunDetailRepo, run *models.Run) (RunRuntimeDTO, error) {
+func buildRuntimeDTO(ctx context.Context, repo RunDetailRepo, run *runsmodels.Run) (RunRuntimeDTO, error) {
 	snapshots, err := repo.ListRunSkillSnapshots(ctx, run.ID)
 	if err != nil {
 		return RunRuntimeDTO{}, err
@@ -471,7 +473,7 @@ func mergeTaskIDs(touched []string, primary string) []string {
 func buildInvocation(
 	ctx context.Context,
 	repo RunDetailRepo,
-	run *models.Run,
+	run *runsmodels.Run,
 ) (RunInvocationDTO, string) {
 	dto := RunInvocationDTO{}
 	if run.ResolvedProviderID != nil {
@@ -501,7 +503,7 @@ func buildInvocation(
 func currentRunSession(
 	ctx context.Context,
 	repo RunDetailRepo,
-	run *models.Run,
+	run *runsmodels.Run,
 ) (*models.RunSession, string) {
 	fallbackID := run.SessionID
 	if fallbackID == "" {

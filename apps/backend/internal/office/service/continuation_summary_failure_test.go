@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -257,7 +259,7 @@ func TestContinuationSummary_UpsertFailure_PreservesRunCompletionAndRecordsRunEv
 	if err != nil || len(runsAfter) != 2 {
 		t.Fatalf("list runs after upsert failure: runs=%#v err=%v", runsAfter, err)
 	}
-	var secondAfter *models.Run
+	var secondAfter *runsmodels.Run
 	for _, r := range runsAfter {
 		if r.ID == second.ID {
 			secondAfter = r

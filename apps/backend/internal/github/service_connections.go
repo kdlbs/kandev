@@ -39,9 +39,8 @@ func (s *Service) GetWorkspaceConnectionHealth(ctx context.Context) (WorkspaceCo
 
 // WorkspaceConnectionFingerprint returns an opaque, non-secret string that
 // changes whenever the workspace's automation connection is replaced,
-// reconnected, or has its credential rotated/revoked (status or credential
-// generation changes). Callers (e.g. workflow-sync's and the PR-watch
-// poller's auth circuit breakers) use this to detect "the credential
+// reconnected, or has its managed credential rotated or removed. Callers
+// (Workflow Sync and the PR poller's auth circuit breakers) use this to detect "the credential
 // changed" and reset an open backoff circuit promptly instead of waiting out
 // the schedule. Returns "" when no connection exists — an empty fingerprint
 // must never be treated as "changed" by callers, since there was nothing to
@@ -57,7 +56,53 @@ func (s *Service) WorkspaceConnectionFingerprint(ctx context.Context, workspaceI
 	if connection == nil {
 		return "", nil
 	}
-	return fmt.Sprintf("%s:%d", connection.Status, connection.CredentialGeneration), nil
+	fingerprint := fmt.Sprintf("%s:%d", connection.Status, connection.CredentialGeneration)
+	if connection.Source == ConnectionSourceGitHubAppInstallation {
+		runtime := s.AppRegistrationRuntimeSnapshot(connection.AppRegistrationID)
+		fingerprint += fmt.Sprintf(":app:%s:%d:%t", connection.AppRegistrationID, runtime.Generation, runtime.Ready)
+	}
+	if connection.Source == ConnectionSourceLegacyShared {
+		revision, err := s.legacyTokenRevision(ctx)
+		if err != nil {
+			return "", err
+		}
+		fingerprint += ":legacy:" + revision
+	}
+	return fingerprint, nil
+}
+
+// legacyTokenRevision uses metadata committed with the encrypted secret. It
+// survives restart without reading or persisting the credential value.
+func (s *Service) legacyTokenRevision(ctx context.Context) (string, error) {
+	s.legacyCredentialMu.Lock()
+	defer s.legacyCredentialMu.Unlock()
+	revision, err := s.readLegacyTokenRevision(ctx)
+	if err != nil {
+		return "", err
+	}
+	if revision != s.legacyCredentialRevision {
+		s.mu.Lock()
+		s.clearLegacyCredentialCachesLocked()
+		s.mu.Unlock()
+		s.legacyCredentialRevision = revision
+	}
+	return revision, nil
+}
+
+func (s *Service) readLegacyTokenRevision(ctx context.Context) (string, error) {
+	if s.secrets == nil {
+		return "absent", nil
+	}
+	items, err := s.secrets.List(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read legacy GitHub credential revision: %w", err)
+	}
+	for _, item := range items {
+		if item.HasValue && (item.Name == "GITHUB_TOKEN" || item.Name == "github_token") {
+			return fmt.Sprintf("%d:%s:%s", len(item.ID), item.ID, item.UpdatedAt.UTC().Format(time.RFC3339Nano)), nil
+		}
+	}
+	return "absent", nil
 }
 
 func (s *Service) SetWorkspaceConnection(

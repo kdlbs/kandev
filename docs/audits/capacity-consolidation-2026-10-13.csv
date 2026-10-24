@@ -1,0 +1,6 @@
+original_boundary,keeper,retained_assertions,disposition
+desktop cancel,desktop cancellation case,zero dispatches; same execution; two prompts; one persisted failure; usable composer/model selector,retain
+phone cancel,phone cancellation case,touch cancel during backoff; no later dispatch,retain
+desktop exhaust,phone and desktop exhaustion case / Desktop Chrome observer,retry card; single capacity error; no resume/fresh/recovery card; composer/model selector; feedback count five,transfer
+phone exhaust,phone and desktop exhaustion case / Pixel 5 observer,retry card; metadata attempts five; composer; no resume/fresh; feedback count five; no horizontal overflow,retain
+desktop and phone exhaust backend,phone and desktop exhaustion case,one retained failure; unchanged execution; six prompts on one process/connection/session; real retry ladder,deduplicate

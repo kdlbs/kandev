@@ -82,8 +82,9 @@ func (s *Service) ProposeKind(ctx context.Context, coordinatorID, kind string, a
 		}
 		return nil, s.checkOrdersActive(ctx, tx, coordinatorID, orderIDs)
 	}
+	turnID := s.currentUnattendedTurn(ctx, coordinatorID)
 	inTx := func(ctx context.Context, tx coordinatorExec, p *Proposal) error {
-		if err := s.recordKindProposed(ctx, tx, exec, p, string(spec)); err != nil {
+		if err := s.recordKindProposed(ctx, tx, exec, p, string(spec), turnID); err != nil {
 			return err
 		}
 		return s.store.MarkApplied(ctx, tx, coordinatorID, orderIDs, p.CreatedAt)
@@ -121,12 +122,12 @@ func (s *Service) buildKindProposal(ctx context.Context, exec KindExecutor, c *C
 	return p, nil
 }
 
-func (s *Service) recordKindProposed(ctx context.Context, tx coordinatorExec, exec KindExecutor, p *Proposal, spec string) error {
+func (s *Service) recordKindProposed(ctx context.Context, tx coordinatorExec, exec KindExecutor, p *Proposal, spec string, turnID *string) error {
 	id := p.ID
 	return s.Record(ctx, tx, ActivityRow{
 		CoordinatorID: p.CoordinatorID, WorkspaceID: p.WorkspaceID, ActionClass: exec.Action(),
 		Outcome: ActivityProposed, Authorization: AuthRequiresApproval, TargetTaskID: p.TargetTaskID,
-		ProposalID: &id, Detail: proposedDetail(spec),
+		ProposalID: &id, Detail: proposedDetail(spec), UnattendedTurnID: turnID,
 	})
 }
 
@@ -212,7 +213,11 @@ func (s *Service) proposeTarget(ctx context.Context, c *Coordinator, taskID stri
 	if err != nil {
 		return nil, fmt.Errorf("read watch set: %w", err)
 	}
-	if !set.Contains(t.WorkflowID) {
+	watched, err := s.taskWatched(ctx, set, c.WorkspaceID, taskID, t.WorkflowID)
+	if err != nil {
+		return nil, fmt.Errorf("read projects: %w", err)
+	}
+	if !watched {
 		return nil, notFoundTarget()
 	}
 	switch {
@@ -342,7 +347,9 @@ func (k *moveKind) ProposeStartsAgent(ctx context.Context, spec json.RawMessage)
 func scanProposalRow(rows *sql.Rows, r *proposalRow) error {
 	if err := rows.Scan(&r.ID, &r.CoordinatorID, &r.WorkspaceID, &r.Status, &r.SpecJSON, &r.FinalSpecJSON, &r.ClaimedAt,
 		&r.ClaimToken, &r.TaskID, &r.Error, &r.RejectReason, &r.DecidedBy, &r.CreatedAt, &r.UpdatedAt, &r.Kind,
-		&r.TargetTaskID, &r.StandingIDs, &r.StartsAgent, &r.OutcomeJSON); err != nil {
+		&r.TargetTaskID, &r.StandingIDs, &r.StartsAgent, &r.OutcomeJSON, &r.ReplyText, &r.ReplyDeliveredAt,
+		&r.ReplyDeliveryClaimedAt, &r.InReplyTo, &r.DecidedAutomatically, &r.ClaimedAutomatically, &r.AutomaticAt,
+		&r.ChangeStatus); err != nil {
 		return fmt.Errorf("scan proposal: %w", err)
 	}
 	return nil

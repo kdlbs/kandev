@@ -169,6 +169,7 @@ type UserSettings struct {
 	ShowTranscriptAutoScrollControl   bool                              `json:"show_transcript_auto_scroll_control"`
 	ShowTodoListPanel                 bool                              `json:"show_todo_list_panel"`
 	ShowTodoListPanelOnlyWhenNotEmpty bool                              `json:"show_todo_list_panel_only_when_not_empty"`
+	ShowTurnChangedFiles              bool                              `json:"show_turn_changed_files"`
 	ShowReleaseNotification           bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion       string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages             []string                          `json:"lsp_auto_start_languages"`

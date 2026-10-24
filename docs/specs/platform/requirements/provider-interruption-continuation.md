@@ -114,6 +114,9 @@ bounded and subordinate to user actions.
   dispatch shall consume an attempt and use the next delay; hard,
   unclassified, and ambiguous failures shall stop automatically. Model output
   alone shall not replenish the episode budget.
+  Eligible retained-runtime model-capacity recovery uses the narrower
+  [capacity timing amendment](transient-turn-runtime-continuity.md#req-platform-turn-continuity-003-continue-after-model-capacity-errors)
+  instead; transport-loss restoration retains this five-attempt policy.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.2:** Cancel, stop, archive,
   delete, start fresh, a new user prompt, and model or profile changes shall
   supersede pending automatic work. Late callbacks shall not resume the old

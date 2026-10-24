@@ -111,6 +111,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ShowTranscriptAutoScrollControl:   req.ShowTranscriptAutoScrollControl,
 		ShowTodoListPanel:                 req.ShowTodoListPanel,
 		ShowTodoListPanelOnlyWhenNotEmpty: req.ShowTodoListPanelOnlyWhenNotEmpty,
+		ShowTurnChangedFiles:              req.ShowTurnChangedFiles,
 		ShowReleaseNotification:           req.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion:       req.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:             req.LspAutoStartLanguages,

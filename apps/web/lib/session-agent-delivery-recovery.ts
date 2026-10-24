@@ -18,7 +18,57 @@ export type AgentDeliveryRecovery = {
   promptGeneration: number;
   message?: string;
   reconstruction?: { processIdentityKnown: boolean };
+  historyGap?: AgentDeliveryHistoryGap;
 };
+
+export type AgentDeliveryHistoryGap = {
+  firstSequence: number;
+  lastSequence: number;
+  receivedSequence: number;
+  projectedSequence: number;
+};
+
+function readHistoryGap(raw: unknown): AgentDeliveryHistoryGap | undefined {
+  if (
+    !isRecord(raw) ||
+    !isPositiveSafeInteger(raw.first_sequence) ||
+    !isPositiveSafeInteger(raw.last_sequence) ||
+    !isNonNegativeSafeInteger(raw.received_sequence) ||
+    !isNonNegativeSafeInteger(raw.projected_sequence) ||
+    raw.first_sequence > raw.last_sequence ||
+    raw.received_sequence !== raw.projected_sequence ||
+    raw.first_sequence !== raw.received_sequence + 1
+  )
+    return undefined;
+  return {
+    firstSequence: raw.first_sequence,
+    lastSequence: raw.last_sequence,
+    receivedSequence: raw.received_sequence,
+    projectedSequence: raw.projected_sequence,
+  };
+}
+
+export function readAgentDeliveryHistoryGaps(
+  metadata: Record<string, unknown> | null | undefined,
+): (AgentDeliveryHistoryGap & { streamId: string })[] {
+  const raw = metadata?.agent_delivery_history_gaps;
+  if (!isRecord(raw)) return [];
+  return Object.entries(raw).flatMap(([streamId, record]) => {
+    if (
+      !isRecord(record) ||
+      record.stream_id !== streamId ||
+      !isNonEmptyString(streamId) ||
+      !isNonEmptyString(record.incarnation_id) ||
+      !isPositiveSafeInteger(record.harness_generation) ||
+      !isNonEmptyString(record.submission_id) ||
+      !isNonEmptyString(record.payload_hash) ||
+      !isNonEmptyString(record.native_session_id)
+    )
+      return [];
+    const gap = readHistoryGap(record.gap);
+    return gap ? [{ streamId, ...gap }] : [];
+  });
+}
 
 type RecoveryIdentity = {
   session_id: string;
@@ -43,6 +93,7 @@ export function readAgentDeliveryRecovery(
   const reconstruction = isRecord(record.reconstruction)
     ? { processIdentityKnown: record.reconstruction.process_identity_known === true }
     : undefined;
+  const historyGap = readHistoryGap(record.history_gap);
   return {
     phase: record.phase,
     revision: record.revision,
@@ -55,6 +106,7 @@ export function readAgentDeliveryRecovery(
     promptGeneration: record.prompt_generation,
     ...(typeof record.message === "string" ? { message: record.message } : {}),
     ...(reconstruction ? { reconstruction } : {}),
+    ...(historyGap ? { historyGap } : {}),
   };
 }
 

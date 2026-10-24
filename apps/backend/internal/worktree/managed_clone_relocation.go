@@ -124,6 +124,9 @@ func (m *Manager) validateManagedMainCheckoutIdentity(
 	wt *Worktree,
 	proof *ManagedCloneRelocationProof,
 ) error {
+	if adopted, err := m.validateWorkspaceAdoptionBinding(ctx, wt); adopted || err != nil {
+		return err
+	}
 	if !managedCloneRelocationProofComplete(wt, proof) {
 		return nil
 	}
@@ -191,7 +194,8 @@ func verifyRecordedManagedCloneSource(source, worktreeCommon string, proof *Mana
 	}
 	recordedPath, pathErr := canonicalExistingPath(proof.RecordedSourcePath)
 	recordedCommon, commonErr := canonicalExistingPath(proof.RecordedSourceCommonDir)
-	if pathErr != nil || commonErr != nil || recordedPath != source || recordedCommon != worktreeCommon {
+	if pathErr != nil || commonErr != nil || !sameDirectoryIdentity(recordedPath, source) ||
+		!sameDirectoryIdentity(recordedCommon, worktreeCommon) {
 		return fmt.Errorf("recorded source does not match worktree registration")
 	}
 	return nil

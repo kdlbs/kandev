@@ -1,0 +1,100 @@
+{
+  "kind": "Office documentation screenshots",
+  "captured_at": "2026-10-19",
+  "source_commit": "72e9eec9b300918863f7d1da89f80303bf694335",
+  "source_ref": "freshly fetched origin/main",
+  "landing_commit": "d2fa5f09a77722c53af997d90e0aec36eca600c4",
+  "seed": "Northstar customer portal",
+  "seed_fixture": "apps/web/e2e/fixtures/test-base.ts and OfficeApiClient",
+  "scenario": {
+    "agents": [
+      "Coordinator",
+      "Engineer",
+      "Reviewer"
+    ],
+    "project": "Customer portal",
+    "tasks": 4,
+    "routines": "Default coordinator routine plus Daily release check"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 1000,
+    "device_scale_factor": 1
+  },
+  "capture": "Headless Chromium. Native screenshots of the application, focused regions, or dialogs. No DOM or CSS alterations. Full frames retained in the temporary capture evidence.",
+  "isolation": "Fresh detached source worktree, fresh worker-owned backend, temporary HOME/database/repositories and browser context. Rehearsal and final capture used separate databases. All provider clients mocked; no live provider credentials used.",
+  "profile_sanitation": "Execution profile renamed Local evaluation through the API. Screenshots exclude the mock-provider selector.",
+  "validation": [
+    "Capture scenario passed in rehearsal and final run",
+    "All delivered images visually reviewed",
+    "Backend processes exited, ports closed, and runtime roots removed"
+  ],
+  "capture_script_sha256": "3b67a0e8e35bf7eb4c9f32f3571d3e278229d79b72b8073bf157782be128b11d",
+  "assets": [
+    {
+      "file": "office-agent-configuration.png",
+      "width": 1120,
+      "height": 750,
+      "bytes": 55385,
+      "sha256": "bf7b0720ef885f7c1fbd8de078382b245c973b8e4eac2a6035b803e1974778dd"
+    },
+    {
+      "file": "office-budgets.png",
+      "width": 1120,
+      "height": 390,
+      "bytes": 39274,
+      "sha256": "24ef633f056375be18f0f307eac30527ce4a19e4957fdbd9270a0abca8b207bf"
+    },
+    {
+      "file": "office-dashboard.png",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 115599,
+      "sha256": "3bf4c2d8f15b2de4b796c0d7b7f53a06f81ad609dd86ee979e892df3e03c5392"
+    },
+    {
+      "file": "office-new-task.png",
+      "width": 896,
+      "height": 388,
+      "bytes": 20134,
+      "sha256": "a99c51c4e448f14efb37922717f1acf638c628047a23bc97823c7952300df9b5"
+    },
+    {
+      "file": "office-pause.png",
+      "width": 512,
+      "height": 222,
+      "bytes": 14971,
+      "sha256": "8f211d510787ca22b30728297600c1fb379dc2423a1ca405b3700ebe298cdc72"
+    },
+    {
+      "file": "office-routine.png",
+      "width": 768,
+      "height": 828,
+      "bytes": 40310,
+      "sha256": "e7ffeebbd1fc8cef9e9ce4d0cb939be123557c5d06d5a96990dd73c2ad5b56ce"
+    },
+    {
+      "file": "office-setup-workspace.png",
+      "width": 800,
+      "height": 470,
+      "bytes": 40536,
+      "sha256": "07780c8527768a0a71ce5a5ed2f4452fc05d88c865e173d47cc33a72b9da3f58"
+    },
+    {
+      "file": "office-task-board.png",
+      "width": 760,
+      "height": 205,
+      "bytes": 15791,
+      "sha256": "32a1b60896ce0e527f31ff7b34dea31e4a46ffe2f7fdae47d020aca73e7aaf57"
+    },
+    {
+      "file": "office-task-detail.png",
+      "width": 1120,
+      "height": 850,
+      "bytes": 87326,
+      "sha256": "04221507bd1a3991317a8f3c8af54886da8aa154146997db1cfd0fd07be713e0"
+    }
+  ],
+  "theme": "dark",
+  "theme_selection": "Browser prefers-color-scheme: dark through Playwright emulation. The app resolves its normal system theme. The dark class is asserted before every capture."
+}

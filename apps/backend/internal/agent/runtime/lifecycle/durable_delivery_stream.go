@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"time"
 
@@ -219,6 +218,8 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliveryHarnessGeneration = committed.HarnessGeneration
 	event.DeliverySequence = committed.Sequence
 	event.DeliverySubmissionID = committed.SubmissionID
+	event.Recovered = true
+	event.RecoveredActivityAt = &committed.CreatedAt
 	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
 	if err != nil {
 		return fmt.Errorf("durable replay event ownership check: %w", err)
@@ -316,18 +317,6 @@ func (sm *StreamManager) deliveryReplayCursor(ctx context.Context, repository Ag
 	return uint64(cursor.ProjectedSequence), nil
 }
 
-func (sm *StreamManager) receiveDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) (bool, error) {
-	if event.DeliverySequence > math.MaxInt64 {
-		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
-	}
-	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
-}
-
 func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	ctx context.Context,
 	deliveryEvent *models.AgentDeliveryEvent,
@@ -354,27 +343,6 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 		return false, err
 	}
 	return cursor == nil || cursor.ProjectedSequence < deliveryEvent.Sequence, nil
-}
-
-func (sm *StreamManager) projectDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-) error {
-	return sm.projectDurableAgentEventWithEffect(ctx, execution, event, repository, deliveryEffectForEvent(event))
-}
-
-func (sm *StreamManager) projectDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	effect *models.AgentDeliveryEffect,
-) error {
-	return sm.projectDurableAgentDeliveryEventWithEffect(
-		ctx, durableAgentEvent(execution, event), repository, effect,
-	)
 }
 
 func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
@@ -421,47 +389,6 @@ func projectedDeliveryTerminalOutcome(event *models.AgentDeliveryEvent) models.D
 	default:
 		return ""
 	}
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-) error {
-	return sm.projectAndAcknowledgeDurableAgentEventWithEffect(
-		ctx, execution, event, repository, acknowledger, deliveryEffectForEvent(event),
-	)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentEventWithEffect(
-	ctx context.Context,
-	execution *AgentExecution,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	deliveryEvent := durableAgentEvent(execution, event)
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
-}
-
-func (sm *StreamManager) projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
-	ctx context.Context,
-	deliveryEvent *models.AgentDeliveryEvent,
-	event agentctl.AgentEvent,
-	repository AgentDeliveryRepository,
-	acknowledger agentDeliveryAcknowledger,
-	effect *models.AgentDeliveryEffect,
-) error {
-	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
-		return err
-	}
-	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
 }
 
 func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffect {
@@ -621,7 +548,7 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 	}
 	payloadEvent := event
 	if payloadEvent.TurnID == "" && execution != nil {
-		payloadEvent.TurnID = execution.promptTurnIDSnapshot()
+		payloadEvent.TurnID = execution.promptTurnIDForEvent(event)
 	}
 	payloadEvent.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 	payloadEvent.CanonicalProjection = false
@@ -678,7 +605,7 @@ func durableEventExpectedStreamID(execution *AgentExecution) string {
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {
-	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning
+	return event.Type == streams.EventTypeMessageChunk || event.Type == streams.EventTypeReasoning || event.Type == streams.EventTypeShellOutputUpdate || canonicalShellStartEvent(event)
 }
 
 func canonicalMessageType(event agentctl.AgentEvent) string {
@@ -701,7 +628,7 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	}
 	turnID := event.TurnID
 	if turnID == "" && execution != nil {
-		turnID = execution.promptTurnIDSnapshot()
+		turnID = execution.promptTurnIDForEvent(event)
 	}
 	scope := event.ProtocolMessageID
 	if scope == "" {
@@ -710,11 +637,20 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	if scope == "" {
 		scope = event.DeliverySubmissionID
 	}
+	if scope == "" && event.PromptGeneration == 0 && execution != nil {
+		// Older peers lack native message IDs. Keep separate dispatch eras as
+		// an opaque message scope without assigning that old turn as owner.
+		if precedingTurn := execution.promptTurnIDSnapshot(); precedingTurn != "" {
+			scope = "native-after:" + precedingTurn
+		}
+	}
 	if scope == "" {
 		scope = "prompt:" + strconv.FormatUint(event.PromptGeneration, 10)
 	}
 	if scope == "prompt:0" {
-		scope = "stream"
+		// With no grouping evidence, keep durable chunks distinct rather than
+		// merging unrelated native replies into one stream-wide transcript row.
+		scope = "sequence:" + strconv.FormatUint(event.DeliverySequence, 10)
 	}
 	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])

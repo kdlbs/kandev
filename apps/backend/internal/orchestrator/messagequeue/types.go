@@ -599,13 +599,24 @@ type PendingMove struct {
 	// MoveID is the durable effect token for one deferred move request across
 	// queue snapshots. Rollback can restore a consumed snapshot, so replay uses
 	// this token to suppress a second workflow effect.
-	MoveID               string    `json:"move_id"`
-	SessionIncarnationID string    `json:"session_incarnation_id,omitempty"`
-	TaskID               string    `json:"task_id"`
-	WorkflowID           string    `json:"workflow_id"`
-	WorkflowStepID       string    `json:"workflow_step_id"`
-	Position             int       `json:"position"`
-	QueuedAt             time.Time `json:"queued_at"`
+	MoveID               string `json:"move_id"`
+	SessionIncarnationID string `json:"session_incarnation_id,omitempty"`
+	TaskID               string `json:"task_id"`
+	WorkflowID           string `json:"workflow_id"`
+	WorkflowStepID       string `json:"workflow_step_id"`
+	// FromStepID is the step the task occupied when this move was armed. Replay
+	// compares it with the task's current step so a move whose board position was
+	// superseded by a later move is dropped instead of relocating the card.
+	// Legacy rows decode as empty and fall back to the current step.
+	FromStepID string `json:"from_step_id,omitempty"`
+	// FromTransitionID is the task's latest step-transition ledger id when this
+	// move was armed. Replay compares it with the task's latest id: a later step
+	// change advances the id even when the card returns to FromStepID (A to B to A),
+	// so a move superseded by a later move is dropped instead of relocating the
+	// card. Legacy rows decode as 0 and skip the ordering guard.
+	FromTransitionID int64     `json:"from_transition_id,omitempty"`
+	Position         int       `json:"position"`
+	QueuedAt         time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`

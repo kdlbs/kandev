@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -71,6 +72,10 @@ func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		Enabled:             true,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
+	}
+
+	if _, err := s.executorActorContext(ctx, executoridentity.CreatorUserID(ctx), iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return nil, err
 	}
 	if err := s.store.CreateIssueWatch(ctx, iw); err != nil {
 		return nil, fmt.Errorf("create issue watch: %w", err)
@@ -191,6 +196,10 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		}
 		iw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
+
+	if _, err := s.executorActorContext(ctx, iw.CreatedByUserID, iw.ExecutorProfileID, iw.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.UpdateIssueWatch(ctx, iw)
 }
 
@@ -237,6 +246,12 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
 	if err != nil {
 		return nil, err
@@ -259,7 +274,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
 	}
-	issues, err := s.fetchIssues(ctx, resolved.Client, &fetchWatch)
+	issues, complete, err := s.fetchIssues(ctx, resolved.Client, &fetchWatch, scopedCacheKey(resolved.CacheScope, workspaceSearchScopeKey(settings)))
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +292,9 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 		}
 	}
 
+	if !complete {
+		return newIssues, nil
+	}
 	now := time.Now().UTC()
 	watch.LastPolledAt = &now
 	_ = s.store.UpdateIssueWatchLastPolledAt(ctx, watch.ID, now)
@@ -285,15 +303,16 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 }
 
 // fetchIssues fetches issues based on the watch configuration.
-func (s *Service) fetchIssues(ctx context.Context, client Client, watch *IssueWatch) ([]*Issue, error) {
+func (s *Service) fetchIssues(ctx context.Context, client Client, watch *IssueWatch, scope string) ([]*Issue, bool, error) {
 	hasRepos := len(watch.Repos) > 0
 
 	if !hasRepos {
 		filter := s.buildIssueFilter(watch)
-		return client.ListIssues(ctx, filter, watch.CustomQuery)
+		items, err := client.ListIssues(ctx, filter, watch.CustomQuery)
+		return items, err == nil, err
 	}
 
-	return s.fetchIssuesWithRepoFilter(ctx, client, watch), nil
+	return s.fetchIssuesWithRepoFilter(ctx, client, watch, scope)
 }
 
 // buildIssueFilter builds the filter qualifier from watch labels. `state:open`
@@ -313,13 +332,20 @@ func (s *Service) buildIssueFilter(watch *IssueWatch) string {
 }
 
 // fetchIssuesWithRepoFilter queries each repo individually and deduplicates.
-func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, watch *IssueWatch) []*Issue {
+func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, watch *IssueWatch, scope string) ([]*Issue, bool, error) {
+	cursor := s.beginWatchFilters(ctx, watchPollKey{kind: "issue", workspace: watch.WorkspaceID, id: watch.ID}, scope, s.buildIssueFilter(watch)+"\n"+watch.CustomQuery, watch.Repos)
+	if cursor == nil {
+		return nil, false, nil
+	}
+	defer cursor.mu.Unlock()
+
 	var allIssues []*Issue
 	seen := make(map[string]bool)
 
 	labelFilter := s.buildIssueFilter(watch)
 
-	for _, repo := range watch.Repos {
+	for i := cursor.next; i < len(watch.Repos); i++ {
+		repo := watch.Repos[i]
 		qualifier := repoFilterToQualifier(repo)
 		filter := qualifier
 		if labelFilter != "" {
@@ -334,6 +360,13 @@ func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, 
 		} else {
 			issues, err = client.ListIssues(ctx, filter, "")
 		}
+		if watchReadDeferred(err) {
+			return allIssues, false, nil
+		}
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		cursor.next = i + 1
 		if err != nil {
 			if IsConnectivityError(err) {
 				s.logger.Warn("failed to list issues (connectivity)",
@@ -353,7 +386,8 @@ func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, 
 			}
 		}
 	}
-	return allIssues
+	cursor.next = 0
+	return allIssues, true, nil
 }
 
 // ReserveIssueWatchTask atomically claims a dedup slot.
@@ -430,6 +464,7 @@ func (s *Service) publishNewIssueEvent(ctx context.Context, watch *IssueWatch, i
 		return
 	}
 	event := bus.NewEvent(events.GitHubNewIssue, "github", &NewIssueEvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		IssueWatchID:      watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,

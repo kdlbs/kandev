@@ -24,6 +24,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/quickterminal"
+	quickterminalmodels "github.com/kandev/kandev/internal/quickterminal/models"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	systemsvc "github.com/kandev/kandev/internal/system"
 	systeminfo "github.com/kandev/kandev/internal/system/info"
@@ -1671,8 +1672,14 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-workflow", workflowID: "wf-qc",
 	})
-	if _, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111"); err != nil {
+	terminalTab, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111")
+	if err != nil {
 		t.Fatalf("create quick terminal descriptor: %v", err)
+	}
+	if err := quickTerminalRepo.UpdateLifecycle(
+		ctx, terminalTab.UserID, terminalTab.TabID, "missing-session", quickterminalmodels.StatusRunning, nil, "",
+	); err != nil {
+		t.Fatalf("seed stale quick terminal session: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)
@@ -2134,6 +2141,12 @@ func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowserv
 }
 
 func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
+	return newBootStateTestHarnessWithTasks(t, nil)
+}
+
+// newBootStateTestHarnessWithTasks lets a test interpose on the task repository
+// the service calls, such as recording the sort a route forwards.
+func newBootStateTestHarnessWithTasks(t *testing.T, wrapTasks func(*sqlitetaskrepo.Repository) taskrepo.TaskRepository) bootStateTestHarness {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -2172,10 +2185,14 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	userSvc := userservice.NewService(userRepo, eventBus, log)
 	workflowSvc := workflowservice.NewService(workflowRepo, log)
 	t.Cleanup(func() { _ = workflowSvc.Close() })
+	tasksForService := taskrepo.TaskRepository(taskRepo)
+	if wrapTasks != nil {
+		tasksForService = wrapTasks(taskRepo)
+	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
 			Workspaces:         taskRepo,
-			Tasks:              taskRepo,
+			Tasks:              tasksForService,
 			TaskRepos:          taskRepo,
 			Workflows:          taskRepo,
 			Messages:           taskRepo,

@@ -8,7 +8,7 @@ import { getPRStatusColor, pickDefaultPR } from "@/components/github/pr-task-ico
 import { prIdentitySlug } from "@/components/github/pr-utils";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
 import { taskPRUnlinkErrorDescription } from "@/hooks/domains/github/task-pr-mutations";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useToast } from "@/components/toast-provider";
 import type { TaskPR } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
@@ -19,7 +19,7 @@ import { useTranslation } from "react-i18next";
  * PR (keyed by id) so the hook count stays stable as the list changes.
  */
 function PRFeedbackWarmer({ pr }: { pr: TaskPR }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(pr.task_id);
   usePRFeedbackBackgroundSync(workspaceId, pr);
   return null;
 }

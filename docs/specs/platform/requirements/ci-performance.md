@@ -87,6 +87,17 @@ The existing external-runner contract retains ownership of fleet selection and t
 - **AC-PLATFORM-CI-PERFORMANCE-006.3:** Change classification shall cover additions, modifications, deletions, and both sides of renames. An unrecognized path shall never prove that a change is test-only.
 - **AC-PLATFORM-CI-PERFORMANCE-006.4:** Required E2E checks shall report the deliberate skip and its reason. Main-branch, merge-group, and manual verification shall retain their existing selection policy.
 
+### REQ-PLATFORM-CI-PERFORMANCE-007: Fifteen-minute complete CI
+
+**Intent:** Shorten the time to complete all application verification, rather than only one test step.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-CI-PERFORMANCE-007.1:** Acceptance shall record three complete successful hosted workflow sets with at most 900 seconds from the earliest backend/frontend/E2E workflow creation to the latest completion. Report every sample and intervening failed, cancelled, or partial attempt. This is a measured delivery target, not a guarantee against future runner queues.
+- **AC-PLATFORM-CI-PERFORMANCE-007.2:** Every selected backend, PostgreSQL 16/18, native Windows, frontend, normal/container E2E, desktop and Kubernetes compatibility check shall remain required. Partitions shall preserve selected identities, assertions, platform coverage, race checks, isolation, retries and failure propagation.
+- **AC-PLATFORM-CI-PERFORMANCE-007.3:** Evidence shall distinguish full-workflow elapsed time, execution, waiting and runner-minutes. Baseline/candidate comparisons shall identify source and selection differences; path-filtered or cancelled runs shall never establish achievement.
+- **AC-PLATFORM-CI-PERFORMANCE-007.4:** Candidates may redistribute work across existing hosted jobs after measuring setup costs and available capacity. Paid capacity activation and trust-boundary expansion remain separate operator decisions. Reject coverage loss and loaded feedback regression; report any occupancy increase explicitly.
+
 ## Out of scope
 
 - Automatic approval, automatic reruns, or changes to contributor trust policy.

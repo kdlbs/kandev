@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -48,24 +49,33 @@ func (m *retentionRetryManager) PromptAgentWithSubmissionID(
 
 func (m *retentionRetryManager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
-	dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string,
+	dispatchOnly bool, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, onDispatched func(), submissionID string,
 ) (*executor.PromptResult, error) {
 	return m.acceptRetry(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID)
 }
 
 func (m *retentionRetryManager) PromptAgentWithAdmissionCallback(
 	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
-	dispatchOnly bool, beforeAdmission func() error, onDispatched func(),
+	dispatchOnly bool, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, onDispatched func(),
 ) (*executor.PromptResult, error) {
 	return m.acceptRetry(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, "")
 }
 
 func (m *retentionRetryManager) acceptRetry(
 	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
-	dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string,
+	dispatchOnly bool, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, onDispatched func(), submissionID string,
 ) (*executor.PromptResult, error) {
+	// Runtime preparation changes both text and attachment descriptors before admission.
+	prompt += "\nprepared runtime context"
+	attachments = append([]v1.MessageAttachment(nil), attachments...)
+	for i := range attachments {
+		attachments[i].Name = "bundle-2.zip"
+		attachments[i].MimeType = "application/zip"
+		attachments[i].SizeBytes = 16
+		attachments[i].DeliveryMode = "prompt"
+	}
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -73,7 +83,7 @@ func (m *retentionRetryManager) acceptRetry(
 	if err == nil {
 		var payload agentDeliveryPromptPayload
 		err = json.Unmarshal(stored.Payload, &payload)
-		if err == nil && (payload.Text != prompt || stored.State != models.DeliverySubmissionDispatching || stored.PayloadHash != journal.SubmissionHash(stored.Payload)) {
+		if err == nil && (!reflect.DeepEqual(payload.Attachments, attachments) || payload.Text != prompt || stored.State != models.DeliverySubmissionDispatching || stored.PayloadHash != journal.SubmissionHash(stored.Payload)) {
 			err = fmt.Errorf("retry SQL proof does not describe accepted provider prompt")
 		}
 	}
@@ -135,7 +145,7 @@ func assertRetentionRetryPromptAdmission(t *testing.T, engine, scenario string) 
 	if scenario == "storage_failure" {
 		installRetentionRetryStorageFailure(t, repo, engine, originalID)
 	}
-	service.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "/transient retry original"})
+	service.lastTurnPrompt.Store(sessionID, capturedPrompt{text: "/transient retry original", attachments: []v1.MessageAttachment{{AttachmentID: "retry-attachment", Type: "resource", Name: "bundle.zip"}}})
 	var ids []string
 	for attempt := 1; attempt <= 2; attempt++ {
 		require.NoError(t, repo.UpdateTaskSessionState(t.Context(), sessionID, models.TaskSessionStateWaitingForInput, ""))

@@ -52,6 +52,12 @@ persistence checks, and router construction succeed. The existing background
 lifecycle-token sweep remains outside readiness: its watcher/scheduler ordering
 and deadline are unchanged.
 
+The [startup housekeeping design](startup-housekeeping.md) refines these
+recovery gates into required local preparation before runtime activation.
+Per-session remote attachment stays outside the global readiness prerequisite.
+Its [combined plan](../../../plans/startup-housekeeping/plan.md) owns the ordering
+change; it must preserve this design's listener, backup, and persistence gates.
+
 ## Timeout policy
 
 Keep release listener-health timeout at 45000 ms, development/E2E at 600000 ms.
@@ -73,8 +79,9 @@ returns, avoiding a pool-close race with in-flight SQL.
 
 ## Persistence safety
 
-Keep `VACUUM INTO`, version-based backup eligibility, and two-snapshot retention.
-Context cancellation applies to the backup SQL. Repository initialization failure
+Keep version-based backup eligibility and two-snapshot retention. The
+[snapshot copy design](sqlite-snapshot-copy.md) replaces backup-time compaction with
+bounded native page copying and retains full integrity validation. Repository initialization failure
 must release previously constructed resources; a completed backup remains intact.
 The successful version marker stays behind the final persistence/router gates.
 

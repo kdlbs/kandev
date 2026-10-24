@@ -17,11 +17,13 @@ import { SessionFailureToastBridge } from "@/components/session-failure-toast-br
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { UpdateAvailableToastBridge } from "@/components/update-available-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { SettingsNavigationProvider } from "@/components/settings/settings-navigation-provider";
 import { WorkspaceCopilotHost } from "@/app/coordinator/copilot/workspace-copilot-host";
 import { CoordinatorCopilotResetBridge } from "@/components/coordinator-copilot-reset-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
+import { IntegratedControlProvider } from "@/components/integrated-control/integrated-control-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
 import { NeedsYouInboxBridge } from "@/components/needs-you-inbox/needs-you-inbox-bridge";
 import { useWindowControlsOverlay } from "@/hooks/use-window-controls-overlay";
@@ -93,24 +95,28 @@ export function AppShell({ children }: AppShellProps) {
                         the active workspace, and Office-vs-kanban chrome comes
                         from it rather than from the URL. */}
                     <WorkspaceScopeProvider>
-                      <div
-                        className="flex h-dvh min-h-0 w-full overflow-hidden"
-                        data-testid="app-shell"
-                        data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
-                        data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
-                        style={shellStyle}
-                      >
-                        <AppSidebar />
-                        <AppStatusSurfaceProvider>
-                          <MobileTaskNavigationProvider>
-                            <WorkspaceCopilotHost>
-                              <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-                                {children}
-                              </main>
-                            </WorkspaceCopilotHost>
-                          </MobileTaskNavigationProvider>
-                        </AppStatusSurfaceProvider>
-                      </div>
+                      <IntegratedControlProvider>
+                        <SettingsNavigationProvider>
+                          <div
+                            className="flex h-dvh min-h-0 w-full overflow-hidden"
+                            data-testid="app-shell"
+                            data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                            data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
+                            style={shellStyle}
+                          >
+                            <AppSidebar />
+                            <AppStatusSurfaceProvider>
+                              <MobileTaskNavigationProvider>
+                                <WorkspaceCopilotHost>
+                                  <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                    {children}
+                                  </main>
+                                </WorkspaceCopilotHost>
+                              </MobileTaskNavigationProvider>
+                            </AppStatusSurfaceProvider>
+                          </div>
+                        </SettingsNavigationProvider>
+                      </IntegratedControlProvider>
                     </WorkspaceScopeProvider>
                   </QuickChatProvider>
                 </ConfigChatProvider>

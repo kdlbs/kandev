@@ -5,7 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
 
@@ -15,9 +16,9 @@ import (
 func commentRun(
 	t *testing.T, repo *runssqlite.Repository,
 	id, reason, payload string, key *string, requestedAt time.Time,
-) *models.Run {
+) *runsmodels.Run {
 	t.Helper()
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID:             id,
 		AgentProfileID: "a1",
 		Reason:         reason,

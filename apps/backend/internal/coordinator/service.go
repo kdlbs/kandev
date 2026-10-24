@@ -3,12 +3,15 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator/pause"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -29,6 +32,8 @@ type DecisionTaskService interface {
 	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	SettleExternalID(ctx context.Context, taskID, externalID string) (bool, *taskmodels.Task, error)
 	GetTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error)
+	GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 // WorkspaceAuthorizer is the workspace-scope check every coordinator route
@@ -83,6 +88,10 @@ type Service struct {
 	proposalSteps        WorkflowStepReader
 
 	conversationTasks    ConversationTaskManager
+	convReader           ConversationReader
+	deliverLocks         keyedLock
+	wakeFinder           WakeMessageFinder
+	wakeSender           WakeSender
 	conversationSessions SessionEnsurer
 
 	// decisionTasks, decisionSteps and eventBus back Approve and Reject
@@ -100,22 +109,36 @@ type Service struct {
 
 	retentionWG      sync.WaitGroup
 	retentionRunning atomic.Bool
+	retentionMu      sync.Mutex
+	retentionStarted bool
+	retentionClosed  bool
+	retentionCancel  context.CancelFunc
 
 	// sweepMu guards sweepStarted against concurrent StartApprovalSweep
 	// calls; sweepWG lets Stop (and tests) wait for the loop to drain. See
 	// docs/specs/coordinator/system-design/proposal-recovery.md#recovery.
 	sweepMu      sync.Mutex
 	sweepStarted bool
+	sweepClosed  bool
+	sweepCancel  context.CancelFunc
 	sweepWG      sync.WaitGroup
 
 	// launchWG tracks resume launches that may outlive their Execute deadline.
-	launchWG sync.WaitGroup
+	launchWG      sync.WaitGroup
+	launchMu      sync.Mutex
+	launchClosed  bool
+	launchNext    uint64
+	launchCancels map[uint64]context.CancelFunc
 
 	// afterSweepPass is a test-only hook invoked once at the end of every
 	// approval-sweep pass (including a pass with nothing to recover). nil in
 	// production; only tests in this package set it, to join on a pass
 	// completing instead of sleeping.
 	afterSweepPass func()
+
+	// afterRetentionPass lets tests join an accepted pass after its running
+	// state is cleared. Production leaves it nil.
+	afterRetentionPass func()
 
 	// phase2 is true when the control surface is on. It gates every phase-2
 	// behavior of the service; false leaves the phase-1 product unchanged.
@@ -124,9 +147,89 @@ type Service struct {
 	// unreadable stored policy has been logged.
 	policyErrLogged sync.Map
 
+	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
+	// and phase 3 all on). It gates the autonomy settings.
+	phase3 bool
+
+	// phase31 is true when phase 3.1 is effective (phase 3 effective and
+	// features.coordinatorPhase31): the pause route and controls, the
+	// project-scope write surface and its reads, and the turn ledger read
+	// surface exist. The pause gate and the stored project scope are enforced
+	// whatever its value.
+	phase31 bool
+
+	// learningHealth computes the Learning section's health line; guarded by observerMu.
+	learningHealth LearningHealthReader
+	// automatic holds the automatic path's injectable seams.
+	automatic automaticState
+	// wakeMu guards kick, the stall hook, the wake sources and the recorder
+	// state; nothing waits while holding it.
+	wakeMu sync.Mutex
+	// kick asks the wake ticker to re-evaluate one coordinator; nil means no call.
+	kick func(ctx context.Context, coordinatorID string) error
+	// stallWakeHook records stall wakes; nil is a no-op.
+	stallWakeHook StallWakeHook
+	wakeSources   WakeSources
+	// projects reads sets, repositories and task repositories for the project
+	// scope; guarded by wakeMu.
+	projects     ProjectReader
+	recorderSubs []bus.Subscription
+	// recorderStopped latches once StopWakeRecorder ran: later hook and event
+	// entries are refused. wakeInFlight counts handlers and hooks in flight.
+	recorderStopped bool
+	wakeInFlight    sync.WaitGroup
+	backstop        *WakeBackstop
+	delivery        deliveryWorker
+
+	// relayReader and relayTasks back the relay read; nil until SetRelayDeps.
+	relayReader RelayReader
+	relayTasks  RelayTasks
+
+	// spendLedger, activeTurns and turnCanceller back spend and the ceiling
+	// stop; wired by SetSpendDeps. ceilingLocks holds one in-process
+	// try-lock per coordinator.
+	spendLedger   SpendLedger
+	activeTurns   ActiveTurnReader
+	turnCanceller TurnCanceller
+	ceilingLocks  keyedLock
+
+	// replyMessenger and replyNotifier deliver a reply; nil until SetReplyDeps.
+	replyMessenger ReplyMessenger
+	replyNotifier  ReplyNotifier
+
 	// afterApproveRecheck is a test-only hook run between the approve policy
 	// re-check and the claim.
 	afterApproveRecheck func()
+
+	// afterGoalBaselineRead is a test-only hook run between PutGoal's
+	// pre-lock reads and the locked write.
+	afterGoalBaselineRead func()
+
+	// permissionResolver resolves a denied unattended permission request; nil
+	// until SetUnattendedPermissionResolver, and then the handler does nothing.
+	permissionResolver UnattendedPermissionResolver
+	// containment evaluates the unattended-turn containment conditions; nil
+	// until phase 3 wiring sets it.
+	containment *ContainmentChecker
+
+	// gate is the pause precondition; knownPaused backs its flag-off carve-out.
+	gate        pause.Gate
+	knownPaused *pause.KnownSet
+	pauseMu     sync.Mutex
+	pauserNames PauserNames
+	pauseRun    pauseRunner
+	// decisionObserver is told about every decision after it committed; nil
+	// is a no-op.
+	observerMu       sync.RWMutex
+	decisionObserver DecisionObserver
+	// outcomeMeasures answers the measures route; nil until wired.
+	outcomeMeasures OutcomeMeasuresReader
+	// dreamStop is the dream canceller registered by the dream scheduler; nil
+	// is a no-op.
+	dreamStop pause.DreamStop
+	// archiveEpisode archives a dream episode task; nil until the dream is
+	// wired.
+	archiveEpisode func(ctx context.Context, taskID string) error
 }
 
 // ServiceOption configures optional Service behavior.
@@ -135,6 +238,42 @@ type ServiceOption func(*Service)
 // WithPhase2 turns the phase-2 control surface on or off. Off is the default.
 func WithPhase2(on bool) ServiceOption {
 	return func(s *Service) { s.phase2 = on }
+}
+
+// WithPhase3 turns the phase 3 autonomy surface on or off. Off is the default;
+// callers pass the effective condition, never the raw flag.
+func WithPhase3(on bool) ServiceOption {
+	return func(s *Service) { s.phase3 = on }
+}
+
+// Phase3Enabled reports whether the phase 3 autonomy surface is effective.
+func (s *Service) Phase3Enabled() bool { return s.phase3 }
+
+// SetKick registers the post-commit Kick the autonomy PATCH calls; nil clears it.
+func (s *Service) SetKick(kick func(ctx context.Context, coordinatorID string) error) {
+	s.wakeMu.Lock()
+	s.kick = kick
+	s.wakeMu.Unlock()
+}
+
+// callKick asks the wake ticker to re-evaluate one coordinator. It is a no-op
+// while no Kick is set; a panic is recovered and an error is logged and
+// ignored.
+func (s *Service) callKick(ctx context.Context, coordinatorID string) {
+	s.wakeMu.Lock()
+	kick := s.kick
+	s.wakeMu.Unlock()
+	if kick == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("coordinator kick panicked", zap.String("coordinator_id", coordinatorID), zap.Any("panic", r))
+		}
+	}()
+	if err := kick(ctx, coordinatorID); err != nil {
+		s.logger.Warn("coordinator kick failed", zap.String("coordinator_id", coordinatorID), zap.Error(err))
+	}
 }
 
 // Phase2Enabled reports whether the phase-2 control surface is on.
@@ -151,9 +290,13 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 	}
 	s.registerKinds()
 	s.executeTimeout = executeDeadline
+	s.backstop = newWakeBackstop(s)
+	s.knownPaused = pause.NewKnownSet()
+	s.gate = pause.NewGate(store.IsPaused, func() bool { return s.phase31 }, s.knownPaused, s.logger.Zap())
 	for _, opt := range opts {
 		opt(s)
 	}
+	store.phase3 = func() bool { return s.phase3 }
 	return s
 }
 
@@ -186,6 +329,12 @@ func (s *Service) SetUndoDeps(tasks UndoTaskService) { s.undoTasks = tasks }
 // this a no-op; a count read failure is logged at warn and swallowed, since
 // a stale badge count is not worth failing the caller's write over.
 func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, coordinatorID string) {
+	s.publishCoordinatorUpdatedWith(ctx, workspaceID, coordinatorID, false)
+}
+
+// publishCoordinatorUpdatedWith is publishCoordinatorUpdated with the
+// autonomy_changed field set as given.
+func (s *Service) publishCoordinatorUpdatedWith(ctx context.Context, workspaceID, coordinatorID string, autonomyChanged bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -196,6 +345,7 @@ func (s *Service) publishCoordinatorUpdated(ctx context.Context, workspaceID, co
 		return
 	}
 	payload := NewCoordinatorUpdatedPayload(workspaceID, coordinatorID, open)
+	payload.AutonomyChanged = autonomyChanged
 	event := bus.NewEvent(events.CoordinatorUpdated, "coordinator-service", payload)
 	if err := s.eventBus.Publish(ctx, events.CoordinatorUpdated, event); err != nil {
 		s.logger.Warn("failed to publish coordinator.updated",
@@ -223,13 +373,19 @@ func (s *Service) CreateCoordinator(ctx context.Context, workspaceID string, req
 	if err := s.validator.ValidateExecutorProfile(ctx, req.ExecutorProfileID); err != nil {
 		return nil, err
 	}
+	taskAgent, taskExecutor, err := s.validateTaskPair(ctx, workspaceID, req.TaskAgentProfileID, req.TaskExecutorProfileID)
+	if err != nil {
+		return nil, err
+	}
 
 	created := &Coordinator{
-		WorkspaceID:       workspaceID,
-		Name:              name,
-		AgentProfileID:    req.AgentProfileID,
-		ExecutorProfileID: req.ExecutorProfileID,
-		Context:           coordinatorContext,
+		WorkspaceID:           workspaceID,
+		Name:                  name,
+		AgentProfileID:        req.AgentProfileID,
+		ExecutorProfileID:     req.ExecutorProfileID,
+		TaskAgentProfileID:    taskAgent,
+		TaskExecutorProfileID: taskExecutor,
+		Context:               coordinatorContext,
 	}
 	if err := s.store.CreateCoordinator(ctx, created); err != nil {
 		return nil, fmt.Errorf("create coordinator: %w", err)
@@ -237,6 +393,44 @@ func (s *Service) CreateCoordinator(ctx context.Context, workspaceID string, req
 	s.logger.Info("coordinator created",
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", created.ID))
 	return created, nil
+}
+
+// requireTaskPair trims the task pair and reports an empty value, the agent
+// first, as a *FieldError naming the field.
+func requireTaskPair(agent, executor string) (string, string, error) {
+	agent, executor = strings.TrimSpace(agent), strings.TrimSpace(executor)
+	if agent == "" {
+		return "", "", &FieldError{Field: PatchFieldTaskAgentProfileID, Message: "task_agent_profile_id is required"}
+	}
+	if executor == "" {
+		return "", "", &FieldError{Field: PatchFieldTaskExecutorProfileID, Message: "task_executor_profile_id is required"}
+	}
+	return agent, executor, nil
+}
+
+// validateTaskPair checks both task-pair values for emptiness first, then
+// against the stores, agent before executor.
+func (s *Service) validateTaskPair(ctx context.Context, workspaceID, agent, executor string) (string, string, error) {
+	agent, executor, err := requireTaskPair(agent, executor)
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.validator.ValidateAgentProfileFor(ctx, workspaceID, agent, PatchFieldTaskAgentProfileID); err != nil {
+		return "", "", err
+	}
+	if err := s.validator.ValidateExecutorProfileFor(ctx, executor, PatchFieldTaskExecutorProfileID); err != nil {
+		return "", "", err
+	}
+	return agent, executor, nil
+}
+
+// TaskPairStatuses reports the statuses of c's agent for created tasks.
+func (s *Service) TaskPairStatuses(ctx context.Context, c *Coordinator) (ProfileStatus, ProfileStatus, error) {
+	a, e, err := s.validator.TaskPairStatus(ctx, c.WorkspaceID, c.TaskAgentProfileID, c.TaskExecutorProfileID)
+	if err != nil {
+		return "", "", fmt.Errorf("compute task profile status: %w", err)
+	}
+	return a, e, nil
 }
 
 // GetCoordinator returns a coordinator and its two profile statuses
@@ -292,15 +486,15 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		return nil, err
 	}
 
-	validate := func(ctx context.Context, merged *Coordinator) error {
-		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
-			return err
-		}
-		return s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID)
-	}
-	updated, clearedConversationTaskID, err := s.store.PatchCoordinator(ctx, workspaceID, id, patch, validate)
+	result, err := s.store.PatchCoordinatorResult(ctx, workspaceID, id, patch, s.patchValidator(workspaceID, patch))
 	if err != nil {
 		return nil, err
+	}
+	updated, clearedConversationTaskID := result.Coordinator, result.ClearedConversationTaskID
+	if result.AutonomyChanged {
+		s.afterAutonomyChange(ctx, workspaceID, id)
+	} else if result.TaskPairChanged {
+		s.publishCoordinatorUpdated(ctx, workspaceID, id)
 	}
 	if clearedConversationTaskID != nil && s.onConversationCleared != nil {
 		s.onConversationCleared(ctx, id, *clearedConversationTaskID)
@@ -309,6 +503,46 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", id),
 		zap.Bool("context_changed", clearedConversationTaskID != nil))
 	return updated, nil
+}
+
+// patchValidator is the validation a coordinator write runs on the merged row:
+// both profiles must resolve and the autonomy interlock must hold.
+func (s *Service) patchValidator(workspaceID string, patch CoordinatorPatch) PatchValidator {
+	return func(ctx context.Context, merged, stored *Coordinator) error {
+		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
+			return err
+		}
+		if err := s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID); err != nil {
+			return err
+		}
+		if err := checkAutonomyInterlock(patch, merged); err != nil {
+			return err
+		}
+		return s.validateChangedTaskPair(ctx, workspaceID, patch, stored)
+	}
+}
+
+// validateChangedTaskPair checks only the task-pair fields the patch changes,
+// agent first.
+func (s *Service) validateChangedTaskPair(ctx context.Context, workspaceID string, patch CoordinatorPatch, stored *Coordinator) error {
+	if v := patch.TaskAgentProfileID; v != nil && *v != stored.TaskAgentProfileID {
+		if err := s.validator.ValidateAgentProfileFor(ctx, workspaceID, *v, PatchFieldTaskAgentProfileID); err != nil {
+			return err
+		}
+	}
+	if v := patch.TaskExecutorProfileID; v != nil && *v != stored.TaskExecutorProfileID {
+		return s.validator.ValidateExecutorProfileFor(ctx, *v, PatchFieldTaskExecutorProfileID)
+	}
+	return nil
+}
+
+// afterAutonomyChange runs after a PATCH that changed autonomy or the ceiling
+// committed: it publishes coordinator.updated with autonomy_changed and calls
+// Kick. Both are best effort; a failure or a Kick panic never changes the
+// PATCH result.
+func (s *Service) afterAutonomyChange(ctx context.Context, workspaceID, id string) {
+	s.publishCoordinatorUpdatedWith(ctx, workspaceID, id, true)
+	s.callKick(ctx, id)
 }
 
 // buildCoordinatorPatch parses req's four known fields into a
@@ -359,7 +593,39 @@ func (s *Service) buildCoordinatorPatch(req PatchCoordinatorRequest) (Coordinato
 		patch.ExecutorProfileID = executorProfileID
 	}
 
+	if err := patchTaskPairFields(req, &patch); err != nil {
+		return patch, err
+	}
+
+	if s.phase3 {
+		if err := applyAutonomyFields(req, &patch); err != nil {
+			return patch, err
+		}
+	}
 	return patch, nil
+}
+
+// patchTaskPairFields reads the task pair: absent is unchanged, null or empty
+// after trimming is a *FieldError, the agent before the executor.
+func patchTaskPairFields(req PatchCoordinatorRequest, patch *CoordinatorPatch) error {
+	for _, f := range []struct {
+		name string
+		dst  **string
+	}{{PatchFieldTaskAgentProfileID, &patch.TaskAgentProfileID}, {PatchFieldTaskExecutorProfileID, &patch.TaskExecutorProfileID}} {
+		v, present, err := req.StringField(f.name)
+		if err != nil {
+			return err
+		}
+		if !present {
+			continue
+		}
+		trimmed := strings.TrimSpace(*v)
+		if trimmed == "" {
+			return &FieldError{Field: f.name, Message: f.name + " must not be empty"}
+		}
+		*f.dst = &trimmed
+	}
+	return nil
 }
 
 // DeleteCoordinator deletes a coordinator and its proposals (Build decision
@@ -368,9 +634,14 @@ func (s *Service) DeleteCoordinator(ctx context.Context, workspaceID, id string)
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return err
 	}
+	open, err := s.store.OpenDreamEpisodeTasks(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.store.DeleteCoordinator(ctx, workspaceID, id); err != nil {
 		return err
 	}
+	s.archiveEpisodes(ctx, open)
 	if s.onCoordinatorDeleted != nil {
 		s.onCoordinatorDeleted(ctx, workspaceID, id)
 	}
@@ -386,7 +657,12 @@ func (s *Service) GetProposal(ctx context.Context, workspaceID, coordinatorID, i
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
+	found, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
+	if err != nil {
+		return nil, err
+	}
+	s.attachRunsWith(ctx, found)
+	return found, nil
 }
 
 // ListProposals returns a coordinator's proposals per status (Build decision
@@ -399,7 +675,12 @@ func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID 
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
+	rows, err := s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
+	if err != nil {
+		return nil, err
+	}
+	s.attachRunsWith(ctx, rows...)
+	return rows, nil
 }
 
 // CoordinatorForConversationTask returns the id of the coordinator whose
@@ -426,6 +707,15 @@ func (s *Service) CoordinatorProfilesReady(ctx context.Context, coordinatorID st
 		return false, fmt.Errorf("compute profile status: %w", err)
 	}
 	return agentStatus == ProfileStatusOK && executorStatus == ProfileStatusOK, nil
+}
+
+// WorkspaceIDOf returns the workspace a coordinator belongs to.
+func (s *Service) WorkspaceIDOf(ctx context.Context, coordinatorID string) (string, error) {
+	found, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return "", err
+	}
+	return found.WorkspaceID, nil
 }
 
 // CoordinatorStandingInstructionsData returns coordinatorID's name and
@@ -468,10 +758,31 @@ func (s *Service) PruneStalls(ctx context.Context, now time.Time) (int64, error)
 	return s.store.PruneStalls(ctx, now)
 }
 
+// PruneWakeState is the phase 3 retention pass, returning the turn and wake
+// rows deleted. Unauthorized: only the coordinator startup pass calls it.
+func (s *Service) PruneWakeState(ctx context.Context, now time.Time) (turns, wakes int64, err error) {
+	return s.store.PruneWakeState(ctx, now)
+}
+
 // DeleteWorkspaceState deletes a workspace's coordinators, proposals and
 // stall records (coordinators.md#workspace-deletion). Unauthorized: callers
 // are the workspace.deleted subscriber and the E2E reset endpoint, neither of
 // which carries a workspace-scoped request to authorize.
 func (s *Service) DeleteWorkspaceState(ctx context.Context, workspaceID string) error {
 	return s.store.DeleteWorkspaceState(ctx, workspaceID)
+}
+
+// SetContainment injects the containment checker once at wiring.
+func (s *Service) SetContainment(c *ContainmentChecker) { s.containment = c }
+
+// Containment returns the injected containment checker, or nil before wiring.
+func (s *Service) Containment() *ContainmentChecker { return s.containment }
+
+// Store returns the coordinator store, for the composition root's wiring of
+// the packages that read it directly.
+func (s *Service) Store() *Store { return s.store }
+
+// IsDreamEpisodeTask reports whether taskID is a dream's episode task.
+func (s *Service) IsDreamEpisodeTask(ctx context.Context, taskID string) (bool, error) {
+	return s.store.IsDreamEpisodeTask(ctx, taskID)
 }

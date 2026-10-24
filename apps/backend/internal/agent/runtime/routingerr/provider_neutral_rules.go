@@ -4,6 +4,19 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	// A gateway that restricted an account rejects every request with 403 and
+	// an account-restriction code or message. The envelope must open the line,
+	// optionally inside a labeled JSON message, so an agent quoting the error
+	// in prose cannot take its own profile out of rotation; a plain 403 or the
+	// code on any other status is a different failure.
+	mustRule(
+		"provider.account_blocked.v1",
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*"message"\s*:\s*")?`+
+			`Error\s+from\s+provider\s+[^\s:]+:\s*403\s+Forbidden\b[^\n]*?`+
+			`(?:\\?"code\\?"\s*:\s*\\?"user_blocked\\?"|\byour\s+access\s+has\s+been\s+restricted\b)`,
+		CodeAccountBlocked,
+		ConfHigh,
+	),
 	mustRule(
 		"provider.model_capacity.v1",
 		`(?i)(?:\bselected\s+model\b[^\n]{0,96}\bat\s+capacity\b|\bmodel\b[^\n]{0,96}\bat\s+capacity\b|\b(?:model|provider)[_-]?capacity(?:_reached)?\b|\b(?:model|provider)\s+capacity\s+(?:is\s+)?(?:reached|unavailable)\b)`,

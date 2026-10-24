@@ -136,13 +136,23 @@ test("primary action, disclosure, destination and footer have distinct behavior"
   await sidebar.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await testPage.mouse.move(1100, 300);
   await expect(testPage.getByTestId("app-sidebar-layout")).toHaveCSS("width", "56px");
-  await expect(create).toBeVisible();
-  await expect(stats).toBeVisible();
-  await stats.click();
-  await expect(testPage).toHaveURL(/\/stats$/);
-  await create.click();
+  await expect(sidebar).toHaveCSS("width", "56px");
+  await testPage.clock.install();
+  await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now() + 100));
   const createDialog = testPage.getByTestId("create-task-dialog");
-  await expect(createDialog).toBeVisible();
+  try {
+    await expect(create).toBeVisible();
+    await expect(stats).toBeVisible();
+    await stats.click();
+    await expect(testPage).toHaveURL(/\/stats$/);
+    await create.click();
+    await expect(createDialog).toBeVisible();
+    await testPage.clock.runFor(1000);
+    await expect(sidebar).toHaveAttribute("data-hover-revealed", "true");
+    await expect(createDialog).toBeVisible();
+  } finally {
+    await testPage.clock.resume();
+  }
   await createDialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(createDialog).toBeHidden();
   await more.click();

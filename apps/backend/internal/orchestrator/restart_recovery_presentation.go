@@ -16,6 +16,9 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, session.TaskID, session.ID) {
+		return session, nil
+	}
 	generation, err := s.restartRecoveryNativeGeneration(ctx, session)
 	if err != nil {
 		return nil, err
@@ -27,6 +30,11 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if !ok {
 		return session, nil
 	}
+	if open, readErr := blocks.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation); readErr == nil && open != nil {
+		if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, open); resolved {
+			return s.repo.GetTaskSession(ctx, session.ID)
+		}
+	}
 	block, reason, err := s.deliveryReconstructionBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation, nil)
 	if err != nil {
 		return nil, err
@@ -34,7 +42,10 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if reason != "" {
 		return session, nil
 	}
-	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	recovery, exists, err := s.currentRestartRecoverySnapshot(ctx, session, generation)
+	if err != nil {
+		return nil, err
+	}
 	if exists && !silentRestoreRecoveryPhase(recovery.Phase) {
 		return session, nil
 	}
@@ -60,7 +71,7 @@ func (s *Service) finishRestartPresentationRepair(ctx context.Context, session *
 		}
 		return s.repo.GetTaskSession(ctx, session.ID)
 	}
-	if !exists || incompleteReconstructedRecovery(recovery) {
+	if !exists || incompleteReconstructedRecovery(recovery) || s.knownRestartHistoryGap(ctx, session, recovery) {
 		if _, err := s.retryMissingCanonicalDeliverySubmission(ctx, session, session.QueueIncarnationID, generation.Generation, block); err != nil {
 			return nil, err
 		}
@@ -139,4 +150,20 @@ func (s *Service) restartRecoveryPresentationRepairAllowed(ctx context.Context, 
 		return true
 	}
 	return s.restartMissingOwnerProvenDead(ctx, session, generation)
+}
+
+func (s *Service) currentRestartRecoverySnapshot(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration) (models.AgentDeliveryRecovery, bool, error) {
+	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	if !exists || recovery.Phase != models.AgentDeliveryRecoveryRestored {
+		return recovery, exists, nil
+	}
+	if !s.hasNewRestartJournalSubmission(ctx, session, generation, recovery.SubmissionID) {
+		return recovery, true, nil
+	}
+	verifier, supported := s.repo.(historicalNativeResumeRecoveryVerifier)
+	if !supported {
+		return recovery, exists, nil
+	}
+	resolved, err := verifier.HasResolvedHistoricalNativeResumeRecovery(ctx, recovery)
+	return recovery, !resolved, err
 }

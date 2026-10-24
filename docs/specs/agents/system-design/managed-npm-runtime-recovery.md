@@ -1,11 +1,13 @@
 ---
-status: current
+status: draft
 system: agents
+updated: 2026-10-19
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
+  - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005
 ---
 
 # Managed npm runtime recovery system design
@@ -28,6 +30,7 @@ Kandev backend.
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001` | [Recovery flow](#recovery-flow) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | [Executor-local cache contract](#executor-local-cache-contract) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004` | [Bounded setup retry](#bounded-setup-retry) |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005` | [Missing bundled Codex dependency](#missing-bundled-codex-dependency) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003` | [Project-independent npm configuration](#project-independent-npm-configuration); [Release-date policy failure](#release-date-policy-failure) |
 
 ## Components and responsibilities
@@ -82,8 +85,10 @@ trusted package and version checks continue to reject arbitrary commands.
 `ProbeResponse` can carry a stable managed-runtime npm-resolution failure code.
 Agentctl sets it only when bounded stderr contains npm `ETARGET` and a missing
 top-level package specification that exactly matches the trusted probe command.
-Raw stderr, npm log paths, cache paths, and registry URLs remain in agentctl
-diagnostic logs and do not cross the probe API.
+The raw bounded stderr drives classification and does not cross the probe API.
+Diagnostic logs retain a sanitized tail: likely credentials, private URL
+details, local paths, and any truncated first line are removed according to
+[Probe Failure Diagnostics](probe-failure-diagnostics.md).
 
 The host utility manager accepts this code only for an agent that implements
 `ManagedNPMRuntimeAgent`. It derives the package specification and
@@ -136,6 +141,10 @@ For a host capability probe, the equivalent flow is:
 3. The host utility manager preserves the execution tree and the original probe environment.
 4. The host utility manager rebuilds the same effective package version with `--prefer-online` and retries once.
 5. A successful retry becomes the live capability or model-configuration catalogue. Retry-preparation or final probe failure becomes the published failed status.
+
+The proposed missing-dependency extension below adds a narrow eligible
+classification to task and probe recovery. Other host probe failures retain
+the ETARGET-only rule.
 
 Retain current host utility admission ordering while removing automatic cache deletion.
 No backend-wide launch mutex or cache lease is introduced.
@@ -217,6 +226,7 @@ No database migration is necessary.
 - [Run cache repair where npm runs](../../../decisions/2026-08-24-agentctl-local-managed-runtime-cache-repair.md)
 - [Recover host capability probes before publishing failure](../../../decisions/2026-09-07-host-utility-managed-runtime-recovery.md)
 - [Isolate managed npm runtime project configuration](../../../decisions/2026-09-24-isolate-managed-npm-project-config.md)
+- [Recover missing bundled dependencies in a private runtime](../../../decisions/2026-10-19-isolated-managed-dependency-recovery.md)
 
 ## Bounded setup retry
 
@@ -326,3 +336,171 @@ outcome. No new metric or storage table is needed. Tests cover mixed concurrent
 outcomes, delayed events, cancellation, cleanup failure, missing evidence, and
 single prompt delivery after recovery. Real subprocess fixtures provide exit
 and stderr evidence; API-only seeded cards are not startup-recovery proof.
+
+## Missing bundled Codex dependency
+
+This proposed extension implements REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-005.
+The [delivery package](../../../plans/managed-codex-dependency-recovery/plan.md)
+owns implementation status. It does not relax the no-shared-tree-mutation rule.
+
+### Eligibility and evidence
+
+The initial provider allowlist is the registered
+`@agentclientprotocol/codex-acp` managed ACP command with no command prefix
+and no non-empty `CODEX_PATH`. Preserve its selected exact version and CLI
+arguments. Native Codex app-server, passthrough, operator-defined commands, and
+other providers stay outside this extension.
+
+Add a bounded Codex dependency diagnostic recognizer beside the existing
+`common/npmresolution` matchers. Recognize the observed missing optional
+platform-package diagnostic inside the failed initialize RPC error as well as
+stderr. A Codex bridge can return JSON-RPC error 1001 after its provider child
+exits while the bridge itself remains alive. Consequently, an ordinary exit of
+the top-level npx/bridge process is not a prerequisite and must not be forged
+in `ManagedStartupEvidence`.
+
+Agentctl validates the failed command's trusted exact package spec and inspects
+that execution tree using the failed subprocess environment. Resolve npm's
+cache with the isolated project prefix, then derive the `_npx` key through
+`managedruntime.NpxExecutionCacheKey`. Reuse the bounded manifest-inspection
+approach in `utility/runtime_observation.go`; share its narrow filesystem
+primitives where useful rather than duplicating traversal.
+
+Read only bounded package manifests beneath the exact tree. Verify the bridge
+name/version, its dependency on `@openai/codex`, and the installed provider's
+declared platform dependency. Map the host OS/architecture to the known Codex
+platform package, rather than accepting a package, executable, or path from
+the error. Confirm that the expected package or native executable is absent.
+Unreadable, inconsistent, malformed, escaped, or symlinked inventory is not
+evidence of absence and fails closed. Do not execute a manifest-provided script
+to establish eligibility.
+
+Retain instance/process-generation evidence for task initialization and a
+probe-attempt identity for one-shot discovery. Bind the verified result to
+the exact package and effective environment, with no secret values or ordinary
+credential hashes crossing APIs or entering logs. Older peers or ambiguous
+evidence do not authorize repair. Permanent failures and cancellation continue
+to take priority.
+
+### Private preparation primitive
+
+Add a narrow executor-local prepared-runtime owner under `agent/managedruntime`,
+shared by agentctl task and utility subprocess paths. It owns a private project
+directory and a private npm cache; neither is inside the failed shared tree,
+task checkout, mounted provider home, or another operation's directory.
+
+Preparation uses the trusted exact bridge package and normal npm installation
+with an explicit isolated `--prefix`, isolated `--cache`, `--prefer-online`,
+and `--include=optional`. It must not run `npm install -g`, mutate the shared
+tree in place, copy broken `node_modules`, or install the diagnostic's package
+name directly. The inclusion override is confined to this operation. Registry,
+authentication, environment sanitization, release-age policy, and strip rules
+remain those of the failed launch.
+
+This is a fresh installation of the selected bridge, not a lockfile recovery
+or a promise to preserve an independently unselected transitive CLI version.
+Use the package's normal dependency constraints, validate the actual installed
+bridge version and host platform executable, and refresh runtime observations.
+Never represent a changed bundled provider version as the previous observation.
+
+Build the replacement command from the original trusted managed command,
+applying the prepared project's private prefix/cache internally at agentctl's
+last command-preparation boundary. Both npm preparation and replacement remain
+argument-vector operations, not shell strings. Keep task working directory,
+ACP cwd, environment, model, flags, permissions, and session ID unchanged.
+Bound command output, sanitize failures before persistence, and confirm that the
+required bundled executable's version check succeeds before replacement.
+
+The prepared-runtime owner retains its directory while any child can read it.
+Probe cleanup releases its private tree only after reaping all probe descendants.
+Task cleanup releases it only after reaping the task process tree; backend
+connection closure or detach is not release. Tie ownership to the surviving
+agentctl instance, not to the HTTP start request or backend context. Reuse
+existing instance cleanup and owned-directory safeguards. Record owner identity
+in the private root and remove only that exact verified root; no broad temporary
+directory cleanup or new install-wide janitor is part of this change. Explicit
+crash-orphan reclamation remains later storage maintenance.
+
+### Wire and task retry
+
+Extend the existing `agent.initialize` error details with an optional typed
+missing-dependency classification, separate from top-level process-exit evidence.
+It is emitted only after inventory verification and carries stable reason,
+trusted package identity, and generation, never paths or raw diagnostics.
+Advertise support through the existing agentctl capability negotiation.
+
+Extend the existing authenticated start request with an optional typed
+dependency-recovery directive containing the expected failed generation and
+exact package spec. The backend sends it only through the runtime agentctl
+client after the existing startup owner consumes its retry budget and confirms
+cleanup. Agentctl revalidates the directive against its instance configuration
+and captured failure; it never accepts a cache path or arbitrary command.
+Existing empty start requests remain unchanged. A peer lacking the advertised
+capability receives no directive and fails normally.
+
+`lifecycle.Manager.prepareManagedRuntimeStartupRetry` handles this typed
+initialize-phase failure independently of empty-stderr and npm-code branches.
+Keep `beginStartupRecovery`, cleanup confirmation, deadline, delay, generation
+fences, and cancellation ordering. Preparation runs inside the same recovery
+context as replacement, with no third launch after a prior ETARGET retry.
+After preparation, perform the normal initialize followed by the original
+create/load/resume exactly once. No automatic repair is eligible after the
+initial handshake has succeeded.
+
+Use existing `managed_runtime_startup` failure routing with bounded dependency
+recovery reasons and accurate attempts. Preparation failure must retain its
+sanitized cause even when no second agent process started. Delayed events from
+the first generation remain stale. Stop must also cancel an in-flight installer
+and reap its descendants before private-tree release.
+
+### Host and profile discovery
+
+Add `managed_runtime_dependency_missing` to `utility.ProbeFailureCode` and
+an optional typed recovery directive to `ProbeRequest`. The stable code comes
+from the same inventory check, including initialize RPC failures; it is not
+produced merely by matching generic stderr. Recheck inventory before preparing
+the retry. A new request cannot repair an arbitrary package.
+
+`hostutility.Manager.probeManagedRuntime` retains the first failed response
+until one eligible retry completes. Reuse the existing instance admission and
+clone the original request, preserving environment, strip policy, arguments,
+runtime observations, and model/mode selections. ETARGET and missing-dependency
+recovery share one probe budget. There is no recursive retry inside agentctl.
+Publish only the successful replacement or the actual final failure.
+
+Concrete profile discovery currently bypasses that retry owner and deliberately
+never installs packages. Add only this narrow private-preparation exception in
+both `probeProfileCapabilitiesFlight` and `resolveProfileModelConfigFlight`,
+reusing a shared bounded probe helper. Preserve all profile single-flight,
+secret/context hashing, runtime-generation, and late-publication checks.
+Repair may not switch to the default context, save a draft, or populate the
+agent-wide cache. Cancel obsolete repair work when its profile context changes;
+the existing `context.WithoutCancel` lifetime is not permission to launch a
+stale replacement. The
+[profile discovery design](profile-capability-discovery.md) retains the
+surrounding context and publication contract.
+
+### Presentation, compatibility, and proof
+
+Reuse existing boot retry progress and generic startup recovery copy, which
+already supports sanitized reason/details and a single Retry runtime action.
+Profile and agent-wide discovery retain their loading and error states. No new
+UI control, layout, translation key, or recovery modal is required by this
+package. Phone and desktop keep their existing compositions and touch targets.
+Validate that dependency preparation failures do not claim two agent attempts
+or successful shared-cache repair.
+
+Structured logs add a bounded `missing_bundled_dependency` reason and
+preparation outcome; identity belongs in logs, not metric labels. Logs and UI
+details exclude npm cache paths, private registry URLs, credentials, and raw
+RPC diagnostics. No database migration, runtime selection write, persistent
+repaired-generation catalogue, or feature flag is introduced.
+
+Deterministic tests use local package/CLI fixtures and no public registry or
+provider credentials. Cover a bridge that stays alive after returning the
+observed initialize error, a genuinely absent platform executable, mixed
+healthy/recovered/exhausted siblings, unsupported shapes, hostile paths,
+installer failure, cancellation, deadline, old peers, and single prompt
+delivery. Browser proof must trigger the real task resume/profile refresh
+pipeline, not seed a recovery card. Existing Docker and SSH fixtures prove
+preparation occurs on the executor rather than the backend.

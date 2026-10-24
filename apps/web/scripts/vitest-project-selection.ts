@@ -27,7 +27,7 @@ const SKIPPED_DIRECTORIES = new Set([".git", "dist", "node_modules"]);
  */
 export const REVIEWED_NODE_TEST_FILES: readonly string[] = reviewedProjects.node;
 
-/** These browser tests were reviewed as not requiring the locale catalogs. */
+/** These suites support English-only setup and the browser project's dependency loading. */
 export const REVIEWED_BROWSER_TEST_FILES: readonly string[] = reviewedProjects.browser;
 
 export interface ProjectFiles {

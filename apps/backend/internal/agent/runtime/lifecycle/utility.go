@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
@@ -136,11 +137,9 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 			return nil, err
 		}
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+	env, err := m.ResolveUtilityProfileEnvironment(ctx, agentName, profile.EnvVars)
+	if err != nil {
+		return nil, err
 	}
 	if providerKey != "" && providerKeyEnvVar != "" {
 		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
@@ -152,7 +151,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
 			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
-			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix),
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	})

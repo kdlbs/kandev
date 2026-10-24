@@ -69,6 +69,7 @@ func TestBuildAgentCommandUsesEffectiveVersionAcrossExecutors(t *testing.T) {
 				&LaunchRequest{ExecutorType: string(tt.executorType)},
 				nil,
 				agent,
+				tt.executorType.Runtime(),
 				false,
 			)
 			if err != nil {
@@ -92,6 +93,7 @@ func TestBuildAgentCommandFailsWhenActiveSelectionCannotBeRead(t *testing.T) {
 		&LaunchRequest{ExecutorType: string(models.ExecutorTypeLocal)},
 		nil,
 		agents.NewOpenCodeACP(),
+		agentruntime.RuntimeStandalone,
 		false,
 	)
 	if !errors.Is(err, wantErr) {
@@ -107,7 +109,7 @@ func TestBuildAgentCommandUsesSelectedOpenCodeFamilyAcrossExecutors(t *testing.T
 	}})
 	openCode := agents.NewOpenCodeACP()
 	for _, executorType := range []models.ExecutorType{models.ExecutorTypeLocal, models.ExecutorTypeLocalDocker, models.ExecutorTypeSSH} {
-		cmds, err := manager.buildAgentCommandWithContext(context.Background(), &LaunchRequest{ExecutorType: string(executorType)}, nil, openCode, true)
+		cmds, err := manager.buildAgentCommandWithContext(context.Background(), &LaunchRequest{ExecutorType: string(executorType)}, nil, openCode, executorType.Runtime(), true)
 		if err != nil {
 			t.Fatalf("build %s command: %v", executorType, err)
 		}

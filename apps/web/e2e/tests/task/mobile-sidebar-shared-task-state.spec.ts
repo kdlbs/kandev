@@ -1,4 +1,5 @@
-import { test } from "../../fixtures/test-base";
+import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { exerciseSharedContextRecovery } from "./sidebar-shared-context-fixtures";
 import {
   exerciseSharedPaging,
@@ -34,7 +35,14 @@ test("phone rejects old workspace pages and recovers shared coverage after recon
   testPage,
   apiClient,
   seedData,
+  prCapture,
 }) => {
   test.setTimeout(120_000);
   await exerciseSharedContextRecovery(testPage, apiClient, seedData, true);
+  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+  await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
+  await prCapture.screenshot("mobile-workspace-recovery", {
+    caption: "Task picker remains usable after workspace switching and reconnect",
+  });
 });

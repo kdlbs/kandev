@@ -32,6 +32,9 @@ func (m *Manager) recoverRetainedJournal(ctx context.Context, lease *agentctl.Ru
 		after = uint64(cursor.ProjectedSequence)
 	}
 	request := journal.RetainedRecoveryRequest{Root: m.dataDir, SessionID: requested.SessionID, ExecutionID: requested.ExecutionID, IncarnationID: requested.IncarnationID, HarnessGeneration: requested.HarnessGeneration, StreamID: requested.StreamID, SubmissionID: requested.SubmissionID, OriginalRuntime: requested.OriginalRuntime, After: after, Limit: 4}
+	if requested.HistoryGap != nil {
+		return m.recoverPrunedDelivery(ctx, lease, control, requested, identity, cursor, request)
+	}
 	execution := &AgentExecution{ID: requested.ExecutionID, TaskID: requested.TaskID, SessionID: requested.SessionID, DeliveryMode: DurableDeliveryV1, DeliveryStreamID: requested.StreamID, DeliveryIncarnationID: requested.IncarnationID, DeliveryHarnessGeneration: requested.HarnessGeneration, DeliveryReplayCursor: after, promptGeneration: requested.PromptGeneration}
 	execution.setDeliverySubmissionID(requested.SubmissionID)
 	evidence, after, reason, replayErr := m.replayRetainedJournalPages(ctx, lease, control, request, execution)

@@ -211,7 +211,20 @@ func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (au
 	if err != nil {
 		return scope, err
 	}
-	if task != nil && task.Origin == models.TaskOriginCoordinator {
+	if task == nil {
+		return scope, repoerrors.ErrTaskNotFound
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		if task.WorkspaceID == "" {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) || (err == nil && workspace == nil) {
+			return scope, repoerrors.ErrTaskNotFound
+		}
+		if err != nil {
+			return scope, err
+		}
 		scope = authz.ScopeWorkspaceManage
 	}
 	return scope, nil
@@ -370,12 +383,20 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 // authz.ScopeSessionExec so a viewer who may read a transcript never gets a
 // shell in the worktree.
 func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if _, scoped := callerScope(ctx); !scoped && !executorUseScope(scope) {
 		return nil
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
+	}
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) {
+		if err := s.authorizeSessionExecutor(ctx, session); err != nil {
+			return err
+		}
 	}
 	return s.authorizeTaskScope(ctx, session.TaskID, scope)
 }
@@ -387,10 +408,27 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
 }
 
-// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
-// the session.prompt capability used to create or dispatch user messages.
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and enforces
+// its ordinary prompt scope or coordinator manager scope before admission.
 func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
-	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+	scope, err := s.coordinatorPromptScope(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, scope)
+}
+
+// AuthorizeSessionPromptAccess applies the task's prompt scope to a session,
+// including message replays whose task identity comes from the session row.
+func (s *Service) AuthorizeSessionPromptAccess(ctx context.Context, sessionID string) error {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.AuthorizeTaskSessionPromptAccess(ctx, session.TaskID, sessionID)
 }
 
 func (s *Service) authorizeTaskSessionScope(
@@ -407,6 +445,9 @@ func (s *Service) authorizeTaskSessionScope(
 	}
 	if session == nil || session.TaskID != taskID {
 		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) || scope == authz.ScopeWorkspaceManage {
+		return s.authorizeSessionExecutor(ctx, session)
 	}
 	return nil
 }
@@ -439,12 +480,20 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 
 // AuthorizeEnvironmentScope enforces one scope on a task environment.
 func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if _, scoped := callerScope(ctx); !scoped && !executorUseScope(scope) {
 		return nil
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
 	if err != nil {
 		return err
+	}
+	if env == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	if executorUseScope(scope) {
+		if err := s.AuthorizeExecutorConfiguration(ctx, env.ExecutorID, env.ExecutorProfileID); err != nil {
+			return err
+		}
 	}
 	return s.authorizeTaskScope(ctx, env.TaskID, scope)
 }

@@ -956,7 +956,7 @@ func (m *Manager) resolveRecoverySlots(ctx context.Context, req *RecoveryAdmissi
 		if slot.WorktreeID != "" {
 			wt, err := m.store.GetWorktreeByID(ctx, slot.WorktreeID)
 			if err != nil {
-				return nil, recoveryAdmissionError(*req, fmt.Sprintf("load selected worktree %q: %v", slot.WorktreeID, err))
+				return nil, fmt.Errorf("%w: %w", recoveryAdmissionError(*req, fmt.Sprintf("load selected worktree %q", slot.WorktreeID)), err)
 			}
 			if wt == nil {
 				return nil, recoveryAdmissionError(*req, fmt.Sprintf("selected worktree %q is no longer present", slot.WorktreeID))
@@ -1253,6 +1253,9 @@ func (m *Manager) inspectRecoverySlot(
 	wt := slot.Worktree
 	if wt == nil || wt.Path == "" {
 		return recoverySlotInspection{}, nil
+	}
+	if _, err := m.validateWorkspaceAdoptionBinding(ctx, wt); err != nil {
+		return recoverySlotInspection{}, err
 	}
 	if _, err := os.Lstat(wt.Path); errors.Is(err, os.ErrNotExist) {
 		return m.inspectMissingCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)

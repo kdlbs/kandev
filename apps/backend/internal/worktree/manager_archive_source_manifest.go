@@ -100,6 +100,21 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("validate archive source manifest owner for %s: %w", wt.ID, err)
 	}
+	inspection, err := m.openWorkspaceAdoptionForArchive(ctx, wt)
+	if err != nil {
+		return ArchiveSourceManifest{}, err
+	}
+	if inspection != nil {
+		defer inspection.Close()
+		manifest, err := m.captureArchiveCheckoutState(ctx, wt)
+		if err != nil {
+			return ArchiveSourceManifest{}, err
+		}
+		if err := inspection.Verify(ctx); err != nil {
+			return ArchiveSourceManifest{}, err
+		}
+		return manifest, nil
+	}
 	gitDir, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--git-dir")
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("verify archive source worktree registration for %s: %w", wt.ID, err)
@@ -110,6 +125,10 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err := m.validateArchiveWorktreeRegistration(ctx, wt); err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("validate archive source worktree registration for %s: %w", wt.ID, err)
 	}
+	return m.captureArchiveCheckoutState(ctx, wt)
+}
+
+func (m *Manager) captureArchiveCheckoutState(ctx context.Context, wt *Worktree) (ArchiveSourceManifest, error) {
 	head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source HEAD for %s: %w", wt.ID, err)

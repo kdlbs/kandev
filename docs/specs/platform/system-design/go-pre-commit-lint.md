@@ -38,6 +38,25 @@ Each non-empty batch invokes one `golangci-lint run` with those packages,
 Pre-commit may split exceptionally large filename lists into serial batches.
 Dependencies can still be loaded for type information.
 
+The wrapper exports `GOMEMLIMIT=3GiB` and `GOMAXPROCS=2` only when no non-empty
+value is supplied. It passes `--concurrency` from the effective `GOMAXPROCS`.
+When `GOFLAGS` has no `-p=N` setting, the wrapper appends `-p=$GOMAXPROCS` to
+bound Go build workers without dropping other flags. An explicit `-p=N`
+remains authoritative.
+
+`GOMEMLIMIT` is a soft target for each Go process, not a ceiling on RSS or the
+combined process tree. Selected packages can still have large dependencies.
+Harness instructions run lint and race/build suites sequentially and leave
+routine full-backend lint to CI. An explicitly requested full local scan needs
+OS-level resource limits covering its subprocesses.
+
+For local changes, pass repository-relative Go paths to the wrapper. For a
+committed PR diff, run `pre-commit run go-lint --from-ref <base-sha> --to-ref HEAD`.
+For non-default PR targets, set the existing `kandev.lintBaseRef` Git config
+to the intended local remote-tracking ref before invoking the hook. File
+selection and comparison-base resolution are separate; `--new-from-rev`
+filters findings after analysis and does not restrict package loading.
+
 ## Repository context and failures
 
 Before Git discovery, the wrapper clears `GIT_DIR`, `GIT_WORK_TREE`,
@@ -58,6 +77,8 @@ backend-wide analysis.
 recording linter at the external process boundary. It covers staged selection,
 package deduplication, root and nested packages, empty selections, unstaged-edit
 restoration, linter failures, invalid bases, and inherited Git overrides.
+It also records the linter environment to verify resource defaults, explicit
+overrides, and preservation of other Go flags at the subprocess boundary.
 `scripts/resolve-go-lint-base.test.sh` retains the existing resolver coverage.
 
 `.github/workflows/backend-tests.yml` and `apps/backend/Makefile` continue to

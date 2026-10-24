@@ -360,16 +360,17 @@ func TestReconcileOrphanedDynamicStartingRoutes_PrecedesGeneralStartupReconcilia
 // TestReconcileOrphanedDynamicStartingRoutes_SkipsNonOrphanStates is the
 // regression test for review finding F3: RUNNING already has a live owner;
 // CREATED is PrepareSession's ordinary pre-first-prompt claim, which can sit
-// unstarted for a long time by design; WAITING_FOR_INPUT/COMPLETED/FAILED/
-// CANCELLED are terminal or parked outcomes the normal session UI already
-// explains — including every dynamic session that predates MarkActive and is
-// "starting" only because that transition did not exist yet, not because
-// anything is stuck. None of these should grow a stale recovery banner.
+// unstarted for a long time by design; COMPLETED/FAILED/CANCELLED are terminal
+// outcomes the normal session UI already explains. None of these should grow a
+// stale recovery banner. This case seeds no executors_running row, so a
+// WAITING_FOR_INPUT session here is the stranded-route shape and is swept;
+// TestReconcileOrphanedDynamicStartingRoutes_SweepsStrandedWaitingRoute and
+// TestReconcileOrphanedDynamicStartingRoutes_KeepsWaitingRouteWithLiveExecutor
+// cover that split.
 func TestReconcileOrphanedDynamicStartingRoutes_SkipsNonOrphanStates(t *testing.T) {
 	for _, state := range []models.TaskSessionState{
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateCreated,
-		models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed,
 		models.TaskSessionStateCancelled,

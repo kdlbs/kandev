@@ -46,8 +46,9 @@ type openCodeNativeDetector struct {
 }
 
 type openCodeNativeDetection struct {
-	runtime    OpenCodeNativeRuntime
-	detectedAt time.Time
+	runtime     OpenCodeNativeRuntime
+	detectedAt  time.Time
+	unsupported *unsupportedOpenCodeMajorError
 }
 
 // unsupportedOpenCodeMajorError is a definite answer, not a transient
@@ -81,6 +82,15 @@ func DetectOpenCodeNativeRuntime(ctx context.Context) (OpenCodeNativeRuntime, bo
 	return defaultOpenCodeNativeDetector.detect(ctx)
 }
 
+// IsUnsupportedOpenCodeMajorError reports whether err is the definite
+// unsupported-major answer the executable itself produced. A launch must fail
+// closed on that; it is not a transient version-run failure that may fall back
+// to the selected runtime's known version.
+func IsUnsupportedOpenCodeMajorError(err error) bool {
+	var unsupported *unsupportedOpenCodeMajorError
+	return errors.As(err, &unsupported)
+}
+
 func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRuntime, bool, error) {
 	path, err := d.lookPath(opencodeNativeBinary)
 	if err != nil {
@@ -94,20 +104,26 @@ func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRunt
 			return OpenCodeNativeRuntime{}, true, err
 		}
 		detected, err := d.detectOnce(ctx, path)
+		var unsupported *unsupportedOpenCodeMajorError
+		isUnsupported := errors.As(err, &unsupported)
+		if isUnsupported {
+			d.rememberUnsupported(path, unsupported)
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return OpenCodeNativeRuntime{}, true, ctxErr
+			return OpenCodeNativeRuntime{}, true, errors.Join(ctxErr, err)
 		}
 		if err == nil {
 			d.remember(path, detected)
 			return detected, true, nil
 		}
-		var unsupported *unsupportedOpenCodeMajorError
-		if errors.As(err, &unsupported) {
-			d.forget(path)
+		if isUnsupported {
 			return OpenCodeNativeRuntime{}, true, err
 		}
 		if attempt >= len(d.backoff) {
-			if cached, ok := d.cached(path); ok {
+			if cached, ok, rejected := d.cached(path); ok {
+				if rejected != nil {
+					return OpenCodeNativeRuntime{}, true, errors.Join(rejected, err)
+				}
 				return cached, true, nil
 			}
 			return OpenCodeNativeRuntime{}, true, err
@@ -143,14 +159,22 @@ func (d *openCodeNativeDetector) detectOnce(ctx context.Context, path string) (O
 	}
 }
 
-func (d *openCodeNativeDetector) cached(path string) (OpenCodeNativeRuntime, bool) {
+func (d *openCodeNativeDetector) cached(path string) (OpenCodeNativeRuntime, bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	entry, ok := d.cache[path]
-	if !ok || d.now().Sub(entry.detectedAt) > opencodeNativeDetectionTTL {
-		return OpenCodeNativeRuntime{}, false
+	if !ok {
+		return OpenCodeNativeRuntime{}, false, nil
 	}
-	return entry.runtime, true
+	// An unreadable probe cannot revoke a definite compatibility rejection.
+	// Only a fresh supported observation replaces it through remember.
+	if entry.unsupported != nil {
+		return OpenCodeNativeRuntime{}, true, entry.unsupported
+	}
+	if d.now().Sub(entry.detectedAt) > opencodeNativeDetectionTTL {
+		return OpenCodeNativeRuntime{}, false, nil
+	}
+	return entry.runtime, true, nil
 }
 
 func (d *openCodeNativeDetector) remember(path string, detected OpenCodeNativeRuntime) {
@@ -159,10 +183,10 @@ func (d *openCodeNativeDetector) remember(path string, detected OpenCodeNativeRu
 	d.cache[path] = openCodeNativeDetection{runtime: detected, detectedAt: d.now()}
 }
 
-func (d *openCodeNativeDetector) forget(path string) {
+func (d *openCodeNativeDetector) rememberUnsupported(path string, unsupported *unsupportedOpenCodeMajorError) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	delete(d.cache, path)
+	d.cache[path] = openCodeNativeDetection{unsupported: unsupported}
 }
 
 func isExecutableNotFound(err error) bool {

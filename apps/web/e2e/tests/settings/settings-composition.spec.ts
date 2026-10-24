@@ -1,6 +1,41 @@
 import { expect, test } from "../../fixtures/test-base";
 
 test.describe("Settings composition", () => {
+  test("uses one group padding layer", async ({ testPage }) => {
+    for (const route of ["task-behavior", "appearance", "terminal-editors"]) {
+      await testPage.goto(`/settings/preferences/${route}`);
+      const cards = testPage.locator('[data-settings-group-card="true"]');
+      await expect(cards.first()).toBeVisible();
+      for (const card of await cards.all()) {
+        const padding = await card.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return [style.paddingTop, style.paddingBottom];
+        });
+        expect(padding).toEqual(["0px", "0px"]);
+        if (route === "task-behavior") {
+          const insets = await card.evaluate((element) => {
+            const rows = element.querySelectorAll<HTMLElement>('[data-settings-row="true"]');
+            const first = rows[0];
+            const last = rows[rows.length - 1];
+            const bounds = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return [
+              first.getBoundingClientRect().top +
+                parseFloat(getComputedStyle(first).paddingTop) -
+                bounds.top -
+                parseFloat(style.borderTopWidth),
+              bounds.bottom -
+                parseFloat(style.borderBottomWidth) -
+                last.getBoundingClientRect().bottom +
+                parseFloat(getComputedStyle(last).paddingBottom),
+            ];
+          });
+          for (const inset of insets) expect(Math.abs(inset - 16)).toBeLessThanOrEqual(1);
+        }
+      }
+    }
+  });
+
   test("task behavior groups are expanded within their tabs", async ({ testPage }) => {
     await testPage.goto("/settings/preferences/task-behavior");
     await expect(testPage.getByTestId("task-behavior-group")).toHaveCount(2);

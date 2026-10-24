@@ -14,8 +14,10 @@ test.describe("Reverse search focus restoration on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await startQuickChatFromSetup(dialog, testPage);
-    const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
-    await editor.fill("phone quick chat draft");
+    const editor = dialog.locator(".tiptap.ProseMirror:visible");
+    await expect(editor).toHaveCount(1);
+    await editor.click();
+    await testPage.keyboard.type("phone quick chat draft");
     await expect(editor).toHaveText("phone quick chat draft");
 
     await testPage.keyboard.press("Control+r");

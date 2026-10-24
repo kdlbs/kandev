@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -181,6 +182,8 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
+	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
+	reusePreparedPrimary  bool
 	TaskID                string                        `json:"task_id"`
 	Intent                SessionIntent                 `json:"intent,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
@@ -194,16 +197,17 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -421,6 +425,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
+	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
+		return response, err
+	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
 	}
@@ -487,6 +494,9 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	}
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
+	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
 	}
 	return &sessionRecoveryRequiredError{Block: block}
 }
@@ -555,12 +565,19 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err != nil {
 		return fmt.Errorf("load session recovery block for resolution: %w", err)
 	}
-	resolved, err := store.ResolveSessionRecoveryBlock(ctx, block.ID, action, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
@@ -816,6 +833,11 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	manualTaskID := ""
+	if launchOriginForActivation(req) == launchOriginManual && retryLaunchInContext(ctx) == nil {
+		manualTaskID = req.TaskID
+	}
+	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
@@ -826,6 +848,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
 		return nil, err
 	}
 	return &LaunchSessionResponse{
@@ -892,7 +917,10 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{
-			ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin,
+			ProfileExplicit:         req.ProfileExplicit,
+			SpawnOrigin:             req.SpawnOrigin,
+			MCPServerIDs:            req.MCPServerIDs,
+			reusePreparedPrimary:    req.reusePreparedPrimary,
 			PreserveWorkflowBinding: req.PreserveWorkflowBinding,
 		},
 	)
@@ -970,6 +998,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
 		options.noInitialTurn = true
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
@@ -1057,6 +1088,12 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		}
 		var blocked *sessionOpenRecoveryBlockedError
 		if errors.As(err, &blocked) {
+			if req.RecoveryAction != "" {
+				// An explicit recovery must not report success when no runtime
+				// was launched: its caller would acknowledge delivery or commit
+				// a continuation against an execution that does not exist.
+				return nil, err
+			}
 			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
 		}
 		if req.ActivationSource == LaunchActivationSourceSessionOpen && errors.Is(err, ErrCeilingLaunchConflict) {
@@ -1364,11 +1401,17 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		return nil, automation.ErrRetryLaunchUncertain
+	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}

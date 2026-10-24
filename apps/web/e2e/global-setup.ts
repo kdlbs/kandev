@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { prepareCompactRuntimeRun } from "./fixtures/compact-runtime";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "..");
@@ -17,6 +18,12 @@ export type GlobalSetupOptions = {
 
 export default function globalSetup() {
   runGlobalSetup();
+  if (isContainerRun(process.env)) {
+    return prepareCompactRuntimeRun({
+      sourceBinDir: path.join(BACKEND_DIR, "bin"),
+      launcherPath: process.env.KANDEV_E2E_BIN,
+    });
+  }
 }
 
 export function runGlobalSetup(options: GlobalSetupOptions = {}): void {

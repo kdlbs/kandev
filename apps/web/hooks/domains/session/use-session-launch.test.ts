@@ -25,7 +25,7 @@ describe("useSessionLaunch", () => {
     });
 
     expect(result.current.error).toBe(
-      "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",
+      "Kandev is checking the agent after a restart. Wait for this check to finish before resuming.",
     );
   });
 

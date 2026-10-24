@@ -6,6 +6,7 @@ import {
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
   expectCompletedCapacityProgress,
+  expectRetainedTurnReady,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -28,19 +29,6 @@ async function waitForExecutionId(
     30_000,
     "waiting for the task session execution identity",
   );
-}
-
-async function expectRetainedTurnReady(session: SessionPage) {
-  const errorRow = session.activeChat().getByTestId("session-recovery-action-message");
-  await expect(errorRow).toHaveCount(1);
-  await expect(errorRow).toContainText("Selected model is at capacity.");
-  await expect(session.recoveryResumeButton()).toHaveCount(0);
-  await expect(session.recoveryFreshButton()).toHaveCount(0);
-  await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
-  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
-  await expect(
-    session.activeChat().getByRole("button", { name: "Session model settings" }),
-  ).toBeVisible();
 }
 
 async function countRetainedFailures(
@@ -222,37 +210,56 @@ test("desktop: completed tools continue once on the same runtime across reload a
       const otherViewer = new SessionPage(viewer);
       await otherViewer.waitForLoad();
       await expectCompletedCapacityProgress(otherViewer);
+
+      await expect
+        .poll(
+          () =>
+            readMockACPTrace(fixture.tracePath).filter((record) => record.event === "prompt")
+              .length,
+          {
+            timeout: 60_000,
+          },
+        )
+        .toBe(2);
+      await expect
+        .poll(async () => {
+          const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+          return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
+        })
+        .toBe("WAITING_FOR_INPUT");
+      await expect
+        .poll(async () => {
+          const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+          return messages.filter(
+            (message) =>
+              message.author_type === "agent" &&
+              message.content?.includes(
+                "continued the unfinished request without repeating completed work",
+              ) === true,
+          ).length;
+        })
+        .toBeGreaterThan(0);
+      await expect
+        .poll(async () => {
+          const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+          return messages.filter((message) => message.metadata?.retrying === true).length;
+        })
+        .toBe(0);
+      for (const currentViewer of [session, otherViewer]) {
+        await expect(
+          currentViewer
+            .activeChat()
+            .getByText(
+              "Mock provider continued the unfinished request without repeating completed work.",
+              { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(currentViewer.transientRetryCard()).toHaveCount(0);
+      }
     } finally {
       await viewer.close();
     }
 
-    await expect
-      .poll(
-        () =>
-          readMockACPTrace(fixture.tracePath).filter((record) => record.event === "prompt").length,
-        {
-          timeout: 60_000,
-        },
-      )
-      .toBe(2);
-    await expect
-      .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
-        return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
-      })
-      .toBe("WAITING_FOR_INPUT");
-    await expect
-      .poll(async () => {
-        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
-        return messages.filter(
-          (message) =>
-            message.author_type === "agent" &&
-            message.content?.includes(
-              "continued the unfinished request without repeating completed work",
-            ) === true,
-        ).length;
-      })
-      .toBeGreaterThan(0);
     expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
       executionId,
     );
@@ -264,45 +271,39 @@ test("desktop: completed tools continue once on the same runtime across reload a
   }
 });
 
-test("desktop: idle cancellation and retry exhaustion preserve the live runtime with actual attempt counts", async ({
+test("desktop: idle cancellation preserves the live runtime with zero retry dispatches", async ({
   testPage,
   apiClient,
   backend,
   seedData,
 }) => {
-  for (const scenario of ["cancel", "exhaust"]) {
-    const fixture = await createRetainedCapacityFixture(
-      backend,
-      apiClient,
-      seedData,
-      scenario,
-      scenario === "cancel" ? { initialPrompt: "/e2e:simple-message" } : {},
+  const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel", {
+    initialPrompt: "/e2e:simple-message",
+  });
+  try {
+    const ws = watchWs(testPage);
+    const session = new SessionPage(testPage);
+    await testPage.goto(`/t/${fixture.taskId}`);
+    await session.waitForLoad();
+    const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
+    await session.sendMessage("/capacity-cancel");
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    const cancelled = ws.waitForResponse("session.recover");
+    await session.recoveryCancelRetryButton().click();
+    expect((await cancelled).payload).toMatchObject({ cancelled: true });
+    const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "cancelled");
+    assertRetainedFailureMessage(failure);
+    const attemptsStarted = failure.metadata?.attempts_started as number;
+    expect(Number.isInteger(attemptsStarted)).toBe(true);
+    expect(attemptsStarted).toBe(0);
+    await expectRetainedTurnReady(session);
+    await expect(session.activeChat().getByTestId("retained-turn-recovery-feedback")).toBeVisible();
+    expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(1);
+    expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
+      executionId,
     );
-    try {
-      const session = new SessionPage(testPage);
-      await testPage.goto(`/t/${fixture.taskId}`);
-      await session.waitForLoad();
-      const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
-      if (scenario === "cancel") {
-        await session.sendMessage("/capacity-cancel");
-        await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-        await session.recoveryCancelRetryButton().click();
-      }
-      const disposition = scenario === "cancel" ? "cancelled" : "exhausted";
-      const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, disposition);
-      assertRetainedFailureMessage(failure);
-      expect(failure.metadata?.attempts_started).toBe(scenario === "cancel" ? 0 : 5);
-      await expectRetainedTurnReady(session);
-      const feedback = session.activeChat().getByTestId("retained-turn-recovery-feedback");
-      await expect(feedback).toBeVisible();
-      if (scenario === "exhaust") await expect(feedback).toContainText("5");
-      expect(await countRetainedFailures(apiClient, fixture.sessionId)).toHaveLength(1);
-      expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
-        executionId,
-      );
-      assertRetainedACPTrace(fixture.tracePath, scenario === "cancel" ? 2 : 6);
-    } finally {
-      await fixture.dispose();
-    }
+    assertRetainedACPTrace(fixture.tracePath, attemptsStarted + 2);
+  } finally {
+    await fixture.dispose();
   }
 });

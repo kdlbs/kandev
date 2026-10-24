@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
+import type { TaskWorkspaceCleanup, DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import { getTaskDeletePreflight } from "@/lib/api";
 
 export type TaskDeletePreflightStatus = "idle" | "loading" | "resolved" | "error";
 
 export type TaskDeletePreflightResult = {
   status: TaskDeletePreflightStatus;
+  workspaceInspection?: "complete" | "unknown" | "not_requested";
   requiresDiscardConsent: boolean;
   confirmationId: string;
   requestKey: string;
@@ -15,6 +17,7 @@ export type TaskDeletePreflightResult = {
 type StoredPreflightResult = {
   key: string;
   status: TaskDeletePreflightStatus;
+  workspaceInspection?: "complete" | "unknown" | "not_requested";
   requiresDiscardConsent: boolean;
   confirmationId: string;
 };
@@ -24,42 +27,46 @@ export function useTaskDeletePreflight(
   taskId?: string,
   taskIds?: string[],
   cascade = false,
-  discardWorktreeChanges = false,
+  options: {
+    discardWorktreeChanges?: boolean;
+    workspaceCleanup?: TaskWorkspaceCleanup;
+    allowUnverifiedWorkspaceChanges?: boolean;
+  } = {},
 ): TaskDeletePreflightResult {
+  const {
+    discardWorktreeChanges = false,
+    workspaceCleanup = "delete",
+    allowUnverifiedWorkspaceChanges = false,
+  } = options;
   const requestIds = taskIds ?? (taskId ? [taskId] : []);
   const scopeKey = JSON.stringify({ ids: requestIds, cascade });
-  const idsKey = JSON.stringify({ ids: requestIds, cascade, discardWorktreeChanges });
+  const idsKey = JSON.stringify({
+    ids: requestIds,
+    cascade,
+    discardWorktreeChanges,
+    workspaceCleanup,
+    allowUnverifiedWorkspaceChanges,
+  });
   const [retryVersion, setRetryVersion] = useState(0);
   const requestKey = `${idsKey}:${retryVersion}`;
-  const [result, setResult] = useState<StoredPreflightResult>({
-    key: "",
-    status: "idle",
-    requiresDiscardConsent: false,
-    confirmationId: "",
-  });
+  const [result, setResult] = useState<StoredPreflightResult>(emptyPreflight());
 
   useEffect(() => {
     if (!open) {
-      setResult({ key: "", status: "idle", requiresDiscardConsent: false, confirmationId: "" });
+      setResult(emptyPreflight());
       return;
     }
     if (requestIds.length === 0) {
-      setResult({
-        key: requestKey,
-        status: "error",
-        requiresDiscardConsent: false,
-        confirmationId: "",
-      });
+      setResult(emptyPreflight(requestKey, "error"));
       return;
     }
     let cancelled = false;
-    setResult({
-      key: requestKey,
-      status: "loading",
-      requiresDiscardConsent: false,
-      confirmationId: "",
-    });
-    getTaskDeletePreflight(requestIds, cascade, discardWorktreeChanges)
+    setResult(emptyPreflight(requestKey, "loading"));
+    requestPreflight(requestIds, cascade, {
+      workspaceCleanup,
+      discardWorktreeChanges,
+      allowUnverifiedWorkspaceChanges,
+    })
       .then((response) => {
         if (cancelled) return;
         setResult({
@@ -67,16 +74,12 @@ export function useTaskDeletePreflight(
           status: "resolved",
           requiresDiscardConsent: response.requires_discard_consent,
           confirmationId: response.confirmation_id,
+          workspaceInspection: response.workspace_inspection,
         });
       })
       .catch(() => {
         if (!cancelled) {
-          setResult({
-            key: requestKey,
-            status: "error",
-            requiresDiscardConsent: false,
-            confirmationId: "",
-          });
+          setResult(emptyPreflight(requestKey, "error"));
         }
       });
     return () => {
@@ -101,8 +104,26 @@ export function useTaskDeletePreflight(
     status: result.status,
     requiresDiscardConsent: result.requiresDiscardConsent,
     confirmationId: result.confirmationId,
+    workspaceInspection: result.workspaceInspection,
     requestKey,
     scopeKey,
     retry,
   };
+}
+
+function emptyPreflight(
+  key = "",
+  status: TaskDeletePreflightStatus = "idle",
+): StoredPreflightResult {
+  return { key, status, requiresDiscardConsent: false, confirmationId: "" };
+}
+function requestPreflight(ids: string[], cascade: boolean, options: DeleteTaskParams) {
+  if (options.workspaceCleanup === "retain")
+    return getTaskDeletePreflight(ids, cascade, false, undefined, { workspaceCleanup: "retain" });
+  if (options.allowUnverifiedWorkspaceChanges)
+    return getTaskDeletePreflight(ids, cascade, options.discardWorktreeChanges, undefined, {
+      workspaceCleanup: "delete",
+      allowUnverifiedWorkspaceChanges: true,
+    });
+  return getTaskDeletePreflight(ids, cascade, options.discardWorktreeChanges);
 }

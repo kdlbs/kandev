@@ -47,7 +47,7 @@ async function settlePicker(picker: Locator): Promise<void> {
   );
 }
 
-/** Opens the task's Add Repositories to workspace dialog with one empty folder
+/** Opens the task's Add repositories or folders dialog with one empty folder
  * row, which is the directory browser this feature owns. */
 async function openFolderSourceDialog(
   page: Page,
@@ -73,10 +73,10 @@ async function openFolderSourceDialog(
   await expect(filesTab).toBeVisible();
   await filesTab.click();
   await expect(session.files).toBeVisible();
-  const workspaceActions = page.getByTestId("files-workspace-actions");
+  const workspaceActions = page.getByTestId("files-create-menu");
   await expect(workspaceActions).toBeVisible();
   await workspaceActions.click();
-  await page.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+  await page.getByRole("menuitem", { name: "Add repositories or folders" }).click();
   const dialog = page.getByTestId("add-workspace-sources-dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Add folder" }).click();
@@ -87,10 +87,10 @@ async function openFolderSourceDialog(
 async function openNarrowFolderSourceDrawer(page: Page, taskId: string) {
   await page.goto(`/t/${taskId}`);
   await page.getByRole("button", { name: "Files", exact: true }).click();
-  const entryPoint = page.getByTestId("files-workspace-actions");
+  const entryPoint = page.getByTestId("files-create-menu");
   await expect(entryPoint).toBeVisible();
   await entryPoint.click();
-  await page.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+  await page.getByRole("menuitem", { name: "Add repositories or folders" }).click();
   const drawer = page.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
   await drawer.getByRole("button", { name: "Add folder" }).click();

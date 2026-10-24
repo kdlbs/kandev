@@ -277,6 +277,9 @@ func gitOperatorTimeout(args []string) time.Duration {
 func validateGitCommandArgs(args []string) error {
 	// Validate that user-controlled arguments don't introduce command injection risks.
 	// exec.CommandContext does not use a shell, but git still interprets unsafe flags.
+	if isAcceptedTurnCheckpointDelete(args) {
+		return nil
+	}
 	skipNextArg := false
 	afterDoubleDash := false
 	for i, arg := range args {
@@ -292,6 +295,19 @@ func validateGitCommandArgs(args []string) error {
 		afterDoubleDash = separator
 	}
 	return nil
+}
+
+func isAcceptedTurnCheckpointDelete(args []string) bool {
+	if len(args) != 4 || args[0] != "update-ref" || args[1] != "-d" {
+		return false
+	}
+	parts := strings.Split(args[2], "/")
+	if len(parts) != 6 || parts[0] != "refs" || parts[1] != "kandev" || parts[2] != "turn-changes" ||
+		!validTurnChangeIdentity(parts[3]) || !validTurnChangeIdentity(parts[4]) ||
+		(parts[5] != "start" && parts[5] != "end") {
+		return false
+	}
+	return securityutil.LooksLikeCommitSHA(args[3])
 }
 
 func validateGitCommandArgument(arg string) (skipNextArg, separator bool, err error) {
@@ -468,6 +484,12 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		// Use the default branch when the local branch has no upstream.
 		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
 			pullBranch = defaultBranch
+		}
+	} else {
+		remote, pullBranch, err = g.resolvePullUpstream(ctx, branch)
+		if err != nil {
+			result.Error = err.Error()
+			return result, nil
 		}
 	}
 
@@ -921,6 +943,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 
 	// Stage all changes if requested
 	if stageAll {
+		if err := g.checkAttachedRepositoryStaging(ctx); err != nil {
+			result.Error = fmt.Sprintf("failed to protect attached repositories: %s", err.Error())
+			return result, nil
+		}
 		stageOutput, err := g.runGitCommand(ctx, "add", "-A")
 		if err != nil {
 			result.Error = fmt.Sprintf("failed to stage changes: %s", err.Error())
@@ -928,6 +954,10 @@ func (g *GitOperator) Commit(ctx context.Context, message string, stageAll bool,
 			return result, nil
 		}
 		result.Output = stageOutput
+		if err := g.finishAttachedRepositoryStaging(ctx); err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
 	}
 
 	// Create the commit (with --amend if requested)
@@ -1000,6 +1030,10 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	result := &GitOperationResult{
 		Operation: "stage",
 	}
+	if err := g.checkAttachedRepositoryStaging(ctx); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
 
 	var args []string
 	var environmentOverrides map[string]string
@@ -1019,6 +1053,10 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 	result.Output = output
 
 	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	if err := g.finishAttachedRepositoryStaging(ctx); err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}

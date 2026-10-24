@@ -34,7 +34,7 @@ func TestNativeResumeRetiresUnknownWithoutInventingOutcome(t *testing.T) {
 }
 
 func TestNativeResumeCannotRetireLiveWork(t *testing.T) {
-	for _, state := range []SubmissionState{SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionCompleted} {
+	for _, state := range []SubmissionState{SubmissionPrepared, SubmissionAccepted, SubmissionDispatching} {
 		t.Run(string(state), func(t *testing.T) {
 			j, event := terminalSubmissionFixture(t, state, false)
 			_, err := j.RetireSubmission(context.Background(), event.SubmissionID, event.HarnessGeneration)
@@ -66,4 +66,48 @@ func TestRecoveredUnknownHistorySurvivesGenerationAndReopen(t *testing.T) {
 	unresolved, err := reopened.HasUnresolvedSubmissions(ctx)
 	require.NoError(t, err)
 	require.False(t, unresolved)
+}
+
+func TestNativeResumeRetiresUnprovenTerminalLabelsWithoutChangingThem(t *testing.T) {
+	for _, state := range []SubmissionState{SubmissionFailed, SubmissionCompleted, SubmissionCancelled} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			j, event := terminalSubmissionFixture(t, state, false)
+			before, err := j.GetSubmission(ctx, event.SubmissionID)
+			require.NoError(t, err)
+			retired, err := j.RetireSubmission(ctx, before.ID, before.HarnessGeneration)
+			require.NoError(t, err)
+			require.True(t, retired.Retired)
+			require.Equal(t, before.State, retired.State)
+			require.Equal(t, before.Payload, retired.Payload)
+			require.Equal(t, before.Hash, retired.Hash)
+			require.False(t, retired.TerminalEventRetained)
+			require.Zero(t, retired.TerminalSequence)
+			require.NoError(t, j.Close())
+			reopened, err := Open(j.config)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = reopened.Close() })
+			stored, err := reopened.GetSubmission(ctx, before.ID)
+			require.NoError(t, err)
+			require.True(t, stored.Retired)
+			require.Equal(t, state, stored.State)
+			unresolved, err := reopened.HasUnresolvedSubmissions(ctx)
+			require.NoError(t, err)
+			require.False(t, unresolved)
+		})
+	}
+}
+
+func TestNativeResumeRetiresUnknownWithRetainedTerminal(t *testing.T) {
+	j, event := terminalSubmissionFixture(t, SubmissionInterruptedUnknown, false)
+	_, appendErr := j.Append(context.Background(), event)
+	require.NoError(t, appendErr)
+	before, err := j.GetSubmission(context.Background(), event.SubmissionID)
+	require.NoError(t, err)
+	require.True(t, before.TerminalEventRetained)
+	after, err := j.RetireSubmission(context.Background(), event.SubmissionID, event.HarnessGeneration)
+	require.NoError(t, err)
+	require.True(t, after.Retired)
+	require.Equal(t, before.State, after.State)
+	require.Equal(t, before.TerminalSequence, after.TerminalSequence)
 }

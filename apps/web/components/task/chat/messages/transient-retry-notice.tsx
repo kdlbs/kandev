@@ -4,6 +4,7 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import type { ActionMeta } from "./action-message-details";
 import { ActionButtons } from "./action-message-actions";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { continuationPhase } from "./interruption-recovery-feedback";
 
 function transientRetryReasonKey(failureCode?: string) {
@@ -48,6 +49,7 @@ export function TransientRetryNotice({
   const { t } = useTranslation();
   const phase = continuationPhase(metadata);
   const retryAt = parseRetryAt(metadata.retry_at);
+  const windowEndsAt = parseRetryAt(metadata.retry_window_ends_at);
   const fallbackDeadline = useMemo(
     () => Date.now() + Math.max(0, metadata.retry_in_seconds ?? 0) * 1_000,
     [metadata.attempt, metadata.retry_in_seconds],
@@ -67,9 +69,8 @@ export function TransientRetryNotice({
   const provider = metadata.provider_name?.trim();
   const model = metadata.model_id?.trim();
   const context = transientRetryContext(t, provider, model);
-  const countdown = phase
-    ? continuationCountdown(t, phase, remaining)
-    : retryCountdown(t, remaining);
+  const waitingForWindowEnd = windowEndsAt !== undefined && retryAt === windowEndsAt;
+  const countdown = retryNoticeCountdown(t, phase, remaining, waitingForWindowEnd);
 
   return (
     <section
@@ -101,6 +102,14 @@ export function TransientRetryNotice({
             maxAttempts: metadata.max_attempts ?? 1,
           })}
         </div>
+        {windowEndsAt !== undefined && (
+          <div
+            className="text-xs text-muted-foreground wrap-anywhere"
+            data-testid="retry-window-deadline"
+          >
+            {t("chat:capacityRetryWindowEndsAt", { time: formatDateTime(windowEndsAt) })}
+          </div>
+        )}
       </div>
       {metadata.actions && metadata.actions.length > 0 && (
         <ActionButtons
@@ -127,4 +136,16 @@ function retryCountdown(t: ReturnType<typeof useTranslation>["t"], remaining: nu
   if (remaining > 0)
     return t("chat:transientRetryIn", { countdown: retryCountdownLabel(remaining) });
   return t("chat:transientRetryNow");
+}
+
+function retryNoticeCountdown(
+  t: ReturnType<typeof useTranslation>["t"],
+  phase: "waiting" | "reconnecting" | "continuing" | undefined,
+  remaining: number,
+  waitingForWindowEnd: boolean,
+) {
+  if (waitingForWindowEnd)
+    return t("chat:capacityRetryWindowEnding", { countdown: retryCountdownLabel(remaining) });
+  if (phase) return continuationCountdown(t, phase, remaining);
+  return retryCountdown(t, remaining);
 }

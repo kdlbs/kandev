@@ -18,10 +18,11 @@ type sessionUpdater interface {
 // emitter wraps an ACP connection and session ID to provide
 // convenient methods for streaming agent updates.
 type emitter struct {
-	ctx        context.Context
-	conn       sessionUpdater
-	sid        acp.SessionId
-	mcpServers map[string]mcpServerDef
+	ctx                  context.Context
+	conn                 sessionUpdater
+	sid                  acp.SessionId
+	mcpServers           map[string]mcpServerDef
+	registerDetachedWork func(acp.SessionId, context.CancelFunc) func()
 }
 
 // callMCPTool invokes an MCP tool through the server definitions attached to

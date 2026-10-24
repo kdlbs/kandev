@@ -2,7 +2,7 @@
 status: active
 system: office
 created: 2026-04-25
-updated: 2026-09-02
+updated: 2026-10-14
 owners:
   - cfl
 ---
@@ -10,7 +10,7 @@ owners:
 
 ## Overview
 
-Autonomous agents consume tokens on every turn, and when multiple agents run unattended across many tasks, spending can escalate without visibility. Kandev tracks analytics (task counts, turn counts, agent usage) but has no concept of monetary cost. Users have no way to know how much a task cost, which agent is most expensive, or to set guardrails that prevent runaway spending. Without cost tracking and budgets, autonomous operation is a financial black box.
+Office estimates agent spending from usage events, exposes cost aggregations, and applies budget guardrails to unattended work.
 
 ## Terminology
 
@@ -41,18 +41,37 @@ Autonomous agents consume tokens on every turn, and when multiple agents run una
 
 ### REQ-OFFICE-COSTS-001: Office: Cost Tracking & Budget Management
 
-**Intent:** Autonomous agents consume tokens on every turn, and when multiple agents run unattended across many tasks, spending can escalate without visibility. Kandev tracks analytics (task counts, turn counts, agent usage) but has no concept of monetary cost. Users have no way to know how much a task cost, which agent is most expensive, or to set guardrails that prevent runaway spending. Without cost tracking and budgets, autonomous operation is a financial black box.
+**Intent:** Make agent spending visible and bound unattended work.
 
 #### Acceptance criteria
 
 - **AC-OFFICE-COSTS-001.1:** Every agent session generates cost events as it runs.
-- **AC-OFFICE-COSTS-001.2:** Cost events are aggregated on read into multiple views (by agent, project, task, model, time window).
+- **AC-OFFICE-COSTS-001.2:** Cost events shall be aggregated on read by agent,
+  project, task, model and time window. For a selected Costs Explorer window,
+  the total and agent/project/model/provider breakdowns, including event counts
+  and group membership, shall use one event-time interval. MTD starts at 00:00 UTC on the first day of the
+  current UTC calendar month. Last 30 days starts exactly 720 hours before one
+  request instant. Both include the start and exclude that instant. Eligibility
+  uses when cost occurred, not ingestion time, independently of time zone/DST.
+  A window without events shall return total zero and empty breakdown arrays.
+  The breakdown API shall retain lifetime results when `range` is omitted,
+  accept only `mtd` and `30d` when supplied, and reject empty, repeated or
+  unsupported range values with HTTP 400.
 - **AC-OFFICE-COSTS-001.3:** Budget policies SHALL enforce spending limits per agent, project, or workspace with `notify_only`, `pause_agent`, or `block_new_tasks` actions.
 - **AC-OFFICE-COSTS-001.4:** Cost is resolved per cost event via a two-layer lookup (provider-reported then `models.dev` cache); no static fallback table exists.
 - **AC-OFFICE-COSTS-001.5:** Stale `models.dev` pricing remains readable while one coalesced refresh runs per client. Concurrent background lookups and explicit refresh calls do not start duplicate network fetches.
 - **AC-OFFICE-COSTS-001.6:** For providers that emit token telemetry on the ACP wire (claude-acp, opencode-acp, gemini, codex-acp), cost events are populated from the `complete` event at end-of-turn.
 - **AC-OFFICE-COSTS-001.7:** For providers without usable wire telemetry (codex per-turn split, amp), a disk-runner subsystem reads on-disk session files via pinned `@ccusage/*` packages and feeds normalized cost events into the same pipeline.
-- **AC-OFFICE-COSTS-001.8:** The cost explorer UI surfaces aggregations and lets the user manage budget policies.
+- **AC-OFFICE-COSTS-001.8:** The cost explorer UI shall surface aggregations
+  and budget policy management. On desktop and phone, its existing MTD default
+  and Last 30 days controls shall request and display the selected window for
+  the total and every breakdown. Live refresh shall use the currently selected
+  range. Selecting a display window shall not alter budget evaluation or the
+  recorded cost history.
+- **AC-OFFICE-COSTS-001.9:** Missing spend shall show neutral unknown status and
+  unavailable spend, percentage and remaining on desktop and phone. Retain
+  policy fields, controls and existing measured behavior for explicit values,
+  including zero.
 
 ### REQ-OFFICE-COSTS-002: Budget notifications fire on crossings, not on every evaluation
 
@@ -61,11 +80,9 @@ Autonomous agents consume tokens on every turn, and when multiple agents run una
 crossing events ("spend crosses `alert_threshold_pct`"). Budget evaluation is
 implemented as a level check that runs on unrelated triggers: after every cost
 event, through the pre-execution budget API, and after every task reassignment
-into a project. Once a policy sits above its threshold each of those writes
-another activity row, so one over-budget policy floods the Office inbox (which
-lists both budget notification rows and counts them toward the badge) with
-duplicates carrying no new information. A reassignment adding no spend at all
-still produces one. This requirement makes the notification idempotent per
+into a project. Above the threshold, each trigger writes another activity row,
+flooding the Office inbox and badge with duplicate budget notifications. Even
+reassignment without spending produces one. This requirement makes the notification idempotent per
 policy, per period, per level, while leaving enforcement (pausing an agent,
 blocking a run) the level check it must remain. The current scheduler admission
 path uses `admitRun` and the pure-read `EvaluatePreLaunch` evaluator; that path

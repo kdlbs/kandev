@@ -83,6 +83,13 @@ type firedKey struct {
 	dedupKey     string
 }
 
+type mergedTriggerMatch struct {
+	triggerID   string
+	triggerIDs  []string
+	triggerData json.RawMessage
+	dedupKey    string
+}
+
 func (s *GitHubPRMergedSubscriber) handlePRUpdated(ctx context.Context, event *bus.Event) error {
 	// Gate 1: payload must be a typed TaskPR or its JSON-decoded bus form.
 	pr, ok := normalizeTaskPR(event.Data)
@@ -133,12 +140,22 @@ func (s *GitHubPRMergedSubscriber) handlePRUpdated(ctx context.Context, event *b
 	}
 
 	// Per-event fired-key set: (automation_id, dedup_key) pairs already
-	// handed to FireTrigger during this event. Prevents a second trigger on
+	// handed to the service during this event. Prevents a second trigger on
 	// the same automation from duplicating the run.
 	fired := make(map[firedKey]struct{})
+	matches := make(map[firedKey]*mergedTriggerMatch)
 
 	for i := range triggers {
-		s.checkMergedTrigger(ctx, &triggers[i], pr, workspaceID, fired)
+		s.checkMergedTrigger(ctx, &triggers[i], pr, workspaceID, fired, matches)
+	}
+	for key, match := range matches {
+		if _, err := s.svc.fireTriggerWithMatchedTriggers(
+			ctx, key.automationID, match.triggerID, TriggerTypeGitHubPRMerged,
+			match.triggerData, nil, DedupKey(key.dedupKey), match.triggerIDs,
+		); err != nil {
+			s.logger.Error("failed to fire github_pr_merged trigger",
+				zap.String("trigger_id", match.triggerID), zap.Error(err))
+		}
 	}
 	return nil
 }
@@ -171,6 +188,7 @@ func (s *GitHubPRMergedSubscriber) checkMergedTrigger(
 	pr *github.TaskPR,
 	resolvedWorkspaceID string,
 	fired map[firedKey]struct{},
+	matches map[firedKey]*mergedTriggerMatch,
 ) {
 	// Parse trigger config; skip on error.
 	var cfg GitHubPRMergedTriggerConfig
@@ -209,8 +227,11 @@ func (s *GitHubPRMergedSubscriber) checkMergedTrigger(
 		pr.PRNumber,
 	)
 
-	// Gate 11: per-event fired-key set.
 	fk := firedKey{automationID: t.AutomationID, dedupKey: dedupKey}
+	if match, alreadyMatched := matches[fk]; alreadyMatched {
+		match.triggerIDs = append(match.triggerIDs, t.ID)
+		return
+	}
 	if _, alreadyFired := fired[fk]; alreadyFired {
 		return
 	}
@@ -222,21 +243,15 @@ func (s *GitHubPRMergedSubscriber) checkMergedTrigger(
 		mergedAt = pr.MergedAt.UTC().Format(time.RFC3339)
 	}
 	data, _ := json.Marshal(map[string]interface{}{
-		"task_id":               pr.TaskID,
-		automationRepoKey:       fmt.Sprintf("%s/%s", pr.Owner, pr.Repo),
-		"pr_number":             pr.PRNumber,
-		"pr_url":                pr.PRURL,
-		automationBaseBranchKey: pr.BaseBranch,
-		"merged_at":             mergedAt,
+		automationTaskIDKey:         pr.TaskID,
+		automationRepoKey:           fmt.Sprintf("%s/%s", pr.Owner, pr.Repo),
+		automationMergedPRNumberKey: pr.PRNumber,
+		"pr_url":                    pr.PRURL,
+		automationBaseBranchKey:     pr.BaseBranch,
+		"merged_at":                 mergedAt,
 	})
-
-	// Pass the dedup key so FireTrigger's store-level check prevents duplicate
-	// runs for the same PR event. If the concurrent-run cap is reached inside
-	// FireTrigger, the skipped-run record is written with an empty key so the
-	// dedup slot is not consumed (see maybeSkipForConcurrencyCap).
-	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPRMerged, data, DedupKey(dedupKey)); err != nil {
-		s.logger.Error("failed to fire github_pr_merged trigger",
-			zap.String("trigger_id", t.ID), zap.Error(err))
+	matches[fk] = &mergedTriggerMatch{
+		triggerID: t.ID, triggerIDs: []string{t.ID}, triggerData: data, dedupKey: dedupKey,
 	}
 }
 

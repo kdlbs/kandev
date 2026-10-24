@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -26,6 +27,8 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 	t.Setenv("PATH", tmp+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ACP_LEAK_MARKER", marker)
 
+	wrapper := filepath.Join(tmp, "independent-wrapper")
+	writeExecutable(t, wrapper, "#!/bin/sh\nexec \"$@\"\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
@@ -34,8 +37,9 @@ func TestProbeCleansUpDescendantProcessOnTimeout(t *testing.T) {
 	resp, err := executor.Probe(ctx, &ProbeRequest{
 		AgentID: "mock-agent",
 		InferenceConfig: &InferenceConfigDTO{
-			Command: []string{"mock-agent"},
-			WorkDir: tmp,
+			Command:       []string{"mock-agent"},
+			LaunchWrapper: launchwrapper.Profile([]string{wrapper}),
+			WorkDir:       tmp,
 		},
 	})
 	if err != nil {

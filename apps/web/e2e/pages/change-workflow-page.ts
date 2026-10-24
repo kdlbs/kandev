@@ -21,6 +21,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
     await expect
       .poll(async () => {
         const stepPicker = this.form.getByTestId("change-workflow-step");
@@ -38,6 +40,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
   }
 
   async chooseProfile(sourceProfileId: string, replacementProfileName: string) {
@@ -47,6 +51,8 @@ export class ChangeWorkflowPage {
     await expect(option).toBeVisible();
     if (this.mobile) await option.tap();
     else await option.click();
+    await expect(option).toBeHidden();
+    await expect(trigger).toBeFocused();
   }
 
   async expectStepOptionColor(stepId: string, cssColor: string) {

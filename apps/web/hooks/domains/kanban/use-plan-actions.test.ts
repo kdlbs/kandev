@@ -9,6 +9,7 @@ const mockAppState = vi.hoisted(() => ({
   value: {
     kanban: { workflowId: "workflow-1", steps: [], tasks: [] },
     kanbanMulti: { snapshots: {} },
+    taskOverview: { byId: {} },
     tasks: { activeSessionId: "session-1" },
     taskSessions: { items: {} },
     setActiveSession: vi.fn(),
@@ -168,6 +169,7 @@ function setUpPlanActionsState() {
   mockMoveTask.mockResolvedValue(undefined);
   mockAppState.value = {
     ...mockAppState.value,
+    taskOverview: { byId: {} },
     kanban: {
       workflowId: WORKFLOW_ID,
       steps: [
@@ -191,6 +193,46 @@ function setUpPlanActionsState() {
 
 describe("useNextWorkflowStep visibility", () => {
   beforeEach(setUpPlanActionsState);
+
+  it("keeps progression available for a canonical task outside board membership", () => {
+    const board = mockAppState.value.kanban as Record<string, unknown>;
+    mockAppState.value = {
+      ...mockAppState.value,
+      kanban: { ...board, tasks: [] },
+      taskOverview: {
+        byId: {
+          [TASK_ID]: { id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "plan-step" },
+        },
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBe("Work");
+    expect(result.current.proceedPreviewTarget).toEqual({
+      taskId: TASK_ID,
+      workflowId: WORKFLOW_ID,
+      workflowStepId: "work-step",
+    });
+  });
+
+  it("uses canonical final placement instead of a stale board action", async () => {
+    mockAppState.value = {
+      ...mockAppState.value,
+      taskOverview: {
+        byId: {
+          [TASK_ID]: { id: TASK_ID, workflowId: WORKFLOW_ID, workflowStepId: "work-step" },
+        },
+      },
+    };
+
+    const { result } = renderHook(() => useNextWorkflowStep(TASK_ID));
+
+    expect(result.current.proceedStepName).toBeNull();
+    expect(result.current.proceedPreviewTarget).toBeUndefined();
+    await expect(result.current.proceed()).resolves.toBe(false);
+    expect(mockMoveTask).not.toHaveBeenCalled();
+  });
 
   it("exposes the next step for an idle signal-gated turn-complete move", () => {
     mockAppState.value = {

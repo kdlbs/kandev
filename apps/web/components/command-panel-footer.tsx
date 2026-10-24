@@ -7,7 +7,11 @@ import { Command, CommandEmpty, CommandInput, CommandList } from "@kandev/ui/com
 import { CommandPanelDialog } from "./command-panel-dialog";
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
-import type { Task } from "@/lib/types/http";
+import { ConversationSearchStatus } from "./command-panel-conversation";
+import type {
+  ConversationSearchState,
+  ConversationTask as Task,
+} from "@/lib/types/conversation-search";
 import type { CommandPanelLiveTask } from "@/lib/commands/task-result-activity";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { WorkspaceContentSearch } from "@/components/workspace-content-search";
@@ -80,7 +84,7 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
   const { t } = useTranslation();
   const isScopeMode = isCommandPanelScopeMode(mode);
   return (
-    <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
+    <div className="border-t border-border px-3 py-1.5 hidden sm:flex items-center gap-3 text-[0.6rem] text-muted-foreground">
       {isScopeMode && (
         <>
           <KbdGroup>
@@ -140,6 +144,7 @@ export type CommandPanelViewProps = {
   handleSelect: (cmd: CommandItemType) => void;
   isSearching: boolean;
   taskResults: Task[];
+  conversationState?: ConversationSearchState;
   stepMap: StepMap;
   repoMap: Map<string, string>;
   liveTasksById: Map<string, CommandPanelLiveTask>;
@@ -192,6 +197,7 @@ function CommandPanelInputHeader({
         </button>
       )}
       <CommandInput
+        className="[@media(pointer:coarse)]:text-base"
         placeholder={getInputPlaceholder(t, mode, inputCommand)}
         value={search}
         onValueChange={setSearch}
@@ -353,6 +359,9 @@ export function CommandPanelView(props: CommandPanelViewProps) {
           </div>
         )}
         <CommandPanelResultList {...renderedProps} />
+        {(mode === MODE_COMMANDS || mode === MODE_SEARCH_TASKS) && (
+          <ConversationSearchStatus state={props.conversationState} />
+        )}
         <CommandPanelFooter mode={renderedProps.mode} />
       </Command>
     </CommandPanelDialog>

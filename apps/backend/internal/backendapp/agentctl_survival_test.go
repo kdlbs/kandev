@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -141,7 +142,7 @@ func TestAdoptSurvivingAgentctlReturnsNilWhenNoRecord(t *testing.T) {
 	cfg := &config.Config{}
 	store := &fakeControlServerStore{}
 
-	result, _ := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, nil)
+	result, _ := adoptSurvivingAgentctl(context.Background(), context.Background(), cfg, newSurvivalTestLogger(t), store, nil)
 
 	if result != nil {
 		t.Fatalf("result = %+v, want nil", result)
@@ -208,7 +209,7 @@ func TestAdoptSurvivingAgentctlAdoptsAndUpdatesConfig(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.HomeDir = homeDir
 
-	result, _ := adoptSurvivingAgentctl(context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
+	result, _ := adoptSurvivingAgentctl(context.Background(), context.Background(), cfg, newSurvivalTestLogger(t), store, secretStore)
 
 	if result == nil {
 		t.Fatal("result = nil, want a non-nil adopted result")
@@ -274,5 +275,83 @@ func TestResolveAdoptedRenewalPeriodUsesReportedValue(t *testing.T) {
 func TestResolveAdoptedRenewalPeriodFallsBackToFloorWhenUnreported(t *testing.T) {
 	if got := resolveAdoptedRenewalPeriod(0); got != ownershipperiod.MinPeriod {
 		t.Fatalf("resolveAdoptedRenewalPeriod(0) = %v, want the shared floor %v", got, ownershipperiod.MinPeriod)
+	}
+}
+
+// TestAdoptSurvivingAgentctlRenewalOutlivesAttemptCtx pins the runtime
+// replacement fix: the recovery coordinator provisions under a per-attempt
+// ctx and cancels it as soon as the attempt returns. The renewal loop must
+// keep claiming ownership on the lifetime ctx after that, or the server's
+// unowned reaper shuts it down one unowned period later.
+func TestAdoptSurvivingAgentctlRenewalOutlivesAttemptCtx(t *testing.T) {
+	const homeDir = "/home/kandev-test"
+	var claims atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/identity":
+			_ = json.NewEncoder(w).Encode(agentctlclient.IdentityInfo{
+				ServerIdentity:  "survivor-identity",
+				Capabilities:    lifecycle.RequiredSurvivalCapabilities,
+				UnownedPeriodMS: 200,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/ownership/prove":
+			var req struct {
+				Challenge string `json:"challenge"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewEncoder(w).Encode(map[string][]string{
+				"proofs": {ownershipproof.Derive("bootstrap-credential", req.Challenge, homeDir)},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/ownership/details":
+			_ = json.NewEncoder(w).Encode(agentctlclient.ServerDetails{HomeDir: homeDir})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/rotate":
+			_ = json.NewEncoder(w).Encode(agentctlclient.CredentialRotationResult{
+				RotationID: 1,
+				Credential: "rotated-credential",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/confirm":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/ownership/claim":
+			claims.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	secretStore := newIDGeneratingSecretStore()
+	var seedSecret secrets.SecretWithValue
+	seedSecret.Name = "seed"
+	seedSecret.Value = "bootstrap-credential"
+	if err := secretStore.Create(context.Background(), &seedSecret); err != nil {
+		t.Fatalf("seed secret: %v", err)
+	}
+	store := &fakeControlServerStore{record: &models.ControlServerRecord{
+		Endpoint:           server.Listener.Addr().String(),
+		ServerIdentity:     "survivor-identity",
+		CredentialSecretID: seedSecret.ID,
+	}}
+	cfg := &config.Config{}
+	cfg.HomeDir = homeDir
+
+	lifetimeCtx, stopLifetime := context.WithCancel(context.Background())
+	t.Cleanup(stopLifetime)
+	attemptCtx, cancelAttempt := context.WithCancel(context.Background())
+	result, _ := adoptSurvivingAgentctl(attemptCtx, lifetimeCtx, cfg, newSurvivalTestLogger(t), store, secretStore)
+	cancelAttempt()
+	if result == nil {
+		t.Fatal("result = nil, want a non-nil adopted result")
+	}
+	t.Cleanup(func() { _ = result.cleanup() })
+
+	// Renewal interval is a quarter of the reported 200ms period.
+	deadline := time.Now().Add(2 * time.Second)
+	for claims.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := claims.Load(); got < 3 {
+		t.Fatalf("ownership claims after attempt ctx cancelled = %d, want >= 3", got)
 	}
 }

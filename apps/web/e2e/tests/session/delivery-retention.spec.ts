@@ -35,7 +35,7 @@ test("preserves saved history and state-only recovery after actual delivery clea
       apiClient,
       seedData,
       backend,
-      { profileId: capacity.profileId },
+      { profileId: capacity.profileId, historicalGap: true },
     );
     taskId = task.id;
     await assertCapacityContinuationAfterPruning(apiClient, backend, session, {

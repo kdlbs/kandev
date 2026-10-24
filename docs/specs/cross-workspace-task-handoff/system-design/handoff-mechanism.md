@@ -85,6 +85,19 @@ systems, not here.
   it is created with no project association and lands in a non-office target
   workflow, independent of which origin value is or is not supplied.
 
+## Runtime credential launch binding
+
+Office task-owned starts refresh the existing run credential after selecting or
+creating the concrete task session and before executor dispatch. The token
+retains the trusted agent, task, workspace, run, and persisted capability
+identity. A deferred start first refreshes before Office environment validation,
+using the persisted run session when no concrete session exists, then refreshes
+again after session selection. A required refresh failure prevents dispatch;
+late failures settle the owned turn/session, and deferred starts retain their
+redacted record for a later sweep. Runtime credentials are never persisted in
+the deferred payload. Existing token authorization and sessionless handoff
+refusal remain authoritative.
+
 ## D3 — authorization is two gates, plus advisory discoverability
 
 Execution (the route re-derives the capability from the signed run token)

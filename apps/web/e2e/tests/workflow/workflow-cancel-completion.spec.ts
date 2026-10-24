@@ -28,7 +28,7 @@ async function createCancellationWorkflow(
 
   await apiClient.updateWorkflowStep(working.id, {
     prompt:
-      'e2e:message("cancelable turn started")\ne2e:delay(8000)\ne2e:message("cancelled turn marker")\n{{task_prompt}}',
+      'e2e:message("cancelable turn started")\ne2e:delay(60000)\ne2e:message("cancelled turn marker")\n{{task_prompt}}',
     events: {
       on_enter: [{ type: "auto_start_agent" }],
       on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],

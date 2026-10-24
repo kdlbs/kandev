@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
@@ -32,6 +32,8 @@ const EMPTY_FORM: CoordinatorFormState = {
   name: "",
   agentProfileId: "",
   executorProfileId: "",
+  taskAgentProfileId: "",
+  taskExecutorProfileId: "",
   context: "",
 };
 
@@ -135,7 +137,9 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
   const canSave =
     isValidCoordinatorName(form.name) &&
     Boolean(form.agentProfileId) &&
-    Boolean(form.executorProfileId);
+    Boolean(form.executorProfileId) &&
+    Boolean(form.taskAgentProfileId) &&
+    Boolean(form.taskExecutorProfileId);
 
   const handleSave = async () => {
     setFieldError(null);
@@ -155,6 +159,11 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
       throw error;
     }
   };
+
+  const applyContext = useCallback((context: string) => {
+    setForm((prev) => ({ ...prev, context }));
+    setSavedForm((prev) => ({ ...prev, context }));
+  }, []);
 
   const handleDiscard = () => {
     setForm(savedForm);
@@ -201,6 +210,7 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
     setDeleteDialogOpen,
     deleting,
     handleDelete,
+    applyContext,
   };
 }
 
@@ -223,6 +233,7 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
     setDeleteDialogOpen,
     deleting,
     handleDelete,
+    applyContext,
   } = useCoordinatorEditorForm(workspaceId, coordinatorId);
 
   if (status === "loading" || status === "error" || status === "not-found") {
@@ -239,6 +250,8 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
         executors={executors}
         agentProfileStatus={coordinator?.agent_profile_status}
         executorProfileStatus={coordinator?.executor_profile_status}
+        taskAgentProfileStatus={coordinator?.task_agent_profile_status}
+        taskExecutorProfileStatus={coordinator?.task_executor_profile_status}
         fieldError={fieldError}
       />
       <div className="space-y-1 text-sm text-muted-foreground">
@@ -285,6 +298,7 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
           coordinatorId={coordinatorId}
           canManage={canManage}
           identity={identity}
+          onContextApplied={applyContext}
         />
       ) : (
         identity

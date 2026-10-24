@@ -81,13 +81,15 @@ type fakeReachabilityProber struct {
 }
 
 func (f *fakeReachabilityProber) ProbeAndWait(executor *models.Executor) (reachabilitypkg.ProbeResult, bool) {
-	atomic.AddInt32(&f.callsEntered, 1)
-	v, _, _ := f.group.Do(executor.ID, func() (any, error) {
+	result := f.group.DoChan(executor.ID, func() (any, error) {
 		atomic.AddInt32(&f.dialCount, 1)
 		<-f.gate
 		return f.result, nil
 	})
-	return v.(reachabilitypkg.ProbeResult), true
+	// DoChan registers the waiter before the caller-entry barrier is signaled.
+	atomic.AddInt32(&f.callsEntered, 1)
+	v := <-result
+	return v.Val.(reachabilitypkg.ProbeResult), true
 }
 
 func (f *fakeReachabilityProber) EffectiveIntervalSeconds() int { return f.interval }
@@ -358,5 +360,18 @@ func TestProbeReachability_WrongTypeExecutorReturns400(t *testing.T) {
 	}
 	if status != 400 {
 		t.Fatalf("status = %d, want 400", status)
+	}
+}
+
+func TestExecutorOwnershipReachabilityOmitsInaccessibleExecutors(t *testing.T) {
+	shared := sshExecutor("shared", models.ExecutorStatusActive, resolvableSSHConfig())
+	private := sshExecutor("private", models.ExecutorStatusActive, resolvableSSHConfig())
+	private.OwnerUserID = "alice"
+	fetcher := &fakeReachabilityExecutorFetcher{executors: map[string]*models.Executor{"shared": shared}}
+	lister := &fakeReachabilityLister{executors: []*models.Executor{shared, private}}
+	h := NewHandler(nil, fetcher, nil, nil, testHandlerLogger(), lister, nil)
+	records, status, err := h.listReachability(t.Context())
+	if err != nil || status != 200 || len(records) != 1 || records[0].ExecutorID != shared.ID {
+		t.Fatalf("private reachability disclosed: %+v, %d, %v", records, status, err)
 	}
 }

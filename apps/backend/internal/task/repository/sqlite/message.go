@@ -1011,22 +1011,7 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 	}
 
 	message.UpdatedAt = time.Now().UTC()
-	if !dialect.IsPostgres(r.db.DriverName()) {
-		return r.updateMessageWithPayloadGuard(ctx, message, []byte(metadataJSON), requestsInput)
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, payload_digest = ?, payload_size = ?, updated_at = ?
-		WHERE id = ?
-	`), message.Content, requestsInput, string(message.Type), metadataJSON, message.PayloadDigest, message.PayloadSize, message.UpdatedAt, message.ID)
-	if err != nil {
-		return err
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("message not found: %s", message.ID)
-	}
-	return nil
+	return r.updateMessageWithPayloadGuard(ctx, message, []byte(metadataJSON), requestsInput)
 }
 
 // ClaimPermissionResolution installs the first durable dispatch claim for one

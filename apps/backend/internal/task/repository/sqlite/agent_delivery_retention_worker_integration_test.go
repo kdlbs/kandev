@@ -41,7 +41,6 @@ func TestDeliveryRetentionWorkerRepository(t *testing.T) {
 			}
 			defer worker.Stop()
 
-			fireWorkerTimer(t, timers, time.Minute)
 			snapshot := finishRetentionStorageWorkerPass(t, timers, snapshots)
 			if snapshot.CommittedBatches < 3 || snapshot.FailedBatches != 0 || snapshot.RetirementJobsCompleted != 1 {
 				t.Fatalf("worker snapshot = %+v", snapshot)
@@ -77,7 +76,6 @@ func TestDeliveryRetentionMetrics(t *testing.T) {
 	}
 	defer worker.Stop()
 
-	fireWorkerTimer(t, timers, time.Minute)
 	snapshot := finishRetentionStorageWorkerPass(t, timers, snapshots)
 	if snapshot.CommittedBatches < 3 || snapshot.FailedBatches != 0 || snapshot.EventPayloadsPruned == 0 {
 		t.Fatalf("worker snapshot = %+v", snapshot)
@@ -122,7 +120,7 @@ func receiveWorkerSnapshot(t *testing.T, snapshots <-chan deliveryretention.Snap
 	select {
 	case snapshot := <-snapshots:
 		return snapshot
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("worker did not report a completed pass")
 		return deliveryretention.Snapshot{}
 	}

@@ -2,12 +2,38 @@ import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import {
+  getDockviewGroupWidth,
+  prepareLayoutTask,
+  resizeColumnViaSplitview,
+} from "../../helpers/dockview-resize";
 import { snapshotPersistedLayouts } from "../../helpers/dockview-persistence";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
-async function createTask(apiClient: ApiClient, seedData: SeedData, title: string) {
+let preparedTask: { taskId: string; sessionId: string } | undefined;
+
+test.afterEach(async ({ apiClient }) => {
+  const prepared = preparedTask;
+  preparedTask = undefined;
+  if (!prepared) return;
+  const { sessions } = await apiClient.listTaskSessions(prepared.taskId);
+  const session = sessions.find((entry) => entry.id === prepared.sessionId);
+  expect(session?.state).toBe("CREATED");
+  expect(session?.task_environment_id).toBeTruthy();
+});
+
+async function createTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+  runAgent = false,
+) {
+  if (!runAgent) {
+    const task = await prepareLayoutTask(apiClient, seedData, title);
+    preparedTask = { taskId: task.id, sessionId: task.session_id };
+    return task;
+  }
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -26,6 +52,7 @@ async function createTask(apiClient: ApiClient, seedData: SeedData, title: strin
 type DesktopTaskOptions = {
   viewport: { width: number; height: number };
   layout?: string;
+  runAgent?: boolean;
 };
 
 async function openDesktopTask(
@@ -36,7 +63,7 @@ async function openDesktopTask(
   options: DesktopTaskOptions,
 ) {
   await page.setViewportSize(options.viewport);
-  const task = await createTask(apiClient, seedData, title);
+  const task = await createTask(apiClient, seedData, title, options.runAgent);
   if (!task.session_id) throw new Error(`${title} did not return a session_id`);
   await page.goto(`/t/${task.id}${options.layout ? `?layout=${options.layout}` : ""}`);
   const session = new SessionPage(page);
@@ -56,7 +83,7 @@ test.describe("right-panel visibility", () => {
       apiClient,
       seedData,
       "Desktop right-panel visibility",
-      { viewport: { width: 1600, height: 900 } },
+      { viewport: { width: 1600, height: 900 }, runAgent: true },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     await session.clickTab("Files");

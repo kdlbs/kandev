@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 
 test.describe("Tool completion on turn end", () => {
   test("tool groups have no spinner after turn completes with uncompleted tool calls", async ({
@@ -20,22 +21,35 @@ test.describe("Tool completion on turn end", () => {
       "Tool Completion Test",
       seedData.agentProfileId,
       {
-        description: script,
+        description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
     );
 
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // The composer can become idle before the final tool-state reconciliation
-    // reaches the rendered message. Give that bounded update its own wait.
-    const toolGroups = session.chat.getByRole("button", { name: /Terminal/ }).locator("..");
+    await Promise.all([
+      ws.waitForEvent("session.turn.completed", {
+        where: (payload) => payload.session_id === task.session_id,
+      }),
+      session.sendMessageViaButton(script),
+    ]);
+    const groupToggle = session.chat.getByRole("button", { name: /2 tool calls/ });
+    const toolGroups = groupToggle.locator("..");
+    await expect(groupToggle).toBeVisible();
     const spinners = toolGroups.locator('[role="status"][aria-label="Loading"]');
-    await expect(spinners).toHaveCount(0, { timeout: 30_000 });
+    await expect(spinners).toHaveCount(0);
+    await groupToggle.click();
+    const terminalTools = toolGroups.getByText("Terminal", { exact: true });
+    await expect(terminalTools).toHaveCount(2);
+    await expect(terminalTools.nth(0)).toBeVisible();
+    await expect(terminalTools.nth(1)).toBeVisible();
+    await expect(spinners).toHaveCount(0);
   });
 });

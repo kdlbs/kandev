@@ -134,7 +134,11 @@ export function useAzureDevOpsWorkItemDetail(
         setState((previous) => ({
           ...previous,
           linkedTasks: all.filter(
-            (task) => task.projectId === projectId && task.workItemId === initialItem.id,
+            (task) =>
+              task.workspaceId === workspaceId &&
+              task.workItemId === initialItem.id &&
+              ((projectId.trim().length > 0 && task.projectId === projectId) ||
+                (Boolean(initialItem.project?.trim()) && task.projectId === initialItem.project)),
           ),
           linkedTasksLoading: false,
         }));

@@ -119,7 +119,7 @@ func TestLaunchPreparedDynamicRelaunchDispatchesPromptToResumedCandidate(t *test
 	releaseRouteAction := svc.acquireRouteActionOperationLock(sessionID)
 	defer releaseRouteAction()
 
-	outcome := svc.launchPreparedDynamicRelaunch(
+	outcome, launchErr := svc.launchPreparedDynamicRelaunch(
 		ctx,
 		data,
 		preparedTask,
@@ -130,6 +130,9 @@ func TestLaunchPreparedDynamicRelaunchDispatchesPromptToResumedCandidate(t *test
 		launchOriginManual,
 		nil,
 	)
+	if launchErr != nil {
+		t.Fatalf("dynamic relaunch failed: %v", launchErr)
+	}
 	if outcome != dynamicRelaunchSucceeded {
 		t.Fatalf("dynamic relaunch outcome = %v, want a successfully dispatched prompt", outcome)
 	}

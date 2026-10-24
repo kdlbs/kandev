@@ -102,6 +102,12 @@ function matchesDurableDeliveryUncertainty(
   recovery: AgentDeliveryRecovery,
 ): boolean {
   const record = asMetadataRecord(error);
+  if (record?.code === "delivery_history_gap" && recovery.historyGap) {
+    const gap = recovery.historyGap;
+    // i18n-exempt: exact persisted backend error identity, never rendered as copy.
+    const expected = `delivery_history_gap: stream ${recovery.streamId}, missing event range ${gap.firstSequence}..${gap.lastSequence}`;
+    return record.details === expected;
+  }
   if (record?.code !== DURABLE_DELIVERY_UNCERTAIN) return false;
   const agentExecutionID = readDeliveryErrorExecutionID(record);
   const submissionID = readDeliveryErrorSubmissionID(record);
@@ -171,6 +177,12 @@ function mergeSessionMetadata(
   if (incoming.metadata == null) return existing.metadata;
   const current = existing.metadata ?? {};
   const next = { ...current, ...incoming.metadata };
+  const history = asMetadataRecord(current.agent_delivery_history_gaps);
+  if (history)
+    next.agent_delivery_history_gaps = {
+      ...asMetadataRecord(incoming.metadata.agent_delivery_history_gaps),
+      ...history,
+    };
   mergeDeliveryRecoveryMetadata(current, incoming.metadata, next);
   const currentACP = asMetadataRecord(current.acp);
   const incomingACP = asMetadataRecord(incoming.metadata.acp);

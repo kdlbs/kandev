@@ -51,7 +51,7 @@ export function isApprovalClaimStale(claimedAt: string | null, nowMs: number): b
  * {@link approvedStatusLine}.
  */
 export function proposalStatusLine(
-  proposal: Pick<Proposal, "status" | "error" | "reject_reason" | "claimed_at">,
+  proposal: Pick<Proposal, "status" | "error" | "reject_reason" | "claimed_at" | "reply_text">,
   t: TFunction,
   nowMs: number,
 ): string {
@@ -70,6 +70,10 @@ export function proposalStatusLine(
       return proposal.reject_reason
         ? t("coordinator:proposalStatusRejectedWithReason", { reason: proposal.reject_reason })
         : t("coordinator:proposalStatusRejected");
+    case "returned":
+      return proposal.reply_text
+        ? t("coordinator:proposalStatusReturned", { text: proposal.reply_text })
+        : t("coordinator:proposalStatusReturnedNoText");
     default:
       return proposal.status;
   }

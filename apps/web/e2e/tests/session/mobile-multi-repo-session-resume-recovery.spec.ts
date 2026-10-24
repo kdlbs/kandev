@@ -9,6 +9,7 @@ import {
   capturedSessionRecoveryResponse,
   capturedSessionRecoveryResponseType,
   countSimpleMockResponses,
+  expectWorkspaceRecoveryResuming,
   readManagedCloneRecoveryConsumers,
 } from "../../helpers/session-resume-recovery";
 import {
@@ -148,13 +149,7 @@ async function confirmPhoneRelocation(page: Page, recovery: SessionRecoveryCaptu
   expect((await confirm.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await confirm.tap();
   await expect.poll(() => recovery.requestCounts.relocate_and_resume ?? 0).toBe(1);
-  await expect(page.getByTestId("workspace-recovery-agent-pending")).toBeVisible({
-    timeout: 60_000,
-  });
-  await expect(page.getByTestId("workspace-recovery-progress")).toHaveAttribute(
-    "data-recovery-phase",
-    "resuming",
-  );
+  await expectWorkspaceRecoveryResuming(page);
   expect(recovery.requestCounts.resume ?? 0).toBe(0);
 }
 

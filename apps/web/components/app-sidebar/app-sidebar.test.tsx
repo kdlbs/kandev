@@ -52,7 +52,7 @@ vi.mock("./sidebar-navigation-split", () => ({
 }));
 
 vi.mock("./app-sidebar-primary-nav", () => ({
-  AppSidebarPrimaryNav: () => <div data-testid="primary-nav" />,
+  AppSidebarPrimaryNav: () => <div data-testid={PRIMARY_NAV} />,
 }));
 
 vi.mock("./sections/tasks-section", () => ({
@@ -181,6 +181,7 @@ function renderSidebar() {
 }
 
 const SIDEBAR = "app-sidebar";
+const PRIMARY_NAV = "primary-nav";
 const COLLAPSED_ATTRIBUTE = "data-collapsed";
 const TASKS_SECTION = "tasks-section";
 const INTEGRATIONS_SECTION = "integrations-section";
@@ -252,7 +253,7 @@ describe("AppSidebar", () => {
 
     const nav = screen.getByRole("navigation");
     const expectedSections = [
-      "primary-nav",
+      PRIMARY_NAV,
       OFFICE_WORK_SECTION,
       "projects-section",
       "agents-section",
@@ -364,7 +365,7 @@ describe("AppSidebar before the workspace resolves", () => {
     // sections there means visibly swapping them for Office ones a tick later.
     renderSidebar();
 
-    expect(screen.getByTestId("primary-nav")).toBeTruthy();
+    expect(screen.getByTestId(PRIMARY_NAV)).toBeTruthy();
     expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
     expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
     expect(screen.queryByTestId(OFFICE_WORK_SECTION)).toBeNull();
@@ -403,6 +404,21 @@ describe("sidebar hover reveal", () => {
     expect(panel.style.width).toBe(`${APP_SIDEBAR_EXPANDED_WIDTH}px`);
     expect(screen.getByTestId("app-sidebar-layout").style.width).toBe("56px");
     expect(panel.getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
+    expect(storeState.toggleAppSidebar).not.toHaveBeenCalled();
+  });
+
+  it("preserves navigation and task owners across temporary reveals", () => {
+    renderSidebar();
+    const panel = screen.getByTestId(SIDEBAR);
+    const navigation = screen.getByTestId(PRIMARY_NAV);
+    const tasks = screen.getByTestId(TASKS_SECTION);
+    fireEvent.pointerOver(panel, { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.getByTestId(PRIMARY_NAV)).toBe(navigation);
+    expect(screen.getByTestId(TASKS_SECTION)).toBe(tasks);
+    fireEvent.pointerOut(panel, { pointerType: "mouse" });
+    expect(screen.getByTestId(PRIMARY_NAV)).toBe(navigation);
+    expect(screen.getByTestId(TASKS_SECTION)).toBe(tasks);
     expect(storeState.toggleAppSidebar).not.toHaveBeenCalled();
   });
 });

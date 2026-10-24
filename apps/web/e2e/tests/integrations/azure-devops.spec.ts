@@ -1,4 +1,6 @@
+import type { AzureDevOpsBrowsePreferences } from "../../../hooks/domains/azure-devops/use-azure-devops-preferences";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 const MOCK_STATE = {
   authenticated: true,
@@ -251,6 +253,15 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await testPage.getByTestId("azure-board-select").click();
   await testPage.getByRole("option", { name: "Tasks" }).click();
   await expect(testPage.getByText("Plan the next release")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const { settings } = await apiClient.getUserSettings();
+      const preferences = settings.azure_devops_browse_preferences as
+        | AzureDevOpsBrowsePreferences
+        | undefined;
+      return preferences?.[seedData.workspaceId]?.board?.boardId;
+    })
+    .toBe("board-2");
   await testPage.reload();
   await expect(testPage.getByTestId("azure-board-select")).toContainText("Tasks");
   await expect(testPage.getByText("Plan the next release")).toBeVisible();
@@ -346,7 +357,9 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
   const resetDialog = testPage.getByTestId("reset-watch-dialog");
   await expect(resetDialog).toBeVisible();
+  const resetFinished = waitForHttp(testPage, "POST", /\/watches\/work-items\/[^/]+\/reset$/);
   await resetDialog.getByTestId("reset-watch-dialog-confirm").click();
+  expect((await resetFinished).ok()).toBe(true);
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
   await workItemWatch.getByRole("button", { name: "Delete this watch?" }).click();
   await testPage

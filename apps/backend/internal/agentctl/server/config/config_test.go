@@ -461,10 +461,10 @@ exit 2
 	env, err := CollectAgentEnvWithError(map[string]string{
 		"GH_TOKEN":            "late-profile-token",
 		"HOME":                filepath.Join(t.TempDir(), "home"),
-		"PATH":                "/usr/bin:/bin",
+		"PATH":                os.Getenv(pathEnvKey),
 		"GIT_CONFIG_COUNT":    "1",
 		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_VALUE_0":  "!'" + filepath.ToSlash(ghPath) + "' auth git-credential",
 		"GIT_CONFIG_NOSYSTEM": "1",
 	})
 	if err != nil {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
@@ -359,26 +359,44 @@ function useWatchOrgs(
   return orgs;
 }
 
-export function SentryIssueWatchDialog({
-  open,
-  onOpenChange,
-  watch,
-  workspaceId,
-  onCreate,
-  onUpdate,
-}: Props) {
-  const { t } = useTranslation();
+export function SentryIssueWatchDialog(props: Props) {
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
+  const workspaceId = props.workspaceId ?? activeWorkspaceId ?? "";
+  if (!props.open) return null;
+  return (
+    <WatchDialogOpening
+      key={JSON.stringify([
+        workspaceId,
+        props.watch?.id,
+        props.watch?.workspaceId,
+        props.watch?.sentryInstanceId,
+      ])}
+      {...props}
+      workspaceId={workspaceId}
+    />
+  );
+}
 
-  useEffect(() => {
-    if (watch) {
-      setForm(formStateFromWatch(watch));
-    } else {
-      setForm(makeEmptyForm(workspaceId ?? activeWorkspaceId ?? ""));
-    }
-  }, [watch, open, workspaceId, activeWorkspaceId]);
+function WatchDialogOpening({ open, onOpenChange, watch, workspaceId, onCreate, onUpdate }: Props) {
+  const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<FormState>(() =>
+    watch ? formStateFromWatch(watch) : makeEmptyForm(workspaceId ?? ""),
+  );
+  const live = useRef(false);
+  useLayoutEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+  const changeOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) live.current = false;
+      onOpenChange(nextOpen);
+    },
+    [onOpenChange],
+  );
 
   const instances = useWorkspaceInstances(open, form.workspaceId, !!watch, setForm);
   const orgs = useWatchOrgs(open, form.workspaceId, form.sentryInstanceId, !!watch, setForm);
@@ -389,7 +407,7 @@ export function SentryIssueWatchDialog({
 
   const handleSave = useCallback(async () => {
     const maxInflight = parseMaxInflightTasks(form.maxInflightTasks);
-    if (maxInflight === "invalid") return;
+    if (maxInflight === "invalid" || !live.current) return;
     setSaving(true);
     try {
       const payload = buildWatchPayload(form, maxInflight);
@@ -402,16 +420,16 @@ export function SentryIssueWatchDialog({
           sentryInstanceId: form.sentryInstanceId,
         });
       }
-      onOpenChange(false);
+      if (live.current) changeOpen(false);
     } catch {
       // Error surfaced by caller's toast.
     } finally {
-      setSaving(false);
+      if (live.current) setSaving(false);
     }
-  }, [form, watch, onCreate, onUpdate, onOpenChange]);
+  }, [form, watch, onCreate, onUpdate, changeOpen]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent className="w-full max-w-full sm:w-[800px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -446,7 +464,7 @@ export function SentryIssueWatchDialog({
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button variant="outline" onClick={() => changeOpen(false)} className="cursor-pointer">
             {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">

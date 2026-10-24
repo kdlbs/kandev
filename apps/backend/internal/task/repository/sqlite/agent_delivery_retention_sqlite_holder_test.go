@@ -75,7 +75,6 @@ func TestDeliveryRetentionIntegrationSQLiteIndependentHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer worker.Stop()
-	fireWorkerTimer(t, timers, time.Minute)
 	batchCtx := <-observed.entered
 	<-batchCtx.Done()
 	readStart := time.Now()

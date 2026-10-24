@@ -70,6 +70,8 @@ type AgentEventData struct {
 	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
 	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
 	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
+	RunID                     string                                `json:"run_id,omitempty"`
+	CausingRunID              string                                `json:"causing_run_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -99,6 +101,9 @@ type ACPSessionEventData struct {
 	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
 	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// DeliveryReplacesNativeConversation marks a fresh-start conversation that
+	// succeeds the committed harness generation.
+	DeliveryReplacesNativeConversation bool `json:"delivery_replaces_native_conversation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events

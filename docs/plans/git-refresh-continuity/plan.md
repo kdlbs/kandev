@@ -15,7 +15,7 @@ legacy_specs: []
 
 Keep existing file counts and diff content visible during background refresh.
 Leave identical returned content mounted and preserve the reading anchor when patches change.
-One work order implements the shared projection, renderer continuity, and desktop/phone proof together.
+The original work order implements shared projection and renderer continuity; a follow-up adds automatic session Git read recovery.
 
 ## Scope
 
@@ -23,7 +23,7 @@ In scope: workspace Changes counts, open single-file and combined Review diffs, 
 Include pending/failure freshness, identical-result view state, changed-result scroll anchors, and scope cleanup.
 Retain the current phone drawer, desktop dockview layout, toolbar feedback, and recovery schedule.
 
-Out of scope: backend publication changes, wire formats, new polling, persistent diffs, historical commit/PR cache redesign, and unrelated UI layout.
+Out of scope: backend publication changes, wire formats, continuous polling, persistent diffs, historical commit/PR cache redesign, and unrelated UI layout.
 
 ## Evidence and assumptions
 
@@ -132,6 +132,7 @@ Phone checks include the actual full-height drawer, narrow fine-pointer entry, t
 ## Work orders
 
 - [x] [Task 01: Preserve counts, diff content, and reading position](task-01-preserve-reading-state.md)
+- [x] [Task 02: Recover slow session Git reads](task-02-recover-git-reads.md)
 
 ## Verification results
 
@@ -149,3 +150,29 @@ Post-PR fixup verification passed the focused checkout-scope hook suite (16 test
 - Changed content above an anchor can alter layout; preserve semantic position after renderer layout completes.
 - Retained patches cannot authorize new hunk mutations or review state.
 - The old enrichment bridge deliberately drops pending events and can hide this regression unless adjusted for the new tests.
+
+## Git read recovery follow-up (#4333)
+
+[Task 02](task-02-recover-git-reads.md) delivers `AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.4` through the existing read coordinator.
+Temporary failures retry five seconds later, preserve successful commits/diffs, and stop after success or scope retirement.
+The per-request timeout is 30 seconds. Permanent errors and terminal sessions retain their stop behavior.
+
+### ASCII UI preview
+
+UI-03: Changes, first read recovering (desktop panel and phone Changes tab share the same body).
+
+```text
+| Changes                         |
+|                                 |
+|       Loading changes...        |
+```
+
+A previous result keeps its rows or confirmed empty state while recovery runs.
+No new recovery control, scroll owner, or phone navigation is introduced.
+This structure implements criterion `.4`; spacing is illustrative.
+
+### Follow-up verification results
+
+103 focused tests across nine files passed. The browser recovery test passed with retries disabled; existing commit-persistence and cumulative-diff scenarios also passed.
+Typecheck, production Vite E2E build, strict changed-file ESLint, formatting, and localization/wait guards passed.
+See Task 02 for exact commands and the distinction between local verification and pending PR CI/review.

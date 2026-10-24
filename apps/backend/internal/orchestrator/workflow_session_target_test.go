@@ -813,3 +813,21 @@ func fixtureSessionState(t *testing.T, repo interface {
 	require.NoError(t, err)
 	return session.State
 }
+
+func TestWorkflowEntryIdentity_FallsBackToTaskRowOnTransitionReadFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "entry-read-fallback", "entry-read-fallback-session", models.TaskSessionStateCreated)
+	task, err := repo.GetTask(ctx, "entry-read-fallback")
+	require.NoError(t, err)
+
+	healthy := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	expected := healthy.workflowEntryIdentity(ctx, task.ID)
+	require.NotEqual(t, legacyWorkflowEntryIdentity, expected, "the task row must supply a usable identity")
+	require.Equal(t, "created:"+task.CreatedAt.UTC().Format(time.RFC3339Nano), expected)
+
+	failing := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	failing.repo = &workflowStartPromptTransitionReadFailureRepository{Repository: repo, err: errors.New("transition ledger unavailable")}
+	require.Equal(t, expected, failing.workflowEntryIdentity(ctx, task.ID),
+		"a transient transition read failure must keep the task row's usable identity instead of collapsing to the legacy sentinel")
+}

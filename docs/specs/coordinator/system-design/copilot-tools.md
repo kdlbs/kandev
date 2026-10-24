@@ -117,4 +117,3 @@ recovery and never starts or messages a session.
   own-workspace stalled task, own-workspace task with no stall row, foreign
   task, missing task, `task` kind, unknown kind, empty id; plus a
   non-coordinator principal refused with the unknown-action error.
-

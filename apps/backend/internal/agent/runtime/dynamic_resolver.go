@@ -202,9 +202,10 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 		return ProfileExecution{}, err
 	}
 	decision, err := r.engine.ApplyFailureContext(ctx, sessionID, profileConfig, expectedGeneration, currentExecutionProfileID, failure)
-	if err != nil {
+	if err != nil && !errors.Is(err, dynamic.ErrRecoveryPending) {
 		return ProfileExecution{}, err
 	}
+	routeErr := err
 	concrete, err := r.profiles.GetAgentProfile(ctx, decision.ExecutionProfileID)
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve execution profile %s: %w", decision.ExecutionProfileID, err)
@@ -218,7 +219,26 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 		AgentName:      concreteAgentName,
 		RouteSessionID: sessionID, Generation: decision.Generation,
 		ProfileVersion: decision.ProfileVersion, Profile: concrete, Decision: decision,
-	}, nil
+	}, routeErr
+}
+
+// HoldAccountBlock keeps the concrete execution profile whose provider account
+// was restricted out of later selections until its owner releases it. An error
+// means the hold applies in memory but is not yet durable.
+func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, code routingerr.Code) error {
+	if r == nil || r.engine == nil {
+		return nil
+	}
+	return r.engine.HoldAccountBlock(executionProfileID, code)
+}
+
+// ReleaseAccountBlock closes the owner-release hold of one concrete execution
+// profile and reports whether a hold was closed.
+func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {
+	if r == nil || r.engine == nil {
+		return false, nil
+	}
+	return r.engine.ReleaseAccountBlock(executionProfileID)
 }
 
 // RouteAfterUnclassifiedFailure validates the logical profile and applies the
@@ -257,6 +277,23 @@ func (r *ProfileExecutionResolver) ClaimUnclassifiedFallbackLaunch(
 		return dynamic.ErrUnclassifiedWorkflowContextUnavailable
 	}
 	return r.engine.ClaimUnclassifiedFallbackLaunch(ctx, decision, evidence)
+}
+
+// UnclassifiedPolicyEnabled reports whether a concrete candidate of a logical
+// profile has an enabled repeated unclassified policy. Any load failure
+// reports false, so a caller keeps its ordinary behavior.
+func (r *ProfileExecutionResolver) UnclassifiedPolicyEnabled(
+	ctx context.Context,
+	profileID, candidateID string,
+) bool {
+	if r == nil || profileID == "" || candidateID == "" {
+		return false
+	}
+	profile, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return false
+	}
+	return dynamic.CandidateUnclassifiedEnabled(profile, candidateID)
 }
 
 // ClearUnclassifiedStreak removes the session-owned count after a current
@@ -313,6 +350,9 @@ func (r *ProfileExecutionResolver) ResolveExisting(
 	}
 	if executionProfileID == "" || generation <= 0 {
 		return ProfileExecution{}, errors.New("dynamic session has no persisted execution profile")
+	}
+	if r.engine != nil && r.engine.Circuits().IsHeld(dynamic.ResourceKey(dynamic.ScopeAccountBlock, executionProfileID)) {
+		return ProfileExecution{}, dynamic.ErrExecutionProfileHeld
 	}
 	concrete, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
 	if err != nil {
@@ -734,6 +774,9 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
 	if err != nil {
 		return "", fmt.Errorf("resolve agent for execution profile %s: %w", profile.ID, err)
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return "", fmt.Errorf("execution profile %s: %w", profile.ID, ErrVirtualProfile)
 	}
 	return agent.Name, nil
 }

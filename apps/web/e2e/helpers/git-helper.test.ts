@@ -10,6 +10,28 @@ vi.mock("../pages/session-page", () => ({ SessionPage: vi.fn() }));
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "./git-helper";
 
+describe("GitHelper lock ownership", () => {
+  it("reports contention without deleting another process's index lock", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-git-lock-"));
+    const env = makeGitEnv(root);
+    try {
+      execFileSync("git", ["init", "--initial-branch=main"], {
+        cwd: root,
+        env,
+        stdio: "pipe",
+      });
+      const lock = path.join(root, ".git", "index.lock");
+      fs.writeFileSync(lock, "owned by another operation\n");
+      fs.writeFileSync(path.join(root, "change.txt"), "unstaged change\n");
+
+      expect(() => new GitHelper(root, env).stageAll()).toThrow("index.lock");
+      expect(fs.readFileSync(lock, "utf8")).toBe("owned by another operation\n");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("GitHelper.pushMainWithRetry", () => {
   it("does not rebase or retry a server-side rejection", () => {
     const helper = new GitHelper("unused", {});
@@ -111,7 +133,7 @@ describe("createStandardProfile", () => {
     } as unknown as ApiClient;
 
     await expect(createStandardProfile(apiClient, "file-viewer")).rejects.toThrow(
-      "mock-agent unavailable in test fixtures",
+      "No mock-agent available in E2E test fixtures",
     );
     expect(createAgentProfile).not.toHaveBeenCalled();
   });
