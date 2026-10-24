@@ -510,6 +510,8 @@ test.describe("Fresh-branch flow", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      // Finish the repository popover's focus restoration before opening the executor picker.
+      await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toBeFocused();
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 

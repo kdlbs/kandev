@@ -177,4 +177,17 @@ pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-thr
 pnpm e2e:run --host --no-build --project chromium e2e/tests/task/create-task-branch-selector.spec.ts --grep 'switching worktree.*local resets the chip' --retries=0 --repeat-each=10
 ```
 
+The next CI run exposed the same focus-restoration race in the Jira project
+filter and the remote repository picker. Both tests now wait for the closing
+popover to restore focus before opening another popover. The two repaired
+flows passed five repetitions each with retries disabled and CPU affinity
+limited to two cores. Focused ESLint and formatting checks passed.
+
+An unchanged fork-PR comparison recovery test also failed once in CI and passed
+on retry. The full two-case spec passed five local repetitions without retries.
+Its CI process group then passed with two-core affinity: 22 desktop and 9 phone
+tests, run separately because the managed runner accepts one project per run.
+The local runs did not reproduce the failure. No speculative source change was
+made for that result. A fresh remote run must establish its CI outcome.
+
 Final remote CI and review status remain external to this implementation record.
