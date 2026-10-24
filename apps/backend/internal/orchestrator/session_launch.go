@@ -189,10 +189,14 @@ type LaunchSessionRequest struct {
 	SessionID             string                        `json:"session_id,omitempty"`
 	SessionSettingsPolicy executor.ResumeSettingsPolicy `json:"-"`
 	AgentProfileID        string                        `json:"agent_profile_id,omitempty"`
-	// ProfileExplicit protects a selected profile or an explicit MCP spawn.
-	// IntentStart bypasses workflow session-target routing and preserves a
-	// non-empty profile; an empty profile still resolves normal launch defaults.
-	// IntentStartCreated keeps its existing profile resolution behavior.
+	// Explicit MCP spawn intent also sets ProfileExplicit, even for an empty
+	// profile. Workflow session-target routing is bypassed; normal empty-profile
+	// defaults still apply.
+	//
+	// ProfileExplicit marks a non-empty profile selected through an explicit
+	// selector-backed choice. It bypasses workflow-step profile resolution for
+	// IntentStart only; IntentStartCreated keeps its existing profile resolution
+	// behavior.
 	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
 	ExecutorID        string   `json:"executor_id,omitempty"`
 	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
