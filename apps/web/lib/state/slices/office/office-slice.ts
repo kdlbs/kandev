@@ -26,6 +26,7 @@ export const defaultOfficeState: OfficeSliceState = {
     inboxCountByWorkspaceId: {},
     runs: [],
     dashboardByWorkspaceId: {},
+    workspaceAggregate: null,
     tasks: {
       items: [],
       filters: {
@@ -277,6 +278,10 @@ function createMiscActions(set: SetFn) {
     ) =>
       set((draft) => {
         draft.office.dashboardByWorkspaceId[workspaceId] = data;
+      }),
+    setWorkspaceAggregate: (data: OfficeSlice["office"]["workspaceAggregate"]) =>
+      set((draft) => {
+        draft.office.workspaceAggregate = data;
       }),
     setMeta: (meta: OfficeSlice["office"]["meta"]) =>
       set((draft) => {

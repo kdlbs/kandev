@@ -270,16 +270,7 @@ func (r *Repository) CountToolCallMessagesBySession(ctx context.Context, session
 func BucketTaskBreakdown(rows []TaskBreakdownRow) models.TaskBreakdown {
 	var bd models.TaskBreakdown
 	for _, row := range rows {
-		switch row.State {
-		case "COMPLETED":
-			bd.Done += row.Count
-		case "IN_PROGRESS", "SCHEDULING":
-			bd.InProgress += row.Count
-		case "BLOCKED":
-			bd.Blocked += row.Count
-		default:
-			bd.Open += row.Count
-		}
+		bucketTaskBreakdownRow(&bd, row.State, row.Count)
 	}
 	return bd
 }

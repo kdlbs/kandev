@@ -26,6 +26,7 @@ import { TasksPageClient as OfficeTasksPageClient } from "@/app/office/tasks/tas
 import { ActivityPageClient } from "@/app/office/workspace/activity/activity-page-client";
 import { CostsPageClient } from "@/app/office/workspace/costs/costs-page-client";
 import { SkillsPageClient } from "@/app/office/workspace/skills/skills-page-client";
+import { WorkspaceAggregatePageClient } from "@/app/office/overview/workspace-aggregate-page-client";
 import { fetchUserSettings, listWorkspaces } from "@/lib/api";
 import { getOnboardingState } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -55,6 +56,7 @@ type RouteRenderer = () => React.ReactNode;
 
 const OFFICE_ROUTES: Record<string, RouteRenderer> = {
   "/office": () => <OfficePageClient initialDashboard={null} />,
+  "/office/overview": () => <WorkspaceAggregatePageClient />,
   "/office/inbox": () => <InboxPageClient initialItems={[]} initialCount={0} />,
   "/office/tasks": () => <OfficeTasksPageClient initialIssues={[]} />,
   "/office/projects": () => <ProjectsPageClient initialProjects={[]} />,
