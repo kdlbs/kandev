@@ -1167,6 +1167,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -1185,6 +1188,26 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but
