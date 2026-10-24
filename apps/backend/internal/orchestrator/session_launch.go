@@ -245,6 +245,9 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// PreserveWorkflowBinding keeps an additional MCP session from replacing
+	// the workflow's source conversation. Only trusted server callers set it.
+	PreserveWorkflowBinding bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -914,10 +917,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
 		startTaskOptions{
-			ProfileExplicit:      req.ProfileExplicit,
-			SpawnOrigin:          req.SpawnOrigin,
-			MCPServerIDs:         req.MCPServerIDs,
-			reusePreparedPrimary: req.reusePreparedPrimary,
+			ProfileExplicit:         req.ProfileExplicit,
+			SpawnOrigin:             req.SpawnOrigin,
+			MCPServerIDs:            req.MCPServerIDs,
+			reusePreparedPrimary:    req.reusePreparedPrimary,
+			PreserveWorkflowBinding: req.PreserveWorkflowBinding,
 		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {

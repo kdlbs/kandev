@@ -9,7 +9,7 @@ system_design:
 
 # Explicit MCP Spawn Distinct Session Repair
 
-Status: implementation complete. Independent Review and QA passed the implementation and public-documentation correction; delivery-package revalidation follows the metadata repair. Sequential execution by MAIN.
+Status: implementation complete. Independent Review and QA passed the initial implementation and documentation corrections. The pinned-source binding correction below requires final-candidate independent revalidation. Sequential execution by MAIN.
 
 Spec: [Spawn session requirements](../../specs/agents/requirements/spawn-session-effective-profile.md).
 Design: [Explicit spawn launch intent](../../specs/agents/system-design/spawn-session-effective-profile.md).
@@ -46,3 +46,25 @@ Draft publication and CI are separate from Human acceptance and release acceptan
 The trusted PR documentation evaluator rejected the three work orders because their frontmatter omitted `wave` and the requirement, acceptance-criterion, and system-design references. The work orders now link the existing requirement and a design record of the implemented launch boundary; this plan links back to all three work orders. No runtime behavior, validator rule, or documentation exemption changes.
 
 Local reproduction used `validateCoverage` from the trusted CI checkout against the exact PR file set and document contents: before the repair it reported `invalid` with three missing-`wave` errors; after the repair it reported `covered` with no errors and accepted all three requirement/design references. `python3 scripts/lint-spec-files.py --all` and `python3 scripts/list-docs.py validate` pass after using the supported system-design status. These local results do not represent a completed remote CI check. Independent Review and QA must account for the final documentation commit.
+
+## Pinned-source binding correction
+
+An additional spawn at a step pinned to profile A could replace that step's
+original source binding with the new session, even when the new session used
+profile B. The original reuse-target fixture did not exercise a pinned source
+step. A separate server-only `PreserveWorkflowBinding` intent now prevents this
+replacement without changing ordinary workflow or selector-backed recording.
+The ceiling start payload persists the intent and restores it on replay.
+
+Permanent handler regressions first failed for different/same supplied profiles
+and caller/primary inheritance while ordinary recording controls passed. The
+corrected cases pass. A real SQLite persisted-payload replay regression also
+failed before flag transport and passes after it; it verifies downstream
+source-target resolution and reuse. Legacy replay payloads retain ordinary
+recording. Public JSON cannot set or expose the server-only flag.
+
+Specification lint/catalog validation, public documentation tests (63) and
+published-page validation (47) pass. Backend lint against the original merge
+base reports zero issues. Exact final-candidate test, independent Review/QA and
+consumer execution receipts remain in task metadata; remote CI and release
+acceptance are separate gates.
