@@ -21,6 +21,44 @@ Use workflow events for predictable transitions on existing work. Use a workspac
 Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. A missing-field error names each absent schema property, but never echoes submitted argument values. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
 
 
+## Read queued instructions for recovery
+
+Task agents can inspect an exact terminal predecessor on their own task with
+`get_terminal_session_message_queue_kandev`. The predecessor must be
+COMPLETED, FAILED, or CANCELLED. Supply its exact `session_id`; the reader
+never selects a primary or newest session for you.
+
+A direct parent can use `get_child_queue_inventory_kandev` with the exact
+child `task_id` to obtain body-free manifests, then
+`get_child_session_message_queue_kandev` with the exact child and session IDs
+to read bodies. Targets must remain direct children in the same workspace.
+Workspace visibility alone does not grant access to other tasks' queues.
+
+Pass a manifest's `snapshot_sha256` as `expected_snapshot_sha256` on the
+first body call. Continue with each returned `next_cursor`. A changed source
+or revoked authority rejects continuation; obtain a fresh manifest and restart.
+Each fragment includes its FIFO identity, full-body SHA-256, byte offset and
+completion flag. Keep entry identities when reconstructing empty or identical
+message bodies. Attachment and delivery evidence is hashed, without exposing
+attachment bytes, paths or metadata payloads.
+
+The default body budget is 65,536 UTF-8 bytes; `max_body_bytes` accepts
+1,024 through 262,144. Source limits are 256 sessions, 1,024 entries per session,
+16 MiB source payload per session and 32 MiB per inventory. Pages have at most
+256 fragments and 2 MiB serialized output, including WebSocket response and
+MCP tool-result wrappers (transport framing is excluded). Cursors are at most 4 KiB. Oversized
+inventories fail instead of returning a misleading partial receipt.
+
+These readers preserve queue contents, order, claims, policy and generations.
+They do not consume, acknowledge, replay or transfer work. An empty FIFO does
+not prove absent in-flight dispatches, replacement acknowledgement or safe task
+retirement. The tools are restricted to authenticated task MCP surfaces and
+existing profile restrictions. They are unavailable to external MCP,
+configuration chat, automation and coordinator conversation surfaces.
+
+This capability belongs to the server's task control plane regardless of
+whether the server runs in Docker. It does not require the task Docker executor.
+
 ## Create an automation in configuration chat
 
 Ask configuration chat to create a workspace automation, for example:
