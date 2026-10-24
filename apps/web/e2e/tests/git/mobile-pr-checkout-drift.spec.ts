@@ -597,6 +597,7 @@ test.describe("Mobile rewritten contribution history", () => {
     const warning = changes.getByTestId("header-remote-contribution-warning");
     await warning.tap();
     const menu = testPage.getByTestId("header-remote-contribution-menu");
+    const historyDrawer = testPage.getByRole("dialog").filter({ has: menu });
     await expect(menu).toBeVisible();
     await expect(menu).toContainText("Task and PR histories differ");
     await expect(menu).toContainText("The task branch was rebased locally");
@@ -604,7 +605,7 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(menu).toContainText("Published commits: 5");
     await expect(menu).toContainText("Newer base commits: 3");
     await expect(menu.getByRole("button", { name: "Close" })).toBeVisible();
-    await waitForFiniteAnimations(menu);
+    await waitForFiniteAnimations(historyDrawer);
     await prCapture.screenshot("remote-contribution-menu-mobile", {
       caption: "Phone history drawer explains the local rebase and version choices",
     });
@@ -629,6 +630,7 @@ test.describe("Mobile rewritten contribution history", () => {
     await warning.tap();
     const resolutionMenu = testPage.getByTestId("header-remote-contribution-menu");
     await expect(resolutionMenu).toBeVisible();
+    await waitForFiniteAnimations(historyDrawer);
     const recoveryBefore = recoveryBranches(git);
     git.createFile("mobile-local-rebase-dirty.txt", "uncommitted mobile local change");
     await resolutionMenu.getByTestId("header-use-pr-version").tap();

@@ -263,6 +263,21 @@ The rebased tree matched the previously tested synthetic merge exactly before th
 The new reader regressions failed before the collector change; all 13 diagnostic tests then passed.
 Local Docker is unavailable. CI must supply the SSH reproduction and remote log evidence; the diagnostic change alone does not establish the runtime failure's cause.
 
+### Additional CI browser corrections
+
+CI at `b9616d7ac96` passed all SSH container shards but found three browser-test failures.
+The ownership test assumed every executor had a profile array. API responses omit empty arrays, so the ownership poll could throw before the save completed. Both catalogue reads now use an empty-array fallback.
+The phone history test now waits for the outer drawer's animation before tapping its action. Its prior wait inspected an inner element that does not own the animation.
+The repository-options test now waits for each repository picker to unmount before opening the next surface. CI showed the options popover disappearing, followed by a 53-second wait for its missing download control.
+
+The original shard 1, process 4 selection reproduced the ownership exception locally: 43 passed, one failed, and one did not run. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/diagnostics-replay-1-logs/kandev-run.e2e.DfwUYR0g.log`.
+The corrected selections passed with two CPUs, one worker, and zero retries:
+
+- Shard 1, process 4: 45 passed. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/diagnostics-replay-1-logs/kandev-run.e2e.o870sew9.log`.
+- Shard 10, process 2: 45 passed and one skipped. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/diagnostics-replay-10-logs/kandev-run.e2e.Kr1k5iXZ.log`.
+- Shard 19, process 1: 41 passed. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/diagnostics-replay-19-logs/kandev-run.e2e.ueGOXfs2.log`.
+- Scoped ESLint, Prettier, TypeScript, and specification lint passed after the final changes.
+
 ### Remaining limit
 
 The original active-question link text was not provided. Standard links pass through the actual active overlay on desktop and phone.
