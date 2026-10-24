@@ -1448,3 +1448,218 @@ Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
   `/home/clem/.kandev/agent-scratch/plugin-layout-review/round9-hook-receipt.json`
   and companion `round9-commit-hooks.log`. No amend, hook bypass, push, PR,
   deployment, `step_complete`, parent archive or new reviewer/worker.
+
+### Round10 absent pinned roots and distinct tool-root geometry
+
+- Starting HEAD `c29d5080a203b0fca4abcc552f22c3eab8f493c5`, clean.
+  Session metadata verified unchanged exact profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`. No workers or substitutions.
+- F1 strict consumer RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-f1-red.json`:
+  **2 failed, 58 passed**. A real settings-generated source is ordered
+  Agent/plugin/Files+Changes at 400/200/1000. At 800 it is 320/160/320.
+  Hide the pinned last root, add Todos beside Agent, use actual settings
+  `splitPanel` and `mergeGroup`, then close Todos. The hidden 400/400 result
+  must release the old allocation. Reveal/widen instead revived 400/200/1000
+  at both boundaries; the explicit released-source control produced 480/120/1000.
+  No-edit hide and preceding trailing-plugin controls passed.
+- Extracted structural membership validation from width allocation.
+  `validateRetainedRootGeometry` runs before live-right/visibility/child-count
+  exits at both boundaries, including no live pinned root. It validates
+  source membership with the retained child reinserted without allocating
+  hidden widths. Genuine edits invalidate irreversibly; no-edit projection
+  retains the original source. One-file GREEN: **60 passed**.
+- F2 strict consumer RED, same command with
+  `--outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-f2-red.json`:
+  **12 failed, 60 passed**. Actual settings Split Changes > Right and
+  capture/ID-free workbench capture, JSON save/reload, then800->1600 produced
+  480/800/320 instead of400/800/400. Reverse Files splits and four-root splits
+  failed too. Every source remained valid and immutable; the editor itself
+  had reached the requested extents, so these are not unreachable constraints.
+- Preserve one width-policy owner, matching the existing one manual/right
+  preference and first eligible root. Other tool roots retain unique
+  panel-derived identities, flexible source weights and no aliased right-map
+  entry. This is shared by capture and successfully validated reusable JSON;
+  validation gates and supplied saved payloads remain unchanged.
+- Cap-transfer strict RED, same one-file command with
+  `--outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-cap-transfer-red-verified.json`:
+  **2 failed, 74 passed**. A former owner retained its320px host cap after an
+  actual split changed ownership, blocking a reachable500px real sash drag.
+  Shared `pinned-right-constraints.ts` now tracks/restores only host-owned
+  group bounds across construction, fixups and both enforcement paths.
+  All descendants refresh; disposed groups are discarded. Component-owned
+  700px/200px bounds are not cleared. One-file GREEN: **76 passed**.
+- The initial cap test incorrectly asserted the library's incidental unbounded
+  sentinel as `Infinity`; removed that assertion rather than pinning its
+  `MAX_SAFE_INTEGER` representation. Assertions now require requested root
+  geometry to be reachable. An intermediate test also supplied reversed manual
+  setter arguments; corrected the fixture before the verified RED above.
+  The cap-transfer case checks500px during the real drag, not a new promise
+  about pinned-neighbor redistribution after release. Earlier permanent sash/
+  manual/one-pixel coverage is retained unchanged.
+- To keep the existing 600-line limit, moved the new tool-root cases to
+  `dockview-tool-roots.plugin-layout.test.ts` and extracted the shared real
+  Dockview harness to `dockview-root-geometry.test-helpers.ts`. Existing 54
+  root-proportion tests remain in their original suite, with the same actual
+  implementations and isolated timers/cleanup. Replaced nested ternaries with
+  case data; no lint suppression or production test seam.
+- Component-bound retention used a separate strict cycle:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-tool-roots.plugin-layout.test.ts --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-component-bounds-red.json`:
+  **2 failed, 78 passed**. Component bounds published while the group was still
+  the owner were overwritten during host refresh and then lost on transfer.
+  Remember component deltas before each host write, as well as respecting
+  updates after the last write. Two-file GREEN: **80 passed**, including
+  vertical multi-tool rows. Refactored the bound update into a private helper
+  to meet the existing cognitive-complexity limit.
+- Previously saved duplicate-ID JSON also used its own strict RED:
+  `pnpm exec vitest run lib/state/dockview-tool-roots.plugin-layout.test.ts
+  --testNamePattern 'valid JSON saved before' --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-saved-json-red.json`:
+  **2 failed, 26 skipped**, exact 100/800/700 versus 400/800/400 after load/apply.
+  Capture-only disambiguation was insufficient for already-saved valid payloads.
+  Shared non-mutating ownership normalization now runs after successful
+  validation too. Geometry, groups, tree, parameters and input bytes are
+  preserved; no schema, eligibility relaxation or per-tool preference.
+  GREEN with both root suites and both layout-profile suites: **4 files,
+  143 tests passed** before the final policy control below.
+- An intermediate Files-preference implementation was rejected by an existing
+  manual-owner control. Final strict policy RED:
+  `pnpm exec vitest run lib/state/dockview-tool-roots.plugin-layout.test.ts
+  --testNamePattern 'round-trips|transferred|existing first-tool manual'
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-first-owner-red.json`:
+  **12 failed, 8 passed, 10 skipped**. Moving Files into a later root wrongly
+  moved the existing 700px manual target away from its original first tool
+  group. Removed the new Files priority and retained the existing first-root
+  policy instead. Transfer controls use real Split Changes > Left; source
+  proportions for both split directions remain covered. Final focused GREEN:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-tool-roots.plugin-layout.test.ts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts`:
+  **4 files, 145 passed**, including 84 real root cases.
+- Intermediate adjacent runs passed 42 files/614 tests, then 42/616, formatting,
+  lint and the 10GiB typecheck. Neither predates-final-production run is used
+  as final verification. LSP remained unavailable; exported/internal consumers
+  and full serializer-module mocks were mapped with focused searches.
+- Actual browser RED used starting Round9 production artifacts:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project chromium tests/settings/layout-profiles.spec.ts
+  --grep 'distinct Files and Changes roots|structural edit while pinned-last'
+  --retries=0`: **2 failed**. Real settings Split Right/save/JSON reload/
+  task application/widen gave 480/800/320; real pinned-last hide, shipped
+  Add Plan, and real Dockview split/merge primitives gave stale 400/200/1000
+  rather than released 480/120/1000. Log `kandev-run.e2e.IXq9ifhz.log`.
+  Failure images retained under the task-owned `round10-visual/red/`.
+  No mocked registration, resize result or source-string assertion.
+- The hidden browser case closes the incidental Bitbucket review through
+  shipped UI before capture. This preserves the documented prerequisite for
+  the excluded undefined-provider serialization boundary, not a PR-present
+  reveal claim. Review validation/coverage and the excluded old delayed sash-rAF
+  environment race are unchanged. Prior split, conditional-tab, saved SPA/cold/
+  reload, manual and cap-release coverage remains present.
+- Final static verification after the last production edit, from `apps/web`:
+  - `pnpm exec prettier --write` and `pnpm exec eslint --max-warnings 0` on
+    `components/task/dockview-layout-setup.ts`,
+    `lib/layout/layout-profiles.ts`,
+    `lib/state/dockview-pinned-enforce.ts`,
+    `lib/state/dockview-layout-builders.ts`,
+    `lib/state/layout-manager/applier.ts`,
+    `lib/state/layout-manager/serializer.ts`,
+    `lib/state/layout-manager/pinned-targets.ts`,
+    `lib/state/layout-manager/reusable-root-geometry.ts`,
+    `lib/state/layout-manager/pinned-right-constraints.ts`,
+    `lib/state/dockview-root-proportions.plugin-layout.test.ts`,
+    `lib/state/dockview-tool-roots.plugin-layout.test.ts`,
+    `lib/state/dockview-root-geometry.test-helpers.ts` and
+    `e2e/tests/settings/layout-profiles.spec.ts` passed.
+  - `pnpm exec vitest run
+    components/task/dockview-desktop-layout.env-switch.test.tsx
+    components/task/dockview-layout-restore lib/state/dockview-env-switch
+    lib/state/dockview-root-proportions.plugin-layout.test.ts
+    lib/state/dockview-tool-roots.plugin-layout.test.ts
+    lib/state/dockview-three-root.plugin-layout.test.ts
+    components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+    lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+    lib/state/layout-manager components/settings/layouts
+    lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts
+    components/task/dockview-review-panel-sync.test.ts
+    components/task/dockview-todo-panel-sync`: **42 files, 618 passed**,
+    including all 84 root cases and the existing editor/save/restore,
+    environment-switch, conditional review/Todos, applier and builder cases.
+  - `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+- Final fresh managed desktop verification:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **26 passed**, one worker, one clean aggregate, no retry or isolated recovery.
+  Log `kandev-run.e2e.nk29UO63.log` under the task-owned scratch `tmp`.
+  Rebuilt backend, Vite production assets and packaged fixture after the last
+  production edit. No source changed after that fresh build.
+- The command copied `.pr-assets` to `round10-visual/desktop/` immediately
+  after success, before the next managed invocation resets that directory.
+  Inspected the two new screenshots: distinct Files/plugin and Changes roots
+  at 400/800/400 with actual Prompt1 content; and the Agent-containing root/
+  plugin/Files+Changes at 480/120/1000 after a real hidden split/merge edit.
+  Actual Files and plugin content, all live/serialized root extents, immutable
+  portable source and absent manual storage are asserted by those scenarios.
+  Existing cap-binding/manual/saved SPA/cold/reload/conditional-tab and generated
+  Below/Right cases remain in the fresh aggregate.
+- Same-artifact mobile verification, sequential after desktop:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, log `kandev-run.e2e.AwXzFgi7.log`.
+  Copied all captures immediately to `round10-visual/mobile/`; inspected the
+  custom and built-in override phone surfaces. No phone composition change or
+  mobile task-layout feature. All managed runs completed owned-runtime teardown.
+- Final desktop/mobile aggregates have no failures, retries, isolated recovery
+  or remaining runtime prerequisite blocker. Historical full `make test`
+  environment limits are unchanged and were not rerun. No exact-head real
+  Prompt History package re-smoke; only the packaged in-tree fixture was
+  exercised here. Primary settings/runtime and excluded review/sash boundaries
+  remain untouched.
+- Companion design records independent retained validation, unique tool roots,
+  existing first-owner semantics, valid saved-JSON normalization and host-bound
+  lifecycle. Public guidance and historical CHANGELOG remain unchanged because
+  existing geometry and manual-owner behavior are restored. Prior evidence and
+  requirement/design acceptance statuses are unchanged.
+- Documentation gates: `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`,
+  `python3 scripts/lint-spec-files.test.py`, `git diff --check` and
+  `validateCoverage` over all 15 intended paths and six package documents.
+  Full coverage result: `round10-coverage.json` in the task-owned review scratch.
+- Normal-hook delivery receipts are outside the checkout:
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round10-hook-receipt.json`
+  and `round10-commit-hooks.log`. No amend/bypass, push/PR/deployment,
+  primary-instance mutation, `step_complete`, parent archive or new worker/
+  reviewer. Parent owns integration and the next review.
+- First normal commit attempt stopped before commit creation: architecture lint
+  rejected the UI-dependent harness under `lib/state`, and the new-code copy
+  guard classified its four canonical fixture titles as shipped copy.
+  Full failed receipt retained as `round10-commit-hooks-attempt1.log`.
+  Moved the harness to
+  `components/task/dockview-root-geometry.test-helpers.ts`, updated its two
+  test-only consumers and state imports, and annotated the canonical test
+  titles with explicit non-copy reasons. No architecture/i18n rule change,
+  hook bypass, amended commit or product-copy translation omission.
+  Only test-support imports and annotations changed after the runtime runs;
+  the tested production implementations remain unchanged.
+- After that test-support-only move, reran formatting and ESLint
+  `--max-warnings 0` across the same 13 changed TypeScript paths, replacing the
+  old state helper path with
+  `components/task/dockview-root-geometry.test-helpers.ts`: passed.
+  Repeated the complete owning Vitest command above: **42 files, 618 passed**.
+  Repeated `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`: passed.

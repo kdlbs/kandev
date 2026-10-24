@@ -281,16 +281,17 @@ remains unchanged. Whole-source reset/replacement on environment switch,
 explicit profile application or vertical transition also resets root allocation.
 
 A retained hidden right pane is a host projection, not a root edit. Both
-enforcement boundaries pass the existing retained column and its source index
-into the shared adapter. Match source anchors against the live columns with
-that retained child reinserted for structural validation only. Skip all-root
-redistribution while it is absent; continue ordinary live Files/right target
-and cap enforcement. A genuine structural change while hidden therefore still
-permanently releases allocation, even if undone before reveal. After reveal,
-validate the actual complete structure before redistributing. Root-sash
-completion still releases genuine width edits. Maximize keeps its existing
-enforcement exclusion. No portable default is re-read to recreate released
-source weights.
+enforcement boundaries validate the existing retained column and its source
+index independently of live right-pane allocation, visibility and child-count
+early exits. Match source anchors against the live columns with that retained
+child reinserted for structural validation only. This includes hiding the
+pinned last root so no live right owner remains. Skip all-root redistribution
+while projected; continue ordinary live right target/cap enforcement when a
+right owner is present. A genuine structural change while hidden permanently
+releases allocation, even if undone before reveal. After reveal, validate the
+actual complete structure before redistributing. Root-sash completion still
+releases genuine width edits. Maximize keeps its enforcement exclusion. No
+portable default is re-read to recreate released source weights.
 
 `getPinnedRightColumn` locates the actual live horizontal pinned right root child
 through the existing tree capture and returns its index and every group beneath
@@ -301,6 +302,28 @@ transient ratio source. Mounted constraints, target enforcement, both adjacent
 sash boundaries and width bookkeeping use this membership, as do proactive
 state enforcement and final build fixups. Refresh every child group's cap from
 the current container before restoring the target.
+
+Distinct Files and Changes roots cannot share the `"right"` ID or one width-map
+entry. Preserve the existing first eligible right root as the single policy
+owner, consistent with the one per-environment manual/right-width preference.
+Other eligible tool roots receive their own panel-derived IDs and keep their
+independent flexible source weights. Root order, not generated group IDs or a
+new Files-specific priority, selects that owner. Existing center/contextual
+eligibility remains unchanged.
+
+`normalizeRightColumnOwnership` applies this same non-mutating rule to live
+capture and to successfully validated reusable JSON. Previously saved duplicate
+right IDs therefore remain readable without aliasing their independent
+geometry. Do not rewrite the supplied saved payload, relax validation, add a
+portable field, or introduce per-tool manual preferences.
+
+`pinned-right-constraints.ts` owns only host constraint bookkeeping per live
+Dockview instance/group, separate from source geometry. Construction, restore
+fixups and both enforcement paths refresh every descendant of the single
+policy owner. When ownership changes, restore former groups' component bounds
+only where the host's last bound still applies; retain component changes
+published before or after a host refresh. Disposed groups are discarded, not
+mutated. A flexible tool root must not inherit a stale narrow-workbench cap.
 
 Width-source ownership remains separate in `getReusableRightWidth` and the
 resolvers: manual pixels win, only the matching environment may use a reusable

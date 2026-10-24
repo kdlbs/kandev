@@ -1,166 +1,38 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DockviewApi } from "dockview-react";
-import { movePanelToGroup, splitPanel } from "@/components/settings/layouts/layout-editor-actions";
+import { describe, expect, it, vi } from "vitest";
+import { movePanelToGroup } from "@/components/settings/layouts/layout-editor-actions";
 import {
   resolveCanonicalReviewPanelState,
   syncCanonicalReviewPanel,
 } from "@/components/task/dockview-review-panel-sync";
-import {
-  setupSashDragCapToggle,
-  syncDockviewContainerSize,
-} from "@/components/task/dockview-layout-setup";
-import { validateReusableLayout } from "@/lib/layout/layout-profiles";
+import { setupSashDragCapToggle } from "@/components/task/dockview-layout-setup";
 import { getManualRightWidth, setManualRightWidth } from "@/lib/local-storage";
 import { resolveCustomLayoutPinnedWidths, useDockviewStore } from "./dockview-store";
-import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
   applyLayout,
   clearAllPinnedTargets,
-  fromDockviewApi,
   getRootSplitview,
   setReusableRightTarget,
-  type LayoutState,
 } from "./layout-manager";
-import { disposeDockview, mountDockview } from "./layout-manager/dockview-test-host.test-helpers";
+import {
+  ENV,
+  HEIGHT,
+  REVIEW,
+  PLUGIN,
+  stops,
+  mount,
+  settle,
+  sizes,
+  expectGeometry,
+  sourceFromSettings,
+  build,
+  resize,
+  setupRootGeometryTests,
+} from "@/components/task/dockview-root-geometry.test-helpers";
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
 }));
-
-const ENV = "env-root-proportions";
-const HEIGHT = 700;
-const CHAT = { id: "chat", component: "chat", title: "Agent" };
-const FILES = { id: "files", component: "files", title: "Files" };
-const REVIEW = { id: "pr-detail", component: "pr-detail", title: "PR Details" };
-const PLUGIN = {
-  id: "plugin:kandev-plugin-e2e:notes",
-  component: "plugin-panel",
-  title: "Notes",
-  params: { pluginId: "kandev-plugin-e2e", panelKey: "notes" },
-  tabComponent: "pluginPanelTab",
-};
-const apis: DockviewApi[] = [];
-const stops: Array<() => void> = [];
-type Boundary = "mounted" | "state";
-
-function mount(width: number) {
-  const api = mountDockview(width, HEIGHT);
-  apis.push(api);
-  return api;
-}
-
-async function settle() {
-  await vi.advanceTimersByTimeAsync(100);
-}
-
-function sizes(api: DockviewApi): number[] {
-  const sv = getRootSplitview(api);
-  return Array.from({ length: sv.length }, (_, index) => sv.getViewSize(index));
-}
-
-function expectGeometry(api: DockviewApi, expected: number[]) {
-  expect(sizes(api)).toEqual(expected);
-  const root = api.toJSON().grid.root;
-  expect(root.type).toBe("branch");
-  if (root.type !== "branch" || !Array.isArray(root.data)) throw new Error("Expected root branch");
-  expect(root.data.map((child) => child.size)).toEqual(expected);
-}
-
-function sourceFromSettings(widths: number[], capture: boolean, review = false): LayoutState {
-  const width = widths.reduce((sum, size) => sum + size, 0);
-  const editor = mount(width);
-  applyLayout(
-    editor,
-    {
-      columns: [
-        {
-          id: "center",
-          width: width / 2,
-          groups: [{ id: "group-center", panels: review ? [CHAT, REVIEW] : [CHAT] }],
-        },
-        {
-          id: "right",
-          pinned: true,
-          width: width / 2,
-          groups: [{ id: "group-right-top", panels: [FILES, PLUGIN] }],
-        },
-      ],
-    },
-    new Map([["right", width / 2]]),
-    width,
-    HEIGHT,
-  );
-  if (widths.length === 3) expect(splitPanel(editor, PLUGIN.id, "right")).toBe(true);
-  const sv = getRootSplitview(editor);
-  widths.forEach((size, index) => sv.resizeView(index, size));
-  expect(sizes(editor)).toEqual(widths);
-  useDockviewStore.setState({ api: editor, preMaximizeLayout: null });
-  const source = capture
-    ? (useDockviewStore.getState().captureCurrentLayout() as LayoutState)
-    : fromDockviewApi(editor);
-  expect(validateReusableLayout(source).valid).toBe(true);
-  if (capture)
-    expect(source.columns.flatMap((column) => column.groups).every((group) => !group.id)).toBe(
-      true,
-    );
-  clearAllPinnedTargets();
-  return source;
-}
-
-async function build(source: LayoutState, boundary: Boundary, envId: string | null = ENV) {
-  const api = mount(800);
-  useDockviewStore.setState({
-    api,
-    currentLayoutEnvId: envId,
-    userDefaultLayout: source,
-    userDefaultLayoutProfile: { kind: "custom", id: "root-proportions" },
-    pinnedWidths: new Map(),
-    preMaximizeLayout: null,
-    hiddenRightPane: null,
-    isRestoringLayout: false,
-    sidebarVisible: false,
-  });
-  useDockviewStore.getState().buildDefaultLayout(api);
-  await settle();
-  if (boundary === "mounted") stops.push(setupSashDragCapToggle(api));
-  return api;
-}
-
-function resize(api: DockviewApi, width: number, boundary: Boundary) {
-  if (boundary === "state") {
-    api.layout(width, HEIGHT);
-    enforcePinnedTargets(api, {
-      sidebarVisible: useDockviewStore.getState().sidebarVisible,
-      rightPanelsVisible: true,
-      maximized: false,
-      envId: useDockviewStore.getState().currentLayoutEnvId,
-      hiddenRightPane: useDockviewStore.getState().hiddenRightPane,
-    });
-  } else {
-    const container = document.createElement("div");
-    Object.defineProperties(container, {
-      clientWidth: { value: width },
-      clientHeight: { value: HEIGHT },
-    });
-    syncDockviewContainerSize(api, container);
-  }
-}
-
-beforeEach(() => {
-  vi.useFakeTimers({
-    toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
-  });
-  vi.stubGlobal("innerWidth", 3120);
-  localStorage.clear();
-  sessionStorage.clear();
-  clearAllPinnedTargets();
-});
-afterEach(() => {
-  stops.splice(0).forEach((stop) => stop());
-  apis.splice(0).forEach(disposeDockview);
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-});
+setupRootGeometryTests();
 
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
 describe.each(["mounted", "state"] as const)(

@@ -1,4 +1,4 @@
-import type { DockviewApi } from "dockview-react";
+import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { LayoutOrientation, LayoutState } from "./types";
 import { readRootOrientation, toSerializedDockview } from "./serializer";
 import {
@@ -12,6 +12,7 @@ import {
 import { computePinnedMaxPxFor, LAYOUT_PINNED_MIN_PX } from "./caps";
 import { getPinnedWidth } from "./sizing";
 import { clearPinnedTarget, setPinnedTarget } from "./pinned-targets";
+import { refreshPinnedRightConstraints } from "./pinned-right-constraints";
 
 export type LayoutGroupIds = {
   centerGroupId: string;
@@ -242,18 +243,20 @@ function applyConstraintsToAllPanelGroups(
   col: LayoutState["columns"][number],
   cap: number,
 ): void {
-  const seen = new Set<string>();
+  const groups = new Set<DockviewGroupPanel>();
   for (const group of col.groups) {
     for (const p of group.panels) {
       const pnl = api.getPanel(p.id);
       if (!pnl) continue;
-      if (seen.has(pnl.group.id)) break;
-      seen.add(pnl.group.id);
-      pnl.group.api.setConstraints({
-        maximumWidth: cap,
-        minimumWidth: LAYOUT_PINNED_MIN_PX,
-      });
+      groups.add(pnl.group);
       break;
     }
+  }
+  if (col.id === "right") {
+    refreshPinnedRightConstraints(api, { groups: [...groups], maximumWidth: cap });
+    return;
+  }
+  for (const group of groups) {
+    group.api.setConstraints({ maximumWidth: cap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
 }

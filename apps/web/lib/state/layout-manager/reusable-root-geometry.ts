@@ -2,7 +2,20 @@ import type { DockviewApi } from "dockview-react";
 import type { HiddenRightPane } from "../dockview-right-pane";
 import { getRootSplitview } from "./applier";
 import { fromDockviewApi } from "./serializer";
-import { getReusableRightWidth, resolveReusableRootSizes } from "./pinned-targets";
+import {
+  getReusableRightWidth,
+  resolveReusableRootSizes,
+  validateReusableRootGeometry,
+} from "./pinned-targets";
+
+/** A retained root remains structurally observable even when no pinned column is live. */
+export function validateRetainedRootGeometry(
+  api: DockviewApi,
+  envId: string | null | undefined,
+  hiddenRightPane: HiddenRightPane | null | undefined,
+): void {
+  if (hiddenRightPane) validateReusableRootGeometry(envId, fromDockviewApi(api), hiddenRightPane);
+}
 
 /** Restore owned automatic root weights without rebuilding panels or overriding manual pixels. */
 export function restoreReusableRootGeometry(
@@ -18,10 +31,15 @@ export function restoreReusableRootGeometry(
     hiddenRightPane?: HiddenRightPane | null;
   },
 ): boolean {
-  if (manualWidth !== null || width === undefined || getReusableRightWidth(envId, width) === null)
+  if (
+    hiddenRightPane ||
+    manualWidth !== null ||
+    width === undefined ||
+    getReusableRightWidth(envId, width) === null
+  )
     return false;
   const live = fromDockviewApi(api);
-  const sizes = resolveReusableRootSizes(envId, live, width, rightTarget, hiddenRightPane);
+  const sizes = resolveReusableRootSizes(envId, live, width, rightTarget);
   const sv = getRootSplitview(api);
   if (!sizes || !sv || sizes.length !== sv.length) return false;
   try {

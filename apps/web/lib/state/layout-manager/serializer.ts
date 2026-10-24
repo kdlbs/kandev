@@ -355,6 +355,20 @@ function inferColumnMeta(
   return { columnId: `col-${index}`, isPinned: false };
 }
 
+/** One environment has one manual/right target; other tool roots retain independent flexible weights. */
+export function normalizeRightColumnOwnership(columns: LayoutColumn[]): LayoutColumn[] {
+  const candidates = columns.filter((column) => column.id === "right");
+  if (candidates.length < 2) return columns;
+  // Retain the existing first-root width owner; extra tool roots are independently flexible.
+  const owner = candidates[0];
+  return columns.map((column) => {
+    if (column.id !== "right" || column === owner) return column;
+    const flexible = { ...column, id: column.groups[0].panels[0].id };
+    delete flexible.pinned;
+    return flexible;
+  });
+}
+
 export function readRootOrientation(
   root: { orientation?: unknown } | null | undefined,
   splitview: { orientation?: unknown } | null | undefined,
@@ -401,7 +415,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
     });
   }
 
-  return { columns, rootOrientation };
+  return { columns: normalizeRightColumnOwnership(columns), rootOrientation };
 }
 
 // ─── Ephemeral Filtering ───────────────────────────────────────────────────

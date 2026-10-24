@@ -3,12 +3,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
-import {
-  computeRightMaxPx,
-  getPinnedTarget,
-  LAYOUT_PINNED_MIN_PX,
-  setPinnedTarget,
-} from "@/lib/state/layout-manager";
+import { computeRightMaxPx, getPinnedTarget, setPinnedTarget } from "@/lib/state/layout-manager";
 import {
   getManualRightWidth,
   setEnvLayout,
@@ -23,11 +18,15 @@ import {
   getReusableRightWidth,
   clearReusableRootGeometry,
 } from "@/lib/state/layout-manager/pinned-targets";
-import { restoreReusableRootGeometry } from "@/lib/state/layout-manager/reusable-root-geometry";
+import {
+  restoreReusableRootGeometry,
+  validateRetainedRootGeometry,
+} from "@/lib/state/layout-manager/reusable-root-geometry";
 import {
   getPinnedRightColumn,
   type PinnedRightColumn,
 } from "@/lib/state/layout-manager/pinned-right-column";
+import { refreshPinnedRightConstraints } from "@/lib/state/layout-manager/pinned-right-constraints";
 import { getRootSidebarWidth } from "@/lib/state/layout-manager/applier";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
@@ -166,12 +165,7 @@ function applyRightConstraints(
 ): number {
   const sidebarWidth = getRootSidebarWidth(api);
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
-  for (const group of right.groups) {
-    group.api.setConstraints({
-      maximumWidth,
-      minimumWidth: LAYOUT_PINNED_MIN_PX,
-    });
-  }
+  refreshPinnedRightConstraints(api, { groups: right.groups, maximumWidth });
   return maximumWidth;
 }
 
@@ -185,9 +179,11 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout && !allowDuringRestore) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
+  validateRetainedRootGeometry(api, store.currentLayoutEnvId, store.hiddenRightPane);
+  const right = getPinnedRightColumn(api);
+  if (!right) refreshPinnedRightConstraints(api, null);
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
-  const right = getPinnedRightColumn(api);
   enforcing = true;
   try {
     if (right) {
@@ -228,7 +224,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   const right = getPinnedRightColumn(api);
   if (right) {
     applyRightConstraints(api, measureDockviewGridWidth(api), right);
-  }
+  } else refreshPinnedRightConstraints(api, null);
 }
 
 /**

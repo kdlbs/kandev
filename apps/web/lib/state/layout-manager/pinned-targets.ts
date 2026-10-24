@@ -125,17 +125,15 @@ export function clearReusableRootGeometry(envId: string | null | undefined): voi
   if (reusableRightTarget && reusableRightTarget.envId === envId) reusableRightTarget.root = null;
 }
 
-/** Resolve remaining root widths from source weights, preserving already constrained pinned extents. */
-export function resolveReusableRootSizes(
+/** Validate source membership independently of live pinned columns or width allocation. */
+export function validateReusableRootGeometry(
   envId: string | null | undefined,
   live: LayoutState,
-  width: number,
-  rightTarget: number,
   retainedColumn?: { sourceIndex: number; column: LayoutColumn } | null,
-): number[] | null {
+): boolean {
   const owned = reusableRightTarget;
   if (!owned || owned.envId !== envId || !owned.root || live.rootOrientation === "VERTICAL")
-    return null;
+    return false;
   const geometry = owned.root;
   const columns = retainedColumn
     ? live.columns.toSpliced(retainedColumn.sourceIndex, 0, retainedColumn.column)
@@ -152,12 +150,19 @@ export function resolveReusableRootSizes(
       }
       return survives;
     });
-  if (!matches) {
-    owned.root = null;
-    return null;
-  }
-  // Validate the complete retained structure, but never allocate widths to absent live roots.
-  if (retainedColumn) return null;
+  if (!matches) owned.root = null;
+  return matches;
+}
+
+/** Resolve remaining root widths from source weights, preserving already constrained pinned extents. */
+export function resolveReusableRootSizes(
+  envId: string | null | undefined,
+  live: LayoutState,
+  width: number,
+  rightTarget: number,
+): number[] | null {
+  const geometry = reusableRightTarget?.root;
+  if (!geometry || !validateReusableRootGeometry(envId, live)) return null;
   const pinned = new Map<string, number>();
   geometry.columns.forEach((column, index) => {
     if (column.pinned)

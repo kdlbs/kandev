@@ -1116,6 +1116,161 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     }
   });
 
+  test("round-trips distinct Files and Changes roots created by settings Split Right", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        savedProfile(
+          "tool-roots",
+          "Tool roots",
+          filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+        ),
+      ],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel("Changes");
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.save();
+    const source = await savedLayout(apiClient, "tool-roots");
+    source.columns.forEach((column, index) => {
+      column.width = [400, 800, 400][index];
+    });
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("tool-roots", "Tool roots", source)],
+    });
+    await testPage.reload();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+    expect(await savedLayout(apiClient, "tool-roots")).toEqual(source);
+    await testPage.setViewportSize({ width: 1120, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Distinct tool roots");
+    await openTask(testPage, task.id);
+    for (const width of [1600, 800, 1600, 800, 1600]) {
+      await testPage.setViewportSize({ width: width + 320, height: 900 });
+      await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(width);
+      const expected = width === 800 ? [240, 320, 240] : [400, 800, 400];
+      await expect.poll(() => rootSizes(testPage)).toEqual(expected);
+      await expect.poll(() => serializedRootSizes(testPage)).toEqual(expected);
+      const caps = await testPage.evaluate(() => {
+        const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+        return {
+          files: api?.getPanel("files")?.group.maximumWidth,
+          changes: api?.getPanel("changes")?.group.maximumWidth,
+        };
+      });
+      expect(caps.files).toBe(width === 800 ? 320 : 1120);
+      expect(caps.changes).toBeGreaterThanOrEqual(400);
+    }
+    expect(new Set(source.columns.map((column) => column.id)).size).toBe(3);
+    expect(source.columns.filter((column) => column.pinned)).toHaveLength(1);
+    await testPage.locator(".dv-tab", { hasText: "Files" }).click();
+    await expect(testPage.getByTestId("files-panel")).toBeVisible();
+    await testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+    expect(await savedLayout(apiClient, "tool-roots")).toEqual(source);
+    await prCapture.screenshot("settings-distinct-tool-roots", {
+      caption:
+        "JSON-reloaded Files and Changes roots retain independent proportions after cap release",
+    });
+  });
+
+  test("releases source weights after a real structural edit while pinned-last is hidden", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        savedProfile(
+          "hidden-pinned-last",
+          "Hidden pinned last",
+          filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+        ),
+      ],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel(PROMPT_TITLE);
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Left", exact: true }).click();
+    await layouts.save();
+    const source = await savedLayout(apiClient, "hidden-pinned-last");
+    source.columns.forEach((column, index) => {
+      column.width = [400, 200, 1000][index];
+    });
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("hidden-pinned-last", "Hidden pinned last", source)],
+    });
+    await testPage.setViewportSize({ width: 1120, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Hidden pinned root edit");
+    await openTask(testPage, task.id);
+    await expect.poll(() => rootSizes(testPage)).toEqual([320, 160, 320]);
+    // Preserve the existing normal-UI prerequisite for the unrelated undefined-review serialization defect.
+    const fixtureReview = testPage.locator(".dv-tab", { hasText: "Bitbucket Pull Request #42" });
+    await expect(fixtureReview).toHaveCount(1);
+    await fixtureReview.hover();
+    await fixtureReview.locator(".dv-default-tab-action").click();
+    await expect(fixtureReview).toHaveCount(0);
+    const toggle = testPage.getByTestId("task-right-panels-toggle");
+    await toggle.click();
+    await expect.poll(() => panelPlacement(testPage, "files")).toBeNull();
+    const agent = testPage.locator(".dv-tabs-and-actions-container").filter({
+      has: testPage.getByTestId(`session-tab-${task.session_id}`),
+    });
+    await agent.getByTestId("dockview-add-panel-btn").click();
+    await testPage.getByRole("menuitem", { name: "Plan", exact: true }).click();
+    await expect(testPage.locator(".dv-tab", { hasText: "Plan" })).toBeVisible();
+    // The exposed real Dockview API performs the same split/merge primitives as settings actions.
+    await testPage.evaluate(() => {
+      const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+      const plan = api?.getPanel("plan");
+      if (!plan) throw new Error("Plan panel not available");
+      plan.api.moveTo({ group: plan.group, position: "right" });
+    });
+    await expect.poll(async () => (await rootSizes(testPage)).length).toBe(3);
+    await testPage.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await testPage.evaluate((pluginId) => {
+      const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+      const plan = api?.getPanel("plan");
+      const plugin = api?.getPanel(pluginId);
+      if (!plan || !plugin) throw new Error("Split/merge panels not available");
+      plan.group.api.moveTo({ group: plugin.group, position: "center" });
+      plan.api.close();
+    }, PROMPT_ID);
+    await expect.poll(() => rootSizes(testPage)).toEqual([400, 400]);
+    await toggle.click();
+    await expect.poll(() => panelPlacement(testPage, "files")).not.toBeNull();
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(1600);
+    await expect.poll(() => rootSizes(testPage)).toEqual([480, 120, 1000]);
+    await expect.poll(() => serializedRootSizes(testPage)).toEqual([480, 120, 1000]);
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+    expect(await savedLayout(apiClient, "hidden-pinned-last")).toEqual(source);
+    await prCapture.screenshot("settings-hidden-pinned-last-edited", {
+      caption:
+        "Revealing Files honors the real hidden split/merge edit instead of reviving source weights",
+    });
+  });
+
   test("preserves three-root geometry through conditional tabs and retained pane lifecycle", async ({
     testPage,
     apiClient,

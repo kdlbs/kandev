@@ -12,6 +12,7 @@ import {
 import type { SavedLayout } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
 import { filterLayoutStateByComponents } from "@/lib/state/layout-manager/sanitize-serialized-layout";
+import { normalizeRightColumnOwnership } from "@/lib/state/layout-manager/serializer";
 import {
   PLUGIN_PANEL_COMPONENT,
   PLUGIN_PANEL_PREFIX,
@@ -403,9 +404,13 @@ export function validateReusableLayout(layout: unknown): ReusableLayoutValidatio
   if ((counts.get("chat") ?? 0) !== 1) {
     issues.push(issue("missing-agent", "layout", "Layout must contain exactly one Agent panel"));
   }
-  return issues.length === 0
-    ? { valid: true, layout: normalized, issues: [] }
-    : { valid: false, issues };
+  if (issues.length > 0) return { valid: false, issues };
+  const columns = normalizeRightColumnOwnership(normalized.columns);
+  return {
+    valid: true,
+    layout: columns === normalized.columns ? normalized : { ...normalized, columns },
+    issues: [],
+  };
 }
 
 export function getLayoutProfileCompatibility(profile: SavedLayout): LayoutProfileCompatibility {

@@ -22,6 +22,7 @@ import {
   getRootSidebarWidth,
 } from "./layout-manager/applier";
 import { getPinnedRightColumn } from "./layout-manager/pinned-right-column";
+import { refreshPinnedRightConstraints } from "./layout-manager/pinned-right-constraints";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
 
@@ -186,9 +187,7 @@ function captureRightTarget(
   const rightCap = computeRightMaxPx(measuredWidth, getRootSidebarWidth(api));
   const right = getPinnedRightColumn(api);
   const groups = right?.groups ?? [];
-  for (const group of groups) {
-    group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
-  }
+  refreshPinnedRightConstraints(api, right ? { groups, maximumWidth: rightCap } : null);
   if (!sv || sv.length < 2) return;
   const idx = right?.index ?? sv.length - 1;
   // Pinned right columns use the stable owned/manual/default target, never transient live sizes.
