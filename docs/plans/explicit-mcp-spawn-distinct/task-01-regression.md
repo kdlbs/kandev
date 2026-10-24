@@ -25,7 +25,7 @@ system_design:
 MAIN owns apps/backend/internal/mcp/handlers/spawn_session_integration_test.go. Sequential.
 Use existing SQLite/service/runtime fixtures, valid workflow source binding and committed reuse route. Call the real MCP handler and orchestrator; verify returned, persisted and launched session identity and profile. Include same-profile, inherited-profile, empty-profile and normal-workflow controls. Preserve old session name and recorded workflow route. No new production test helpers.
 
-Verification: `cd apps/backend && go test ./internal/mcp/handlers -run 'TestHandleSpawnSession' -count=1`.
+Verification: `cd apps/backend && go test -trimpath ./internal/mcp/handlers -run 'TestHandleSpawnSession' -count=1`.
 
 ## Results
 

@@ -22,7 +22,7 @@ system_design:
 MAIN owns spawn_session_test.go, mcp/server/server.go, spawn_session_tool_test.go, existing spawn-session-effective-profile requirement and docs/public/agent-communication.md. Sequential.
 Replace superseded spawn workflow-pin expectations, preserve actual launch response projection, explain profile inheritance and distinct session identity. Do not alter create_task or ordinary workflow semantics. Public docs page classification: Explanation.
 
-Verification: `cd apps/backend && go test ./internal/mcp/server -run TestSpawnSessionToolDescribesEffectiveAgentProfile -count=1`; `node --test scripts/validate-public-docs.test.mjs`; `node scripts/validate-public-docs.mjs`; `git diff --check`.
+Verification: `cd apps/backend && go test -trimpath ./internal/mcp/server -run TestSpawnSessionToolDescribesEffectiveAgentProfile -count=1`; `node --test scripts/validate-public-docs.test.mjs`; `node scripts/validate-public-docs.mjs`; `git diff --check`.
 
 ## Results
 
