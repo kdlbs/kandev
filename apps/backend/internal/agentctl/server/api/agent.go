@@ -932,6 +932,9 @@ func (s *Server) sessionMCPServers(requested []types.McpServer) ([]types.McpServ
 	if err != nil {
 		return nil, err
 	}
+	if s.cfg.McpProfile != nil && s.cfg.McpProfile.BuiltinPackages != nil {
+		return s.builtinSessionMCPServers(servers)
+	}
 	if s.mcpServer == nil && s.procMgr.RequiresManagedToolPolicy() {
 		return nil, errors.New("managed conversation MCP broker is unavailable")
 	}
@@ -1025,7 +1028,7 @@ func mcpAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(mcpServer.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if mcpServer.Name == kandevMcpServerName {
+	if mcpServer.Name == kandevMcpServerName || mcpServer.IsInjectedBuiltin() {
 		source = streams.MCPServerSourceKandev
 	}
 	return streams.MCPAttachmentEvidence{

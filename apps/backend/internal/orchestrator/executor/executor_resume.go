@@ -2280,7 +2280,7 @@ func (e *Executor) applyResumeMCPSettings(
 	if err != nil {
 		return err
 	}
-	profileContext, err := e.resolveTaskSessionMCPProfile(ctx, taskID, session, true)
+	profileContext, err := e.launchMCPProfile(ctx, taskID, session, req.StartAgent)
 	if err != nil {
 		return err
 	}

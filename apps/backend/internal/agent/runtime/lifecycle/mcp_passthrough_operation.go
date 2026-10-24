@@ -48,7 +48,7 @@ func buildPassthroughMCPAttempt(execution *AgentExecution, processID string, ope
 			target = streams.SanitizeMCPNetworkTarget(server.URL)
 		}
 		source := streams.MCPServerSourceProfile
-		if server.Name == kandevMCPServerName {
+		if server.Name == kandevMCPServerName || server.IsInjectedBuiltin() {
 			source = streams.MCPServerSourceKandev
 		}
 		evidence := streams.MCPAttachmentEvidence{AttemptID: attemptID, ServerName: server.Name, Source: source, Transport: server.Type, Target: target, OccurredAt: attempt.StartedAt, DefinitionID: server.DefinitionID, DefinitionRevision: server.DefinitionRevision}
