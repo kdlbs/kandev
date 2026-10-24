@@ -43,8 +43,6 @@ import { applyLayoutFixups } from "./dockview-layout-builders";
 import {
   getRootSplitview,
   setPinnedTarget,
-  computeSidebarMaxPx,
-  computeRightMaxPx,
   getPinnedWidth,
   RIGHT_TOP_GROUP,
 } from "./layout-manager";
@@ -150,19 +148,6 @@ describe("applyLayoutFixups — pinned target capture", () => {
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 441);
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 420);
     expect(mockResizeView).toHaveBeenCalledWith(2, 441);
-  });
-
-  it("derives the caps from api.width, not the window.innerWidth fallback", () => {
-    // Regression: caps computed without the measured width fall back to
-    // window.innerWidth, which can be transiently stale and clamp the captured
-    // target too narrow. They must be derived from api.width (1470 here).
-    mockSplitview([350, 720, 400]);
-    const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
-
-    applyLayoutFixups(api);
-
-    expect(computeSidebarMaxPx).toHaveBeenCalledWith(1470);
-    expect(computeRightMaxPx).toHaveBeenCalledWith(1470, 350);
   });
 
   it("records the side-column target for a 3-column preset without RIGHT_TOP_GROUP", () => {

@@ -16,7 +16,11 @@ import {
 import type { LayoutGroupIds } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
 import { resolveEnvRightWidth } from "./layout-manager/right-width";
-import { clearHorizontalPinnedTargets, getRootOrientation } from "./layout-manager/applier";
+import {
+  clearHorizontalPinnedTargets,
+  getRootOrientation,
+  getRootSidebarWidth,
+} from "./layout-manager/applier";
 import { getOwnedRightColumn } from "./layout-manager/owned-right-column";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
@@ -31,11 +35,6 @@ const debugWidths = createDebugLogger("dockview:widths");
  *  `window.innerWidth`. */
 function layoutWidth(api: DockviewApi): number | undefined {
   return api.width > 0 ? api.width : undefined;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function visibleSidebarWidth(sv: any): number {
-  return sv?.length >= 3 ? sv.getViewSize(0) : 0;
 }
 
 /** Best-effort caller chain for the fixups-capture debug log: pull the first
@@ -209,7 +208,7 @@ function captureRightTarget(
   // Reusable owners constrain every group in their actual right root child.
   // Non-owned restores retain the stock-group and generated-preset policies.
   const measuredWidth = layoutWidth(api);
-  const rightCap = computeRightMaxPx(measuredWidth, visibleSidebarWidth(sv));
+  const rightCap = computeRightMaxPx(measuredWidth, getRootSidebarWidth(api));
   const owned = getOwnedRightColumn(api, ownerEnvId);
   const groups =
     owned?.groups ??
@@ -263,7 +262,7 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   debugWidths(
     `fixups-capture caller=${captureCallerChain()} apiW=${api.width} innerW=${innerW} ` +
       `cols=${sv?.length ?? 0} sidebarCap=${Math.round(sidebarCap)} liveSidebar=${r(liveSidebar)} ` +
-      `rightCap=${Math.round(computeRightMaxPx(w, visibleSidebarWidth(sv)))} liveRight=${r(liveRight)} ` +
+      `rightCap=${Math.round(computeRightMaxPx(w, getRootSidebarWidth(api)))} liveRight=${r(liveRight)} ` +
       `sidebarOverCap=${typeof liveSidebar === "number" && liveSidebar > sidebarCap + 1}`,
   );
 }

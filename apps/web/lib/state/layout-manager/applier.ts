@@ -38,6 +38,21 @@ export function getRootOrientation(api: DockviewApi): LayoutOrientation {
   return readRootOrientation(root, root?.splitview);
 }
 
+/** Only a dedicated sidebar leaf at the horizontal root reserves sidebar width. */
+export function getRootSidebarWidth(api: DockviewApi): number {
+  if (getRootOrientation(api) === "VERTICAL") return 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const root = (api as any).component?.gridview?.root;
+  if (!root?.children) return 0;
+  const sidebar = api.getPanel("sidebar")?.group;
+  if (!sidebar) return 0;
+  const index = root?.children?.findIndex(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (child: any) => !child.children && child.view === sidebar,
+  );
+  return index >= 0 ? root.splitview.getViewSize(index) : 0;
+}
+
 /** Drop sidebar/right width targets left by a previous horizontal layout. */
 export function clearHorizontalPinnedTargets(): void {
   clearPinnedTarget("sidebar");
@@ -209,7 +224,7 @@ function configureRightPinned(
     if (col.id === "sidebar" || !col.pinned) continue;
     // Same rationale as `configureSidebarPinned`: derive the cap from the
     // measured dockview width, not `window.innerWidth`.
-    const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+    const sidebarWidth = getRootSidebarWidth(api);
     const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth, sidebarWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;

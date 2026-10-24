@@ -27,6 +27,7 @@ import {
   getOwnedRightColumn,
   type PinnedRightColumn,
 } from "@/lib/state/layout-manager/owned-right-column";
+import { getRootSidebarWidth } from "@/lib/state/layout-manager/applier";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
@@ -91,8 +92,7 @@ function getPinnedRightColumn(api: DockviewReadyEvent["api"]) {
 function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"], width?: number): void {
   const store = useDockviewStore.getState();
   if (!getPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
-  const sv = getRootSplitview(api);
-  const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = getRootSidebarWidth(api);
   setPinnedTarget(
     "right",
     resolveEnvRightWidth(
@@ -104,7 +104,7 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"], width?: num
   );
 }
 
-/** Return whether `target` is the root sash immediately before the pinned right column. */
+/** Only the root sashes immediately before or after the pinned right child own its width. */
 function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget | null): boolean {
   const right = getPinnedRightColumn(api);
   if (!right) return false;
@@ -112,7 +112,10 @@ function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget |
   if (!sash) return false;
   const sv = getRootSplitview(api);
   const rootSashes = sv?.sashes as Array<{ container?: HTMLElement }> | undefined;
-  return rootSashes?.[right.index - 1]?.container === sash;
+  return (
+    (right.index > 0 && rootSashes?.[right.index - 1]?.container === sash) ||
+    (right.index < sv.length - 1 && rootSashes?.[right.index]?.container === sash)
+  );
 }
 
 /** Resize splitview view `idx` back to `target` (clamped to `maximumWidth`)
@@ -144,8 +147,7 @@ function applyRightConstraints(
   measuredWidth: number | undefined,
   right: PinnedRightColumn,
 ): number {
-  const sv = getRootSplitview(api);
-  const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const sidebarWidth = getRootSidebarWidth(api);
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
   for (const group of right.groups) {
     group.api.setConstraints({
@@ -173,7 +175,7 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   try {
     if (right) {
       const measuredWidth = measureDockviewGridWidth(api);
-      const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+      const sidebarWidth = getRootSidebarWidth(api);
       const maximumWidth = applyRightConstraints(api, measuredWidth, right);
       const manualRightWidth = getManualRightWidth(store.currentLayoutEnvId);
       const target =

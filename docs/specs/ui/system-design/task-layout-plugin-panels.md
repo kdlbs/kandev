@@ -264,6 +264,21 @@ with actual manual pixels still first. Canonical group-ID fallback remains
 only for the existing non-owned stock/preset policy. No nested-sidebar policy,
 portable schema or panel eligibility/lifecycle change is introduced.
 
+Root child count is not evidence of an embedded sidebar: settings Split tab >
+Right can produce Agent, Files/Changes and plugin children without any sidebar.
+`getRootSidebarWidth` measures only a dedicated sidebar leaf at a horizontal
+root, returning zero when absent. Application, fixups, automatic target
+resolution and both enforcement boundaries use that same measured reservation;
+neither the Agent nor another ordinary child may reduce the right-column cap.
+This does not introduce pinning for a nested sidebar.
+
+When the owned right child is between other root children, both adjacent root
+sashes resize it. Persist its post-drag width after either boundary, never after
+a nested or unrelated sash. Task environments retain those raw manual pixels
+through later layout/display changes; null-environment staging remains transient
+and does not create a task-scoped manual preference. The ordinary last-column,
+foreign-owner and vertical exclusions retain their existing behavior.
+
 Right-pane reveal and maximize exit also resolve the owned source from the
 current measured container before applying their retained layouts. The resulting
 width map becomes the applied pinned target before scheduled enforcement; a

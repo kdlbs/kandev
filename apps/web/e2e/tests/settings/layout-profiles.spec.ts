@@ -936,6 +936,78 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     });
   });
 
+  test("preserves three-root geometry and the middle Files column's trailing sash width", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    const source = filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    source.columns.forEach((column) => {
+      column.width = 800;
+    });
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("three-root-plugin", "Three root geometry", source)],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel(PROMPT_TITLE);
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.save();
+    await testPage.reload();
+    const saved = await savedLayout(apiClient, "three-root-plugin");
+    expect(saved.columns).toHaveLength(3);
+    expect(saved.columns.map((column) => column.id)).toEqual(["center", "right", PROMPT_ID]);
+    const share =
+      saved.columns[1].width! / saved.columns.reduce((sum, column) => sum + column.width!, 0);
+    await testPage.setViewportSize({ width: 1520, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Three root geometry and sash");
+    await openTask(testPage, task.id);
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    for (const viewport of [1520, 1920, 1520, 1920]) {
+      await testPage.setViewportSize({ width: viewport, height: 900 });
+      const width = viewport - 320;
+      await expect.poll(() => getDockviewContainerWidth(testPage)).toBeCloseTo(width, 0);
+      await expect
+        .poll(async () => (await rootSizes(testPage))[1])
+        .toBeCloseTo(Math.round(share * width), 0);
+      const sizes = await rootSizes(testPage);
+      expect(sizes).toHaveLength(3);
+      const files = await panelPlacement(testPage, "files");
+      const prompt = await panelPlacement(testPage, PROMPT_ID);
+      expect(files?.groupId).not.toBe(prompt?.groupId);
+      expectApproxWidth(files?.width ?? 0, sizes[1], 2);
+      expectApproxWidth(prompt?.width ?? 0, sizes[2], 2);
+    }
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+    await dragRootSash(testPage, "last", 1, 500);
+    await expect
+      .poll(() =>
+        testPage.evaluate(() =>
+          Object.entries(window.sessionStorage)
+            .filter(([key]) => key.startsWith("kandev.dockview.manual-right-width-v1."))
+            .map(([, value]) => JSON.parse(value) as number),
+        ),
+      )
+      .toEqual([500]);
+    await testPage.locator(".dv-tab", { hasText: "Changes" }).click();
+    await expect.poll(async () => (await rootSizes(testPage))[1]).toBe(500);
+    for (const viewport of [1520, 1920]) {
+      await testPage.setViewportSize({ width: viewport, height: 900 });
+      await expect.poll(() => getDockviewContainerWidth(testPage)).toBeCloseTo(viewport - 320, 0);
+      await expect.poll(async () => (await rootSizes(testPage))[1]).toBe(500);
+      expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), 500, 2);
+    }
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    await prCapture.screenshot("settings-three-root-trailing-sash", {
+      caption: "Settings Right split keeps three root groups and a trailing-sash manual width",
+    });
+  });
+
   test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({
     testPage,
     apiClient,

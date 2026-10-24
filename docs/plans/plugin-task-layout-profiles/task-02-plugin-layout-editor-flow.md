@@ -864,3 +864,121 @@ Round 5 accepted generated-group geometry remediation (2026-10-24, Sol 6.1):
   errors, both owning requirement/design references accepted. Whitespace passed.
   Public guidance and historical CHANGELOG remain unchanged because this restores
   the existing split, resize and reusable-profile contract.
+
+Round 6 accepted three-root geometry remediation (2026-10-24, Sol 6.1):
+
+- Starting HEAD `bcba47a0d0cd9f0fefb547c91e6c943a32478c72`, initially clean.
+  Session metadata again confirmed exact profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`. No workers or model substitution.
+  The parent authorized both P2 findings, not another planning checkpoint.
+- F1 traced the root-count sidebar assumption through application, mounted
+  automatic targets/constraints, final fixups and proactive enforcement.
+  Real settings `splitPanel(plugin, "right")` and task
+  `captureCurrentLayout`/`filterEphemeral` produce valid Agent / Files+Changes /
+  plugin root children, including all-generated IDs. Neither three children
+  nor the Agent's width proves a sidebar exists.
+- F1 RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-three-root.plugin-layout.test.ts`:
+  6 failed, 4 passed before production edits, after correcting the real-sidebar
+  fixture's total-width arithmetic. Direct application imposed cap 320 instead
+  of 720 at 1200px; mounted same-size sync changed Files 400 -> 320.
+  Unequal 800/600/200 source geometry changed Files 600 -> 275; a real manual
+  500px preference likewise hit the fictitious 320px cap. Proactive and real
+  sidebar controls passed. Minimum fix GREEN: 10 passed.
+- F1 adds `getRootSidebarWidth` in `applier.ts`: only a dedicated sidebar leaf
+  at a horizontal root reserves its measured width. Application, fixups,
+  automatic resolution and both enforcement paths share this fact. Missing
+  sidebar/root geometry yields zero; no new nested-sidebar policy, cap formula,
+  schema or non-owned saved-layout policy. Legacy generated-preset root-count
+  classification and debug-only column labels were traced and left unchanged:
+  neither supplies the owned sidebar reservation.
+- F2 RED, the same command after adding sash cases: 2 failed, 18 passed before
+  its production edit. A real trailing root sash changed the middle Files
+  child to 500px, but manual storage stayed null and the target stayed 533.
+  Leading-sash controls passed. Null-owner staging correctly has no persistent
+  manual-width slot; its transient trailing target still incorrectly stayed
+  533. The null tests preserve that existing storage contract.
+- F2 recognizes both adjacent root sashes and captures the owned child's actual
+  post-drag width. GREEN: 20 passed. Permanent cases assert raw 500px task-env
+  storage, target and actual width after a title/layout event and display
+  changes; null staging stays transient. Nested height, unrelated root,
+  VERTICAL and foreign/null-owner mismatch controls pass. Prior ordinary
+  last-column, below-split, capture/reuse and restore coverage remains intact.
+- Final affected command, after the last production edit, from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  lib/state/dockview-three-root.plugin-layout.test.ts
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+  lib/state/layout-manager components/settings/layouts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts`:
+  37 files, 469 tests passed. Removed one old mocked cap-helper forwarding
+  assertion rather than re-pinning its arguments; real application cap/extent
+  and actual-sidebar consumer regressions now cover that boundary.
+- Seven changed TS/TSX files passed `pnpm exec prettier --write` and
+  `pnpm exec eslint --max-warnings 0`:
+  `components/task/dockview-layout-setup.ts`,
+  `lib/state/dockview-pinned-enforce.ts`,
+  `lib/state/dockview-layout-builders.ts`,
+  `lib/state/layout-manager/applier.ts`,
+  `lib/state/dockview-three-root.plugin-layout.test.ts`,
+  `lib/state/dockview-layout-builders-fixups.test.ts`,
+  `e2e/tests/settings/layout-profiles.spec.ts`.
+  `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+  LSP status was retried: no server configured. Existing exported signatures
+  were not changed; the new helper's callers were traced directly.
+- Fresh managed desktop verification used:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **22 passed**, one clean aggregate run, no isolated recovery needed.
+  Backend, Vite production assets and packaged fixture were rebuilt.
+  Log: `kandev-run.e2e.xlVX7Px4.log` in the task-owned `tmp` directory above.
+- Added the actual settings Split tab > Right, custom save/reload and fresh
+  task scenario without replacing the previous Below-split test. It checks
+  three distinct root children, saved source share and Files/plugin content
+  across repeated 1520/1920px viewports (1200/1600px workbench). The existing
+  legal `dragRootSash` helper presses/releases the trailing root sash while
+  resizing the real middle child to 500px; it does not write targets or storage.
+  The scenario asserts actual raw session storage `[500]`, live width after
+  tab/layout activity and subsequent narrow/wide display changes.
+- Inspected the successful desktop screenshot: Agent, middle Files/Changes and
+  visible packaged Prompt History fixture occupy separate root children; the
+  middle child retains 500px after the trailing drag and later expansion.
+  Preserved it and the successful prior Below-split image under
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round6-visual/`.
+- Existing PR-tab normal-UI close setup remains scoped to geometry isolation
+  in the earlier hide/maximize scenario. No PR-tab-present reveal claim,
+  serialization relaxation, PR-tab special case or review coverage deletion.
+  Prior runtime limits and evidence remain unchanged; no full `make test` or
+  real Prompt History package smoke was repeated. Managed task-owned storage
+  avoids the previously full default Go-cache filesystem; no primary runtime,
+  settings, shared cache or unrelated lock was changed.
+- Mobile reused the same freshly built artifacts and task-owned storage:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, log `kandev-run.e2e.4N6KVljh.log`.
+  Inspected the successful shared phone editor capture; custom/override images
+  are retained with desktop evidence in `round6-visual/`. This remediation
+  adds no new phone composition or task-layout customization behavior.
+  Both managed runs completed their owned-runtime teardown.
+- Companion design clarifies actual root sidebar reservation and both adjacent
+  root sash ownership, including transient null staging. Requirement/design
+  lifecycle statuses and all earlier evidence remain unchanged. Public guidance
+  and historical CHANGELOG are unchanged: this restores existing split, manual
+  width and reusable-profile behavior. Normal-hook delivery evidence is retained
+  outside the checkout in
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round6-hook-receipt.json`
+  and its companion `round6-commit-hooks.log`.
+- Documentation gates: `python3 scripts/list-docs.py validate` passed
+  (386 decisions, 1646 specifications);
+  `python3 scripts/lint-spec-files.py --all` passed;
+  `python3 scripts/lint-spec-files.test.py` passed all 36 tests;
+  `git diff --check` passed.
