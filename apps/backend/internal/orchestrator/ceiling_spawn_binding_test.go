@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/stretchr/testify/require"
@@ -15,6 +16,12 @@ func TestCeilingReplay_PreservesAdditionalSpawnBinding(t *testing.T) {
 		t.Run(map[bool]string{true: "additional spawn", false: "ordinary selector"}[preserve], func(t *testing.T) {
 			ctx := context.Background()
 			f := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+			var launched *executor.LaunchAgentRequest
+			launchAgent := f.agentMgr.launchAgentFunc
+			f.agentMgr.launchAgentFunc = func(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				launched = req
+				return launchAgent(ctx, req)
+			}
 			source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", AgentProfileID: "profile-a"}
 			f.stepGetter.steps[source.ID] = source
 			require.NoError(t, f.svc.recordWorkflowSourceBinding(ctx, "t1", source, f.current))
@@ -36,7 +43,10 @@ func TestCeilingReplay_PreservesAdditionalSpawnBinding(t *testing.T) {
 			require.NoError(t, err)
 			task, err := f.repo.GetTask(ctx, "t1")
 			require.NoError(t, err)
-			require.Equal(t, ceilingReplaySucceeded, f.svc.replayCeilingDeferral(ctx, task, deferral))
+			f.svc.replayCeilingDeferral(ctx, task, deferral)
+			require.NotNil(t, launched, "persisted replay must reach the actual external-runtime boundary")
+			require.NotEqual(t, f.current.ID, launched.SessionID)
+			require.Equal(t, profile, launched.AgentProfileID)
 			after, err := f.repo.GetWorkflowSessionBinding(ctx, "t1", "step:step-a")
 			require.NoError(t, err)
 			sessions, err := f.repo.ListTaskSessions(ctx, "t1")
