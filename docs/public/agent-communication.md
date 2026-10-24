@@ -46,7 +46,20 @@ By default, the message goes to the task's primary session. To target another se
 
 - Pass its `session_id` to `message_task_kandev`. This also works for a sibling session on your task.
 - `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
-- The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
+
+An explicit spawn creates a distinct session even when the workflow step is configured to reuse an earlier session.
+
+Kandev selects the spawn profile in this order:
+
+1. The supplied profile, which takes precedence over workflow profiles and session targets.
+2. The verified same-task session's profile.
+3. The target task's primary-session profile.
+
+If no profile is available, normal launch defaults or errors apply. Ordinary workflow launches keep their configured profile precedence and session reuse.
+
+The returned `agent_profile_id` is the actual profile persisted and launched on the distinct new session.
+
+Additional spawns preserve the workflow's existing source-session binding, including when the current step pins a profile. Later workflow steps can still target the original conversation.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
@@ -284,7 +297,7 @@ These tools complement cross-task communication for common coordination patterns
 | `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
-| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |
+| `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the actual profile used by the distinct new session; use the `session_id` field to message the new session directly |
 | `move_task_kandev` | Hand off a task to a workflow step with optional one-time entry options for the receiving agent |
 | `create_task_plan_kandev` | Record an agreed implementation plan (both tasks can create/update their own plans) |
 | `get_task_plan_kandev` | Read the whole plan or an exact bounded range using `offset`/`limit`; pin later pages with `expected_version` |

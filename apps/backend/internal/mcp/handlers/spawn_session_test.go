@@ -130,7 +130,7 @@ func TestHandleSpawnSessionReportsEffectiveAgentProfile(t *testing.T) {
 	assert.Equal(t, "requested-profile", orch.launchCalls[0].AgentProfileID)
 }
 
-func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
+func TestHandleSpawnSessionPreservesExplicitProfileOnPinnedStep(t *testing.T) {
 	svc, repo, _, workflowRepo := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()
 	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
@@ -179,7 +179,7 @@ func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
 	require.NoError(t, repo.CreateTaskSession(ctx, session))
 
 	h, orch := newMessageTaskHandler(t, svc, repo)
-	orch.launchResponseProfileID = step.AgentProfileID
+	orch.launchResponseProfileID = "explicit-profile"
 	payload := spawnPayload(target.ID, "use the pinned profile", sender.ID, session.ID)
 	payload["agent_profile_id"] = "explicit-profile"
 	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
@@ -189,7 +189,8 @@ func TestHandleSpawnSessionReportsStepPinnedAgentProfile(t *testing.T) {
 
 	var out map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &out))
-	assert.Equal(t, "step-pinned-profile", out["agent_profile_id"])
+	assert.Equal(t, "explicit-profile", out["agent_profile_id"])
+	assert.True(t, orch.launchCalls[0].ProfileExplicit)
 	assert.Equal(t, "explicit-profile", orch.launchCalls[0].AgentProfileID)
 }
 

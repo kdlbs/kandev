@@ -20,13 +20,16 @@ Agents use `spawn_session_kandev` to start another session with a selected agent
 #### Acceptance criteria
 
 - **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.1:** `spawn_session_kandev` reports the effective agent profile for each successful launch.
-- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.2:** The reported profile is the profile on the new session, after workflow profile resolution.
-- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.3:** A workflow step launch profile keeps its current precedence. A pinned step profile wins first. Otherwise, the workflow default wins on that step.
-- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.4:** Without a workflow launch profile, an explicit `agent_profile_id` keeps its current precedence.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.2:** The reported profile equals the profile persisted and launched on the distinct new session.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.3:** An explicit spawn bypasses workflow session-target reuse. A non-empty resolved spawn profile wins over workflow step pins, defaults, and session targets.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.4:** Resolve the spawn profile from the supplied ID, then a verified same-task caller session, then the target primary session. If none resolves, preserve normal launch defaults or errors without reusing a workflow-targeted session.
 - **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.5:** Without an explicit profile, the current inheritance rules remain unchanged.
 - **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.6:** The tool description explains the precedence and the response field.
-- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.7:** **GIVEN** an unpinned workflow step with workflow default A, **WHEN** a caller requests profile B, **THEN** the new session and response use profile A.
-- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.8:** **GIVEN** a workflow step pinned to profile A, **WHEN** a caller requests profile B, **THEN** the new session and response use profile A.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.7:** **GIVEN** an unpinned workflow step with workflow default A, **WHEN** a caller requests profile B, **THEN** a distinct new session and response use profile B.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.8:** **GIVEN** a workflow step pinned to profile A, **WHEN** a caller requests profile B, **THEN** a distinct new session and response use profile B.
+
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.9:** **GIVEN** existing source session S and a step targeting that source with reuse, **WHEN** an explicit MCP spawn succeeds, **THEN** it returns a persisted and launched session N != S and adds exactly one session. Naming N must not rename S or replace the recorded workflow route.
+- **AC-AGENTS-SPAWN-SESSION-EFFECTIVE-PROFILE-001.10:** **GIVEN** the same reuse target, **WHEN** an ordinary workflow launch runs without explicit spawn intent, **THEN** it may still reuse S.
 
 ## Migrated source detail
 
@@ -39,9 +42,9 @@ Without this guarantee, a caller can receive confirmation for one profile while 
 ## What
 
 - `spawn_session_kandev` reports the effective agent profile for each successful launch.
-- The reported profile is the profile on the new session, after workflow profile resolution.
-- A workflow step launch profile keeps its current precedence. A pinned step profile wins first. Otherwise, the workflow default wins on that step.
-- Without a workflow launch profile, an explicit `agent_profile_id` keeps its current precedence.
+- The reported profile equals the profile persisted and launched on the distinct new session.
+- An explicit spawn bypasses workflow session-target reuse. A non-empty resolved spawn profile wins over workflow step pins, defaults, and session targets.
+- Resolve the spawn profile from the supplied ID, then a verified same-task caller session, then the target primary session. If none resolves, preserve normal launch defaults or errors without reusing a workflow-targeted session.
 - Without an explicit profile, the current inheritance rules remain unchanged.
 - The tool description explains the precedence and the response field.
 
@@ -58,7 +61,7 @@ The successful `spawn_session_kandev` response has this shape:
 }
 ```
 
-`agent_profile_id` identifies the effective profile on the new session. It does not echo an earlier profile choice when workflow resolution selects another profile.
+`agent_profile_id` identifies the actual profile persisted and launched on the new session. The response remains authoritative rather than merely echoing the request.
 
 ## Failure modes
 
@@ -73,17 +76,22 @@ The successful `spawn_session_kandev` response has this shape:
 
 ## Scenarios
 
-- **GIVEN** an unpinned workflow step with workflow default A, **WHEN** a caller requests profile B, **THEN** the new session and response use profile A.
-- **GIVEN** a workflow step pinned to profile A, **WHEN** a caller requests profile B, **THEN** the new session and response use profile A.
+- **GIVEN** no resolved caller or primary profile and a workflow session target, **WHEN** no normal launch default is available, **THEN** spawn returns a launch error and never starts or renames the existing target session.
+- **GIVEN** no resolved caller or primary profile and an ordinary step with a valid launch default, **WHEN** spawn succeeds, **THEN** it creates a distinct session with that default.
+- **GIVEN** a reusable source session with the same requested profile, **WHEN** spawn succeeds, **THEN** session identity is still distinct.
+
+- **GIVEN** an unpinned workflow step with workflow default A, **WHEN** a caller requests profile B, **THEN** a distinct new session and response use profile B.
+- **GIVEN** a workflow step pinned to profile A, **WHEN** a caller requests profile B, **THEN** a distinct new session and response use profile B.
 - **GIVEN** no workflow launch profile, **WHEN** a caller requests profile B, **THEN** the new session and response use profile B.
-- **GIVEN** no explicit profile or workflow launch profile, **WHEN** a same-task session spawns another session, **THEN** the new session and response use the inherited profile.
+- **GIVEN** no explicit profile, **WHEN** a same-task session spawns another session, **THEN** the new session and response use the inherited profile.
 
 ## Out of scope
 
-- Changing workflow, step, explicit, or inherited profile precedence.
+- Changing ordinary workflow launches, which retain workflow profile precedence and intentional session reuse.
+- Office scheduler ownership, profile validation, or live deployment changes.
 - Changing `create_task_kandev`. Its workflow-default response behavior is already covered by the MCP-created task profile spec.
 - Changing session persistence, executor selection, or profile validation.
 
 ## Implementation plan
 
-See [`../../plans/spawn-session-effective-profile/plan.md`](../../../plans/spawn-session-effective-profile/plan.md).
+The original effective-response work remains recorded in [`spawn-session-effective-profile`](../../../plans/spawn-session-effective-profile/plan.md). The distinct-session repair is recorded in [`explicit-mcp-spawn-distinct`](../../../plans/explicit-mcp-spawn-distinct/plan.md). Its explicit-spawn precedence supersedes the original workflow override scenarios; effective-response projection remains required.
