@@ -339,6 +339,7 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 // dropped; a task.created enqueue clears the tombstone (theoretical ID
 // reuse).
 func (s *Service) enqueueTaskPublication(ctx context.Context, taskID, eventType string, publish func(context.Context)) {
+	ctx = models.WithOfficeHumanCompletionIntent(ctx, models.OfficeHumanCompletionIntent{})
 	s.taskPublicationMu.Lock()
 	if s.taskPublications == nil {
 		s.taskPublications = make(map[string]*taskPublicationQueue)

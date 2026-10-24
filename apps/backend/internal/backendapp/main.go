@@ -1909,6 +1909,11 @@ func wireOfficeSvcsDependencies(
 	// Wire the workflow-domain decisions store so approve/request-changes
 	// route to workflow_step_decisions (ADR 0005 Wave E).
 	services.OfficeSvcs.Dashboard.SetDecisionStore(repos.Workflow)
+	configureOfficeHumanCompletionGuard(repos.Task, repos.Office, repos.Workflow)
+	if !repos.Task.OfficeHumanCompletionGuardConfigured() {
+		panic("Office completion gate not configured")
+	}
+	services.OfficeSvcs.Dashboard.SetTaskHumanDoneCompleter(officeHumanDoneCompleterAdapter{tasks: services.Task})
 	// Wire the event bus into the dashboard service for status-change events.
 	services.OfficeSvcs.Dashboard.SetEventBus(eventBus)
 	services.OfficeSvcs.Channels.SetEventBus(eventBus)
@@ -1932,6 +1937,9 @@ func wireOfficeSvcsDependencies(
 	// Route an Office task's terminal-step completion through Office's own
 	// status pipeline (approval gate included) instead of a raw state write.
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
+	// A human move that would complete an Office task is refused while its
+	// approvers are pending.
+	services.Task.SetOfficeApprovalGuard(officeApprovalGuardAdapter{reader: services.OfficeSvcs.Dashboard})
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the terminal-shape recorder so a
@@ -1943,6 +1951,11 @@ func wireOfficeSvcsDependencies(
 	// Route the Office "No parent" mutation through the canonical task detach
 	// operation so inherited workspace sharing remains valid.
 	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
+	// A user's Done request on a task before its final workflow step moves the
+	// task to that step through the human move path.
+	if services.Workflow != nil {
+		services.OfficeSvcs.Dashboard.SetTaskFinalStepMover(officeFinalStepMoverAdapter{tasks: services.Task, steps: services.Workflow})
+	}
 	// Publish task.updated for Office status changes so WS-driven UI outside
 	// the Office board (All-Workflows kanban, task views, task/statussummary)
 	// sees the mutation instead of rendering stale state until a refetch.

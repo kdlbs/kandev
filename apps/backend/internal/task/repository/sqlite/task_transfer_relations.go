@@ -2,7 +2,9 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"sort"
 	"strings"
 
@@ -24,7 +26,7 @@ func (r *Repository) lockTaskTransferRelations(
 		return err
 	}
 	tableSet := map[string]struct{}{
-		"workspaces": {}, "workflows": {}, "workflow_steps": {}, "task_transfer_operations": {},
+		"tasks": {}, "task_step_transitions": {}, "workspaces": {}, "workflows": {}, "workflow_steps": {}, "task_transfer_operations": {},
 		"task_transfer_audit": {}, "task_transfer_serialization": {},
 	}
 	if inventory.labels {
@@ -47,7 +49,11 @@ func (r *Repository) lockTaskTransferRelations(
 		tables = append(tables, `"`+strings.ReplaceAll(table, `"`, `""`)+`"`)
 	}
 	sort.Strings(tables)
-	_, err := tx.ExecContext(ctx, `LOCK TABLE `+strings.Join(tables, ", ")+` IN SHARE ROW EXCLUSIVE MODE`)
+	_, err := tx.ExecContext(ctx, `LOCK TABLE `+strings.Join(tables, ", ")+` IN EXCLUSIVE MODE NOWAIT`)
+	var busy *pgconn.PgError
+	if errors.As(err, &busy) && busy.Code == "55P03" {
+		return fmt.Errorf("%w: transfer relations busy", repoerrors.ErrTaskTransferConflict)
+	}
 	return err
 }
 

@@ -5,7 +5,11 @@ import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
-import { updateTaskStatusOrTranslateGate } from "@/lib/api/domains/office-status-gate";
+import {
+  finalStepMoveNotice,
+  updateTaskStatusOrTranslateGate,
+} from "@/lib/api/domains/office-status-gate";
+import { toast } from "@/lib/toast/sonner";
 import type { Task, TaskStatus } from "@/app/office/tasks/[id]/types";
 import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
@@ -51,9 +55,12 @@ export function StatusPicker({ task }: StatusPickerProps) {
     setOpen(false);
     if (value === current) return;
     try {
-      await mutate(task.id, { status: value }, () =>
-        updateTaskStatusOrTranslateGate(task.id, value),
-      );
+      await mutate(task.id, { status: value }, async () => {
+        const outcome = await updateTaskStatusOrTranslateGate(task.id, value);
+        const notice = finalStepMoveNotice(value, outcome);
+        if (notice) toast.info(notice);
+        return outcome;
+      });
     } catch {
       /* toast already raised by hook */
     }

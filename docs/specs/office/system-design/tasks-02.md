@@ -23,7 +23,7 @@ This design preserves the technical source detail for `REQ-OFFICE-TASKS-001` dur
 
 ## Failure modes
 
-- **Approver gate violation.** A `done` transition while approvers are pending is rejected with 409 and a typed error naming the missing approvals. The UI redirects the transition to `in_review` as a convenience.
+- **Approver gate violation.** A `done` transition while approvers are pending is rejected with 409 and a typed error naming the missing approvals. The UI redirects the transition to `in_review` as a convenience. A user's `done` request on a task before its final workflow step is handled by [human Done](human-done-final-step.md) instead: the task moves to the final step, and a refusal changes nothing.
 - **Blocker cycle.** Adding a blocker that would create a cycle returns 400 with the cycle path. The frontend rolls back the optimistic chip and toasts the message.
 - **Optimistic property edit failure.** The UI reverts the row to the prior value and shows a toast. No partial server state.
 - **ACP `session/load` failure.** Fall back to `session/new`, overwrite the stored `acp_session_id`, treat the conversation as fresh. Row identity at the kandev level persists; chat history at the office level (comments, decision rows, timeline events) is unaffected.

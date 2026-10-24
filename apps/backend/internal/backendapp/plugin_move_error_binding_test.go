@@ -40,14 +40,17 @@ type pluginMoveErrorBindingHarness struct {
 	eventBus    *bus.MemoryEventBus
 }
 
-func newPluginMoveErrorBindingHarness(t *testing.T) *pluginMoveErrorBindingHarness {
+func newPluginMoveErrorBindingHarness(t *testing.T, databases ...*sqlx.DB) *pluginMoveErrorBindingHarness {
 	t.Helper()
-	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "plugin-move-error-binding.db"))
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+	var database *sqlx.DB
+	if len(databases) > 0 {
+		database = databases[0]
+	} else {
+		dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "plugin-move-error-binding.db"))
+		require.NoError(t, err)
+		database = sqlx.NewDb(dbConn, "sqlite3")
+		t.Cleanup(func() { _ = database.Close() })
 	}
-	database := sqlx.NewDb(dbConn, "sqlite3")
-	t.Cleanup(func() { _ = database.Close() })
 	taskRepo, cleanup, err := repository.Provide(database, database, nil)
 	if err != nil {
 		t.Fatalf("task repository: %v", err)
