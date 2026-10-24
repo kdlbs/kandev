@@ -51,6 +51,27 @@ coverage, inspect the agent's command output; qualify unavailable provider or
 executor variants. Record exact head, image/build evidence, cleanup, and any
 unrun checks before delivery.
 
+Run the repository checks from its root:
+
+```bash
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+python3 scripts/lint-spec-files.py --all
+node --test .github/scripts/pr-docs.test.cjs
+```
+
+Build the example on a supported task-scoped Docker daemon:
+
+```bash
+docker build --no-cache -f examples/docker-server-extension/Dockerfile \
+  -t kandev-postgresql-client:0.98.0 examples/docker-server-extension
+```
+
+Use the commands in the [public Docker guide](../../public/docker.md#check-an-extension-in-a-disposable-deployment)
+for agent-command, recreation, and cleanup checks. The required PR
+documentation-coverage status must be read back from the exact PR head after
+publication; the local validator unit tests alone do not establish that status.
+
 ## Results to date
 
 - The preceding documentation candidate passed 63 public-doc tests and the
