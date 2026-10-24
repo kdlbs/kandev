@@ -3167,6 +3167,26 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		((running != nil && executorRunningStatusMayOwnAgent(running.Status)) || e.agentManager.IsAgentRunningForSession(ctx, session.ID)) {
 		return nil, ErrExecutionAlreadyRunning
 	}
+	// agentctl refuses to configure a live subprocess, so starting one here can
+	// only fail the session and force-stop the agent. The check above misses
+	// sessions parked in WAITING_FOR_INPUT (clarification timeout, cancelled
+	// turn), whose process stays alive.
+	if e.agentManager.IsAgentRunningForSession(ctx, session.ID) {
+		if refuseIfAgentRunning || !e.parkedOfficeSession(ctx, task.ID, session) {
+			return nil, ErrExecutionAlreadyRunning
+		}
+		// An Office run is a fresh wake for a parked agent that is not mid-turn:
+		// release it so the caller cold-resumes the ACP session, as it does after
+		// every completed office turn.
+		e.logger.Info("releasing parked office agent before wake launch",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.String("agent_execution_id", executionID))
+		if err := e.agentManager.StopAgent(ctx, executionID, false); err != nil {
+			return nil, fmt.Errorf("release parked office agent: %w", err)
+		}
+		return nil, ErrStaleExecution
+	}
 	if refuseIfAgentRunning && e.executorHasActiveAgent(ctx, session, running) {
 		return nil, ErrExecutionAlreadyRunning
 	}
@@ -3274,6 +3294,16 @@ func executorRunningStatusMayOwnAgent(status string) bool {
 	default:
 		return false
 	}
+}
+
+// parkedOfficeSession reports whether session belongs to an Office task and is
+// parked waiting for input, i.e. its live agent is between turns.
+func (e *Executor) parkedOfficeSession(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	if session.State != models.TaskSessionStateWaitingForInput {
+		return false
+	}
+	dbTask, err := e.repo.GetTask(ctx, taskID)
+	return err == nil && dbTask != nil && dbTask.IsFromOffice
 }
 
 func (e *Executor) executorHasActiveAgent(
