@@ -17,6 +17,7 @@ import type { LayoutGroupIds } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
 import { resolveEnvRightWidth } from "./layout-manager/right-width";
 import { clearHorizontalPinnedTargets, getRootOrientation } from "./layout-manager/applier";
+import { getOwnedRightColumn } from "./layout-manager/owned-right-column";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
 
@@ -155,8 +156,22 @@ function resolveRightTarget(
   );
 }
 
-/** Constrain the default layout's right column groups and record the side
- *  column's target width, clamped to the cap.
+function restorePinnedRightTarget(
+  sv: { getViewSize: (index: number) => number; resizeView: (index: number, size: number) => void },
+  index: number,
+  target: number,
+): void {
+  const current = sv.getViewSize(index);
+  if (!Number.isFinite(current) || current <= 0 || Math.abs(current - target) <= 1) return;
+  try {
+    sv.resizeView(index, target);
+  } catch {
+    /* dockview rejects unreachable sizes — ignore */
+  }
+}
+
+/** Constrain stock right groups or every group in the owned reusable right root child,
+ *  then record its target width, clamped to the cap.
  *
  *  For the DEFAULT preset (the right column is pinned — identified by the
  *  well-known RIGHT_TOP_GROUP), the target is anchored to a STABLE width: the
@@ -191,34 +206,23 @@ function captureRightTarget(
   manualRightWidth: number | null | undefined,
   ownerEnvId: string | null | undefined,
 ): void {
-  // Constrain the default preset's right column groups (stable well-known IDs).
-  // Other presets' side columns aren't pinned and carry no max-width cap.
-  // Use the measured grid width, not the window.innerWidth fallback (see
-  // captureSidebarTarget).
+  // Reusable owners constrain every group in their actual right root child.
+  // Non-owned restores retain the stock-group and generated-preset policies.
   const measuredWidth = layoutWidth(api);
   const rightCap = computeRightMaxPx(measuredWidth, visibleSidebarWidth(sv));
-  for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
-    const group = api.groups.find((g) => g.id === gid);
-    if (group) {
-      group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
-    }
+  const owned = getOwnedRightColumn(api, ownerEnvId);
+  const groups =
+    owned?.groups ??
+    api.groups.filter((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP);
+  for (const group of groups) {
+    group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
   if (!sv || sv.length < 2) return;
-  const idx = sv.length - 1;
-  // Default preset (pinned right column): anchor to saved-or-default, resize the
-  // column to it, and record it as the target. Never the live size. Works for
-  // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
-  // hidden) layouts since the right column is always at sv.length-1.
-  if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
+  const idx = owned?.index ?? sv.length - 1;
+  // Pinned right columns use the stable owned/manual/default target, never transient live sizes.
+  if (groups.length > 0) {
     const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth, ownerEnvId);
-    const cur = sv.getViewSize(idx);
-    if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
-      try {
-        sv?.resizeView?.(idx, target);
-      } catch {
-        /* dockview rejects unreachable sizes — ignore */
-      }
-    }
+    restorePinnedRightTarget(sv, idx, target);
     setPinnedTarget("right", target);
     return;
   }

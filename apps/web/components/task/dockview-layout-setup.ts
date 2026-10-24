@@ -23,6 +23,10 @@ import {
   resolveResponsiveRightWidth,
 } from "@/lib/state/layout-manager/right-width";
 import { getReusableRightWidth } from "@/lib/state/layout-manager/pinned-targets";
+import {
+  getOwnedRightColumn,
+  type PinnedRightColumn,
+} from "@/lib/state/layout-manager/owned-right-column";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
@@ -69,12 +73,16 @@ let enforcing = false;
 let sashDragging = false;
 let rightSashDragging = false;
 
-/** Return whether the layout currently shows the pinned right column (the
- *  right-top or right-bottom group). Right-width policy is horizontal only: a
- *  vertical root's children are rows, so those groups are never a pinned column. */
-function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
-  if (getRootOrientation(api) === "VERTICAL") return false;
-  return api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+/** Owned reusable layouts use the actual right root child; other layouts retain stock group policy. */
+function getPinnedRightColumn(api: DockviewReadyEvent["api"]) {
+  if (getRootOrientation(api) === "VERTICAL") return null;
+  const owned = getOwnedRightColumn(api, useDockviewStore.getState().currentLayoutEnvId);
+  if (owned) return owned;
+  const groups = api.groups.filter((group) =>
+    [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id),
+  );
+  const sv = getRootSplitview(api);
+  return groups.length && sv ? { index: sv.length - 1, groups } : null;
 }
 
 /** Recompute the automatic right-column pinned target from the measured grid
@@ -82,7 +90,7 @@ function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
  *  user has set a manual right width. */
 function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"], width?: number): void {
   const store = useDockviewStore.getState();
-  if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
+  if (!getPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
   const sv = getRootSplitview(api);
   const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
   setPinnedTarget(
@@ -96,15 +104,15 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"], width?: num
   );
 }
 
-/** Return whether `target` is the sash separating the pinned right column from
- *  the rest of the grid (the last root splitview sash). */
+/** Return whether `target` is the root sash immediately before the pinned right column. */
 function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget | null): boolean {
-  if (!hasPinnedRightColumn(api)) return false;
+  const right = getPinnedRightColumn(api);
+  if (!right) return false;
   const sash = (target as HTMLElement | null)?.closest(".dv-sash");
   if (!sash) return false;
   const sv = getRootSplitview(api);
   const rootSashes = sv?.sashes as Array<{ container?: HTMLElement }> | undefined;
-  return rootSashes?.[rootSashes.length - 1]?.container === sash;
+  return rootSashes?.[right.index - 1]?.container === sash;
 }
 
 /** Resize splitview view `idx` back to `target` (clamped to `maximumWidth`)
@@ -134,13 +142,12 @@ function restoreColumnToTarget(
 function applyRightConstraints(
   api: DockviewReadyEvent["api"],
   measuredWidth: number | undefined,
+  right: PinnedRightColumn,
 ): number {
   const sv = getRootSplitview(api);
   const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
-  for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
-    const group = api.groups.find((candidate) => candidate.id === gid);
-    if (!group) continue;
+  for (const group of right.groups) {
     group.api.setConstraints({
       maximumWidth,
       minimumWidth: LAYOUT_PINNED_MIN_PX,
@@ -161,19 +168,19 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
-  const rightVisible = hasPinnedRightColumn(api);
+  const right = getPinnedRightColumn(api);
   enforcing = true;
   try {
-    if (rightVisible) {
+    if (right) {
       const measuredWidth = measureDockviewGridWidth(api);
       const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
-      const maximumWidth = applyRightConstraints(api, measuredWidth);
+      const maximumWidth = applyRightConstraints(api, measuredWidth, right);
       const manualRightWidth = getManualRightWidth(store.currentLayoutEnvId);
       const target =
         manualRightWidth ??
         getPinnedTarget("right") ??
         resolveResponsiveRightWidth(measuredWidth, sidebarWidth, null);
-      restoreColumnToTarget(sv, sv.length - 1, target, maximumWidth);
+      restoreColumnToTarget(sv, right.index, target, maximumWidth);
     }
   } finally {
     enforcing = false;
@@ -186,8 +193,9 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
-  if (hasPinnedRightColumn(api)) {
-    applyRightConstraints(api, measureDockviewGridWidth(api));
+  const right = getPinnedRightColumn(api);
+  if (right) {
+    applyRightConstraints(api, measureDockviewGridWidth(api), right);
   }
 }
 
@@ -241,8 +249,9 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (persistRight) {
-        const newRight = sv.getViewSize(sv.length - 1);
+      const right = getPinnedRightColumn(api);
+      if (persistRight && right) {
+        const newRight = sv.getViewSize(right.index);
         setPinnedTarget("right", newRight);
         setManualRightWidth(store.currentLayoutEnvId, newRight);
         if (isDebug()) {
@@ -282,12 +291,10 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
   try {
-    // Right column is the last grid index when present. Skip when there is
-    // no right column (compact preset, rightPanelsVisible=false).
-    if (hasPinnedRightColumn(api)) {
+    const right = getPinnedRightColumn(api);
+    if (right) {
       if (getManualRightWidth(store.currentLayoutEnvId) === null) return;
-      const rightIdx = sv.length - 1;
-      const rightW = sv.getViewSize(rightIdx);
+      const rightW = sv.getViewSize(right.index);
       if (rightW > 50) {
         const current = store.pinnedWidths.get("right");
         if (current !== rightW) {

@@ -12,6 +12,7 @@ import {
   getPinnedTarget,
   getRootSplitview,
   setPinnedTarget,
+  setReusableRightTarget,
   toSerializedDockview,
   type LayoutPanel,
   type LayoutState,
@@ -23,6 +24,9 @@ import {
   setupSashDragCapToggle,
   syncDockviewContainerSize,
 } from "@/components/task/dockview-layout-setup";
+import { splitPanel } from "@/components/settings/layouts/layout-editor-actions";
+import { validateReusableLayout } from "@/lib/layout/layout-profiles";
+import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
@@ -632,4 +636,182 @@ describe("plugin-free environment switches across root orientations", () => {
     expect(getPinnedTarget("right")).toBe(240);
     expect(getManualRightWidth("env-fresh")).toBeNull();
   });
+});
+const GENERATED_ENV = "env-generated";
+const WORKBENCH_CAPTURE = "workbench capture";
+
+function reusableGeneratedGroups(mode: "settings split" | typeof WORKBENCH_CAPTURE): LayoutState {
+  const editor = mountDockview(1600, HEIGHT);
+  const source = horizontalLayout({ bottom: [PROMPTS], centerWidth: 800, rightWidth: 800 });
+  if (mode === "settings split") {
+    source.columns[1].groups[0].panels.push(PROMPTS);
+    source.columns[1].groups.pop();
+  }
+  try {
+    applyLayout(editor, source, new Map([["right", 800]]), 1600, HEIGHT);
+    if (mode === "settings split") {
+      expect(splitPanel(editor, PROMPTS.id, "below")).toBe(true);
+      return fromDockviewApi(editor);
+    }
+    useDockviewStore.setState({ api: editor, preMaximizeLayout: null });
+    const captured = useDockviewStore.getState().captureCurrentLayout() as LayoutState;
+    expect(captured.columns[1].groups.every((group) => group.id === undefined)).toBe(true);
+    return captured;
+  } finally {
+    disposeDockview(editor);
+    clearAllPinnedTargets();
+  }
+}
+
+async function buildGeneratedDefault(source: LayoutState, envId: string | null = GENERATED_ENV) {
+  expect(validateReusableLayout(source).valid).toBe(true);
+  startIn(GENERATED_ENV, horizontalLayout({ bottom: [NOTES] }), source);
+  api.layout(800, HEIGHT);
+  useDockviewStore.setState({ currentLayoutEnvId: envId });
+  useDockviewStore.getState().buildDefaultLayout(api);
+  await settle();
+}
+
+function resizeGeneratedDefault(width: number, boundary: "mounted" | "state"): void {
+  if (boundary === "state") {
+    api.layout(width, HEIGHT);
+    enforcePinnedTargets(api, {
+      sidebarVisible: false,
+      rightPanelsVisible: true,
+      maximized: false,
+      envId: useDockviewStore.getState().currentLayoutEnvId,
+    });
+    return;
+  }
+  const container = document.createElement("div");
+  Object.defineProperties(container, {
+    clientWidth: { value: width },
+    clientHeight: { value: HEIGHT },
+  });
+  syncDockviewContainerSize(api, container);
+}
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.3, AC-UI-TASK-LAYOUT-PROFILES-002.6, AC-UI-TASK-LAYOUT-PROFILES-001.9, AC-UI-TASK-LAYOUT-PROFILES-001.10 */
+describe.each(["settings split", WORKBENCH_CAPTURE] as const)(
+  "generated right groups from %s",
+  (mode) => {
+    it.each(["mounted", "state"] as const)(
+      "refreshes every child cap through the %s boundary",
+      async (boundary) => {
+        const source = reusableGeneratedGroups(mode);
+        await buildGeneratedDefault(source, mode === WORKBENCH_CAPTURE ? null : GENERATED_ENV);
+        if (boundary === "mounted") stopMounted.push(setupSashDragCapToggle(api));
+        expect(rootSizes(api)).toEqual([480, 320]);
+        for (const width of [1600, 800, 1600]) {
+          resizeGeneratedDefault(width, boundary);
+          await settle();
+          const right = width === 800 ? 320 : 800;
+          expect(rootSizes(api)).toEqual([width - right, right]);
+          for (const id of ["files", PROMPTS.id]) {
+            const group = api.getPanel(id)!.group;
+            expect(group.width).toBe(right);
+            expect(group.maximumWidth).toBe(width === 800 ? 320 : 1120);
+          }
+        }
+        expect(getManualRightWidth(useDockviewStore.getState().currentLayoutEnvId)).toBeNull();
+      },
+    );
+
+    it("keeps real manual pixels ahead of the reusable ratio and releases the narrow cap", async () => {
+      const source = reusableGeneratedGroups(mode);
+      setManualRightWidth(GENERATED_ENV, 700);
+      await buildGeneratedDefault(source);
+      stopMounted.push(setupSashDragCapToggle(api));
+      expect(rootSizes(api)).toEqual([480, 320]);
+      resizeGeneratedDefault(1600, "mounted");
+      await settle();
+      expect(rootSizes(api)).toEqual([900, 700]);
+      expect(getManualRightWidth(GENERATED_ENV)).toBe(700);
+    });
+
+    it("persists a genuine sash width for generated right groups across displays", async () => {
+      await buildGeneratedDefault(reusableGeneratedGroups(mode));
+      stopMounted.push(setupSashDragCapToggle(api));
+      resizeGeneratedDefault(1600, "mounted");
+      await settle();
+      const sv = getRootSplitview(api);
+      const sash: HTMLElement = sv.sashes[0].container;
+      sash.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      sv.resizeView(1, 660);
+      sash.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+      await settle();
+      expect(getManualRightWidth(GENERATED_ENV)).toBe(660);
+      for (const width of [800, 1600]) {
+        resizeGeneratedDefault(width, "mounted");
+        await settle();
+        expect(rootSizes(api)[1]).toBe(width === 800 ? 320 : 660);
+      }
+    });
+
+    it.each(["reveal", "unmaximize"])(
+      "restores generated child caps on %s after an absent resize",
+      async (action) => {
+        await buildGeneratedDefault(reusableGeneratedGroups(mode));
+        stopMounted.push(setupSashDragCapToggle(api));
+        if (action === "reveal") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+        await settle();
+        resizeGeneratedDefault(1600, "mounted");
+        await settle();
+        if (action === "reveal") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().exitMaximizedLayout();
+        await settle();
+        expect(rootSizes(api)).toEqual([800, 800]);
+        expect(api.getPanel(PROMPTS.id)!.group.maximumWidth).toBe(1120);
+      },
+    );
+  },
+);
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("generated right group policy controls", () => {
+  it("retains the all-canonical positive control", async () => {
+    await buildGeneratedDefault(
+      horizontalLayout({ bottom: [PROMPTS], centerWidth: 800, rightWidth: 800 }),
+    );
+    stopMounted.push(setupSashDragCapToggle(api));
+    expect(rootSizes(api)).toEqual([480, 320]);
+    resizeGeneratedDefault(1600, "mounted");
+    await settle();
+    expect(rootSizes(api)).toEqual([800, 800]);
+  });
+
+  it("keeps generated VERTICAL groups outside horizontal width policy", async () => {
+    const source = reusableGeneratedGroups(WORKBENCH_CAPTURE);
+    source.rootOrientation = "VERTICAL";
+    setManualRightWidth(GENERATED_ENV, 700);
+    await buildGeneratedDefault(source);
+    stopMounted.push(setupSashDragCapToggle(api));
+    const before = rootSizes(api);
+    resizeGeneratedDefault(1600, "mounted");
+    await settle();
+    expect(rootSizes(api)).toEqual(before);
+    for (const id of ["files", PROMPTS.id]) {
+      expect(api.getPanel(id)!.group.maximumWidth).toBeGreaterThan(1_000_000);
+    }
+    expect(getManualRightWidth(GENERATED_ENV)).toBe(700);
+  });
+
+  it.each(["env-other", null])(
+    "does not adopt %s geometry for a non-owned generated saved layout",
+    async (owner) => {
+      const source = reusableGeneratedGroups(WORKBENCH_CAPTURE);
+      startIn("env-saved-generated", source, null);
+      api.layout(800, HEIGHT);
+      applyLayout(api, source, new Map([["right", 320]]), 800, HEIGHT);
+      setReusableRightTarget(owner, source);
+      stopMounted.push(setupSashDragCapToggle(api));
+      resizeGeneratedDefault(1600, "mounted");
+      await settle();
+      expect(rootSizes(api)).toEqual([1280, 320]);
+      expect(getPinnedTarget("right")).toBe(320);
+      expect(api.getPanel(PROMPTS.id)!.group.maximumWidth).toBe(320);
+      expect(getManualRightWidth("env-saved-generated")).toBeNull();
+    },
+  );
 });

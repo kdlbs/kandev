@@ -760,3 +760,107 @@ Round 4 accepted geometry remediation (2026-10-24, Sol 6.1):
   in `/home/clem/.kandev/agent-scratch/plugin-layout-review/round4-visual/`.
   Managed runs completed their owned-runtime teardown; no primary instance
   was used. All commands in this visual rerun use the task-owned storage above.
+
+Round 5 accepted generated-group geometry remediation (2026-10-24, Sol 6.1):
+
+- Starting HEAD `42d43b4f206ea32984d4ba027b2d1429061f141c`, initially clean.
+  Current session metadata still identifies exact Sol 6.1 profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`. No workers or model substitution.
+  The parent authorized the single P2 finding for criteria 002.3/.6 and 001.9/.10.
+- The real settings split action generates a plugin group ID; workbench
+  `captureCurrentLayout`/`filterEphemeral` drops all group IDs for reuse.
+  Application already constrained every group in a pinned column, but mounted
+  refresh recognized/constrained only canonical right groups. A generated
+  child's initial 320px cap therefore constrained the entire branch after
+  widening, and all-generated groups could skip target refresh altogether.
+- RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts`:
+  6 failed, 45 passed before production edits. Real `splitPanel(..., "below")`
+  and real workbench capture/reuse both produced valid profiles. Mounted and
+  proactive enforcement restored `[1280,320]`, not `[800,800]`, after expansion
+  from 800 to 1600; real stored manual-width controls likewise returned
+  `[1280,320]`, not `[900,700]`. No mocked resize or registry fabrication.
+- GREEN with the minimal membership/constraint fix: 51 tests passed.
+  `getOwnedRightColumn` reuses live tree capture to identify the actual right
+  root child and every group beneath it, gated by the horizontal reusable owner.
+  Mounted target/constraint refresh, sash detection/bookkeeping, proactive
+  state enforcement and final build fixups use that membership. State
+  enforcement resolves the owned share before old pinned pixels. Application's
+  existing all-group constraints are unchanged; non-owned stock/preset policies,
+  caps, genuine manual pixels, and known/null identity boundaries are preserved.
+  Serialized saved-width helpers remain diagnostics/legacy policy, not a new
+  portable geometry contract. No schema, eligibility, lifecycle or sidebar change.
+- Extended consumer regressions cover repeated narrow/wide transitions with
+  every child's actual maximum width (320 -> 1120) and live extents; manual
+  700px precedence; a real generated-group sash drag persisting 660px through
+  contraction/expansion; generated hide/reveal and maximize-exit restores;
+  canonical, VERTICAL, non-owned and foreign/null-owner controls.
+  Refactoring only extracted bounded enforcement/fixup helpers and test constants
+  to satisfy existing complexity/duplicate-string limits.
+- Final affected command, after the last production edit, from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders-fixups.test.ts
+  lib/state/dockview-pinned-enforce.test.ts lib/state/layout-manager
+  components/settings/layouts lib/layout/layout-profiles.test.ts
+  lib/layout/layout-profiles.plugin-panels.test.ts`: 35 files, 443 tests passed.
+  Additional adjacent builder check:
+  `pnpm exec vitest run lib/state/dockview-layout-builders.test.ts`: 7 passed.
+  Six changed source/test files passed Prettier and ESLint `--max-warnings 0`;
+  `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+- Fresh managed desktop command, with the same persistent task-owned
+  `TMPDIR`/`GOCACHE` as round 4:
+  `CAPTURE_PR_ASSETS=1 scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --project chromium
+  tests/settings/layout-profiles.spec.ts tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  18 passed, 3 failed in runtime prerequisites, not geometry assertions.
+  Log `kandev-run.e2e.xBO9YdK2.log`. Todos restore and plugin-add task setup
+  returned API `503 persistence_unavailable`; retired-default setup timed out
+  waiting for `/ready`. Logs record writer-ping deadline exhaustion with the
+  sole writer in use, delivery-table probe deadline exhaustion, and startup
+  `restore dynamic routing health: context canceled`. The retained runner log
+  includes the diagnostics; managed teardown removed the disposable raw logs.
+  Task-owned storage had 206GiB available, so no task-storage exhaustion is
+  established. Do not describe this aggregate run as fully green.
+- The new desktop geometry scenario passed in that fresh run: actual settings
+  Split tab > Below, save/reload, narrow task entry, then repeated 1120/1920px
+  viewport transitions. It checks distinct Files/plugin groups, both live
+  widths against the saved share, and visible packaged fixture content.
+  Inspected and preserved the successful screenshot:
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round5-visual/settings-generated-right-groups-expanded.png`.
+- Existing round-4 PR-tab close setup and its documented limitation remain
+  intact. The parent classified that producer/serialization boundary as
+  unrelated and pre-existing at the original base; this remediation does not
+  weaken validation, add a PR-tab special case, delete existing review/reveal
+  coverage, or claim PR-tab-present reveal passed. No full `make test` or real
+  Prompt History package smoke was repeated; prior evidence/limits remain intact.
+- Isolated the three unavailable prerequisites in one fresh managed worker,
+  without source changes or retries, using the same artifacts/storage:
+  `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build
+  --project chromium tests/settings/layout-profiles.spec.ts
+  --grep "adds Todos through the layout editor and restores it into a task|opens a task whose saved default profile still references the retired panel|adds a plugin panel to the selected split, saves the built-in override, and applies it to a task"
+  --retries=0`: 3 passed; log `kandev-run.e2e.A3mJQSUS.log`.
+  All 21 desktop scenarios have passing execution evidence across the full run
+  and this isolated recovery, but there is no clean single aggregate run in
+  round 5. The intermittent persistence/readiness prerequisite remains a limit;
+  no timeout increase, retry bypass, fixture suppression or backend fix was made.
+- The existing mobile suite covers shared phone profile editing/persistence.
+  This fix adds no phone composition, touch-menu or phone task-layout behavior.
+- Mobile reused the same freshly built artifacts and task-owned storage:
+  `CAPTURE_PR_ASSETS=1 scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome
+  tests/settings/mobile-layout-profiles.spec.ts --retries=0`: 8 passed,
+  log `kandev-run.e2e.k0aGfh5B.log`. Inspected the shared phone editor capture;
+  both phone captures are preserved alongside desktop proof in `round5-visual/`.
+  Managed runtimes were torn down after each run. No primary settings/runtime,
+  push, PR, deployment, `step_complete`, archive or new review worker.
+- Companion design now states actual-root membership and all-child cap refresh
+  for owned reusable geometry. Final catalog validation passed (386 decisions,
+  1646 specifications), full specification lint passed, and all 36 specification
+  linter tests passed. `validateCoverage` checked the eight intended changed
+  paths against the six package documents: `ok: true`, `status: covered`, no
+  errors, both owning requirement/design references accepted. Whitespace passed.
+  Public guidance and historical CHANGELOG remain unchanged because this restores
+  the existing split, resize and reusable-profile contract.

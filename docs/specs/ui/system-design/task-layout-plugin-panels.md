@@ -251,6 +251,19 @@ already resized the grid. Non-owned saved pixel targets keep their existing
 container-only policy; viewport refresh is unchanged. Manual pixel widths
 retain precedence; vertical roots never enter horizontal target refresh.
 
+For an active horizontal reusable owner, `getOwnedRightColumn` locates the
+actual live right root child through the existing tree capture and returns every
+group in that child. Settings splits may create generated group IDs, and
+workbench reusable capture intentionally drops IDs; neither changes ownership.
+Mounted refresh, loose constraints and sash bookkeeping use this membership,
+as do proactive state enforcement and final build fixups. Refresh every child
+group's cap from the measured container before restoring the column target,
+otherwise one narrow-screen cap can constrain the whole branch after expansion.
+State enforcement resolves owned source geometry ahead of stale pinned pixels,
+with actual manual pixels still first. Canonical group-ID fallback remains
+only for the existing non-owned stock/preset policy. No nested-sidebar policy,
+portable schema or panel eligibility/lifecycle change is introduced.
+
 Right-pane reveal and maximize exit also resolve the owned source from the
 current measured container before applying their retained layouts. The resulting
 width map becomes the applied pinned target before scheduled enforcement; a

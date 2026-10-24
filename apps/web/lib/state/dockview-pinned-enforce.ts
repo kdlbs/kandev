@@ -25,6 +25,9 @@ import {
   getPinnedTarget,
   computeSidebarMaxPx,
 } from "./layout-manager";
+import { getOwnedRightColumn } from "./layout-manager/owned-right-column";
+import { getReusableRightWidth, setPinnedTarget } from "./layout-manager/pinned-targets";
+import { computeRightMaxPx, LAYOUT_PINNED_MIN_PX } from "./layout-manager/caps";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -77,12 +80,43 @@ export type EnforcePinnedTargetsCtx = {
   envId?: string | null;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: any): number {
+type RightSplitview = {
+  length: number;
+  getViewSize: (index: number) => number;
+  resizeView: (index: number, size: number) => void;
+};
+
+function resolveRightTarget(
+  ctx: EnforcePinnedTargetsCtx,
+  sv: RightSplitview,
+  width: number | undefined,
+): number {
   const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
   const persistedTarget =
-    getManualRightWidth(ctx.envId ?? null) ?? getPinnedTarget("right") ?? null;
-  return resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, persistedTarget);
+    getManualRightWidth(ctx.envId ?? null) ??
+    getReusableRightWidth(ctx.envId, width) ??
+    getPinnedTarget("right") ??
+    null;
+  return resolveResponsiveRightWidth(width, sidebarWidth, persistedTarget);
+}
+
+function enforceRightColumn(
+  api: DockviewApi,
+  ctx: EnforcePinnedTargetsCtx,
+  sv: RightSplitview,
+): void {
+  const width = measureDockviewGridWidth(api);
+  const owned = getOwnedRightColumn(api, ctx.envId);
+  const target = resolveRightTarget(ctx, sv, width);
+  if (owned) {
+    const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+    const maximumWidth = computeRightMaxPx(width, sidebarWidth);
+    for (const group of owned.groups) {
+      group.api.setConstraints({ maximumWidth, minimumWidth: LAYOUT_PINNED_MIN_PX });
+    }
+    setPinnedTarget("right", target);
+  }
+  restoreColumnToTarget(sv, owned?.index ?? sv.length - 1, target);
 }
 
 /**
@@ -128,10 +162,7 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       const clamped = raw === undefined ? undefined : Math.min(raw, computeSidebarMaxPx(safeWidth));
       restoreColumnToTarget(sv, 0, clamped);
     }
-    if (ctx.rightPanelsVisible) {
-      const target = resolveRightTarget(api, ctx, sv);
-      restoreColumnToTarget(sv, sv.length - 1, target);
-    }
+    if (ctx.rightPanelsVisible) enforceRightColumn(api, ctx, sv);
   } finally {
     enforcing = false;
   }

@@ -873,6 +873,69 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     });
   }
 
+  test("resizes every right group created by the settings split action", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    const source = filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));
+    source.columns.forEach((column) => {
+      column.width = 800;
+    });
+    await apiClient.saveUserSettings({
+      saved_layouts: [savedProfile("generated-plugin", "Generated group geometry", source)],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel(PROMPT_TITLE);
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Below", exact: true }).click();
+    await layouts.save();
+    await testPage.reload();
+    const saved = await savedLayout(apiClient, "generated-plugin");
+    const right = saved.columns[1];
+    const pluginGroup = right.groups.find((group) =>
+      group.panels.some((panel) => panel.id === PROMPT_ID),
+    );
+    expect(right.groups).toHaveLength(2);
+    expect(pluginGroup?.id).toBeDefined();
+    expect(pluginGroup?.id).not.toBe("group-right-bottom");
+    const share = right.width! / saved.columns.reduce((sum, column) => sum + column.width!, 0);
+    expect(share).toBeGreaterThan(0.25);
+    await testPage.setViewportSize({ width: 1120, height: 900 });
+    const task = await createTaskWithSession(apiClient, seedData, "Generated right groups");
+    await openTask(testPage, task.id);
+    const narrowWidth = await getDockviewContainerWidth(testPage);
+    expectApproxWidth(narrowWidth, 800, 3);
+    await expect
+      .poll(async () => (await rootSizes(testPage))[1])
+      .toBeCloseTo(Math.min(Math.round(share * narrowWidth), narrowWidth - 480), 0);
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    for (const viewport of [1920, 1120, 1920]) {
+      await testPage.setViewportSize({ width: viewport, height: 900 });
+      const expectedContainer = viewport - 320;
+      await expect
+        .poll(() => getDockviewContainerWidth(testPage))
+        .toBeCloseTo(expectedContainer, 0);
+      const expected = Math.min(Math.round(share * expectedContainer), expectedContainer - 480);
+      await expect.poll(async () => (await rootSizes(testPage))[1]).toBeCloseTo(expected, 0);
+      const files = await panelPlacement(testPage, "files");
+      const prompt = await panelPlacement(testPage, PROMPT_ID);
+      expect(files?.groupId).not.toBe(prompt?.groupId);
+      expectApproxWidth(files?.width ?? 0, expected, 2);
+      expectApproxWidth(prompt?.width ?? 0, expected, 2);
+    }
+    await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+    expect(await hasManualRightWidth(testPage)).toBe(false);
+    await prCapture.screenshot("settings-generated-right-groups-expanded", {
+      caption: "Settings-created plugin split expands with the owned reusable right column",
+    });
+  });
+
   test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({
     testPage,
     apiClient,
