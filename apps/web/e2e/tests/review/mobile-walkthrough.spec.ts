@@ -231,6 +231,22 @@ test.describe("Mobile code walkthrough", () => {
           }),
         )
         .toBe(true);
+      await expect
+        .poll(async () => {
+          const actions = (await card.locator("[data-comment-actions]").boundingBox())!;
+          const navigation = (await card.getByTestId("walkthrough-navigation").boundingBox())!;
+          return actions.y + actions.height <= navigation.y;
+        })
+        .toBe(true);
+      await expect
+        .poll(() =>
+          card.getByRole("textbox").evaluate((input) => {
+            const actions = input.parentElement!.querySelector("[data-comment-actions]")!;
+            const bounds = input.getBoundingClientRect();
+            return bounds.height >= 44 && bounds.bottom <= actions.getBoundingClientRect().top;
+          }),
+        )
+        .toBe(true);
     }
     await next.tap();
     await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");

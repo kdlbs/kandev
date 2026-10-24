@@ -216,7 +216,9 @@ Remove the floating card's fixed height. Let the explanation and comments take
 natural space until the viewport limit is reached. The body is the single scroll
 owner. Put its padding inside the scroller so the region can collapse to zero
 height. The header, picker, and navigation do not shrink. The open composer
-can shrink its input to 44px while its action row retains full touch targets. On desktop,
+can shrink its input to 44px while its action row retains full touch targets.
+Reserve the combined minimum input, action row, and spacing height so neither
+row can overlap navigation. On desktop,
 observe card resizing and clamp its position to the viewport after content or
 viewport changes. On phones,
 retain the bottom-sheet placement, status-bar clearance, and safe-area inset.

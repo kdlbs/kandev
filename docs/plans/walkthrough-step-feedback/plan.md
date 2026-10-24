@@ -507,3 +507,18 @@ walkthrough feedback and mobile suites before final delivery.
 The corrected workspace-adoption assertion passes three fresh authenticated
 runs with retries disabled. On the updated branch, all 158 focused tests,
 typecheck, changed-file ESLint, and specification validation/lint pass.
+
+
+## Composer minimum-space refinement (2026-10-24)
+
+Final screenshot inspection found that Next remained clickable while the
+composer action row overlapped navigation. The strengthened landscape test
+checks both row order and textarea/action separation, in addition to hit testing
+and viewport bounds. It fails against 0c585f37951. Reserve 8.125rem for the open
+composer: a 44px input, a 44px action row, padding, gap, and borders. A disposable
+browser probe verifies both rows fit at 375px and 320px heights with this floor.
+Keep all previous content-driven height, draft, and input-scroll behavior.
+
+The strengthened regression and all nine mobile tests plus the affected
+desktop feedback test pass (10 tests). Composer tests, changed-file lint,
+formatting, and specification checks also pass.

@@ -82,7 +82,8 @@ function StepComposer({
     return true;
   };
   return (
-    <div className={open ? "flex min-h-0 flex-col px-4 py-2" : "shrink-0 px-4 py-2"}>
+    // The minimum reserves a 44px input, 44px actions, and their spacing.
+    <div className={open ? "flex min-h-[8.125rem] flex-col px-4 py-2" : "shrink-0 px-4 py-2"}>
       <Button
         ref={trigger}
         variant="outline"
