@@ -772,6 +772,13 @@ func (s *HandoffService) GetDocumentForCaller(ctx context.Context, currentTaskID
 	return s.docs.GetDocument(ctx, targetTaskID, key)
 }
 
+// CanReadTask reports whether currentTaskID may read targetTaskID under the
+// shared read relation that document and comment reads apply. A missing or
+// foreign-workspace task is a plain false, never an error naming it.
+func (s *HandoffService) CanReadTask(ctx context.Context, currentTaskID, targetTaskID string) (bool, error) {
+	return canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, currentTaskID, targetTaskID)
+}
+
 // ListDocumentsForCaller returns the document HEADs (no content) for
 // targetTaskID after the read-access guard.
 func (s *HandoffService) ListDocumentsForCaller(ctx context.Context, currentTaskID, targetTaskID string) ([]*models.TaskDocument, error) {

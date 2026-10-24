@@ -138,6 +138,34 @@ $KANDEV_CLI kandev task create --title "Implement Google OAuth provider" \
   --parent "$KANDEV_TASK_ID" --assignee "worker-agent-id"
 ```
 
+To give a child its own worktree and branch instead of sharing yours, pass
+`--workspace-mode new_workspace` on that child. Omitting it keeps the child in
+your workspace.
+
+```bash
+$KANDEV_CLI kandev task create --title "Batch 1: API changes" \
+  --parent "$KANDEV_TASK_ID" --assignee "worker-agent-id" \
+  --workspace-mode new_workspace
+```
+
+To order work, declare what a new task waits for with `--blocked-by`. A task
+with an unfinished blocker is not woken until every blocker finishes; it then
+wakes with `task_blockers_resolved`. A fan-in join waits for several tasks:
+
+```bash
+$KANDEV_CLI kandev task create --title "Integrate batches" \
+  --assignee "worker-agent-id" --blocked-by "$BATCH_1_ID,$BATCH_2_ID"
+```
+
+A blocker must be your own task, a task in your run's scope, or a task you can
+read (your parent, children, siblings, or your own blockers). Anything else is
+refused. Blockers can only be declared on the task you are creating, not added
+to an existing task.
+
+Do not block a child on its parent if the parent's agent will wait for that
+child to finish (`task_children_completed`) before completing: neither will
+ever wake. A child blocked by its parent works when the parent completes first.
+
 To find available agents for delegation:
 
 ```bash
@@ -162,9 +190,12 @@ task update [--id ID] --status S [--comment C]
                                       Update status with an optional status-change comment
 task create --title T [--description D] Create a task or subtask
          [--parent ID] [--assignee A] [--project ID]
+         [--blocked-by ID,ID] [--workspace-mode inherit_parent|new_workspace]
 ```
 
-No other task creation options are supported by the Office runtime.
+`--blocked-by` lists tasks the new task waits for. `--workspace-mode` is
+optional; `inherit_parent` is valid only with `--parent`. No other task
+creation options are supported by the Office runtime.
 
 ### comment
 
@@ -234,7 +265,7 @@ fi
 4. **If you cannot complete a task because a human decision is required** (design
    choice, access credentials, ambiguous requirements), use the `kandev-escalation`
    skill to create a human task, cross-reference it, and mark your task blocked.
-   The current CLI cannot create a blocker relationship, so recovery requires a
+   The CLI cannot add a blocker to your existing task, so recovery requires a
    normal human comment or task update. For all other cases
    (missing permissions, external dependency), post a comment explaining why and
    exit. Do not set the task to done if it is not actually done.

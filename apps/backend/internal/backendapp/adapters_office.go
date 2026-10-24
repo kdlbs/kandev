@@ -17,7 +17,9 @@ import (
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	officeshared "github.com/kandev/kandev/internal/office/shared"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/task/models"
@@ -207,14 +209,36 @@ type taskCreatorAdapter struct {
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginOnboarding, nil)
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description,
+		models.TaskOriginOnboarding, nil, officeshared.AgentTaskRelations{})
 }
 
 func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
-	carrierMetadata map[string]interface{},
+	carrierMetadata map[string]interface{}, relations officeshared.AgentTaskRelations,
 ) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated, carrierMetadata)
+	taskID, err := a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description,
+		models.TaskOriginAgentCreated, carrierMetadata, relations)
+	return taskID, mapAgentRelationError(err, relations)
+}
+
+// mapAgentRelationError turns a blocker that vanished between the runtime
+// scope check and the task service's pre-insert re-check into the runtime's
+// single blocker denial, so the race is reported as 403 rather than 500.
+func mapAgentRelationError(err error, relations officeshared.AgentTaskRelations) error {
+	if err != nil && len(relations.BlockedBy) > 0 && errors.Is(err, taskservice.ErrTaskReferenceNotFound) {
+		return fmt.Errorf("%w: a blocked_by task is no longer available", officeruntime.ErrBlockerOutOfScope)
+	}
+	return err
+}
+
+// agentWorkspacePolicy returns the explicit policy for an agent-declared
+// workspace mode, or nil so an omitted mode keeps the create path's default.
+func agentWorkspacePolicy(relations officeshared.AgentTaskRelations) *taskservice.WorkspacePolicy {
+	if relations.WorkspaceMode == "" {
+		return nil
+	}
+	return &taskservice.WorkspacePolicy{Mode: relations.WorkspaceMode}
 }
 
 // createOfficeTask persists carrierMetadata (already resolved server-side
@@ -224,7 +248,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(
 // carrier does not (AC-OFFICE-RUN-CAUSATION-001.17).
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
-	carrierMetadata map[string]interface{},
+	carrierMetadata map[string]interface{}, relations officeshared.AgentTaskRelations,
 ) (string, error) {
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
@@ -234,6 +258,8 @@ func (a *taskCreatorAdapter) createOfficeTask(
 		AssigneeAgentProfileID: assigneeAgentID,
 		Origin:                 origin,
 		OfficeCarrierMetadata:  carrierMetadata,
+		BlockedBy:              relations.BlockedBy,
+		WorkspacePolicy:        agentWorkspacePolicy(relations),
 	})
 	if err != nil {
 		return "", err
@@ -312,18 +338,21 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 func (a *taskCreatorAdapter) CreateOfficeSubtask(
 	ctx context.Context,
 	parentTaskID, assigneeAgentID, title, description string,
-	carrierMetadata map[string]interface{},
+	carrierMetadata map[string]interface{}, relations officeshared.AgentTaskRelations,
 ) (string, error) {
 	parent, err := a.taskSvc.GetTask(ctx, parentTaskID)
 	if err != nil {
 		return "", err
 	}
-	return a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
+	taskID, err := a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
 		Title:                 title,
 		Description:           description,
 		AgentProfileID:        assigneeAgentID,
 		OfficeCarrierMetadata: carrierMetadata,
+		BlockedBy:             relations.BlockedBy,
+		WorkspaceMode:         relations.WorkspaceMode,
 	})
+	return taskID, mapAgentRelationError(err, relations)
 }
 
 // routineWakeupAdapter bridges the routines package's WakeupEnqueuer
