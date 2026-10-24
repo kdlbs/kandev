@@ -219,6 +219,19 @@ Initial browser setup failures occurred before the feature assertions and are no
 - The work-order reference coverage preflight returned `covered` for the actual final runtime diff, with no errors. `git diff --check` passed.
 - Public docs updated: `docs/public/sessions-and-review.md`, within its existing how-to guide.
 
+### PR review remediation
+
+Greptile identified that fenced code uses a whitespace-preserving span, so an override limited to inline `code` elements did not keep summaries on one line.
+The summary now applies no-wrap styling to every Markdown descendant. Expanded content retains its line breaks.
+The existing desktop and phone History scenarios include fenced code and assert both presentations.
+
+- Before the correction, the selected desktop and phone scenarios failed on summary height: `/tmp/kandev-run.e2e.mGgHoR01.log` and `/tmp/kandev-run.e2e.pvInIQPv.log`.
+- After the correction, both complete History specs passed with `--host --retries=0`: 2 desktop tests in `/tmp/kandev-run.e2e.VdXTXrAS.log` and 2 phone tests in `/tmp/kandev-run.e2e.zU8lXQ19.log`.
+- The seven-file Vitest command above passed again: 65 tests. The changed component, helper, and two History specs passed scoped ESLint and Prettier checks. The 8 GiB TypeScript command passed again.
+- The existing single-line summary contract and public documentation remain accurate. No syntax, link policy, or payload contract changed.
+
+Remote CI, final screenshot publication, and review-thread completion are external delivery checks.
+
 ### Remaining limit
 
 The original active-question link text was not provided. Standard links pass through the actual active overlay on desktop and phone.

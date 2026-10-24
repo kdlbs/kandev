@@ -16,7 +16,7 @@ export async function seedMarkdownHistory(apiClient: ApiClient, seedData: SeedDa
   const pendingId = `markdown-${task.id}`;
   const question = {
     id: "markdown",
-    prompt: `Read [storage guide](${CLARIFICATION_REFERENCE_URL}).\nCompare **retention** with \`${"configuration".repeat(20)}\`.\n\n1. Check retention\n2. Compare [${LONG_REFERENCE_LABEL}](${CLARIFICATION_REFERENCE_URL})`,
+    prompt: `Read [storage guide](${CLARIFICATION_REFERENCE_URL}).\nCompare **retention** with \`${"configuration".repeat(20)}\`.\n\n\`\`\`sh\npnpm build\npnpm test\n\`\`\`\n\n1. Check retention\n2. Compare [${LONG_REFERENCE_LABEL}](${CLARIFICATION_REFERENCE_URL})`,
     options: [{ option_id: "postgres", label: "`Postgres`", description: "" }],
   };
   const startedAt = new Date(Date.now() - 120_000).toISOString();
@@ -76,9 +76,9 @@ export async function expectTruncatedQuestionSummary(summary: Locator) {
       textOverflow: style.textOverflow,
       height: element.getBoundingClientRect().height,
       lineHeight: parseFloat(style.lineHeight),
-      codeWhiteSpace: Array.from(
-        element.querySelectorAll("code"),
-        (code) => getComputedStyle(code).whiteSpace,
+      descendantWhiteSpace: Array.from(
+        element.querySelectorAll("*"),
+        (node) => getComputedStyle(node).whiteSpace,
       ),
     };
   });
@@ -86,5 +86,5 @@ export async function expectTruncatedQuestionSummary(summary: Locator) {
   expect(styles.overflow).toBe("hidden");
   expect(styles.textOverflow).toBe("ellipsis");
   expect(styles.height).toBeLessThanOrEqual(styles.lineHeight + 1);
-  expect(styles.codeWhiteSpace).toEqual(["nowrap"]);
+  expect(new Set(styles.descendantWhiteSpace)).toEqual(new Set(["nowrap"]));
 }

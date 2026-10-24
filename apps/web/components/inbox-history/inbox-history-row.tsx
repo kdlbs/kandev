@@ -222,7 +222,7 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
         >
           <InboxHistoryRowIcon bundle={bundle} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium [&_br]:hidden [&_code]:whitespace-nowrap">
+            <span className="block truncate text-sm font-medium [&_*]:whitespace-nowrap [&_br]:hidden">
               {primaryText.markdown ? (
                 <ClarificationMarkdown variant="inline" linkBehavior="passive">
                   {primaryText.text}

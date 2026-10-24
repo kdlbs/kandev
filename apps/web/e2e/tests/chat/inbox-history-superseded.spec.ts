@@ -36,6 +36,10 @@ test.describe("Inbox History tab", () => {
       await toggle.click();
 
       const detail = row.getByTestId("inbox-history-clarification-detail");
+      await expect(detail.getByText("pnpm build pnpm test", { exact: true })).toHaveCSS(
+        "white-space",
+        "pre-wrap",
+      );
       await expect(detail.locator("ol > li")).toHaveCount(2);
       await expect(detail.locator("strong")).toHaveText("retention");
       await expect(detail.locator("code").filter({ hasText: "Postgres" })).toBeVisible();

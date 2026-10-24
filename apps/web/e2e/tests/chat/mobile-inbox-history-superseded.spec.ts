@@ -36,6 +36,10 @@ test.describe("Inbox History tab on mobile", () => {
       await expectTruncatedQuestionSummary(toggle.locator("span.font-medium"));
       await toggle.tap();
       const detail = row.getByTestId("inbox-history-clarification-detail");
+      await expect(detail.getByText("pnpm build pnpm test", { exact: true })).toHaveCSS(
+        "white-space",
+        "pre-wrap",
+      );
       await expect(detail.locator("ol > li")).toHaveCount(2);
       await expect(detail.locator("code").filter({ hasText: "Postgres" })).toBeVisible();
       const guidance = detail.getByRole("link", { name: "storage guide", exact: true });
