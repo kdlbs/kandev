@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { mergeGroup, splitPanel } from "@/components/settings/layouts/layout-editor-actions";
-import { setupSashDragCapToggle } from "@/components/task/dockview-layout-setup";
+import {
+  mergeGroup,
+  movePanelToGroup,
+  splitPanel,
+} from "@/components/settings/layouts/layout-editor-actions";
+import {
+  setupGroupTracking,
+  setupSashDragCapToggle,
+} from "@/components/task/dockview-layout-setup";
 import { validateReusableLayout } from "@/lib/layout/layout-profiles";
 import { getManualRightWidth, setManualRightWidth } from "@/lib/local-storage";
 import { useDockviewStore } from "./dockview-store";
@@ -304,3 +311,62 @@ describe.each(["mounted", "state"] as const)(
     });
   },
 );
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["mounted", "state"] as const)("raw explicit profiles through %s", (boundary) => {
+  it("applies raw saved JSON without aliasing roots", async () => {
+    const { source } = sourceFromToolSplit("changes", true);
+    source.columns[2].id = "right";
+    source.columns[2].pinned = true;
+    const immutable = structuredClone(source);
+    const api = await build(sourceFromSettings([1200, 400], true), boundary);
+    useDockviewStore.getState().applyCustomLayout(
+      {
+        id: "raw-custom",
+        name: "Raw tool roots",
+        isDefault: false,
+        createdAt: "2026-10-24T00:00:00Z",
+        layout: source as unknown as Record<string, unknown>,
+      },
+      { envId: ENV, activeSessionId: null, sessionIds: [] },
+    );
+    await settle();
+    expectGeometry(api, [240, 320, 240]);
+    for (const width of [1600, 800, 1600]) {
+      resize(api, width, boundary);
+      await settle();
+      expectGeometry(api, width === 800 ? [240, 320, 240] : [400, 800, 400]);
+    }
+    expect(source).toEqual(immutable);
+    expect(getManualRightWidth(ENV)).toBeNull();
+  });
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["mounted", "state"] as const)("ordinary no-right edits through %s", (boundary) => {
+  it.each([false, true])(
+    "never revives source after move/undo with explicit release %s",
+    async (release) => {
+      const source = sourceFromSettings([400, 1000, 200], true);
+      const immutable = structuredClone(source);
+      const api = await build(source, "state");
+      stops.push(setupGroupTracking(api));
+      if (boundary === "mounted") stops.push(setupSashDragCapToggle(api));
+      expect(movePanelToGroup(api, "files", api.getPanel("chat")!.group.id)).toBe(true);
+      await settle();
+      expect(useDockviewStore.getState().hiddenRightPane).toBeNull();
+      expect(useDockviewStore.getState().rightPanelsVisible).toBe(false);
+      resize(api, 800, boundary);
+      await settle();
+      expectGeometry(api, [400, 400]);
+      if (release) clearReusableRootGeometry(ENV);
+      expect(splitPanel(api, "files", "right")).toBe(true);
+      await settle();
+      resize(api, 1600, boundary);
+      await settle();
+      expectGeometry(api, [500, 1000, 100]);
+      expect(source).toEqual(immutable);
+      expect(getManualRightWidth(ENV)).toBeNull();
+    },
+  );
+});

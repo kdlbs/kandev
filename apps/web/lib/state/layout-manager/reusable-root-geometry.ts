@@ -8,13 +8,13 @@ import {
   validateReusableRootGeometry,
 } from "./pinned-targets";
 
-/** A retained root remains structurally observable even when no pinned column is live. */
-export function validateRetainedRootGeometry(
+/** Observe ordinary edits and retained projections independently of live width allocation. */
+export function validateLiveRootGeometry(
   api: DockviewApi,
   envId: string | null | undefined,
   hiddenRightPane: HiddenRightPane | null | undefined,
 ): void {
-  if (hiddenRightPane) validateReusableRootGeometry(envId, fromDockviewApi(api), hiddenRightPane);
+  validateReusableRootGeometry(envId, fromDockviewApi(api), hiddenRightPane);
 }
 
 /** Restore owned automatic root weights without rebuilding panels or overriding manual pixels. */

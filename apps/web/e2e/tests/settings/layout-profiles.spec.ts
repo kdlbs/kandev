@@ -1183,6 +1183,160 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     });
   });
 
+  for (const profileId of ["raw-custom", "layout-override-default"]) {
+    test(`applies raw saved ${profileId} through the workbench selector without aliasing roots`, async ({
+      testPage,
+      apiClient,
+      seedData,
+      prCapture,
+    }) => {
+      test.setTimeout(180_000);
+      await installFixturePlugin(testPage);
+      await testPage.setViewportSize({ width: 1920, height: 900 });
+      await apiClient.saveUserSettings({
+        saved_layouts: [
+          savedProfile(
+            "raw-builder",
+            "Raw builder",
+            filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+          ),
+        ],
+      });
+      const layouts = new LayoutSettingsPage(testPage);
+      await layouts.open();
+      await layouts.selectPanel("Changes");
+      await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+      await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+      await layouts.save();
+      const source = await savedLayout(apiClient, "raw-builder");
+      source.columns.forEach((column, index) => {
+        column.width = [400, 800, 400][index];
+      });
+      source.columns[2].id = "right";
+      source.columns[2].pinned = true;
+      const name = "Raw saved tool roots";
+      await apiClient.saveUserSettings({
+        saved_layouts: [savedProfile(profileId, name, source, false)],
+      });
+      await testPage.reload();
+      expect(await savedLayout(apiClient, profileId)).toEqual(source);
+      await testPage.setViewportSize({ width: 1120, height: 900 });
+      const task = await createTaskWithSession(apiClient, seedData, `Raw selector ${profileId}`);
+      await openTask(testPage, task.id);
+      await testPage.getByTestId("layout-preset-trigger").click();
+      if (profileId === "layout-override-default") {
+        await testPage
+          .locator('[data-testid="layout-preset-item"][data-preset-id="default"]')
+          .click();
+      } else {
+        await testPage.getByRole("menuitem", { name, exact: true }).click();
+      }
+      for (const width of [800, 1600, 800, 1600]) {
+        await testPage.setViewportSize({ width: width + 320, height: 900 });
+        await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(width);
+        const expected = width === 800 ? [240, 320, 240] : [400, 800, 400];
+        await expect.poll(() => rootSizes(testPage)).toEqual(expected);
+        await expect.poll(() => serializedRootSizes(testPage)).toEqual(expected);
+      }
+      await testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+      await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+      await testPage.locator(".dv-tab", { hasText: "Changes" }).click();
+      await expect(testPage.getByTestId("changes-panel")).toBeVisible();
+      expect(await savedLayout(apiClient, profileId)).toEqual(source);
+      expect(await hasManualRightWidth(testPage)).toBe(false);
+      await prCapture.screenshot(`settings-raw-selector-${profileId}`, {
+        caption:
+          "Explicit selection normalizes legacy duplicate roots without rewriting saved JSON",
+      });
+    });
+  }
+
+  test("releases ordinary source weights when the sole tool root is moved away and undone", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    const { settings } = await apiClient.getUserSettings();
+    await apiClient.saveUserSettings({ show_todo_list_panel: false });
+    try {
+      await testPage.setViewportSize({ width: 1920, height: 900 });
+      await apiClient.saveUserSettings({
+        saved_layouts: [
+          savedProfile(
+            "ordinary-no-right",
+            "Ordinary no right",
+            filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+          ),
+        ],
+      });
+      const layouts = new LayoutSettingsPage(testPage);
+      await layouts.open();
+      await layouts.selectPanel(PROMPT_TITLE);
+      await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+      await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+      await layouts.save();
+      const source = await savedLayout(apiClient, "ordinary-no-right");
+      source.columns.forEach((column, index) => {
+        column.width = [400, 1000, 200][index];
+        for (const group of column.groups) {
+          group.panels = group.panels.filter((panel) => panel.id !== "changes");
+          group.activePanel = group.panels[0].id;
+        }
+      });
+      await apiClient.saveUserSettings({
+        saved_layouts: [savedProfile("ordinary-no-right", "Ordinary no right", source)],
+      });
+      await testPage.setViewportSize({ width: 1120, height: 900 });
+      const task = await createTaskWithSession(apiClient, seedData, "Ordinary move and undo");
+      await openTask(testPage, task.id);
+      await expect.poll(() => rootSizes(testPage)).toEqual([320, 320, 160]);
+      await expect(testPage.locator(".dv-tab", { hasText: "Todos" })).toHaveCount(0);
+      // The unrelated undefined-review serialization prerequisite remains normal UI setup.
+      const fixtureReview = testPage.locator(".dv-tab", { hasText: "Bitbucket Pull Request #42" });
+      await expect(fixtureReview).toHaveCount(1);
+      await fixtureReview.hover();
+      await fixtureReview.locator(".dv-default-tab-action").click();
+      await expect(fixtureReview).toHaveCount(0);
+      await testPage.evaluate(() => {
+        const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+        const files = api?.getPanel("files");
+        const agent = api?.panels.find((panel) => panel.api.component === "chat");
+        if (!files || !agent) throw new Error("Move panels not available");
+        files.api.moveTo({ group: agent.group, position: "center" });
+      });
+      await expect.poll(() => rootSizes(testPage)).toEqual([400, 400]);
+      await testPage.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      await testPage.evaluate(() => {
+        const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+        const files = api?.getPanel("files");
+        if (!files) throw new Error("Undo panel not available");
+        files.api.moveTo({ group: files.group, position: "right" });
+      });
+      await expect.poll(async () => (await rootSizes(testPage)).length).toBe(3);
+      await testPage.setViewportSize({ width: 1920, height: 900 });
+      await expect.poll(() => rootSizes(testPage)).toEqual([500, 1000, 100]);
+      await expect.poll(() => serializedRootSizes(testPage)).toEqual([500, 1000, 100]);
+      await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+      expect(await hasManualRightWidth(testPage)).toBe(false);
+      expect(await savedLayout(apiClient, "ordinary-no-right")).toEqual(source);
+      await prCapture.screenshot("settings-ordinary-no-right-undo", {
+        caption: "A genuine move releases all-root source weights even while no right root is live",
+      });
+    } finally {
+      await apiClient.saveUserSettings({
+        show_todo_list_panel: settings.show_todo_list_panel ?? false,
+      });
+    }
+  });
+
   test("releases source weights after a real structural edit while pinned-last is hidden", async ({
     testPage,
     apiClient,

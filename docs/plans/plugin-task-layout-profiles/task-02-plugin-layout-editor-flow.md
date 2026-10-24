@@ -1663,3 +1663,206 @@ Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
   `components/task/dockview-root-geometry.test-helpers.ts`: passed.
   Repeated the complete owning Vitest command above: **42 files, 618 passed**.
   Repeated `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`: passed.
+
+### Round11 raw explicit application and ordinary no-right lifecycle
+
+- Starting HEAD `c088b85987c4fc81c322609502b7e485536841f9`, clean.
+  Runtime session metadata again matched the required Sol6.1 profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`. No worker or reviewer was spawned.
+- F1 RED from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-tool-roots.plugin-layout.test.ts
+  --testNamePattern 'raw explicit' --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round11-f1-red.json`:
+  **4 failed**. Both custom/override-shaped raw records at mounted and proactive
+  boundaries applied 160/320/320 instead of 240/320/240. Sources came from real
+  settings Split Changes Right and capture, with legacy duplicate right IDs.
+- F1 fix reuses the existing non-mutating right-owner normalizer inside
+  `restoreCustomLayout`, after retired-component filtering and chat/session
+  materialization, before width resolution, application and source claim.
+  Both workbench selector paths already call that consumer; no selector,
+  schema, eligibility, first-owner or saved-payload rewrite. Legacy serialized
+  Dockview handling remains on its existing separate path.
+- F1 GREEN:
+  `pnpm exec vitest run lib/state/dockview-tool-roots.plugin-layout.test.ts`:
+  **34 passed**. Raw custom/override records retain all live and serialized
+  extents through 800/1600/800/1600, unchanged supplied JSON and no manual width.
+- F2 RED:
+  `pnpm exec vitest run lib/state/dockview-tool-roots.plugin-layout.test.ts
+  --testNamePattern 'ordinary no-right' --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round11-f2-red.json`:
+  **2 failed, 2 passed**. Moving sole Files into Agent, then splitting it back,
+  revived 400/1000/200 instead of the released 500/1000/100 policy at both
+  boundaries. Explicit source-release controls passed. Mounted tests install
+  actual group tracking before cap/sash tracking, without a manual visibility
+  refresh, and assert no retained hidden pane and no visible right pane.
+- F2 fix generalizes retained-only validation to ordinary live membership and
+  retained projections. Both enforcement boundaries call it before no-right,
+  visibility and child-count exits, retaining their existing restoration,
+  maximize, vertical and environment exclusions. Retained reinsertion is still
+  validation-only; genuine move/undo cannot revive allocation.
+- Initial adjacent run exposed one inaccurate test-harness context: its
+  proactive resize helper always passed `maximized:false` even while the store
+  retained a maximized projection. Replaced that constant with the real store
+  `preMaximizeLayout` predicate used by production. No production exclusion or
+  assertion was weakened. Repeated
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-tool-roots.plugin-layout.test.ts
+  lib/state/dockview-three-root.plugin-layout.test.ts`: **3 files, 120 passed**,
+  including existing maximize, retained-hidden, conditional-tab, sash/manual,
+  generated roots, saved return/cold, vertical and foreign-source controls.
+- LSP reported no configured server. Focused caller search traced raw custom
+  selection, built-in override delegation, explicit persistence/legacy tests
+  and both structural-validation consumers. No portable API changed; the
+  obsolete retained-only helper name was replaced at both consumers.
+- Final affected unit command after both production changes, from `apps/web`:
+  `pnpm exec vitest run
+  components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-tool-roots.plugin-layout.test.ts
+  lib/state/dockview-three-root.plugin-layout.test.ts
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+  lib/state/layout-manager components/settings/layouts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts
+  components/task/dockview-review-panel-sync.test.ts
+  components/task/dockview-todo-panel-sync`: **42 files, 626 passed**.
+  Additional explicit/legacy persistence consumers:
+  `pnpm exec vitest run lib/state/dockview-preset-persistence.test.ts`:
+  **1 file, 25 passed**. Combined **43 files, 651 passed**.
+- Formatted all seven changed TypeScript files with `pnpm exec prettier --write`.
+  Final `pnpm exec prettier --check` and `pnpm exec eslint --max-warnings 0`
+  passed on `lib/state/dockview-tool-roots.plugin-layout.test.ts`,
+  `lib/state/dockview-store.ts`,
+  `lib/state/layout-manager/reusable-root-geometry.ts`,
+  `components/task/dockview-layout-setup.ts`,
+  `lib/state/dockview-pinned-enforce.ts`,
+  `components/task/dockview-root-geometry.test-helpers.ts` and
+  `e2e/tests/settings/layout-profiles.spec.ts`.
+- First old-artifact browser attempt:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project chromium tests/settings/layout-profiles.spec.ts
+  --grep 'raw saved .* through|ordinary source weights' --retries=0`:
+  **3 failed**, log `tmp/kandev-run.e2e.A9hWS4u8.log` in review scratch.
+  Only the override case was behavioral RED (160/320/320 instead of
+  240/320/240). Custom failed worker backend readiness at 30 seconds before
+  entering the test; ordinary move failed test setup because the helper read
+  `panel.component` instead of real Dockview `panel.api.component`.
+  Preserved screenshots/context in `round11-visual/red-attempt1/`. Corrected
+  that helper; neither setup failure is counted as defect reproduction.
+- Repeated the same old-artifact command after correcting the real-API helper:
+  **3 failed**, log `tmp/kandev-run.e2e.49ErMOLE.log`. Override again reached the
+  160/320/320 assertion; ordinary move/undo now reached the expected behavioral
+  RED, 400/1000/200 instead of 500/1000/100. Custom again stopped at worker
+  backend readiness before browser interaction. Its two unit boundary cases
+  remain behavioral RED evidence; this readiness failure is not.
+  Preserved/inspected both actual failure screenshots under
+  `round11-visual/red/`. Both managed runs tore down their task-owned runtimes.
+- `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+  The release-notes generator retained its existing 0.98.0-to-0.97.0 fallback
+  warning; no historical CHANGELOG edit.
+- Fresh managed desktop build/run used the same task-owned environment prefix
+  with `scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`.
+  Rebuilt backend, Vite production assets and packaged fixture after the last
+  production edit. First aggregate: **28 passed, 1 failed**, log
+  `tmp/kandev-run.e2e.xB8G3913.log`.
+  Both real raw selector paths passed every live/serialized root assertion and
+  rendered actual fixture/Changes content without modifying persisted JSON.
+  Preserved captures/context in `round11-visual/desktop-attempt1/`; inspected
+  both raw selector screenshots.
+- The one first-fresh failure was an ordinary-no-right setup defect, not a
+  geometry assertion after undo: earlier scenarios had enabled the shared
+  Todos preference, so moving Files left a live Todos tool root (three roots,
+  not the required no-right two-root state). The inspected failure screenshot
+  shows Agent+Files / Todos / plugin. Scoped that test's real persisted Todos
+  preference off, asserted the tab absent, and restored its actual baseline
+  in `finally`, including failure paths. No production change, conditional-tab
+  coverage removal, hidden-pane substitution or geometry assertion relaxation.
+  Repeated formatting/ESLint on the changed browser spec after isolation.
+  Production artifacts remain those rebuilt by the fresh command above.
+- Final complete desktop aggregate, reusing that fresh production build after
+  the browser-only prerequisite correction:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **29 passed**, one worker, no retry or isolated-only recovery.
+  Log `tmp/kandev-run.e2e.4RcP8DZc.log`.
+  No production source changed after the fresh build. The three new cases
+  cover actual custom and built-in override selector application of JSON-
+  reloaded raw legacy records, all live/serialized cap-release extents, actual
+  fixture/Changes content, and actual ordinary Files move/undo with the sole
+  tool root absent. Existing Below/Right splits, manual sashes, saved task
+  return/cold/reload, conditional-tab and retained-pane cases remain included.
+- Copied `.pr-assets` immediately to `round11-visual/desktop/` before mobile
+  resets it. Inspected both final raw-selector captures (400/800/400) and
+  `layout-profiles--settings-ordinary-no-right-undo.png` (500/1000/100).
+  The no-right test uses the same real Dockview move primitive as shipped
+  settings, not a store/mock echo; it preserves the documented normal-UI
+  close of the incidental undefined-provider review tab before geometry
+  isolation. It does not claim PR-tab-present reveal passed.
+- Same-artifact mobile verification, sequential after desktop:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, one worker, no retry.
+  Log `tmp/kandev-run.e2e.KjGxTYDt.log`. Copied captures immediately to
+  `round11-visual/mobile/`; inspected the final custom and built-in override
+  phone editor surfaces. No phone composition or mobile task-workbench change.
+  All final managed runtimes completed owned teardown.
+- Final desktop/mobile aggregates have no failure, retry or isolated-only
+  recovery. Earlier readiness failures and the first-fresh Todos prerequisite
+  failure remain recorded above; neither is hidden by the final clean run.
+  Historical full `make test` environment limits remain unchanged and were not
+  rerun. No exact-head real Prompt History package re-smoke: these runs used
+  the in-tree packaged fixture. Primary runtime/settings and the excluded
+  undefined-provider serialization and delayed-sash environment race remain
+  untouched.
+- Companion design now records raw explicit normalization before geometry/source
+  claim, and ordinary-plus-retained membership validation before allocation
+  exits. Public guidance and historical CHANGELOG remain intentionally
+  unchanged: this restores existing selection and geometry contracts.
+  Prior evidence and requirement/design acceptance statuses are unchanged.
+- Normal-hook delivery evidence is retained outside the checkout in
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round11-hook-receipt.json`
+  and `round11-commit-hooks.log`. No amend/bypass, push, PR, deployment,
+  primary-instance mutation, `step_complete`, new worker/reviewer or parent
+  archive. Parent owns integration and the next review.
+- After runtime verification, removed the ID-only duplicate store row: changing
+  a record ID does not select a different `applyCustomLayout` consumer branch.
+  The two distinct actual workbench selector scenarios remain in browser
+  coverage, and both enforcement boundaries retain their raw-JSON regression.
+  Re-formatted/linted that test; production and browser artifacts are unchanged.
+- Final complete unit command after every test edit:
+  `pnpm exec vitest run
+  components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-tool-roots.plugin-layout.test.ts
+  lib/state/dockview-three-root.plugin-layout.test.ts
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-preset-persistence.test.ts
+  lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+  lib/state/layout-manager components/settings/layouts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts
+  components/task/dockview-review-panel-sync.test.ts
+  components/task/dockview-todo-panel-sync`: **43 files, 649 passed**.
+- Repeated `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`
+  after the final browser and unit edits: passed with only the same
+  release-notes fallback warning.
+- Final documentation gates: `python3 scripts/list-docs.py validate`,
+  `python3 scripts/lint-spec-files.py --all`,
+  `python3 scripts/lint-spec-files.test.py`, `git diff --check` and
+  `validateCoverage` over all nine intended paths and the six package
+  documents. Full coverage receipt: `round11-coverage.json` in review scratch.

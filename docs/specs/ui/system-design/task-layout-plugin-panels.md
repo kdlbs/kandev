@@ -280,12 +280,15 @@ sashes do not release another layout's allocation. Existing right-source/manual/
 remains unchanged. Whole-source reset/replacement on environment switch,
 explicit profile application or vertical transition also resets root allocation.
 
-A retained hidden right pane is a host projection, not a root edit. Both
-enforcement boundaries validate the existing retained column and its source
-index independently of live right-pane allocation, visibility and child-count
-early exits. Match source anchors against the live columns with that retained
-child reinserted for structural validation only. This includes hiding the
-pinned last root so no live right owner remains. Skip all-root redistribution
+Both enforcement boundaries validate ordinary live membership and retained
+hidden projections independently of live right-pane allocation, visibility and
+child-count early exits. Moving the sole tool root's panel into Agent is an
+ordinary structural edit even when no live right owner remains and no hidden
+pane exists; splitting it back cannot revive source weights.
+A retained hidden right pane is a host projection, not a root edit. Match source
+anchors against the live columns with its retained child reinserted at its
+source index for structural validation only. This includes hiding the pinned
+last root so no live right owner remains. Skip all-root redistribution
 while projected; continue ordinary live right target/cap enforcement when a
 right owner is present. A genuine structural change while hidden permanently
 releases allocation, even if undone before reveal. After reveal, validate the
@@ -312,7 +315,11 @@ new Files-specific priority, selects that owner. Existing center/contextual
 eligibility remains unchanged.
 
 `normalizeRightColumnOwnership` applies this same non-mutating rule to live
-capture and to successfully validated reusable JSON. Previously saved duplicate
+capture, successfully validated reusable JSON and explicit saved-profile
+application. Workbench custom selection and built-in override selection both
+pass raw saved JSON. After existing retired-component filtering and session
+materialization, normalize that explicit input before resolving widths,
+applying panels and claiming the reusable source. Previously saved duplicate
 right IDs therefore remain readable without aliasing their independent
 geometry. Do not rewrite the supplied saved payload, relax validation, add a
 portable field, or introduce per-tool manual preferences.

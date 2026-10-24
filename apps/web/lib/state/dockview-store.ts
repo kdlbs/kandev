@@ -93,6 +93,7 @@ import {
   formatJsonRootSizes,
 } from "./dockview-widths-debug";
 
+import { normalizeRightColumnOwnership } from "./layout-manager/serializer";
 import { getReusableRightWidth } from "./layout-manager/pinned-targets";
 import { resolveEnvRightWidth } from "./layout-manager/right-width";
 const debugSwitch = createDebugLogger("dockview:store-switch");
@@ -979,11 +980,14 @@ function restoreCustomLayout({
     // as during profile validation, because this explicit apply path does not
     // go through the settings normalizer.
     const visibleSessions = visibleCustomLayoutSessions(opts);
-    const activeState = materializeReusableChatPanel(
+    const materializedState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(filterLayoutStateByComponents(state)),
       visibleSessions.activeSessionId,
       visibleSessions.sessionIds,
     );
+    const columns = normalizeRightColumnOwnership(materializedState.columns);
+    const activeState =
+      columns === materializedState.columns ? materializedState : { ...materializedState, columns };
     const savedWidths = resolveCustomLayoutPinnedWidths(
       activeState.columns,
       safeWidth,

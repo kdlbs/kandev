@@ -31,7 +31,7 @@ import { getRootSidebarWidth } from "./layout-manager/applier";
 import { getReusableRightWidth, setPinnedTarget } from "./layout-manager/pinned-targets";
 import {
   restoreReusableRootGeometry,
-  validateRetainedRootGeometry,
+  validateLiveRootGeometry,
 } from "./layout-manager/reusable-root-geometry";
 import { computeRightMaxPx } from "./layout-manager/caps";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
@@ -158,7 +158,7 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
   if (api.hasMaximizedGroup() || ctx.maximized) return;
   // Pinned targets are horizontal widths; a vertical root's children are rows.
   if (getRootOrientation(api) === "VERTICAL") return;
-  validateRetainedRootGeometry(api, ctx.envId, ctx.hiddenRightPane);
+  validateLiveRootGeometry(api, ctx.envId, ctx.hiddenRightPane);
   if (!ctx.rightPanelsVisible) refreshPinnedRightConstraints(api, null);
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;

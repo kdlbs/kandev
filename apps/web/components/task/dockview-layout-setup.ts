@@ -20,7 +20,7 @@ import {
 } from "@/lib/state/layout-manager/pinned-targets";
 import {
   restoreReusableRootGeometry,
-  validateRetainedRootGeometry,
+  validateLiveRootGeometry,
 } from "@/lib/state/layout-manager/reusable-root-geometry";
 import {
   getPinnedRightColumn,
@@ -179,7 +179,7 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   const store = useDockviewStore.getState();
   if (store.isRestoringLayout && !allowDuringRestore) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
-  validateRetainedRootGeometry(api, store.currentLayoutEnvId, store.hiddenRightPane);
+  validateLiveRootGeometry(api, store.currentLayoutEnvId, store.hiddenRightPane);
   const right = getPinnedRightColumn(api);
   if (!right) refreshPinnedRightConstraints(api, null);
   const sv = getRootSplitview(api);

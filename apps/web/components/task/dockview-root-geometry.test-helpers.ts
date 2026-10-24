@@ -127,7 +127,7 @@ function resize(api: DockviewApi, width: number, boundary: Boundary) {
     enforcePinnedTargets(api, {
       sidebarVisible: useDockviewStore.getState().sidebarVisible,
       rightPanelsVisible: useDockviewStore.getState().rightPanelsVisible,
-      maximized: false,
+      maximized: useDockviewStore.getState().preMaximizeLayout !== null,
       envId: useDockviewStore.getState().currentLayoutEnvId,
       hiddenRightPane: useDockviewStore.getState().hiddenRightPane,
     });
