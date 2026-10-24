@@ -540,17 +540,26 @@ type PermissionOption struct {
 
 // PermissionRequestEventPayload is the payload when an agent requests permission.
 type PermissionRequestEventPayload struct {
-	Type       string             `json:"type"` // Always "permission_request"
-	Timestamp  string             `json:"timestamp"`
-	AgentID    string             `json:"agent_id"`
-	TaskID     string             `json:"task_id"`
-	SessionID  string             `json:"session_id"`
-	RequestID  string             `json:"request_id"`
-	PendingID  string             `json:"pending_id"`
-	ToolCallID string             `json:"tool_call_id"`
-	Title      string             `json:"title"`
-	Options    []PermissionOption `json:"options"`
-	ActionType string             `json:"action_type"`
+	Type      string `json:"type"` // Always "permission_request"
+	Timestamp string `json:"timestamp"`
+	AgentID   string `json:"agent_id"`
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	// Owner identity routes and admits a run-owned request, which has no
+	// task session.
+	AgentExecutionID string             `json:"agent_execution_id"`
+	OwnerKind        ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID      string             `json:"workspace_id,omitempty"`
+	RunID            string             `json:"run_id,omitempty"`
+	RunSessionID     string             `json:"run_session_id,omitempty"`
+	RunAttempt       int                `json:"run_attempt,omitempty"`
+	AgentProfileID   string             `json:"agent_profile_id,omitempty"`
+	RequestID        string             `json:"request_id"`
+	PendingID        string             `json:"pending_id"`
+	ToolCallID       string             `json:"tool_call_id"`
+	Title            string             `json:"title"`
+	Options          []PermissionOption `json:"options"`
+	ActionType       string             `json:"action_type"`
 	// AutoApprovedOptionID names the option agentctl already selected. A
 	// nonempty value makes this payload an audit record of an answered
 	// request rather than a prompt awaiting a person.

@@ -204,6 +204,42 @@ func (f *facade) ExecuteBackgroundWorkAction(ctx context.Context, executionID st
 	return f.backend.ExecuteBackgroundWorkAction(ctx, executionID, req)
 }
 
+type runPermissionBackend interface {
+	ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error
+	CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error
+}
+
+func (f *facade) runPermissionBackend(executionID string) (runPermissionBackend, error) {
+	if executionID == "" {
+		return nil, fmt.Errorf("runtime: executionID is required")
+	}
+	backend, ok := f.backend.(runPermissionBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend, nil
+}
+
+// ResolveRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) ResolveRunPermission(ctx context.Context, executionID, requestID, pendingID, optionID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.ResolveRunPermission(ctx, executionID, requestID, pendingID, optionID)
+}
+
+// CancelRunPermission delegates to a backend that can address permissions
+// by execution.
+func (f *facade) CancelRunPermission(ctx context.Context, executionID, requestID, pendingID string) error {
+	backend, err := f.runPermissionBackend(executionID)
+	if err != nil {
+		return err
+	}
+	return backend.CancelRunPermission(ctx, executionID, requestID, pendingID)
+}
+
 // launchRequestFromSpec builds the lifecycle.LaunchRequest the backend
 // expects. If the caller supplies a pre-built *lifecycle.LaunchRequest
 // in Metadata["launch_request"], we use it as the base and overlay the
