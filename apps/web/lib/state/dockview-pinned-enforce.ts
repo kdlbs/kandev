@@ -28,6 +28,7 @@ import {
 import { getPinnedRightColumn } from "./layout-manager/pinned-right-column";
 import { getRootSidebarWidth } from "./layout-manager/applier";
 import { getReusableRightWidth, setPinnedTarget } from "./layout-manager/pinned-targets";
+import { restoreReusableRootGeometry } from "./layout-manager/reusable-root-geometry";
 import { computeRightMaxPx, LAYOUT_PINNED_MIN_PX } from "./layout-manager/caps";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
@@ -91,12 +92,10 @@ function resolveRightTarget(
   ctx: EnforcePinnedTargetsCtx,
   sidebarWidth: number,
   width: number | undefined,
+  manualWidth: number | null,
 ): number {
   const persistedTarget =
-    getManualRightWidth(ctx.envId ?? null) ??
-    getReusableRightWidth(ctx.envId, width) ??
-    getPinnedTarget("right") ??
-    null;
+    manualWidth ?? getReusableRightWidth(ctx.envId, width) ?? getPinnedTarget("right") ?? null;
   return resolveResponsiveRightWidth(width, sidebarWidth, persistedTarget);
 }
 
@@ -108,13 +107,15 @@ function enforceRightColumn(
   const width = measureDockviewGridWidth(api);
   const right = getPinnedRightColumn(api);
   const sidebarWidth = getRootSidebarWidth(api);
-  const target = resolveRightTarget(ctx, sidebarWidth, width);
+  const manualWidth = getManualRightWidth(ctx.envId ?? null);
+  const target = resolveRightTarget(ctx, sidebarWidth, width, manualWidth);
   if (right) {
     const maximumWidth = computeRightMaxPx(width, sidebarWidth);
     for (const group of right.groups) {
       group.api.setConstraints({ maximumWidth, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
     setPinnedTarget("right", target);
+    if (restoreReusableRootGeometry(api, ctx.envId, width, target, manualWidth)) return;
   }
   restoreColumnToTarget(sv, right?.index ?? sv.length - 1, target);
 }

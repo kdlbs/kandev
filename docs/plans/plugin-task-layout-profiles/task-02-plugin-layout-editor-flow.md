@@ -1113,3 +1113,167 @@ Round 7 accepted saved-environment geometry remediation (2026-10-24, Sol 6.1):
   `python3 scripts/lint-spec-files.py --all`;
   `python3 scripts/lint-spec-files.test.py` (36 passed);
   `git diff --check`.
+
+Round 8 accepted automatic all-root geometry remediation (2026-10-24, Sol 6.1):
+
+- Starting HEAD `b0824a40874e8db45600bbd604325f260c235149`, initially clean.
+  Session metadata confirmed unchanged exact profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`; no workers or model substitution.
+- Retaining only the right share cannot restore the remaining roots after a
+  safety cap binds. Dockview scales already-constrained live proportions, and
+  resizing only Files takes space from a neighbor. Audited source claims in
+  default/custom construction and fresh switches, source release on saved
+  switches/presets/vertical transitions, both enforcement paths and restoration.
+- Initial real-Dockview RED:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts`,
+  from `apps/web`: 10 failed, 16 passed. Real settings Split Right and actual
+  from-Dockview/workbench capture both validated. Source 400/1000/200 expanded
+  from 320/320/160 to 500/1000/100, not 400/1000/200; source 800/1200/800 expanded
+  from 240/320/240 to 840/1200/760. Both mounted and proactive boundaries failed.
+  Direct wide application and non-binding 800/600/200 controls passed; original
+  sources stayed unchanged and manual preferences stayed null.
+- Final expanded pre-production RED:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-red.json`:
+  16 failed, 18 passed (34 tests). Controls also cover real sidebar reservation,
+  null-owned/foreign sources, manual pixels, incomplete geometry, vertical roots,
+  actual session/tab identity changes, root structure edit/undo and unrelated
+  root-sash edits. Sidebar expectations use its actual pinned live extent;
+  they do not impose a new sidebar scaling policy.
+- Complete source claims now retain numeric root widths/pinning and normalized
+  panel anchors in the same environment-owned record. Incomplete sources still
+  retain only their absolute right policy. `restoreReusableRootGeometry` shares
+  one bounded path across both enforcement boundaries: resolve/cap right first,
+  preserve other pinned children's live extents, reuse `computeColumnWidths`
+  for the remaining source weights, then resize the root prefix. Integer
+  residue goes to the last flexible child. No panel rebuild, schema/API change,
+  nested-weight mutation or second source-ownership cache.
+- An intermediate contraction check proved changed Dockview constraints do not
+  eagerly clamp live extents: the old right width must be restored before
+  prefix allocation. Corrected that ordering in the common adapter, not with
+  retries or special source values. Removed the temporary diagnostic output.
+  GREEN with the simple one-file command above: 34 passed.
+- Root anchors match source order without requiring generated group IDs,
+  tolerate extra tabs in a child and normalize actual chat/session identity.
+  A structural mismatch releases the additional root allocation permanently
+  for that source; undoing the edit cannot revive it. A genuine root-sash size
+  change releases that allocation before drag suppression ends, scoped to the
+  environment captured at drag start. Existing right-source/null-staging policy
+  remains intact. Nested sashes and foreign ownership do not clear another
+  source. Actual manual right pixels bypass whole-root redistribution.
+- Permanent tests assert every live root extent and every serialized root size
+  through narrow -> wide -> narrow -> wide, both captures and both boundaries.
+  Distinct controls retain canonical two-root, non-binding three-root, 800px
+  raw manual precedence, true null ownership, foreign/null mismatch, incomplete
+  absolute width, vertical rows, actual pinned sidebar extents, chat replacement,
+  structural edit/undo and a genuine unrelated root sash. Earlier saved SPA/
+  cold/manual restoration and other geometry coverage remains unchanged.
+- First comprehensive command (before the one-pixel boundary refinement), from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  lib/state/dockview-root-proportions.plugin-layout.test.ts
+  lib/state/dockview-three-root.plugin-layout.test.ts
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+  lib/state/layout-manager components/settings/layouts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts`:
+  38 files, 511 tests passed.
+- Six changed TS/TSX paths passed `pnpm exec prettier --write` and
+  `pnpm exec eslint --max-warnings 0`:
+  `components/task/dockview-layout-setup.ts`,
+  `lib/state/dockview-pinned-enforce.ts`,
+  `lib/state/layout-manager/pinned-targets.ts`,
+  `lib/state/layout-manager/reusable-root-geometry.ts`,
+  `lib/state/dockview-root-proportions.plugin-layout.test.ts`,
+  `e2e/tests/settings/layout-profiles.spec.ts`.
+  Split the new test suite into geometry and lifecycle groups to meet the
+  existing function-length limit. LSP remained unavailable; existing exported
+  signatures were unchanged and new internal consumers were mapped directly.
+- `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+  Its first run identified the library's non-discriminated serialized-root data
+  union in the new test helper. Added `Array.isArray` narrowing to both serialized
+  assertion helpers, without changing production behavior; reran formatting,
+  ESLint, all 38 files/511 tests and the 10GiB typecheck successfully.
+- Fresh managed desktop verification:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **23 passed**, one clean aggregate, no retries or isolated recovery.
+  Rebuilt backend, Vite production assets and packaged fixture.
+  Log: `kandev-run.e2e.31UqPEer.log` in the task-owned `tmp` directory above.
+- Added, rather than replaced, a cap-binding browser scenario. Actual settings
+  Split tab > Right creates and saves the generated three-root source; supported
+  settings-API fixture seeding assigns its two unequal width sets. Fresh tasks
+  exercise 800 -> 1600 -> 800 -> 1600 and 800 -> 2800 -> 800 -> 2800 workbench
+  widths. Every actual root extent and serialized root size must equal
+  320/320/160 <-> 400/1000/200 or 240/320/240 <-> 800/1200/800 respectively.
+  Actual Files and packaged plugin content are visible; no manual width appears
+  and portable saved widths stay unchanged. No registry fabrication or mocked
+  resize result. Existing non-cap/manual/saved-return/reload/sash proof remains.
+- Inspected both successful cap-release screenshots. Preserved them and the
+  passing task-return/reload captures under
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-visual/`.
+  Production geometry code was unchanged after the fresh build. The later test
+  helper array guards only narrow the library's serialized-data union.
+- Existing excluded PR-tab undefined serialization boundary and normal-UI close
+  prerequisite remain unchanged in the earlier hide/maximize scenario.
+  No PR-tab-present reveal claim, validation weakening, full `make test` rerun
+  or exact-head real Prompt History package re-smoke. Earlier evidence and
+  environment limits remain historical, not claimed resolved by this fix.
+- Mobile used the same fresh artifacts and task-owned storage:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, log `kandev-run.e2e.9C8l2X4u.log`.
+  Inspected the shared phone editor; custom/override images are retained beside
+  the four desktop captures in `round8-visual/`. No new phone composition or
+  phone task-layout feature. Managed runs completed owned-runtime teardown.
+- Companion design records source-root weights, safe anchor matching, shared
+  bounded redistribution, current pinned-sidebar precedence and allocation
+  invalidation without changing existing right/manual/saved policy. Earlier
+  evidence and requirement/design lifecycle statuses remain unchanged.
+  Public guidance and historical CHANGELOG are unchanged because this restores
+  the already-promised root proportions. Normal-hook delivery receipts:
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-hook-receipt.json`
+  and companion `round8-commit-hooks.log`. No push, PR, deployment, primary
+  instance/settings/runtime mutation, `step_complete`, archive or new worker.
+- Final genuine-edit boundary refinement used its own RED/GREEN cycle:
+  `pnpm exec vitest run lib/state/dockview-root-proportions.plugin-layout.test.ts
+  --reporter=json
+  --outputFile=/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-pixel-red.json`:
+  2 failed, 34 passed. A real unrelated sash changed 200 -> 201px, but the
+  allocation invalidation threshold ignored one pixel while redistribution
+  restored it. Both boundaries reverted 400/1000/201/199 to 400/1000/200/200.
+  Changed the invalidation comparison from `> 1` to `>= 1`, matching integer
+  Dockview sizing and the restoration threshold; no input-specific branch.
+  One-file GREEN: 36 passed, including both one-pixel and 50px genuine edits.
+- After that last production edit, reran the complete command and explicit
+  formatting/lint path set above: 38 files, **513 tests passed**, Prettier and
+  ESLint `--max-warnings 0` passed, and
+  `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+- After the one-pixel production correction, repeated the exact fresh managed
+  desktop build/run command above (same task-owned storage, three affected
+  specs, `--retries=0`): **23 passed** in one clean aggregate.
+  Final desktop log: `kandev-run.e2e.fswfrCKB.log`. Rebuilt production assets
+  include the last source edit. Inspected both final cap-release images and
+  preserved them with the final saved-return/reload captures separately under
+  `round8-visual/final/`; the earlier captures remain unchanged.
+- Repeated the same-artifact mobile command on those final rebuilt assets:
+  **8 passed**, final log `kandev-run.e2e.WZ63pa7m.log`. Inspected the final phone
+  surface and retained both final phone captures in `round8-visual/final/`.
+  Final desktop/mobile runs completed owned-runtime teardown, with no aggregate
+  failures, retries, isolated recovery or remaining runtime prerequisite blocker.
+- Final documentation gates passed: `python3 scripts/list-docs.py validate`
+  (386 decisions, 1646 specifications), full `lint-spec-files.py --all`,
+  all 36 `lint-spec-files.test.py` tests and `git diff --check`.
+  `validateCoverage` checked all eight intended changed paths against the six
+  current package documents: `ok: true`, `status: covered`, no errors, both
+  owning requirement/design references accepted. Full result retained in
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round8-coverage.json`.

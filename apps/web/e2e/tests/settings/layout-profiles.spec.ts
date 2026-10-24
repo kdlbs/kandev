@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import type { DockviewApi } from "dockview-react";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
@@ -1034,6 +1035,79 @@ test.describe("Plugin panel geometry in applied profiles", () => {
       await prCapture.screenshot(`settings-three-root-${restoration}`, {
         caption:
           "Saved task restores the middle Files manual width independently of reusable ratios",
+      });
+    }
+  });
+
+  test("restores all root weights after cap release for a settings-created Right split", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    await installFixturePlugin(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 900 });
+    await apiClient.saveUserSettings({
+      saved_layouts: [
+        savedProfile(
+          "root-cap-release",
+          "Root cap release",
+          filesGroupPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+        ),
+      ],
+    });
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.selectPanel(PROMPT_TITLE);
+    await layouts.actions.getByRole("button", { name: "Split tab", exact: true }).click();
+    await testPage.getByRole("menuitem", { name: "Right", exact: true }).click();
+    await layouts.save();
+    const captured = await savedLayout(apiClient, "root-cap-release");
+    expect(captured.columns.map((column) => column.id)).toEqual(["center", "right", PROMPT_ID]);
+    const serializedSizes = () =>
+      testPage.evaluate(() => {
+        const api = (window as Window & { __dockviewApi__?: DockviewApi }).__dockviewApi__;
+        const root = api?.toJSON().grid.root;
+        if (root?.type !== "branch" || !Array.isArray(root.data))
+          throw new Error("Dockview root branch not available");
+        return root.data.map((child) => child.size);
+      });
+    for (const geometry of [
+      { widths: [400, 1000, 200], narrow: [320, 320, 160], wide: 1600 },
+      { widths: [800, 1200, 800], narrow: [240, 320, 240], wide: 2800 },
+    ]) {
+      const source = structuredClone(captured);
+      source.columns.forEach((column, index) => {
+        column.width = geometry.widths[index];
+      });
+      await apiClient.saveUserSettings({
+        saved_layouts: [savedProfile("root-cap-release", "Root cap release", source)],
+      });
+      await testPage.setViewportSize({ width: 1120, height: 900 });
+      const task = await createTaskWithSession(
+        apiClient,
+        seedData,
+        `Root cap release ${geometry.wide}`,
+      );
+      await openTask(testPage, task.id);
+      for (const width of [800, geometry.wide, 800, geometry.wide]) {
+        await testPage.setViewportSize({ width: width + 320, height: 900 });
+        await expect.poll(() => getDockviewContainerWidth(testPage)).toBe(width);
+        const expected = width === 800 ? geometry.narrow : geometry.widths;
+        await expect.poll(() => rootSizes(testPage)).toEqual(expected);
+        await expect.poll(serializedSizes).toEqual(expected);
+      }
+      await testPage.locator(".dv-tab", { hasText: "Files" }).click();
+      await expect(testPage.getByTestId("files-panel")).toBeVisible();
+      await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+      expect(await hasManualRightWidth(testPage)).toBe(false);
+      expect(
+        (await savedLayout(apiClient, "root-cap-release")).columns.map((column) => column.width),
+      ).toEqual(geometry.widths);
+      await prCapture.screenshot(`settings-root-cap-release-${geometry.wide}`, {
+        caption:
+          "Cap release restores every saved root proportion without changing the portable source",
       });
     }
   });

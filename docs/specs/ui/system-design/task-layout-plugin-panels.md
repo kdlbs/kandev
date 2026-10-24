@@ -234,8 +234,9 @@ No new portable setting, persistence tier, or plugin API is introduced.
 
 `layout-manager/pinned-targets.ts` owns one in-memory source-geometry record
 for the active environment. Complete saved geometry supplies the unclamped
-right share; incomplete geometry supplies the saved absolute right width.
-Column bounds and runtime safety caps apply at each current measurement,
+right share and the remaining root weights; incomplete geometry keeps the saved
+absolute right width without enabling whole-root redistribution. Column bounds
+and runtime safety caps apply at each current measurement,
 never when retaining the source. Cold initialization binds the known
 environment before default construction; genuine null-environment staging
 remains separate. Default builds, fast fresh switches and explicit custom
@@ -250,6 +251,30 @@ changes with a fixed viewport and callbacks after Dockview's own observer has
 already resized the grid. Non-owned saved pixel targets keep their existing
 container-only policy; viewport refresh is unchanged. Manual pixel widths
 retain precedence; vertical roots never enter horizontal target refresh.
+
+`reusable-root-geometry.ts` shares one bounded automatic restoration path between
+mounted and proactive enforcement. Retain numeric source widths/pinning and
+normalized panel anchors, not constrained live proportions or whole panel
+payloads. Match anchors in root order without requiring captured group IDs;
+chat/session identity normalization and additional tabs in an existing child do
+not change root ownership. Resolve the right target and preserve other pinned
+children's actual live extents (including the measured embedded sidebar), then
+reuse `computeColumnWidths` to distribute the remaining width by source weights.
+The already-resolved pinned extents must not be capped again against the browser
+viewport. Assign integer rounding residue to the last flexible child.
+
+First restore the right extent under its new cap: Dockview can retain a live
+extent outside a freshly changed constraint until resize. Then restore the root
+prefix in one pass, leaving the suffix its remaining space. Do not rebuild
+panels, touch nested weights, or resize children already at their resolved size.
+An actual manual right preference bypasses this whole-root policy. A changed
+root/anchor structure permanently releases only the additional root allocation
+for that source; undoing the edit must not revive old root weights. A genuine
+root-sash width change of at least one pixel releases it before drag suppression
+ends, scoped to the environment captured at drag start. Nested/unrelated DOM
+sashes do not release another layout's allocation. Existing right-source/manual/null-staging policy
+remains unchanged. Whole-source reset/replacement on environment switch,
+explicit profile application or vertical transition also resets root allocation.
 
 `getPinnedRightColumn` locates the actual live horizontal pinned right root child
 through the existing tree capture and returns its index and every group beneath

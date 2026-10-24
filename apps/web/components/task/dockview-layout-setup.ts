@@ -19,7 +19,11 @@ import {
   resolveEnvRightWidth,
   resolveResponsiveRightWidth,
 } from "@/lib/state/layout-manager/right-width";
-import { getReusableRightWidth } from "@/lib/state/layout-manager/pinned-targets";
+import {
+  getReusableRightWidth,
+  clearReusableRootGeometry,
+} from "@/lib/state/layout-manager/pinned-targets";
+import { restoreReusableRootGeometry } from "@/lib/state/layout-manager/reusable-root-geometry";
 import {
   getPinnedRightColumn,
   type PinnedRightColumn,
@@ -103,6 +107,34 @@ function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget |
   );
 }
 
+type RootDrag = { envId: string | null; sizes: number[] };
+
+function captureRootDrag(
+  api: DockviewReadyEvent["api"],
+  target: EventTarget | null,
+): RootDrag | null {
+  const sv = getRootSplitview(api);
+  const sash = (target as HTMLElement | null)?.closest(".dv-sash");
+  if (!sash || !sv?.sashes?.some((item: { container: HTMLElement }) => item.container === sash))
+    return null;
+  return {
+    envId: useDockviewStore.getState().currentLayoutEnvId,
+    sizes: Array.from({ length: sv.length }, (_, index) => sv.getViewSize(index)),
+  };
+}
+
+function releaseEditedRootGeometry(api: DockviewReadyEvent["api"], drag: RootDrag | null): void {
+  if (!drag) return;
+  const sv = getRootSplitview(api);
+  if (
+    !sv ||
+    drag.sizes.length !== sv.length ||
+    drag.sizes.some((size, index) => Math.abs(size - sv.getViewSize(index)) >= 1)
+  ) {
+    clearReusableRootGeometry(drag.envId);
+  }
+}
+
 /** Resize splitview view `idx` back to `target` (clamped to `maximumWidth`)
  *  when it differs by more than 1px, ignoring dockview rejections of
  *  unreachable sizes. */
@@ -167,7 +199,17 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
         manualRightWidth ??
         getPinnedTarget("right") ??
         resolveResponsiveRightWidth(measuredWidth, sidebarWidth, null);
-      restoreColumnToTarget(sv, right.index, target, maximumWidth);
+      if (
+        !restoreReusableRootGeometry(
+          api,
+          store.currentLayoutEnvId,
+          measuredWidth,
+          Math.min(target, maximumWidth),
+          manualRightWidth,
+        )
+      ) {
+        restoreColumnToTarget(sv, right.index, target, maximumWidth);
+      }
     }
   } finally {
     enforcing = false;
@@ -205,6 +247,8 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     return () => layoutSub.dispose();
   }
 
+  let rootDrag: RootDrag | null = null;
+
   /** Begin tracking a sash drag: flag the drag state on a primary-button
    *  mousedown over a `.dv-sash` and record whether it is the right column's
    *  sash. */
@@ -216,6 +260,7 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     if (t?.closest(".dv-sash")) {
       sashDragging = true;
       rightSashDragging = isPinnedRightSash(api, e.target);
+      rootDrag = captureRootDrag(api, e.target);
       setPinnedEnforcementSashDragging(true);
       if (isDebug()) {
         debugWidths(`sash-drag-start ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
@@ -228,6 +273,8 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   const onMouseUp = (e: MouseEvent): void => {
     if (e.button !== 0 || !sashDragging) return;
     const persistRight = rightSashDragging;
+    releaseEditedRootGeometry(api, rootDrag);
+    rootDrag = null;
     sashDragging = false;
     rightSashDragging = false;
     setPinnedEnforcementSashDragging(false);

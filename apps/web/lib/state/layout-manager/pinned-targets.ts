@@ -16,7 +16,9 @@
  *   width on `mouseup` so future rebalances restore to the user's choice.
  */
 import { LAYOUT_PINNED_MIN_PX } from "./caps";
-import type { LayoutState } from "./types";
+import type { LayoutColumn, LayoutState } from "./types";
+import { isSessionChatPanel } from "./session-panels";
+import { computeColumnWidths } from "./sizing";
 
 const targets = new Map<"sidebar" | "right", number>();
 
@@ -43,12 +45,40 @@ export function clearAllPinnedTargets(): void {
  * Complete snapshots scale by their saved share; incomplete snapshots keep
  * the saved absolute width. Runtime caps are applied only when resolving it.
  */
+type ReusableRootGeometry = { columns: LayoutColumn[]; anchors: Set<string>[] };
+
+function rootPanelIds(column: LayoutColumn): Set<string> {
+  return new Set(
+    column.groups.flatMap((group) =>
+      group.panels.map((panel) => (isSessionChatPanel(panel) ? "chat" : panel.id)),
+    ),
+  );
+}
+
+function captureRootGeometry(layout: LayoutState): ReusableRootGeometry | null {
+  const anchors = layout.columns.map(rootPanelIds);
+  if (anchors.some((ids) => ids.size === 0)) return null;
+  return {
+    columns: layout.columns.map((column) => ({
+      id: column.id,
+      width: column.width,
+      pinned: column.pinned,
+      groups: [],
+      // Pinned overrides are already resolved from the live constrained extents.
+      minWidth: 0,
+      maxWidth: Infinity,
+    })),
+    anchors,
+  };
+}
+
 type ReusableRightTarget = {
   envId: string | null;
   ratio: number | null;
   width: number;
   minWidth: number;
   maxWidth: number;
+  root: ReusableRootGeometry | null;
 };
 
 let reusableRightTarget: ReusableRightTarget | null = null;
@@ -70,6 +100,7 @@ export function setReusableRightTarget(envId: string | null, layout: LayoutState
     width: right.width,
     minWidth: right.minWidth ?? LAYOUT_PINNED_MIN_PX,
     maxWidth: right.maxWidth ?? Infinity,
+    root: complete ? captureRootGeometry(layout) : null,
   };
 }
 
@@ -87,4 +118,42 @@ export function getReusableRightWidth(
 
 export function clearReusableRightTarget(): void {
   reusableRightTarget = null;
+}
+
+/** Stop automatic all-root allocation after an explicit root edit without changing right-width policy. */
+export function clearReusableRootGeometry(envId: string | null | undefined): void {
+  if (reusableRightTarget && reusableRightTarget.envId === envId) reusableRightTarget.root = null;
+}
+
+/** Resolve remaining root widths from source weights, preserving already constrained pinned extents. */
+export function resolveReusableRootSizes(
+  envId: string | null | undefined,
+  live: LayoutState,
+  width: number,
+  rightTarget: number,
+): number[] | null {
+  const owned = reusableRightTarget;
+  if (!owned || owned.envId !== envId || !owned.root || live.rootOrientation === "VERTICAL")
+    return null;
+  const geometry = owned.root;
+  const matches =
+    live.columns.length === geometry.columns.length &&
+    geometry.anchors.every((ids, index) => {
+      const liveIds = rootPanelIds(live.columns[index]);
+      return [...ids].every((id) => liveIds.has(id));
+    });
+  if (!matches) {
+    owned.root = null;
+    return null;
+  }
+  const pinned = new Map<string, number>();
+  geometry.columns.forEach((column, index) => {
+    if (column.pinned)
+      pinned.set(column.id, column.id === "right" ? rightTarget : (live.columns[index].width ?? 0));
+  });
+  const sizes = computeColumnWidths(geometry.columns, width, pinned);
+  const lastFlexible = geometry.columns.findLastIndex((column) => !column.pinned);
+  if (lastFlexible >= 0)
+    sizes[lastFlexible] += Math.round(width - sizes.reduce((sum, size) => sum + size, 0));
+  return sizes;
 }
