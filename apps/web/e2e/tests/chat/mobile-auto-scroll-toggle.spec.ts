@@ -437,7 +437,10 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     await session.sendMessageViaButton(
       'e2e:message("MOBILE-LIVE-FOLLOW-START")\ne2e:delay(2500)\ne2e:message("MOBILE-LIVE-FOLLOW-TAIL")',
     );
-    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false })).toBeVisible();
+    const agentMessages = activeChat.getByTestId("agent-message-highlight");
+    await expect(
+      agentMessages.getByText("MOBILE-LIVE-FOLLOW-START", { exact: false }),
+    ).toBeVisible();
     const runningStatus = list.getByRole("status", { name: "Agent is running" });
     await expect(runningStatus).toBeVisible({ timeout: 10_000 });
     await expect
@@ -493,7 +496,7 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       .toBeGreaterThan(5);
     const readerTop = await list.evaluate((element) => element.scrollTop);
 
-    await expect(activeChat.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
+    await expect(agentMessages.getByText("MOBILE-LIVE-FOLLOW-TAIL", { exact: false })).toBeVisible({
       timeout: 10_000,
     });
     await expect

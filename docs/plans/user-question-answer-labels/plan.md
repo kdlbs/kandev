@@ -40,8 +40,8 @@ Confirmed root cause: `extractQuestionAnswers` calls `simplifyAnswer` without
 using the original question's options. The simplified entry contains only the
 selection ID and custom text. The output schema also forbids a label property.
 
-The reported UI flow was not exercised. The reproduction isolates the real
-MCP handler and mocks only the backend answer source.
+The initial reproduction isolated the real MCP handler and mocked the backend
+answer source. PR validation later exercised browser submission with the mock agent.
 
 ## Scope
 
@@ -95,8 +95,9 @@ backend's simulated first-option answer, and inspect both final result forms.
 Use the existing `postJSONRPC` and HTTP server patterns. Bound requests and
 register cleanup immediately. No production instance or real user prompt is needed.
 
-This checks the agent-visible protocol journey. It does not claim browser or
-live Claude Code coverage. No rendered UI changes require Playwright work.
+This checks the agent-visible protocol journey. Existing desktop and phone
+Playwright flows also verify the submitted IDs and labels. Live provider
+interpretation remains outside this validation.
 
 ## Work orders
 
@@ -133,7 +134,9 @@ Implementation validation passed on 2026-10-24:
   every exact command and result.
 
 The requirement is active, the design is current, and work order 01 is done.
-The source remains uncommitted. Live browser and provider behavior remain unverified.
+The implementation is published in PR #4752. Browser submission passed with
+the mock agent. Live provider interpretation remains unverified. PR fixup
+validation and CI findings are recorded in work order 01.
 
 ## Risks
 
@@ -141,5 +144,5 @@ The source remains uncommitted. Live browser and provider behavior remain unveri
 - Labels can repeat or contain arbitrary text. Preserve exact text and stable IDs.
 - The workspace trails main. Recheck current source before implementation and
   reconcile relevant changes without repairing unrelated shared Git refs.
-- The mock answer fixture proves projection behavior, not browser submission or
-  provider interpretation. Live provider interpretation remains unverified.
+- The mock agent proves browser submission and result projection. Live provider
+  interpretation remains unverified.

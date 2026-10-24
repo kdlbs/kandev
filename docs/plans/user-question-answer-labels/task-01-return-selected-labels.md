@@ -140,5 +140,41 @@ this response-label change.
 
 Public reference updated: `docs/public/agent-communication.md`.
 Requirements and design match the implementation and are now active/current.
-The backend answer source was simulated. Browser submission and live provider
-interpretation were not exercised. No commit or publication was performed.
+The initial backend tests simulated the answer source. The implementation was
+later committed and published as PR #4752 at the user's request. Live provider
+interpretation remains unverified.
+
+
+## PR fixup validation
+
+CI exposed an order-sensitive JSON assertion in the shared Threads question
+helper. All six desktop and two phone failures received the expected IDs and
+new labels. A focused local keyboard run reproduced the same failure. The
+helper now parses one answer receipt and checks each question's ID and label.
+
+CI also exposed two test synchronization and selector issues. The branch-switch
+test now waits for picker focus restoration before opening the next picker.
+The mobile live-scroll test scopes its markers to agent messages, so the user
+prompt cannot satisfy or duplicate the reply locator. No UI behavior changed.
+
+Validation uses an isolated merge of the PR with current main. The MCP package
+passed with the race detector. All 13 desktop composer cases passed across the
+main run and a four-case native-zoom rerun. The first zoom run could not launch
+Chromium because host libraries were absent; the rerun supplied existing Nix
+libraries. The phone answer and live-scroll cases passed three times each
+(9 tests, retries disabled). The branch-switch case passed ten repetitions
+with retries disabled. Focused ESLint and formatting checks passed.
+
+The managed E2E build used `MAKEFLAGS=GOFLAGS=-buildvcs=false` for its temporary
+worktree. Runs used loopback fixture settings and the host's browser libraries.
+Subsequent `--no-build` runs reused those exact production artifacts.
+Browser commands (from `apps/web` in the isolated merge checkout):
+
+```text
+pnpm e2e:run --host --no-build --project chromium e2e/tests/task/threads-composer-disclosure.spec.ts --retries=0
+pnpm e2e:run --host --no-build --project chromium e2e/tests/task/threads-composer-disclosure.spec.ts --grep 'scrolls long required questions' --retries=0
+pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/task/mobile-threads-composer-disclosure.spec.ts e2e/tests/chat/mobile-auto-scroll-toggle.spec.ts --grep 'scrolls and submits a long required question by touch|follows a live turn from the bottom' --retries=0 --repeat-each=3
+pnpm e2e:run --host --no-build --project chromium e2e/tests/task/create-task-branch-selector.spec.ts --grep 'switching worktree.*local resets the chip' --retries=0 --repeat-each=10
+```
+
+Final remote CI and review status remain external to this implementation record.

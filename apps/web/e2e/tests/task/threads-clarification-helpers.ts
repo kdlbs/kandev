@@ -334,13 +334,17 @@ export async function expectThreadQuestionSubmitted(
 ) {
   await waitForAgentMessage(api, sessionId, "You answered:");
   const { messages } = await api.listSessionMessages(sessionId);
-  const receipt = messages
-    .filter((message) => message.author_type === "agent")
-    .map((message) => message.content)
-    .join("\n");
-  expect(receipt).toMatch(/"db":\s*{\s*"selected_option":\s*"q1_opt3"/);
-  expect(receipt).toMatch(/"language":\s*{\s*"selected_option":\s*"q2_opt3"/);
-  expect(receipt).toMatch(/"deploy":\s*{\s*"selected_option":\s*"q3_opt2"/);
+  const receipts = messages
+    .filter(
+      (message) => message.author_type === "agent" && message.content.includes("You answered:"),
+    )
+    .map((message) => message.content.split("You answered:")[1]);
+  expect(receipts).toHaveLength(1);
+  expect(JSON.parse(receipts[0])).toMatchObject({
+    db: { selected_option: "q1_opt3", selected_label: "SQLite" },
+    language: { selected_option: "q2_opt3", selected_label: "Rust" },
+    deploy: { selected_option: "q3_opt2", selected_label: "Bare metal" },
+  });
   await expect(tile.getByTestId("clarification-overlay-container")).toHaveCount(0);
   await expect(tile.locator(".chat-message-list")).toContainText("You answered:");
 }

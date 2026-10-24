@@ -594,6 +594,7 @@ test.describe("Fresh-branch flow", () => {
         .filter({ hasText: /worktree/i })
         .first()
         .click();
+      await expect(executorSelector).toBeFocused();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await branchSelector.click();
@@ -602,6 +603,8 @@ test.describe("Fresh-branch flow", () => {
         .first()
         .click();
       await expect(branchSelector).toContainText("develop");
+      // Finish the branch popover's focus restoration before opening the executor picker.
+      await expect(branchSelector).toBeFocused();
 
       await executorSelector.click();
       await testPage
