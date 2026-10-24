@@ -286,6 +286,13 @@ The stalled-child regression failed before the change after waiting 5.08 seconds
 The successful remote-tail case also runs an executable Docker fixture. All 15 diagnostic tests, scoped ESLint, Prettier, TypeScript, and specification checks passed for this correction.
 Real Docker is unavailable locally, so fresh SSH container CI remains required after the push.
 
+### Mobile automation CI correction
+
+The mobile webhook test could match the creation fallback while the saved automation was still loading. Holding `automation.get` confirmed that the broad `Webhook` selector tapped `Or use a webhook instead` and reproduced the missing-field assertion.
+Both visits now wait for the trigger card and tap its exact `Webhook` disclosure. The existing persistence, touch-target, overflow, and deletion assertions are retained.
+The controlled loading case, scoped lint, Prettier, and TypeScript passed. The original 36-test CI process selection also passed after the correction, with two CPUs, one worker, and zero retries.
+The first failing CI attempt did not retain an action trace. Its screenshot and DOM match the controlled failure's collapsed-card state.
+
 ### Remaining limit
 
 The original active-question link text was not provided. Standard links pass through the actual active overlay on desktop and phone.
