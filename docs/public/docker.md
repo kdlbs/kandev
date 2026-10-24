@@ -64,21 +64,75 @@ Replace `X.Y.Z` with a real release. `latest` moves on release. `universal` move
 
 The repository root `Dockerfile` is release packaging, not a source-build Dockerfile. The release workflow first builds a native bundle for each architecture, prepares a build context containing `bundle/` plus `docker-entrypoint.sh`, builds the amd64 and arm64 images separately, and joins their digests into the published manifest. A plain `docker build .` from a checkout fails because `bundle/` is intentionally absent.
 
-For extra OS tools, derive from a pinned published image so the release bundle and entrypoint stay intact:
-
-```dockerfile
-FROM ghcr.io/kdlbs/kandev:X.Y.Z
-USER root
-RUN apt-get update \
- && apt-get install -y --no-install-recommends postgresql-client \
- && rm -rf /var/lib/apt/lists/*
-```
-
-Leaving the final configured user as root is intentional for this base flavor: the inherited entrypoint repairs `/data` and drops to `kandev` before starting the command. If a derivative finishes with `USER kandev`, provision writable volume ownership in advance, as the universal flavor does.
-
 </details>
 
 > **Persistence:** Always mount `/data`. Removing a container without a volume removes its database, workspaces, installed agent CLIs, and authentication state.
+
+## Extend the server image
+
+For extra OS tools used by Local or Worktree agents inside the server container, derive from a published image so the release bundle and entrypoint stay intact. This example pins Kandev 0.98.0 to its multi-architecture digest and adds a PostgreSQL 15 client from Debian Bookworm:
+
+```dockerfile
+FROM ghcr.io/kdlbs/kandev:0.98.0@sha256:f9aab231d3b3d3c09b0cfd247c8aa007bac2bc0788d1ae776af79c5307bbf628
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-15=15.19-0+deb12u1 \
+ && psql --version \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+The [ready-to-build Dockerfile](../../examples/docker-server-extension/Dockerfile) has no extra privilege, host mount, or startup installer. Leaving the final configured user as root is intentional for this base flavor: the inherited entrypoint repairs `/data` and drops to `kandev` before starting the command. If a derivative finishes with `USER kandev`, provision writable volume ownership in advance, as the universal flavor does.
+
+Build from the repository checkout, using only the example as context:
+
+```bash
+docker build -f examples/docker-server-extension/Dockerfile \
+  -t kandev-postgresql-client:0.98.0 examples/docker-server-extension
+```
+
+The image digest fixes the Kandev release bytes for the published `linux/amd64` and `linux/arm64` architectures. This recipe depends on Debian Bookworm and its glibc packages; it does not make a host SDK or musl binary portable. The Debian package version fixes the requested client version; signed Debian repository metadata and transitive packages can still change, and that version can become unavailable. Record the build log and resulting image digest for a deployment. Rebuild deliberately with a newer Kandev digest and package version to receive security updates. The example does not assume that `psql` on the host, a task Docker container, or a login shell proves availability to a Local or Worktree agent.
+
+### Check an extension in a disposable deployment
+
+Use a fresh, disposable `/data` volume and bind the service to loopback. Do not reuse a deployment volume: it contains workspaces and authentication state. With the image built above, start the service and check its logs for startup or install failures:
+
+```bash
+docker volume create kandev-extension-check
+docker run -d --name kandev-extension-check \
+  -p 127.0.0.1:38430:38429 \
+  -v kandev-extension-check:/data \
+  kandev-postgresql-client:0.98.0
+docker logs kandev-extension-check
+```
+
+Open `http://localhost:38430`, configure an agent CLI in this disposable instance, create a disposable task with a **Local** or **Worktree** executor profile and a disposable repository, and run this command in that task's agent terminal. It reads no credentials and prints only the effective user, paths, tool version, and cache ownership:
+
+```sh
+id
+printf 'HOME=%s\nPATH=%s\n' "$HOME" "$PATH"
+command -v psql
+psql --version
+mkdir -p "$HOME/.cache/kandev-extension-check"
+test -w "$HOME/.cache/kandev-extension-check"
+stat -c '%u:%g %n' "$HOME" "$HOME/.cache/kandev-extension-check"
+printf 'created on first start\n' > "$HOME/.cache/kandev-extension-check/probe"
+```
+
+Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.19, and writable cache paths owned by the service user. A shell launched through the actual agent is the decisive check; an interactive container shell can have a different environment. Recreate only this disposable container with the **same** volume and image:
+
+```bash
+docker stop kandev-extension-check
+docker rm kandev-extension-check
+docker run -d --name kandev-extension-check \
+  -p 127.0.0.1:38430:38429 \
+  -v kandev-extension-check:/data \
+  kandev-postgresql-client:0.98.0
+docker logs kandev-extension-check
+```
+
+In a new Local or Worktree agent session, rerun the user, path, version, and ownership checks, then run `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, remove only this labelled container and its disposable volume if they contain no work you need.
+
+For image versus volume installs and PATH precedence, see the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md). The [runtime persistence details](#persistence) explain which paths survive recreation. This procedure checks the server image; the Local Docker executor uses a separate task image.
 
 <details>
 <summary>Image runtime behavior and persistence details</summary>
