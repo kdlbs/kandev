@@ -194,6 +194,52 @@ test.describe("Mobile code walkthrough", () => {
   }
 
   // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-002.4
+  test("keeps composer navigation reachable on landscape phones", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData);
+    await testPage.getByTestId("walkthrough-launcher").tap();
+    const card = testPage.getByTestId("walkthrough-floating");
+    await card.getByTestId("walkthrough-comment-trigger").tap();
+    await card.getByRole("textbox").fill("Keep this landscape draft.\n".repeat(20));
+    const next = card.getByTestId("walkthrough-next");
+    for (const { width, height } of [
+      { width: 639, height: 375 },
+      { width: 640, height: 375 },
+      { width: 667, height: 375 },
+      { width: 767, height: 375 },
+      { width: 667, height: 320 },
+    ]) {
+      await testPage.setViewportSize({ width, height });
+      await expect
+        .poll(() =>
+          next.evaluate((button) => {
+            const rect = button.getBoundingClientRect();
+            const card = button
+              .closest('[data-testid="walkthrough-floating"]')!
+              .getBoundingClientRect();
+            return (
+              rect.height >= 44 &&
+              rect.top >= card.top &&
+              rect.bottom <= Math.min(card.bottom, innerHeight) &&
+              button.contains(
+                document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+              )
+            );
+          }),
+        )
+        .toBe(true);
+    }
+    await next.tap();
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+    await card.getByTestId("walkthrough-prev").tap();
+    await card.getByTestId("walkthrough-comment-trigger").tap();
+    await expect(card.getByRole("textbox")).toHaveValue("Keep this landscape draft.\n".repeat(20));
+  });
+
+  // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-002.4
   for (const withoutClicks of [false, true]) {
     test(`navigates Previous and Next with single taps${withoutClicks ? " without click events" : ""}`, async ({
       testPage,

@@ -416,3 +416,46 @@ Final managed mobile walkthrough suite: all eight tests passed (1.6 minutes).
 PR preparation: 118 focused tests and all 10 desktop walkthrough E2E tests
 passed. Full localization checks passed. The user-requested isolated instance
 on port 37665 was stopped before publication; port 9998 remains active.
+
+
+## PR landscape navigation review (2026-10-24)
+
+Status: complete. Greptile identified a valid clipped-footer case at 667x375.
+The 640px desktop height override applies before the 768px phone control sizes
+end, leaving insufficient height for the non-shrinking composer and navigation.
+The regression opens a long draft and checks actual hit testing for Next at
+639px, 640px, 667px, and 767px widths with 375px viewport height, then checks
+forward/back navigation and draft retention. Use the full available phone
+height below 768px while keeping the approved card placement and shared state.
+
+The system design also retained a stale fixed-card instruction. Remove that
+instruction in favor of the existing content-driven height contract. This
+implements comments 4367476248 and 4367476252 under the existing AC-002.4 and
+AC-002.6; no new product requirement is required. Reuse the current phone
+composition preview, one scrolling body, 44px targets, and safe-area clearance.
+Run the mobile suite, focused picker tests, typecheck/lint, and spec checks.
+Recapture mobile PR screenshots after the final fix.
+
+
+CodeRabbit aggregate review 5638682499 also identified the stale height text,
+a stale render-time sent-status guard, and a dense public-doc paragraph. The
+guard now reads the current comment store at submission time, with a regression
+that changes acknowledgement after render and proves pending delivery remains
+reachable. Replace the old promise-only acknowledgement test with this store-guard
+regression. Final comments-domain results are recorded below. Public draft retention and saved
+comment limits are separated. No blanket docstring expansion is planned:
+repository guidance asks comments to document invariants, and no repository CI
+policy requires an 80% function-docstring threshold.
+
+Landscape validation: the initial rebuilt height-cap-only change still clipped
+navigation. A disposable browser probe proved the cause: scroll-region padding
+and the composer's minimum sizes. Put padding inside the scrolling body, allow
+the open composer to shrink its input to 44px, and keep its action row fixed.
+The final mobile suite passes all nine tests, including 375px and 320px heights,
+actual button hit testing, navigation, and retained drafts. The single-scroll
+owner and the existing 640px floating placement boundary remain.
+
+Final review checks: all 114 comments-domain tests pass. The rebuilt mobile
+suite passes nine tests; the three affected desktop navigation, dragging, and
+feedback tests pass. Typecheck, changed-file lint, localization ratchet, and
+specification checks pass.

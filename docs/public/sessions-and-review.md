@@ -665,10 +665,13 @@ Kandev accepted the comment for delivery or queueing, not that the agent finishe
 processing it. Submitted comments stay visible and do not enter pending context again.
 
 Drafts stay with their step when you navigate, select **Cancel**, or close and
-reopen the walkthrough. Reloading can clear unsaved drafts. Saved comments
-survive reloads in the same browser tab and active session. They are not a
-shared discussion across sessions or devices. A replacement walkthrough does
-not inherit comments from an older revision.
+reopen the walkthrough. Reloading can clear unsaved drafts.
+
+Saved comments have these limits:
+
+- They survive reloads in the same browser tab and active session.
+- They are not shared across sessions or devices.
+- A replacement walkthrough does not inherit comments from an older revision.
 
 The walkthrough window fits its content. Long steps scroll within the window,
 while comment actions and navigation stay visible. The step picker uses the

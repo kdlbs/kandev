@@ -124,14 +124,16 @@ for fixed controls around one scrolling region.
 
 The body order is title, file anchor, explanation, and comment list. When empty,
 omit the list and its heading. Keep Comment visible in the footer. When open,
-place the composer immediately above navigation. Retain fixed card dimensions
-so the footer does not move between differently sized steps.
+place the composer immediately above navigation. Let the card fit its content
+within the available viewport height.
 
 Explanation and history share `min-h-0`, `overflow-y-auto`, and
 `overscroll-contain`. Avoid a second comment-list scrollbar. Preserve the
 existing floating-card/phone presentation boundary at 640px. New phone control
-sizing follows the 768px phone boundary or coarse pointer condition. Test both
-boundaries. Do not refactor unrelated breakpoint policy.
+sizing follows the 768px phone boundary or coarse pointer condition. Use the
+available viewport height below 768px, including landscape phones between
+640px and 767px. Apply the 78dvh desktop height cap only at 768px and above.
+Test both boundaries. Do not refactor unrelated breakpoint policy.
 
 On phones, the current panel remains the focused surface, with safe-area
 clearance and dynamic viewport sizing. Keep the composer and navigation usable
@@ -212,7 +214,9 @@ constrain long option labels to the card width.
 
 Remove the floating card's fixed height. Let the explanation and comments take
 natural space until the viewport limit is reached. The body is the single scroll
-owner. The header, picker, composer, and navigation do not shrink. On desktop,
+owner. Put its padding inside the scroller so the region can collapse to zero
+height. The header, picker, and navigation do not shrink. The open composer
+can shrink its input to 44px while its action row retains full touch targets. On desktop,
 observe card resizing and clamp its position to the viewport after content or
 viewport changes. On phones,
 retain the bottom-sheet placement, status-bar clearance, and safe-area inset.

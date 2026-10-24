@@ -168,7 +168,7 @@ export function CommentForm({
         className="min-h-[60px] resize-none text-xs"
         rows={2}
       />
-      <div className="flex items-center justify-between gap-2">
+      <div data-comment-actions className="flex items-center justify-between gap-2">
         <span data-comment-shortcuts className="text-[10px] text-muted-foreground">
           {onSubmitAndRun
             ? t("diff:enterToAddShiftEnterToRun", { modKey })

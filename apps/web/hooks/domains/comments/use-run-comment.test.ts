@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type {
+  Comment,
   AgentMessageComment,
   DiffComment,
   PlanComment,
@@ -55,6 +56,7 @@ const mockSubscribe = vi.fn(
 );
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 let mockStoreState: Record<string, unknown> = {};
+let mockCommentsById: Record<string, Comment> = {};
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockGetWebSocketClient(),
@@ -86,8 +88,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/lib/state/slices/comments", () => ({
-  useCommentsStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ markCommentsSent: mockMarkCommentsSent }),
+  useCommentsStore: Object.assign(
+    (selector: (s: Record<string, unknown>) => unknown) =>
+      selector({ markCommentsSent: mockMarkCommentsSent, byId: mockCommentsById }),
+    { getState: () => ({ markCommentsSent: mockMarkCommentsSent, byId: mockCommentsById }) },
+  ),
 }));
 
 vi.mock("@/lib/state/slices/comments/format", () => ({
@@ -167,6 +172,7 @@ function renderCommentHook(sessionId: string | null = "sess-1") {
 
 function setup() {
   vi.clearAllMocks();
+  mockCommentsById = {};
   const state = makeStoreState("WAITING_FOR_INPUT");
   mockStoreState = state;
   mockListTaskSessions.mockResolvedValue({
@@ -649,16 +655,19 @@ describe("useRunComment — session delivery failures", () => {
   });
 });
 
-it("does not submit a walkthrough comment already acknowledged through this hook", async () => {
+it("reads walkthrough acknowledgement at call time without requiring a render", async () => {
   setup();
-  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
   mockRequest.mockResolvedValue(undefined);
-  mockStoreState = makeStoreState("WAITING_FOR_INPUT");
-  const { result } = renderCommentHook();
   const comment = makeWalkthroughComment();
+  mockCommentsById = { [comment.id]: comment };
+  const { result } = renderCommentHook();
+  mockCommentsById = { [comment.id]: { ...comment, status: "sent" } };
   await result.current.runComment(comment);
+  expect(mockRequest).not.toHaveBeenCalled();
+  expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  mockCommentsById = { [comment.id]: comment };
   await result.current.runComment(comment);
-  expect(mockRequest).toHaveBeenCalledTimes(1);
+  expect(mockRequest).toHaveBeenCalledOnce();
 });
 
 it("retries rejected walkthrough delivery without acknowledging the failed attempt", async () => {

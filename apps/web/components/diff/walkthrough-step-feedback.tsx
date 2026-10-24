@@ -82,7 +82,7 @@ function StepComposer({
     return true;
   };
   return (
-    <div className="shrink-0 px-4 py-2">
+    <div className={open ? "flex min-h-0 flex-col px-4 py-2" : "shrink-0 px-4 py-2"}>
       <Button
         ref={trigger}
         variant="outline"
@@ -99,14 +99,14 @@ function StepComposer({
         <span className="tabular-nums text-muted-foreground">({commentCount})</span>
       </Button>
       {open && (
-        <div id={composerId}>
+        <div id={composerId} className="flex min-h-0 flex-col">
           <CommentForm
             value={draft}
             onChange={updateDraft}
             onSubmit={(text) => save(text, false)}
             onSubmitAndRun={(text) => save(text, true)}
             onCancel={close}
-            className="shadow-none [&_textarea]:max-h-[min(9rem,25dvh)] [&_textarea]:overflow-y-auto [&_button]:h-7 max-md:[&_button]:h-11 pointer-coarse:[&_button]:h-11 max-md:[&_[data-comment-shortcuts]]:hidden pointer-coarse:[&_[data-comment-shortcuts]]:hidden"
+            className="min-h-0 shadow-none [&_textarea]:min-h-11 [&_textarea]:max-h-[min(9rem,25dvh)] [&_textarea]:overflow-y-auto [&_[data-comment-actions]]:shrink-0 [&_button]:h-7 max-md:[&_button]:h-11 pointer-coarse:[&_button]:h-11 max-md:[&_[data-comment-shortcuts]]:hidden pointer-coarse:[&_[data-comment-shortcuts]]:hidden"
           />
         </div>
       )}

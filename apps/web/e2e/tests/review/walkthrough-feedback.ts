@@ -159,7 +159,7 @@ async function checkLongFeedback(page: Page, card: Locator) {
   const bounds = (await card.boundingBox())!;
   expect(bounds.height).toBeGreaterThan(shortHeight);
   expect(bounds.y + bounds.height).toBeLessThanOrEqual(page.viewportSize()!.height);
-  const scrollBody = card.getByTestId("walkthrough-step-body").locator("..");
+  const scrollBody = card.getByTestId("walkthrough-step-content");
   expect(await scrollBody.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
   await card.getByTestId("walkthrough-next").click();
   expect((await card.boundingBox())!.height).toBeLessThan(bounds.height);

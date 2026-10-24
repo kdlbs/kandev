@@ -520,7 +520,6 @@ async function runSessionComment({
  */
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
-  const commentsById = useCommentsStore((s) => s.byId);
   const walkthroughRuns = useRef(new Map<string, Promise<{ queued: boolean }>>());
   const storeApi = useAppStoreApi();
   const pendingPlanCommentAdmissionRef = useRef<{ key: string; id: string } | null>(null);
@@ -548,7 +547,8 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       if (!sessionId) return { queued: false };
       try {
         if (comment.source === "walkthrough") {
-          if (comment.status === "sent" || commentsById?.[comment.id]?.status === "sent") {
+          const stored = useCommentsStore.getState().byId[comment.id];
+          if (comment.status === "sent" || stored?.status === "sent") {
             return { queued: false };
           }
           const existing = walkthroughRuns.current.get(comment.id);
@@ -570,7 +570,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
         throw error;
       }
     },
-    [sessionId, taskId, storeApi, markCommentsSent, commentsById],
+    [sessionId, taskId, storeApi, markCommentsSent],
   );
 
   return { runComment };

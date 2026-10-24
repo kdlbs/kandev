@@ -43,33 +43,38 @@ function StepBody({
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
   const fileName = step.file.split("/").pop() || step.file;
   return (
-    <div className="min-h-0 flex-auto overflow-y-auto overscroll-contain px-4 py-3">
-      {step.title ? (
-        <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
-          {step.title}
-        </h4>
-      ) : null}
-      <button
-        type="button"
-        onClick={onOpenFile}
-        title={t("diff:openFileAtLine", { file: step.file, line: step.line })}
-        data-testid="walkthrough-step-file"
-        className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
-      >
-        <IconFileCode className="size-3.5 shrink-0 text-primary" />
-        <span className="truncate font-mono">{fileName}</span>
-        <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
-      </button>
-      <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          components={markdownComponents}
+    <div
+      className="min-h-0 flex-auto overflow-y-auto overscroll-contain"
+      data-testid="walkthrough-step-content"
+    >
+      <div className="px-4 py-3">
+        {step.title ? (
+          <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
+            {step.title}
+          </h4>
+        ) : null}
+        <button
+          type="button"
+          onClick={onOpenFile}
+          title={t("diff:openFileAtLine", { file: step.file, line: step.line })}
+          data-testid="walkthrough-step-file"
+          className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
         >
-          {normalizeMarkdown(step.text)}
-        </ReactMarkdown>
+          <IconFileCode className="size-3.5 shrink-0 text-primary" />
+          <span className="truncate font-mono">{fileName}</span>
+          <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
+        </button>
+        <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={markdownComponents}
+          >
+            {normalizeMarkdown(step.text)}
+          </ReactMarkdown>
+        </div>
+        <WalkthroughCommentList comments={comments} />
       </div>
-      <WalkthroughCommentList comments={comments} />
     </div>
   );
 }
@@ -302,9 +307,9 @@ export function WalkthroughStepInner({
   return (
     <div
       className={cn(
-        "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg sm:max-h-[min(78vh,720px)]",
+        "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg md:max-h-[min(78vh,720px)]",
         isFloating &&
-          "max-h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden sm:max-h-[min(78dvh,720px)]",
+          "max-h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden md:max-h-[min(78dvh,720px)]",
       )}
     >
       <StepHeader
