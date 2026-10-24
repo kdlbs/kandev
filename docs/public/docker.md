@@ -47,7 +47,7 @@ The release workflow publishes multi-architecture `linux/amd64` and `linux/arm64
 | Base | `latest` | `X.Y.Z`, `vX.Y.Z` | Kandev, Node 24/npm, Git, `gh`, `procps`, Python/pipx, Apprise, Azure CLI, and the Azure DevOps extension |
 | Universal | `universal` | `X.Y.Z-universal`, `vX.Y.Z-universal` | Base plus Go, Rust, pnpm, build tools, common developer CLIs, and Playwright Chromium system libraries |
 
-The universal image does not include Playwright browser downloads, JDKs, .NET, or database servers. Its tool versions are pinned in `Dockerfile.universal` for each release. See the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the inclusion policy and derived-image examples.
+The universal image does not include Playwright browser downloads, JDKs, .NET, or database servers. `Dockerfile.universal` pins Go and selected tool versions; Rust uses the stable channel resolved during the image build. See the [image guide](../images.md) for the inclusion policy and derived-image examples.
 
 Both flavors include `ps` through `procps` for agent process checks, including
 Droid's foreground command supervision. This requires no additional container
@@ -94,15 +94,18 @@ The image digest fixes the Kandev release bytes for the published `linux/amd64` 
 
 ### Check an extension in a disposable deployment
 
-Use a fresh, disposable `/data` volume and bind the service to loopback. Do not reuse a deployment volume: it contains workspaces and authentication state. With the image built above, start the service and check its logs for startup or install failures:
+Use a fresh, disposable `/data` volume and bind the service to loopback. Do not reuse a deployment volume: it contains workspaces and authentication state. Run these snippets in the same shell so the generated volume and container names remain available. Docker assigns a new name when `volume create` has no name; both resources carry a validation label for the cleanup checks. With the image built above, start the service and check its logs for startup or install failures:
 
 ```bash
-docker volume create kandev-extension-check
-docker run -d --name kandev-extension-check \
+check_volume="$(docker volume create --label kandev.extension-check=true)" &&
+test -n "$check_volume" &&
+test "$(docker volume inspect --format '{{ index .Labels "kandev.extension-check" }}' "$check_volume")" = true &&
+check_container="kandev-extension-check-$check_volume" &&
+docker run -d --name "$check_container" --label kandev.extension-check=true \
   -p 127.0.0.1:38430:38429 \
-  -v kandev-extension-check:/data \
-  kandev-postgresql-client:0.98.0
-docker logs kandev-extension-check
+  -v "$check_volume:/data" \
+  kandev-postgresql-client:0.98.0 &&
+docker logs "$check_container"
 ```
 
 Open `http://localhost:38430`, configure an agent CLI in this disposable instance, and create a disposable task with a **Local** or **Worktree** executor profile and a disposable repository. Ask the running agent to execute these commands with its command tool and return the output. The commands read no credentials and print only the effective user, paths, tool version, and cache ownership:
@@ -121,18 +124,28 @@ printf 'created on first start\n' > "$HOME/.cache/kandev-extension-check/probe"
 Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.19, and writable cache paths owned by the service user. The agent's command result is the decisive check; Kandev's task terminal and an interactive container shell are separate processes and can have different environments. Recreate only this disposable container with the **same** volume and image:
 
 ```bash
-docker stop kandev-extension-check
-docker rm kandev-extension-check
-docker run -d --name kandev-extension-check \
+test "$(docker container inspect --format '{{ index .Config.Labels "kandev.extension-check" }}' "$check_container")" = true &&
+test "$(docker volume inspect --format '{{ index .Labels "kandev.extension-check" }}' "$check_volume")" = true &&
+docker stop "$check_container" &&
+docker rm "$check_container" &&
+docker run -d --name "$check_container" --label kandev.extension-check=true \
   -p 127.0.0.1:38430:38429 \
-  -v kandev-extension-check:/data \
-  kandev-postgresql-client:0.98.0
-docker logs kandev-extension-check
+  -v "$check_volume:/data" \
+  kandev-postgresql-client:0.98.0 &&
+docker logs "$check_container"
 ```
 
-In a new Local or Worktree agent session, ask the agent to rerun the user, path, version, and ownership checks through its command tool, then execute `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, remove only this labelled container and its disposable volume if they contain no work you need.
+In a new Local or Worktree agent session, ask the agent to rerun the user, path, version, and ownership checks through its command tool, then execute `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, confirm both labels before removing the exact disposable resources:
 
-For image versus volume installs and PATH precedence, see the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md). The [runtime persistence details](#persistence) explain which paths survive recreation. This procedure checks the server image; the Local Docker executor uses a separate task image.
+```bash
+test "$(docker container inspect --format '{{ index .Config.Labels "kandev.extension-check" }}' "$check_container")" = true &&
+test "$(docker volume inspect --format '{{ index .Labels "kandev.extension-check" }}' "$check_volume")" = true &&
+docker stop "$check_container" &&
+docker rm "$check_container" &&
+docker volume rm "$check_volume"
+```
+
+For image versus volume installs and PATH precedence, see the [image guide](../images.md). The [runtime persistence details](#persistence) explain which paths survive recreation. This procedure checks the server image; the Local Docker executor uses a separate task image.
 
 <details>
 <summary>Image runtime behavior and persistence details</summary>

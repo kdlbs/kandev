@@ -11,7 +11,7 @@ Kandev publishes two server image flavors to GitHub Container Registry. Both run
 
 ## What's in `:universal` (and what's not)
 
-**Language toolchains:** Go and Rust at the versions pinned by that release's `Dockerfile.universal`, plus pnpm installed under `/usr/local`.
+**Language toolchains:** Go at the version pinned by that release's `Dockerfile.universal`, Rust from the stable channel resolved during the image build, and pnpm installed under `/usr/local`.
 
 **Build essentials:** `build-essential` (gcc, g++, make, libc-dev), `pkg-config`, `python3-dev`, `libssl-dev`. These cover CGO compilation, native Python pip wheels, and native Node modules.
 
