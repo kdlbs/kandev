@@ -505,25 +505,30 @@ failure path, and its partial runtime is stopped by the existing cleanup.
 The failed state stays visible, and the `session.ensure` latch is unchanged.
 Re-election happens only when a binding, start, or launch request arrives:
 the user's Retry, a new session, `spawn_session_kandev`, or a workflow or
-automation start. A `failed` environment with physical evidence still needs the
-environment reset action.
+automation start. A consumer-free task-local failed environment can instead
+be retained and replaced through the transaction below. An unsafe or inherited
+owner retains the environment reset guidance.
 
-### Reset guidance
+### Retain and replace an unusable environment
 
-The worktree store writes `task_environment_repos` rows when it creates a
-worktree, before the launch finalizes. A launch that fails after that point, for
-example in a setup script, leaves a `failed` row with physical evidence. That
-row is not re-elected. The binding and the launch refuse it with
-`models.ErrTaskEnvironmentResetRequired`, which wraps `ErrWorkspaceReuseUnsafe`
-so existing `errors.Is` callers and the `workspace_reuse_unsafe` reason are
-unchanged. Its message names the task environment reset action.
-`spawn_session_kandev` keeps the reason and `recoverable: true` and changes its
-retry guidance for this error to resetting the task environment.
+A physical failed environment is never re-elected. Task-local binding and terminal
+worktree resume may instead retire it, reserve a creating replacement, and persist
+the requesting session binding in one transaction before materialization. Existing
+task/materialization locks, owner generation, session state/binding, and cleanup
+and recovery-claim admission fence that transaction. Any materializer, live bound
+session/runtime, recovery claim, or inherited owner keeps the existing
+`ErrTaskEnvironmentResetRequired` refusal and reset guidance.
 
-Retaining such an environment while a replacement becomes canonical is not part
-of this amendment. It needs a schema decision on how a task keeps an inactive
-environment next to its active one, and on how that fits the existing
-recovery-claim consumer admission and preserved-checkout inventory recovery.
+Nullable `retired_at` preserves the old ID, inventory, files, and other historical
+bindings. Canonical lookup, uniqueness, and startup healing select active rows
+only; by-ID reads retain history. Root election checks all active/retained names
+under the task lock. The request uses that saved root and environment ID, so
+physical inventory and existing ready publication have the same owner. An
+already-retired retry joins or reserves a replacement; failed successors
+use that consumer guard. Retired-only starts reserve fresh roots. Cached or
+explicit-ID worktrees must match a specified environment; checkouts remain.
+Existing materialization failure release applies to its reserved row. This path
+does not reset files, mutate an inherited owner, or settle historical outcomes.
 
 ### Interaction with workspace election waits
 

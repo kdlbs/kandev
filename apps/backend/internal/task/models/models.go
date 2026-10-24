@@ -3077,8 +3077,15 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// RetiredAt retains an unusable environment without occupying the active owner slot.
+	RetiredAt *time.Time `json:"retired_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// IsRetired reports whether the environment is retained rather than canonical.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.
