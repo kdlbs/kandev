@@ -29,7 +29,7 @@ ceiling persistence/replay. MAIN owns these paths and their regression tests.
 Additional spawns leave pinned source bindings intact; ordinary workflow and
 selector launches retain binding recording. No public field or DB schema change.
 
-Verification: `cd apps/backend && go test ./internal/mcp/handlers ./internal/mcp/server ./internal/orchestrator -count=1` and `make -C apps/backend lint`.
+Verification: `cd apps/backend && go test -trimpath ./internal/mcp/handlers ./internal/mcp/server ./internal/orchestrator -count=1` and `make -C apps/backend lint`.
 
 ## Results
 
