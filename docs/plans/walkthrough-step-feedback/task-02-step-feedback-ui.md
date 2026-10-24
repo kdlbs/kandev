@@ -496,3 +496,33 @@ Keep all previous content-driven height, draft, and input-scroll behavior.
 The strengthened regression and all nine mobile tests plus the affected
 desktop feedback test pass (10 tests). Composer tests, changed-file lint,
 formatting, and specification checks also pass.
+
+## CI interaction-fixture ordering (2026-10-24)
+
+CI run 40112617636 failed three first-attempt browser cases; each passed its retry.
+All backend checks passed. The browser failures are the failure evidence: the
+original stale-activity case passed three local repetitions, and the two original
+mobile cases passed three repetitions each.
+
+- The stale-activity case now holds the real focus-refresh request while it seeds
+  and verifies the missed-event projection. It releases that request and verifies
+  the authoritative response clears the indicator. An unrelated refresh cannot
+  erase the projection between setup and its assertion. Removing the suite-local
+  retry override lets the runner's `--retries 0` apply to this case.
+- The mobile workflow helper waits for the shared drawer's finite animations before
+  its single tap. Visibility alone does not establish animation completion.
+- The question helper keeps its native touch-scroll events and waits for both
+  scroll owners to remain still across animation frames. Its single locator tap
+  checks actionability and computes the current center after the recorded hit test.
+  Raw rapid touch-move frames could leave inertial scrolling active, and a stored
+  coordinate could become stale before activation. Native scrolling, hit testing,
+  and complete answer-receipt assertions remain.
+
+The stale-activity repair passed five fresh runs with retries disabled:
+`pnpm --dir apps/web e2e:run --no-build --project chromium tests/session/session-resume.spec.ts --grep 'clears stale background activity' --retries 0 --repeat-each 5`.
+The final question helper passed six cases (both phone sizes, three repetitions):
+`pnpm --dir apps/web e2e:run --no-build --project mobile-chrome tests/task/mobile-threads-composer-disclosure.spec.ts --grep 'long required question' --retries 0 --repeat-each 3`.
+The drawer readiness check passed three palette workflow cases in the mobile
+probe. All these cases passed on their first attempt. Changed-file ESLint,
+Prettier, documentation catalog validation, and specification lint passed.
+These are test-fixture changes; no rendered UI or product interaction behavior changes.

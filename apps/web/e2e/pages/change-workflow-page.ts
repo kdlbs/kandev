@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../helpers/animations";
 
 export class ChangeWorkflowPage {
   readonly form: Locator;
@@ -81,6 +82,7 @@ export class ChangeWorkflowPage {
 
   private async openSelector(trigger: Locator) {
     await expect(trigger).toBeVisible();
+    if (this.mobile) await waitForFiniteAnimations(this.phoneDrawer);
     if ((await trigger.getAttribute("aria-expanded")) !== "true") {
       if (this.mobile) await trigger.tap();
       else await trigger.click();
