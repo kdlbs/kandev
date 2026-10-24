@@ -22,6 +22,7 @@ import {
   resolveEnvRightWidth,
   resolveResponsiveRightWidth,
 } from "@/lib/state/layout-manager/right-width";
+import { getReusableRightWidth } from "@/lib/state/layout-manager/pinned-targets";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
@@ -52,11 +53,10 @@ export function markTerminalPanelTerminateClose(panelId: string): void {
  *
  * Dockview's splitview rebalances proportionally on any `api.layout` call,
  * which would otherwise grow pinned columns past their initial defaults on
- * container expansion and shrink them on container contraction. We treat
- * sidebar/right as having a *target width* (stored in `pinned-targets.ts`)
- * that is updated only by explicit user actions (drag, initial layout,
- * restore from saved); after every layout-change event we force the live
- * columns back to their targets via `sv.resizeView`.
+ * container expansion and shrink them on container contraction. Manual widths
+ * remain pixel targets; automatic widths are resolved against the current
+ * container and reusable profile ratio. After each layout change we enforce
+ * those targets via `sv.resizeView`.
  */
 
 /** Enforcement-in-progress guard to prevent infinite loops when our own
@@ -80,7 +80,7 @@ function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
 /** Recompute the automatic right-column pinned target from the measured grid
  *  width and sidebar visibility; no-op when the right column is hidden or the
  *  user has set a manual right width. */
-function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
+function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"], width?: number): void {
   const store = useDockviewStore.getState();
   if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
   const sv = getRootSplitview(api);
@@ -88,7 +88,7 @@ function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
   setPinnedTarget(
     "right",
     resolveEnvRightWidth(
-      measureDockviewGridWidth(api),
+      width ?? measureDockviewGridWidth(api),
       sidebarWidth,
       null,
       store.currentLayoutEnvId,
@@ -316,17 +316,9 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
   }
   const dv = getDockviewElement(api);
   const parent = dv?.parentElement;
-  let previousViewportWidth = window.innerWidth;
   const ro =
     parent && typeof ResizeObserver !== "undefined"
-      ? new ResizeObserver(() => {
-          const viewportWidth = window.innerWidth;
-          if (viewportWidth !== previousViewportWidth) {
-            previousViewportWidth = viewportWidth;
-            refreshAutomaticRightTarget(api);
-          }
-          syncDockviewContainerSize(api, parent);
-        })
+      ? new ResizeObserver(() => syncDockviewContainerSize(api, parent))
       : null;
   if (ro && parent) ro.observe(parent);
   /** On window resize, refresh the automatic right target and re-sync
@@ -358,6 +350,11 @@ export function syncDockviewContainerSize(
   const width = container.clientWidth;
   const height = container.clientHeight;
   if (width <= 0 || height <= 0) return;
+  // Only the active reusable owner scales with a container-only change.
+  // Non-owned saved targets retain their existing pixel policy.
+  if (getReusableRightWidth(useDockviewStore.getState().currentLayoutEnvId, width) !== null) {
+    refreshAutomaticRightTarget(api, width);
+  }
   if (width === api.width && height === api.height) {
     // Environment switches can replace pinned targets without changing the
     // container dimensions, so enforce even when Dockview's layout is a no-op.

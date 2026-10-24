@@ -29,6 +29,7 @@ afterEach(async () => {
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
   pluginComponent.mockClear();
   await i18n.changeLanguage("en");
+  vi.restoreAllMocks();
 });
 
 function registerPrompts(): void {
@@ -199,6 +200,37 @@ describe("LayoutEditor plugin panels", () => {
     await waitFor(() => expect(tabLabels()).toContain(LOCALIZED_TITLE));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { orientation: "HORIZONTAL" as const, widths: [960, 240], expected: [960, 240] },
+    { orientation: "VERTICAL" as const, widths: [250, 350], expected: [250, 350] },
+    { orientation: "HORIZONTAL" as const, widths: [], expected: [840, 360] },
+  ])(
+    "preserves $orientation profile geometry when reopening and editing another tab ($widths)",
+    async ({ orientation, widths, expected }) => {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 1200, 600),
+      );
+      const savedProfile = profileWithPlugin();
+      savedProfile.rootOrientation = orientation;
+      savedProfile.columns[1].pinned = true;
+      savedProfile.columns.forEach((column, index) => {
+        if (widths[index] === undefined) delete column.width;
+        else column.width = widths[index];
+      });
+      const onChange = mountEditor(savedProfile);
+      await waitForEditor();
+
+      await moveTabLeft("計画");
+
+      await waitFor(() => expect(onChange).toHaveBeenCalled());
+      const saved = lastLayout(onChange);
+      expect(saved.columns.map((column) => column.width)).toEqual(expected);
+      expect(saved.rootOrientation).toBe(orientation);
+      expect(saved.columns[0].groups[0].panels.map((item) => item.id)).toEqual(["plan", "chat"]);
+      expect(saved.columns[1].groups[1].panels[0].id).toBe(PANEL_ID);
+    },
+  );
 });
 
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-001.5 */

@@ -542,3 +542,63 @@ Round 1 (Opus 5.5 reviewer, read-only) reported two findings, both accepted:
   2 flaky (passed on retry), no terminal failures. Flakes were backend readiness
   timeout and API `503 persistence_unavailable`, not layout assertions.
 - Document catalog, full specification lint and whitespace checks passed.
+
+Round 2 (Sol 6.1 reviewer, read-only) reported three P2 findings, all accepted:
+
+- Reopening a profile reset a non-stock saved right ratio in the settings
+  preview. `LayoutEditor` now uses `resolveCustomLayoutPinnedWidths` before
+  serialization, matching task application. Mounted reopen/edit/capture
+  regression: RED `[840,360]` instead of `[960,240]`; GREEN with horizontal
+  stock-preset and vertical row controls.
+- Sidebar/container-only width changes enforced the old automatic pixel
+  target. `syncDockviewContainerSize` now resolves the current environment's
+  owned reusable target from the supplied container width before enforcement,
+  including when Dockview's own observer resized first. The viewport-only
+  observer gate was removed. Real-Dockview expansion/contraction regressions:
+  RED `[1260,240]` instead of `[1200,300]`, including observer-order RED after
+  the initial fix. GREEN preserves manual-width precedence and fixed viewport.
+- Same-axis plugin-free vertical switches retained the outgoing row sizes.
+  Vertical targets now use the existing full restore/default-build path.
+  Real-Dockview fresh and saved target regressions: RED `[500,200]` instead
+  of `[300,400]` and `[450,250]`; GREEN. Removed the old incidental assertion
+  that identical-axis vertical switches must skip `fromJSON`.
+- Final focused command, from `apps/web`:
+  `pnpm exec vitest run components/settings/layouts/layout-editor.test.tsx
+  components/settings/layouts/layout-editor-actions.test.ts
+  components/settings/layouts/layout-editor-toolbar.test.tsx
+  components/settings/layouts/use-layout-settings.test.tsx
+  components/task/dockview-layout-setup lib/state/dockview-env-switch
+  lib/state/dockview-store.test.ts lib/state/dockview-layout-builders-fixups.test.ts
+  lib/state/dockview-pinned-enforce.test.ts lib/state/layout-manager
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts`:
+  30 files, 360 tests passed.
+- Prettier and changed-file ESLint passed. Web typecheck passed with
+  `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`.
+- Added desktop browser regressions for reopening/editing/resaving both a
+  built-in override and a custom profile without changing the saved ratio.
+  Extended task navigation to collapse/expand the app sidebar at a fixed
+  viewport and verify the owned 20% ratio. Component/integration RED was the
+  pre-fix gate; browser assertions run against the rebuilt production bundle.
+  The existing mobile layout-profile spec covers shared settings behavior;
+  no new mobile composition or task-workbench customization is introduced.
+- The first rebuilt browser run caught a compatibility regression in the
+  initial broad refresh: the existing no-terminal default expected 25% but
+  received the stock 30% target. Container-only synchronization now refreshes
+  only an owned reusable ratio; non-owned saved pixel targets retain their
+  existing policy, and viewport refresh remains unchanged. Added a real
+  Dockview RED/GREEN control (`[1050,450]` instead of `[1260,240]`).
+  That browser run ended with 18 passed, 1 geometry failure and 1 infrastructure
+  flake; the failing production path was fixed before the final rerun.
+- Final desktop browser command (fresh managed backend/Vite/plugin build):
+  `TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts`: 20 passed, no flakes.
+  Log: `kandev-run.e2e.GCaX68wQ.log` under the task-owned temporary directory.
+- Mobile command reused those freshly built artifacts:
+  `pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome
+  tests/settings/mobile-layout-profiles.spec.ts` (same task-owned storage):
+  6 passed. Log: `kandev-run.e2e.Okz7kfvv.log`. Catalog validation,
+  full specification lint and whitespace checks passed.

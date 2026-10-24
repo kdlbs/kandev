@@ -16,6 +16,7 @@ import {
   toSerializedDockview,
   type LayoutState,
 } from "@/lib/state/layout-manager";
+import { resolveCustomLayoutPinnedWidths } from "@/lib/state/dockview-store";
 import { LayoutEditorActions, type LayoutEditorActionAnchor } from "./layout-editor-toolbar";
 import {
   refreshCanonicalTitles,
@@ -212,7 +213,12 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
       const height = Math.max(320, Math.round(bounds?.height ?? current.height ?? 480));
       applyingRef.current = true;
       seedCanonicalTitles(nextLayout, canonicalTitlesRef.current);
-      current.fromJSON(toSerializedDockview(nextLayout, width, height, new Map()));
+      const pinnedWidths = resolveCustomLayoutPinnedWidths(
+        nextLayout.columns,
+        width,
+        nextLayout.rootOrientation,
+      );
+      current.fromJSON(toSerializedDockview(nextLayout, width, height, pinnedWidths));
       current.layout(width, height, true);
       setSelectedPanelId(current.activePanel?.id ?? current.panels[0]?.id ?? null);
       setRevision((revision) => revision + 1);

@@ -324,16 +324,17 @@ function targetRootOrientation(params: EnvSwitchParams, saved: object | null): s
 }
 
 /**
- * Component-only comparison ignores the root axis; reusing a live grid whose
- * orientation differs from the target would keep the outgoing arrangement.
+ * Fast reuse only reapplies horizontal pinned widths. A vertical target needs
+ * its own row extents restored even when the outgoing root has the same axis.
  */
-function rootOrientationChanges(
+function requiresRootGeometryRestore(
   params: EnvSwitchParams,
   currentLayout: LayoutState,
   saved: object | null,
 ): boolean {
   const current = currentLayout.rootOrientation ?? "HORIZONTAL";
-  return current !== targetRootOrientation(params, saved);
+  const target = targetRootOrientation(params, saved);
+  return current !== target || target === "VERTICAL";
 }
 
 function canUseFastEnvSwitch(
@@ -347,8 +348,8 @@ function canUseFastEnvSwitch(
     });
     return false;
   }
-  if (rootOrientationChanges(params, currentLayout, saved)) {
-    debug("tryFastEnvSwitch: root orientation changes, falling back to slow path", {
+  if (requiresRootGeometryRestore(params, currentLayout, saved)) {
+    debug("tryFastEnvSwitch: root geometry requires restoration, falling back to slow path", {
       newEnvId: params.newEnvId,
     });
     return false;

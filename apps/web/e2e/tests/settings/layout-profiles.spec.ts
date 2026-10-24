@@ -818,6 +818,40 @@ test.describe("Plugin task panels in reusable layout profiles", () => {
 test.describe("Plugin panel geometry in applied profiles", () => {
   test.afterEach(async ({ apiClient }) => uninstallFixturePlugin(apiClient));
 
+  for (const profileId of ["layout-override-default", "horizontal-plugin"]) {
+    test(`preserves ${profileId} geometry when reopened, edited, and saved again`, async ({
+      testPage,
+      apiClient,
+    }) => {
+      await installFixturePlugin(testPage);
+      await testPage.setViewportSize({ width: 1600, height: 900 });
+      await apiClient.saveUserSettings({
+        saved_layouts: [
+          savedProfile(
+            profileId,
+            "Horizontal plugin",
+            horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+          ),
+        ],
+      });
+      const layouts = new LayoutSettingsPage(testPage);
+      await layouts.open();
+      await layouts.selectPanel("Files");
+      await layouts.moveSelectedTabRight();
+      await layouts.save();
+
+      await testPage.reload();
+      await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+      const saved = await savedLayout(apiClient, profileId);
+      const [center, right] = saved.columns.map((column) => column.width ?? 0);
+      expectRatio(right, center + right, 0.2, 0.01);
+      expect(saved.columns[1].groups[0].panels.map((panel) => panel.id)).toEqual([
+        "changes",
+        "files",
+      ]);
+    });
+  }
+
   test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({
     testPage,
     apiClient,
@@ -932,6 +966,28 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const rightWidth = (await rootSizes(testPage)).at(-1) ?? 0;
     expectRatio(rightWidth, container, 0.2, 0.03);
     expect(await hasManualRightWidth(testPage)).toBe(false);
+
+    const viewport = testPage.viewportSize();
+    await testPage.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+    await expect.poll(() => getDockviewContainerWidth(testPage)).toBeGreaterThan(container);
+    await expect
+      .poll(async () => {
+        const width = await getDockviewContainerWidth(testPage);
+        const right = (await rootSizes(testPage)).at(-1) ?? 0;
+        return Math.abs(right / width - 0.2);
+      })
+      .toBeLessThan(0.03);
+    expect(testPage.viewportSize()).toEqual(viewport);
+    await testPage.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+    await expect
+      .poll(async () => Math.abs((await getDockviewContainerWidth(testPage)) - container))
+      .toBeLessThan(1);
+    await expect
+      .poll(async () => {
+        const right = (await rootSizes(testPage)).at(-1) ?? 0;
+        return Math.abs(right / container - 0.2);
+      })
+      .toBeLessThan(0.03);
 
     await session.sidebarTaskItem("Notes Environment").click();
     await expect(testPage.getByTestId("e2e-notes-panel")).toBeVisible({ timeout: 15_000 });

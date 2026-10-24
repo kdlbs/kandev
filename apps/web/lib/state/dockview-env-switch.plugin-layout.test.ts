@@ -11,6 +11,7 @@ import {
   fromDockviewApi,
   getPinnedTarget,
   getRootSplitview,
+  setPinnedTarget,
   toSerializedDockview,
   type LayoutPanel,
   type LayoutState,
@@ -20,6 +21,7 @@ import { useDockviewStore } from "./dockview-store";
 import {
   setupContainerResizeSync,
   setupSashDragCapToggle,
+  syncDockviewContainerSize,
 } from "@/components/task/dockview-layout-setup";
 
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
@@ -290,6 +292,59 @@ describe("fresh default geometry after a plugin-bearing environment switch", () 
     expect(getManualRightWidth("env-fresh")).toBeNull();
   });
 
+  it.each([
+    { manual: null, dockviewResizedFirst: false },
+    { manual: null, dockviewResizedFirst: true },
+    { manual: 310, dockviewResizedFirst: false },
+  ])(
+    "resolves container-only resize (manual=$manual, Dockview first=$dockviewResizedFirst)",
+    async ({ manual, dockviewResizedFirst }) => {
+      const viewportWidth = window.innerWidth;
+      startIn("env-notes", horizontalLayout({ bottom: [NOTES] }), custom);
+      if (manual !== null) setManualRightWidth("env-fresh", manual);
+      await switchEnv("env-notes", "env-fresh");
+      stopMounted.push(setupSashDragCapToggle(api), setupContainerResizeSync(api));
+      const container = document.createElement("div");
+      let width = WIDTH;
+      Object.defineProperties(container, {
+        clientWidth: { get: () => width },
+        clientHeight: { value: HEIGHT },
+      });
+
+      for (const nextWidth of [1500, 1000]) {
+        width = nextWidth;
+        if (dockviewResizedFirst) api.layout(width, HEIGHT);
+        syncDockviewContainerSize(api, container);
+        await settle();
+
+        const right = manual ?? nextWidth * 0.2;
+        expect(window.innerWidth).toBe(viewportWidth);
+        expect(rootSizes(api)).toEqual([nextWidth - right, right]);
+        expect(getPinnedTarget("right")).toBe(right);
+        expect(getManualRightWidth("env-fresh")).toBe(manual);
+      }
+    },
+  );
+
+  it("does not replace a non-owned saved target with the stock ratio on container-only resize", async () => {
+    startIn("env-saved", horizontalLayout({ bottom: [PROMPTS] }), null);
+    setPinnedTarget("right", 240);
+    getRootSplitview(api).resizeView(1, 240);
+    stopMounted.push(setupSashDragCapToggle(api), setupContainerResizeSync(api));
+    const container = document.createElement("div");
+    Object.defineProperties(container, {
+      clientWidth: { value: 1500 },
+      clientHeight: { value: HEIGHT },
+    });
+
+    syncDockviewContainerSize(api, container);
+    await settle();
+
+    expect(rootSizes(api)).toEqual([1260, 240]);
+    expect(getPinnedTarget("right")).toBe(240);
+    expect(getManualRightWidth("env-saved")).toBeNull();
+  });
+
   it("lets an actual manual right width win over the saved ratio", async () => {
     startIn("env-notes", horizontalLayout({ bottom: [NOTES] }), custom);
     setManualRightWidth("env-fresh", 300);
@@ -381,26 +436,37 @@ describe("VERTICAL root through environment switches and resets", () => {
     expect(getPinnedTarget("right")).toBeUndefined();
   });
 
-  it("keeps row extents on the plugin-free fast path", async () => {
-    const plain: LayoutState = {
-      ...vertical,
-      columns: [
-        vertical.columns[0],
-        {
-          ...vertical.columns[1],
-          groups: [vertical.columns[1].groups[0], { id: RIGHT_BOTTOM_GROUP, panels: [TERMINAL] }],
-        },
-      ],
-    };
-    startIn("env-a", plain, plain);
-    const fromJSON = vi.spyOn(api, "fromJSON");
+  it.each(["fresh", "saved"])(
+    "restores incoming plugin-free VERTICAL row extents for a %s environment",
+    async (target) => {
+      const plain: LayoutState = {
+        ...vertical,
+        columns: [
+          vertical.columns[0],
+          {
+            ...vertical.columns[1],
+            groups: [vertical.columns[1].groups[0], { id: RIGHT_BOTTOM_GROUP, panels: [TERMINAL] }],
+          },
+        ],
+      };
+      startIn("env-a", plain, plain);
+      getRootSplitview(api).resizeView(1, 200);
+      expect(rootSizes(api)).toEqual([500, 200]);
+      const incoming = {
+        ...plain,
+        columns: plain.columns.map((column, index) => ({
+          ...column,
+          width: index === 0 ? 450 : 250,
+        })),
+      };
+      if (target === "saved") saveEnvironment("env-b", incoming);
 
-    await switchEnv("env-a", "env-b");
+      await switchEnv("env-a", "env-b");
 
-    expect(fromJSON).not.toHaveBeenCalled();
-    expect(rootSizes(api)).toEqual([300, 400]);
-    expect(getPinnedTarget("right")).toBeUndefined();
-  });
+      expect(rootSizes(api)).toEqual(target === "saved" ? [450, 250] : [300, 400]);
+      expect(getPinnedTarget("right")).toBeUndefined();
+    },
+  );
 });
 
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-001.9, AC-UI-TASK-LAYOUT-PROFILES-002.6 */

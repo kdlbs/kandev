@@ -135,6 +135,10 @@ and `LayoutState.rootOrientation`. Missing orientation retains the existing
 legacy horizontal default; an explicit `VERTICAL` must not become horizontal.
 `isStructuralComponent` already recognizes the generic plugin component, but
 structural retention alone does not preserve layout metadata.
+The editor resolves saved pinned widths with the same proportional scaling and
+caps as task application before loading Dockview. Reopening a horizontal
+override/custom profile and editing a tab must not replace its saved split
+ratio with the stock default. Vertical rows retain their own axis extents.
 
 Task 01 fixes `rewriteReusableChatPanels` in `session-panels.ts` to preserve
 unchanged state metadata while replacing columns. Both
@@ -196,11 +200,11 @@ saved-layout precedence. Do not classify plugins as ephemeral, change revocation
 policy, automatically reopen panels, or write portable settings during switching.
 The fast path is also rejected when the live root orientation differs from the
 target's (saved grid orientation, else the effective default's
-`rootOrientation`, missing meaning horizontal), because component-only
-comparison cannot see the root axis. Plugin-free same-axis behavior and the
-comparators remain otherwise unchanged; a new semantic fingerprint or
-generalized comparator redesign is unnecessary. The tradeoff is one normal
-restore for plugin-bearing or axis-changing switches instead of unsafe reuse.
+`rootOrientation`, missing meaning horizontal), or when the target is vertical.
+Fast reuse only reapplies horizontal pinned widths; vertical targets need their
+own row extents restored even when both roots are vertical. Plugin-free
+horizontal reuse and the comparators remain otherwise unchanged; a generalized
+comparator redesign is unnecessary.
 
 For a fresh incoming environment, Task 02 carries the effective reusable
 default's resolved horizontal targets through the final
@@ -230,6 +234,12 @@ released by an environment switch, preset application, or a VERTICAL root.
 workbench, then the stock default, all under the runtime cap; final fixups
 (`applyLayoutFixups`, naming the owning environment) and the mounted automatic
 refresh both call it.
+Every container synchronization refreshes an owned reusable target from the
+new measured width before layout or enforcement, including sidebar-only
+changes with a fixed viewport and callbacks after Dockview's own observer has
+already resized the grid. Non-owned saved pixel targets keep their existing
+container-only policy; viewport refresh is unchanged. Manual pixel widths
+retain precedence; vertical roots never enter horizontal target refresh.
 
 Regression coverage uses actual Dockview, real default builders/fixups, both
 enforcement boundaries, and mounted automatic refresh. On a measured 1200px
