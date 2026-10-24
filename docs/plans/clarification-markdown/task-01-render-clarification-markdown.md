@@ -250,6 +250,19 @@ The corrections adjust test synchronization and action selection; the product co
 
 Remote CI and final review completion remain external delivery checks until the corrected tests are pushed and checked.
 
+### SSH CI diagnostics
+
+The corrected sidebar and recovery checks passed remotely at `097fc8f7eed`.
+The SSH interruption scenario failed again, and its diagnostics recorded `ENOENT` for the remote agent log.
+The collector had used the host's view of a Docker mount. It now reads the validated session log inside the fixture container.
+The remote command returns at most 512 KiB. The collector discards the first potentially partial line, redacts credentials before writing, and keeps the existing aggregate artifact budget.
+Remote command errors retain only their error code or a generic message, so command output cannot enter metadata.
+
+The three task commits were rebased onto main at `0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab` to update the current SSH fixture.
+The rebased tree matched the previously tested synthetic merge exactly before the diagnostic changes.
+The new reader regressions failed before the collector change; all 13 diagnostic tests then passed.
+Local Docker is unavailable. CI must supply the SSH reproduction and remote log evidence; the diagnostic change alone does not establish the runtime failure's cause.
+
 ### Remaining limit
 
 The original active-question link text was not provided. Standard links pass through the actual active overlay on desktop and phone.
