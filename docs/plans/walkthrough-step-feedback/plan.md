@@ -485,3 +485,25 @@ Final review checks: all 114 comments-domain tests pass. The rebuilt mobile
 suite passes nine tests; the three affected desktop navigation, dragging, and
 feedback tests pass. Typecheck, changed-file lint, localization ratchet, and
 specification checks pass.
+
+
+## Workspace-adoption CI assertion repair (2026-10-24)
+
+CI run 40103966553, shard 19, failed the authenticated workspace-adoption test
+because it read the fixture's original file before the asynchronous mock turn
+wrote SECOND_MODIFICATION. The scenario delays the write by 50ms, and file
+existence is not evidence of that write. The same original assertion passed
+three isolated local repetitions, so the CI artifact is the failure evidence.
+The correction polls for the intended file contents instead of polling only
+existence. No product behavior, adoption contract, or backend code changes.
+
+The feature branch was rebased onto authoritative main commit
+0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab to change this existing upstream test.
+The remote PR head before the rebase was bde20fa0f45ef328fe0a763ead949fb43baca2ce;
+push uses that exact lease. Validate the corrected authenticated test with
+`pnpm --dir apps/web e2e:run --project chromium tests/session/workspace-adoption.spec.ts --grep 'auth true' --retries 0 --repeat-each 3`, then run the rebuilt
+walkthrough feedback and mobile suites before final delivery.
+
+The corrected workspace-adoption assertion passes three fresh authenticated
+runs with retries disabled. On the updated branch, all 158 focused tests,
+typecheck, changed-file ESLint, and specification validation/lint pass.
