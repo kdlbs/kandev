@@ -106,9 +106,9 @@ func acpErrorKindFromData(data any) string {
 
 // mergeAllowlistedProviderErrorMetadata fills provider_id and model_id
 // verbatim from the adapter's own state, and rpc_code/error_kind from the
-// underlying *acp.RequestError when err is (or wraps) one. Raw
-// RequestError.Data never crosses this call other than through the
-// validated error_kind extraction.
+// underlying *acp.RequestError when err is (or wraps) one. Explicit optional
+// HTTP status and provider code are merged by the bounded scalar extractor.
+// Raw RequestError.Data never crosses this call.
 func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, err error, providerID, modelID string) {
 	if projection.ProviderID == "" {
 		projection.ProviderID = providerID
@@ -126,6 +126,7 @@ func mergeAllowlistedProviderErrorMetadata(projection *streams.ProviderError, er
 	if projection.ErrorKind == "" {
 		projection.ErrorKind = acpErrorKindFromData(reqErr.Data)
 	}
+	mergeProviderFailureFields(projection, reqErr.Data)
 }
 
 // providerErrorFromACPPrompt projects the safe message from a terminal ACP

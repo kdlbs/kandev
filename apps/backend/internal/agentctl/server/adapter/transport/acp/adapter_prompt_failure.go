@@ -68,11 +68,8 @@ func (a *Adapter) retainableACPApplicationError(err error) (*streams.ProviderErr
 	if !errors.As(err, &requestErr) || requestErr == nil || requestErr.Message == "" {
 		return nil, false
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: a.agentID,
-		Stderr:     requestErr.Message,
-	})
+	providerError := ProviderErrorFromError(err, a.agentID, "")
+	classified := routingerr.Classify(providerError.RoutingInput(routingerr.PhasePromptSend, a.agentID, requestErr.Message))
 	if classified.Confidence != routingerr.ConfHigh || classified.UserAction {
 		return nil, false
 	}
@@ -81,7 +78,6 @@ func (a *Adapter) retainableACPApplicationError(err error) (*streams.ProviderErr
 	default:
 		return nil, false
 	}
-	providerError := ProviderErrorFromError(err, a.agentID, "")
 	if providerError == nil || !providerError.Valid() {
 		return nil, false
 	}

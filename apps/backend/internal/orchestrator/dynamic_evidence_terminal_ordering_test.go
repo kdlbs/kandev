@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
 
@@ -110,4 +112,65 @@ func TestPromptAttemptEvidenceUsesLifecycleDiagnosticWhenFailureArrivesFirst(t *
 			}
 		})
 	}
+}
+
+// TestPromptAttemptEvidenceStructuredTerminalIsOrderIndependent pins that a
+// text-classified diagnostic chunk still matches a terminal failure whose
+// structured signals refine the code (Codex usage-limit prose classifies as
+// quota_limited, HTTP 429 as rate_limited). Recovery must not depend on
+// whether the stream chunk or the terminal failure is delivered first.
+func TestPromptAttemptEvidenceStructuredTerminalIsOrderIndependent(t *testing.T) {
+	const diagnostic = "You've hit your usage limit. try again at Sep 27th, 2026 3:09 AM UTC"
+	terminal := func() watcher.AgentEventData {
+		return watcher.AgentEventData{
+			SessionID:        "session-1",
+			AgentExecutionID: "execution-1",
+			PromptGeneration: 5,
+			AgentID:          "codex-acp",
+			ErrorMessage:     diagnostic,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCodexACP,
+				Message:    diagnostic,
+				HTTPStatus: 429,
+				OccurredAt: time.Date(2026, 9, 27, 2, 0, 0, 0, time.UTC),
+			},
+		}
+	}
+
+	t.Run("chunk first", func(t *testing.T) {
+		var service Service
+		service.beginPromptAttempt("session-1", "execution-1", 5, false)
+		service.observeProviderDiagnostic("session-1", "execution-1", 5, "codex-acp", diagnostic)
+
+		got := service.withPromptAttemptEvidence(terminal())
+		if !service.promptAttemptPreResultSafe(got) {
+			t.Fatalf("chunk-first structured terminal failure was not pre-result safe; evidence = %+v", got)
+		}
+	})
+
+	t.Run("terminal first", func(t *testing.T) {
+		var service Service
+		service.beginPromptAttempt("session-1", "execution-1", 5, false)
+
+		data := terminal()
+		data.EvidenceKnown = true
+		data.ProviderDiagnosticCandidate = true
+		data.ProviderDiagnosticText = diagnostic
+		got := service.withPromptAttemptEvidence(data)
+		if !service.promptAttemptPreResultSafe(got) {
+			t.Fatalf("terminal-first structured terminal failure was not pre-result safe; evidence = %+v", got)
+		}
+	})
+
+	t.Run("chunk first with ordinary output", func(t *testing.T) {
+		var service Service
+		service.beginPromptAttempt("session-1", "execution-1", 5, false)
+		service.observeProviderDiagnostic("session-1", "execution-1", 5, "codex-acp", diagnostic)
+		service.observePromptAttempt("session-1", "execution-1", 5, true, false)
+
+		got := service.withPromptAttemptEvidence(terminal())
+		if service.promptAttemptPreResultSafe(got) {
+			t.Fatal("ordinary output after the diagnostic chunk was erased by the structured terminal failure")
+		}
+	})
 }

@@ -211,14 +211,8 @@ func transientRetryNotices(messages []*models.Message, taskID, sessionID string)
 }
 
 func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
-	providerID, message, resetHint, occurredAt := kanbanFailureDetails(data)
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      kanbanFailurePhase(data),
-		ProviderID: providerID,
-		ResetHint:  resetHint,
-		OccurredAt: occurredAt,
-		Stderr:     message,
-	})
+	providerID, message, _, _ := kanbanFailureDetails(data)
+	classified := routingerr.Classify(data.ProviderError.RoutingInput(kanbanFailurePhase(data), providerID, message))
 	if isExactUnknownDynamicProviderFailure(data, classified) {
 		// An exact terminal provider diagnostic can identify the unknown result
 		// shape without changing the global post-start classifier contract.

@@ -7,6 +7,7 @@
 package routingerr
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -169,6 +170,9 @@ type Input struct {
 	ExitCode                  *int
 	StructuredErr             error
 	HTTPStatus                int
+	ACPCode                   int // ACP JSON-RPC code, never an HTTP status
+	ErrorKind                 string
+	ProviderCode              string // opaque provider code; unknown namespaces are not inferred
 	ResetHint                 *time.Time
 	OccurredAt                time.Time // observation time for this provider diagnostic
 	Stderr                    string
@@ -186,6 +190,10 @@ const statusOverloaded = 529
 // Classify always returns a non-nil *Error, even for an unmatched or empty
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
+	var normalized *Error
+	if errors.As(in.StructuredErr, &normalized) && normalized != nil {
+		return normalized
+	}
 	e := classify(in)
 	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
 		// Providers such as codex state the retry time only in the human
@@ -286,12 +294,12 @@ func classifyInjection(in Input, excerpt string) *Error {
 }
 
 func classifyStructured(in Input, excerpt string) *Error {
-	if c := httpStatusToCode(in.HTTPStatus); c != "" {
+	if c, rule := structuredProviderCode(in); c != "" {
 		return &Error{
 			Code:           c,
 			Confidence:     ConfHigh,
 			Phase:          in.Phase,
-			ClassifierRule: fmt.Sprintf("http.%d", in.HTTPStatus),
+			ClassifierRule: rule,
 			ExitCode:       in.ExitCode,
 			RawExcerpt:     excerpt,
 		}
