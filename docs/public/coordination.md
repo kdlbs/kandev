@@ -171,6 +171,18 @@ Choose the control by intent:
 
 Only a direct parent may interrupt its child. Halt-only stop is stricter: it accepts only a same-workspace direct child, while self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
 
+### Choose child processing order
+
+Use `reorder_child_tasks_kandev` to order direct children in the same workflow
+step and band (admitted or queued). Pass full child IDs as `ordered_task_ids`
+in the desired order. The default `placement: "in_place"` changes only their
+slots in the band's order; `placement: "front"` puts them ahead of the rest.
+The board shows the new order, and queued-task admission follows it.
+
+Use dependencies (`blocked_by`) when a task consumes another task's output.
+For scheduling preference alone, use ordering. Mixed steps or bands are rejected;
+a membership conflict is retried once before an error is returned.
+
 ### Stop a direct child's work
 
 `stop_task_kandev` accepts the full ID of one direct child and has no session-specific option. Kandev inspects that child's active-session candidates and requests a graceful stop for every execution still observed as live, including non-primary sibling sessions. It does not recurse into descendants.

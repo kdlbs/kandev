@@ -615,6 +615,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPReorderChildTasks, h.handleReorderChildTasks)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 

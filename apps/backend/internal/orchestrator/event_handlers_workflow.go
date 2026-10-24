@@ -6394,7 +6394,7 @@ func (s *Service) injectAutoStartRuntimeContext(
 	}
 	options := sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       requiresSignal,
-		IncludeCoordinatorTaskControls: !configMode,
+		IncludeCoordinatorTaskControls: !configMode && (taskForPrompt == nil || taskForPrompt.Origin != models.TaskOriginAutomationRun),
 		IncludeTaskTitleTool:           !configMode && titleOwner,
 		IncludeCanvasGuidance:          includeCanvasGuidance,
 		Autopilot:                      taskForPrompt != nil && taskForPrompt.Autopilot,

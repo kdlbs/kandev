@@ -271,15 +271,15 @@ const stepCompleteSection = "- step_complete_kandev: Signal that every requireme
 // in the template to avoid broadening this feature into a cleanup of older mode
 // mismatches.
 const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
-	"For an autopilot child question, also pass reply_to_question_id with the question ID from the child message. " +
-	"Use delivery_mode=\"queued\" or omit it for information that can wait. " +
-	"Use delivery_mode=\"interrupt\" for urgent replacement work on a running direct child; " +
-	"if immediate cancel-and-dispatch cannot be confirmed safely, the message remains queued. " +
-	"For halt-only work, use stop_task_kandev.\n" +
-	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
-	"Only the target task's direct parent may call it. Required params: task_id. " +
-	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
-	"use spawn_session_kandev to put the task back to work."
+	"Add reply_to_question_id for an autopilot child's question. " +
+	"delivery_mode=\"queued\" or omit it when work can wait; " +
+	"delivery_mode=\"interrupt\" replaces a running child's turn, staying queued if that cancel is unsafe.\n" +
+	"- stop_task_kandev (halt-only): Halt every live session on a direct child, no prompt and no replacement turn. " +
+	"Only its direct parent may call it. Required param: task_id. " +
+	"The session becomes CANCELLED and is not resumable; use spawn_session_kandev to put the task back to work.\n" +
+	"- reorder_child_tasks_kandev: Set direct children's processing order in one step and band. " +
+	"Required: ordered_task_ids. Optional: placement (in_place default, front). " +
+	"Order for scheduling; blocked_by only for real input dependency."
 
 // taskTitleSection is included only for task sessions whose task metadata says
 // the provisional title still needs an agent-generated replacement. It ends in

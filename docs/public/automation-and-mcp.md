@@ -930,6 +930,17 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
+`reorder_child_tasks_kandev` is available only in task mode. It accepts required
+`ordered_task_ids` (full IDs of same-workspace direct children in one workflow
+step and band) and optional `placement`: `in_place` (default) permutes their
+current slots, while `front` puts them ahead of remaining tasks without changing
+the remaining relative order. The response identifies `workflow_step_id`,
+`band`, `placement`, `revision`, and the resulting `tasks` IDs and positions.
+The board and normal queued admission use this order. A membership conflict is
+retried once; a second conflict returns an error. Use this tool for scheduling
+preference and `blocked_by` only for real input dependencies. See
+[child processing order](coordination.md#choose-child-processing-order).
+
 `add_workspace_sources_kandev` accepts the same mixed source batches as the Files panel. It adds sources to an idle task and defaults `task_id` to the current task.
 
 - It can target a same-workspace direct child. Kandev checks the caller's task and session on the backend; the agent cannot set them.
