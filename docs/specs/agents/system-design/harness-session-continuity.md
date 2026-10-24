@@ -177,6 +177,12 @@ The backend persists the snapshot hash and submission association before deliver
 Retries reuse the same snapshot and final prompt hash.
 An uncertain delivery cannot clear the checkpoint or cause another automatic injection.
 
+The replacement runs on the next harness generation with its own delivery stream.
+Kandev commits that generation only after launch, so setup events can be retained
+first. Delivery replays them from the start of the stream and admits them only
+after the commit, as specified in
+[successor setup replay](../../platform/system-design/durable-agent-stream-processing.md#successor-setup-replay).
+
 ## Workspace identity
 
 The agent-visible CWD differs from the host source path and worktree display name.
