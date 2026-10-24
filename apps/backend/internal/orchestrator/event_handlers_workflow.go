@@ -5853,25 +5853,14 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if s.resumeAttemptStore().holdsInitialPromptForSession(sessionID) {
 		return queueDrainSkipped
 	}
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
+	dispatched, autoRun, err := s.reserveAndDispatchQueueHeadWithCompletion(ctx, queueIdentity, completionEffect)
 	if err != nil {
 		return queueDrainSkipped
 	}
 	if !autoRun {
 		return queueDrainPaused
 	}
-	if ok && queuedMsg != nil && completionEffect != nil {
-		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
-		if hasInput && inputErr == nil {
-			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
-				s.logger.Warn("failed to settle delivery before queued successor",
-					zap.String("session_id", sessionID), zap.Error(err))
-				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)
-				return queueDrainSkipped
-			}
-		}
-	}
-	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
+	if dispatched {
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped
