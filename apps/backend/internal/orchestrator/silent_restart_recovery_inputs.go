@@ -245,6 +245,7 @@ func (s *Service) restoreSilentRestartCandidate(
 	store taskrepo.SilentRestoreRepository,
 	candidate models.SilentRestoreCandidate,
 ) error {
+	defer s.drainQueuedDispatchIfPending(context.WithoutCancel(ctx), candidate.SessionID)
 	inputs, err := s.loadSilentRestoreInputs(ctx, candidate)
 	if err != nil || inputs == nil {
 		return err

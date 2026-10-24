@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keyResumeQueueAfterSilentRestore              = "features.resumeQueueAfterSilentRestore"
+	envResumeQueueAfterSilentRestore              = "KANDEV_FEATURES_RESUME_QUEUE_AFTER_SILENT_RESTORE"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -215,6 +217,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyResumeQueueAfterSilentRestore,
+			EnvVar:          envResumeQueueAfterSilentRestore,
+			Kind:            KindFeature,
+			Label:           "Resume queues after silent restart restore",
+			Description:     "After a backend restart restores an interrupted session, turns Auto-run back on if the restore paused it, so queued messages keep flowing.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Queued messages can start a new turn on a restored session without a person re-enabling Auto-run. A failed restore still keeps the queue paused.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ResumeQueueAfterSilentRestore },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ResumeQueueAfterSilentRestore = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

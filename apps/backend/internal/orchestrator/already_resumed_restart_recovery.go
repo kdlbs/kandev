@@ -29,7 +29,8 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 	if err != nil {
 		return false, err
 	}
-	if err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID); err != nil {
+	resumeQueue, err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID, inputs.block.ID)
+	if err != nil {
 		return false, err
 	}
 	if err := s.validateSoleRestartRecoveryBlock(ownerCtx, inputs); err != nil {
@@ -62,6 +63,7 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
 			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}
+		resumeQueue()
 	}
 	return err == nil, err
 }
