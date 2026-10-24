@@ -1190,6 +1190,8 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 	return mcp.NewToolResultStructured(out, string(data))
 }
 
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
 func selectedAnswerLabel(question, answer map[string]interface{}) string {
 	selected, _ := answer["selected_option"].(string)
 	if selected == "" {
