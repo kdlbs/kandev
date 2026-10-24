@@ -358,10 +358,14 @@ func provideGateway(
 				}
 				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
-					InUse:      observation.InUse,
-					Limit:      observation.Limit,
-					ObservedAt: observation.ObservedAt,
-					Known:      observationErr == nil && observation.Known,
+					Policy:             observation.Policy,
+					GradeInUse:         observation.GradeInUse,
+					GradeLimits:        observation.GradeLimits,
+					NeedsConfiguration: observation.NeedsConfiguration,
+					InUse:              observation.InUse,
+					Limit:              observation.Limit,
+					ObservedAt:         observation.ObservedAt,
+					Known:              observationErr == nil && observation.Known,
 				}), nil
 			},
 			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {

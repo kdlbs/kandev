@@ -86,6 +86,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	// from the trusted execution owner when it is available.
 	_ = r.migrate.Apply("task_step_transitions.causing_run_id", `ALTER TABLE task_step_transitions ADD COLUMN causing_run_id TEXT`)
 	for _, migration := range []struct{ name, query string }{
+		{"task_sessions.admitted_execution_grade", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade TEXT NOT NULL DEFAULT ''`},
+		{"task_sessions.admitted_execution_grade_known", `ALTER TABLE task_sessions ADD COLUMN admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0`},
+		{"tasks.execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
@@ -1167,6 +1170,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
+			execution_grade TEXT NOT NULL DEFAULT '',
 			position INTEGER DEFAULT 0,
 			wip_admitted INTEGER NOT NULL DEFAULT 1,
 			queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1181,7 +1185,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		)`,
 		`INSERT INTO tasks_new SELECT
 			id, executor_actor_user_id, workspace_id, '', workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
+			state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,
@@ -1355,6 +1359,8 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			task_id TEXT NOT NULL,
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 			route_generation INTEGER NOT NULL DEFAULT 0,
 			route_state TEXT NOT NULL DEFAULT '',
 			route_reason TEXT NOT NULL DEFAULT '',
@@ -1387,7 +1393,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_profile_id, execution_profile_id,
+			id, task_id, agent_profile_id, execution_profile_id, admitted_execution_grade, admitted_execution_grade_known,
 			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
@@ -1612,6 +1618,8 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			container_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
 			execution_profile_id TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade TEXT NOT NULL DEFAULT '',
+			admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 			route_generation INTEGER NOT NULL DEFAULT 0,
 			route_state TEXT NOT NULL DEFAULT '',
 			route_reason TEXT NOT NULL DEFAULT '',
@@ -1640,7 +1648,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
+			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id, admitted_execution_grade, admitted_execution_grade_known,
 			route_generation, route_state, route_reason, downstream_acp_session_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,

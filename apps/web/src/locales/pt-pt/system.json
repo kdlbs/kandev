@@ -810,5 +810,17 @@
   "toolPayload.firstRun": "A primeira execução começa após a preparação da cópia de segurança.",
   "toolPayload.analysisDetails": "Detalhes da análise",
   "toolPayload.runDetails": "Detalhes da execução",
-  "storageGoCacheBusyPolicySnapshot": "A limpeza da cache Go durante tarefas ativas esteve ativada nesta execução."
+  "storageGoCacheBusyPolicySnapshot": "A limpeza da cache Go durante tarefas ativas esteve ativada nesta execução.",
+  "sessionCapacityAllHelp": "Os novos inícios exigem capacidade no limite total e no grau de execução explícito. Zero bloqueia o grau; um grau em falta requer configuração.",
+  "sessionCapacityAllLabel": "Aplicar limites a todas as execuções",
+  "sessionCapacityAllTitle": "Limites de execução simultânea",
+  "sessionCapacityGradeAdd": "Adicionar grau de execução",
+  "sessionCapacityGradeMaximum": "Limite do grau {{grade}}",
+  "sessionCapacityGradeName": "Grau de execução",
+  "sessionCapacityGradeNew": "Novo grau",
+  "sessionCapacityGradeRemove": "Remover {{grade}}",
+  "sessionCapacityGradeValidation": "Introduza nomes únicos até 64 carateres e limites inteiros entre 0 e 2147483647. O âmbito de todas as execuções exige pelo menos um grau. Remova explicitamente os limites por grau antes de mudar para o âmbito automático.",
+  "sessionCapacityGradesUnavailable": "Os limites por grau não estão disponíveis neste servidor.",
+  "sessionCapacityTotalHelp": "O limite total é independente da soma dos limites por grau. Os inícios manuais usam ambos os limites neste âmbito.",
+  "sessionCapacityTotalLabel": "Máximo de execuções simultâneas"
 }

@@ -810,5 +810,17 @@
   "toolPayload.firstRun": "首次執行將在備份準備完成後開始。",
   "toolPayload.analysisDetails": "分析詳情",
   "toolPayload.runDetails": "執行詳情",
-  "storageGoCacheBusyPolicySnapshot": "本次執行已啓用任務執行期間清理 Go 快取的設定。"
+  "storageGoCacheBusyPolicySnapshot": "本次執行已啓用任務執行期間清理 Go 快取的設定。",
+  "sessionCapacityAllHelp": "新執行必須同時滿足總上限和明確的執行等級上限。0 表示阻止該等級，缺少等級則需要設定。",
+  "sessionCapacityAllLabel": "對所有執行應用限制",
+  "sessionCapacityAllTitle": "併發執行限制",
+  "sessionCapacityGradeAdd": "新增執行等級",
+  "sessionCapacityGradeMaximum": "等級 {{grade}} 的上限",
+  "sessionCapacityGradeName": "執行等級",
+  "sessionCapacityGradeNew": "新等級",
+  "sessionCapacityGradeRemove": "移除 {{grade}}",
+  "sessionCapacityGradeValidation": "請輸入不重複且不超過 64 個字符的等級名稱，上限為 0 到 2147483647 的整數。全執行範圍至少需要一個等級。切換到自動範圍前請明確移除等級上限。",
+  "sessionCapacityGradesUnavailable": "此後端不提供等級上限。",
+  "sessionCapacityTotalHelp": "總上限獨立於各等級上限之和。在此範圍內，手動啓動也適用兩類上限。",
+  "sessionCapacityTotalLabel": "最大併發執行數"
 }

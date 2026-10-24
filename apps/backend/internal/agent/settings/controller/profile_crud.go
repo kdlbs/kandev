@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 const dynamicProfileKind = "dynamic"
@@ -52,6 +53,7 @@ func mcpSelectionValues(mode *string, servers *[]string) (string, []string) {
 }
 
 type CreateProfileRequest struct {
+	ExecutionGrade    string
 	AgentID           string
 	Name              string
 	Model             string
@@ -102,6 +104,9 @@ func (c *Controller) AgentProfileExists(ctx context.Context, id string) (bool, e
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return nil, err
+	}
 	// Model is optional — the profile reconciler fills it from the host
 	// utility probe cache on boot, and session start applies it via
 	// ACP model selection. An empty model means "use the agent's default".
@@ -150,6 +155,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	profile := &models.AgentProfile{
 		AgentID:                 req.AgentID,
 		Name:                    req.Name,
+		ExecutionGrade:          req.ExecutionGrade,
 		AgentDisplayName:        displayName,
 		Model:                   req.Model,
 		FallbackModel:           strings.TrimSpace(req.FallbackModel),
@@ -204,6 +210,7 @@ func (c *Controller) createDynamicProfile(
 		ID:                      uuid.NewString(),
 		AgentID:                 agent.ID,
 		Name:                    strings.TrimSpace(req.Name),
+		ExecutionGrade:          req.ExecutionGrade,
 		AgentDisplayName:        displayName,
 		Enabled:                 true,
 		CursorMCPAuthEnabled:    cursorMCPAuthEnabled(req.CursorMCPAuthEnabled),
@@ -403,6 +410,7 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 }
 
 type UpdateProfileRequest struct {
+	ExecutionGrade    *string
 	ID                string
 	Name              *string
 	Model             *string
@@ -443,7 +451,7 @@ func (req UpdateProfileRequest) touchesProvider() bool {
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
-		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
+		req.ExecutionGrade == nil && req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil && !req.touchesProvider() && req.CursorMCPAuthEnabled == nil &&
@@ -451,6 +459,12 @@ func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
+	ctx = store.WithExecutionGradeUpdate(ctx, req.ExecutionGrade)
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
 	if err := dto.ValidateMCPSelection(req.MCPSelectionMode, req.MCPSelectedServers); err != nil {
 		return nil, err
 	}
@@ -584,6 +598,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
+	}
+	if req.ExecutionGrade != nil {
+		profile.ExecutionGrade = *req.ExecutionGrade
 	}
 	if req.CommandPrefix != nil {
 		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
@@ -830,6 +847,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 	return &models.AgentProfile{
 		AgentID:                    source.AgentID,
 		Name:                       strings.TrimSpace(source.Name) + " Copy",
+		ExecutionGrade:             source.ExecutionGrade,
 		AgentDisplayName:           source.AgentDisplayName,
 		Model:                      source.Model,
 		FallbackModel:              strings.TrimSpace(source.FallbackModel),
@@ -1406,6 +1424,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		AutoApprove:             profile.AutoApprove,
 		CLIFlags:                cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:                 envVarsToDTO(profile.EnvVars),
+		ExecutionGrade:          profile.ExecutionGrade,
 		CLIPassthrough:          profile.CLIPassthrough,
 		Enabled:                 profile.Enabled,
 		CommandPrefix:           profile.CommandPrefix,

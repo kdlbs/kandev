@@ -159,6 +159,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetExecutionCapacity(sessionCapacityResolution.Effective)
 	orchestratorSvc.SetStartupRecoveryOwnerContextResolver(func(ctx context.Context, ownerID, orgID string) (context.Context, error) {
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})
@@ -255,10 +256,14 @@ func provideOrchestrator(
 	taskSvc.SetTaskStatusSummaryLaunchQueueReader(func(ctx context.Context, tasks []*taskmodels.Task) map[string]*statussummary.LaunchQueueSummary {
 		observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 		capacity := &statussummary.LaunchQueueCapacityObservation{
-			InUse:      observation.InUse,
-			Limit:      observation.Limit,
-			ObservedAt: observation.ObservedAt,
-			Known:      observationErr == nil && observation.Known,
+			Policy:             observation.Policy,
+			GradeInUse:         observation.GradeInUse,
+			GradeLimits:        observation.GradeLimits,
+			NeedsConfiguration: observation.NeedsConfiguration,
+			InUse:              observation.InUse,
+			Limit:              observation.Limit,
+			ObservedAt:         observation.ObservedAt,
+			Known:              observationErr == nil && observation.Known,
 		}
 		queues := make(map[string]*statussummary.LaunchQueueSummary, len(tasks))
 		for _, task := range tasks {

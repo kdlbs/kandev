@@ -1937,6 +1937,7 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 	}
 	return map[string]interface{}{
 		"id":                           profileInfo.ProfileID,
+		"execution_grade":              profileInfo.ExecutionGrade,
 		"name":                         profileInfo.ProfileName,
 		"agent_id":                     profileInfo.AgentID,
 		"agent_name":                   profileInfo.AgentName,

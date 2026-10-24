@@ -810,5 +810,17 @@
   "toolPayload.firstRun": "Ƒĩŕśţ ŕũń śţàŕţś àƒţēŕ ƀàćķũƥ ƥŕēƥàŕàţĩōń.",
   "toolPayload.analysisDetails": "Àńàĺŷśĩś ďēţàĩĺś",
   "toolPayload.runDetails": "Ŕũń ďēţàĩĺś",
-  "storageGoCacheBusyPolicySnapshot": "Ĝō ćàćĥē ćĺēàńũƥ ďũŕĩńĝ àćţĩvē ţàśķś ŵàś ēńàƀĺēď ƒōŕ ţĥĩś ŕũń."
+  "storageGoCacheBusyPolicySnapshot": "Ĝō ćàćĥē ćĺēàńũƥ ďũŕĩńĝ àćţĩvē ţàśķś ŵàś ēńàƀĺēď ƒōŕ ţĥĩś ŕũń.",
+  "sessionCapacityAllHelp": "Ńēŵ śţàŕţś ŕēqũĩŕē ŕōōḿ ĩń ƀōţĥ ţĥē ţōţàĺ ĺĩḿĩţ àńď ţĥēĩŕ ēxƥĺĩćĩţ ēxēćũţĩōń ĝŕàďē. Źēŕō ƀĺōćķś à ĝŕàďē; à ḿĩśśĩńĝ ĝŕàďē ńēēďś ćōńƒĩĝũŕàţĩōń.",
+  "sessionCapacityAllLabel": "Àƥƥĺŷ ĺĩḿĩţś ţō àĺĺ ēxēćũţĩōńś",
+  "sessionCapacityAllTitle": "Ćōńćũŕŕēńţ ēxēćũţĩōń ĺĩḿĩţś",
+  "sessionCapacityGradeAdd": "Àďď ēxēćũţĩōń ĝŕàďē",
+  "sessionCapacityGradeMaximum": "Ĺĩḿĩţ ƒōŕ ĝŕàďē {{grade}}",
+  "sessionCapacityGradeName": "Ēxēćũţĩōń ĝŕàďē",
+  "sessionCapacityGradeNew": "Ńēŵ ĝŕàďē",
+  "sessionCapacityGradeRemove": "Ŕēḿōvē {{grade}}",
+  "sessionCapacityGradeValidation": "Ēńţēŕ ũńĩqũē ĝŕàďē ńàḿēś (ũƥ ţō 64 ćĥàŕàćţēŕś) àńď ŵĥōĺē-ńũḿƀēŕ ĺĩḿĩţś ƒŕōḿ 0 ţō 2147483647. Àĺĺ-ēxēćũţĩōń śćōƥē ŕēqũĩŕēś àţ ĺēàśţ ōńē ĝŕàďē. Ŕēḿōvē ĝŕàďē ĺĩḿĩţś ēxƥĺĩćĩţĺŷ ƀēƒōŕē śŵĩţćĥĩńĝ ţō àũţōḿàţĩć śćōƥē.",
+  "sessionCapacityGradesUnavailable": "Ĝŕàďē ĺĩḿĩţś àŕē ũńàvàĩĺàƀĺē ōń ţĥĩś ƀàćķēńď.",
+  "sessionCapacityTotalHelp": "Ţĥē ţōţàĺ ĺĩḿĩţ ĩś ĩńďēƥēńďēńţ ōƒ ţĥē śũḿ ōƒ ĝŕàďē ĺĩḿĩţś. Ḿàńũàĺ śţàŕţś ũśē ƀōţĥ ĺĩḿĩţś ĩń ţĥĩś śćōƥē.",
+  "sessionCapacityTotalLabel": "Ḿàxĩḿũḿ śĩḿũĺţàńēōũś ēxēćũţĩōńś"
 }

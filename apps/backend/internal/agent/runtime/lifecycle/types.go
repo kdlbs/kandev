@@ -1889,13 +1889,14 @@ type CredentialsManager interface {
 
 // AgentProfileInfo contains resolved profile information
 type AgentProfileInfo struct {
-	ProfileID     string
-	ProfileName   string
-	AgentID       string
-	AgentName     string // e.g., "auggie", "claude", "codex"
-	Model         string // applied through ACP model selection at session start
-	Mode          string // applied via ACP session/set_mode at session start (empty = use agent default)
-	ConfigOptions map[string]string
+	ExecutionGrade string
+	ProfileID      string
+	ProfileName    string
+	AgentID        string
+	AgentName      string // e.g., "auggie", "claude", "codex"
+	Model          string // applied through ACP model selection at session start
+	Mode           string // applied via ACP session/set_mode at session start (empty = use agent default)
+	ConfigOptions  map[string]string
 	// FallbackModel is the optional single ACP model ID to switch to when
 	// Model is unavailable. Ignored when AutoFallback is enabled.
 	FallbackModel string

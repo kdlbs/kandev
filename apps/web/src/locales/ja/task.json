@@ -2887,5 +2887,15 @@
   "sessionRestartRequested": "セッションの再起動を要求しました",
   "sessionRestartFailed": "セッションの再起動に失敗しました",
   "sessionRestartUnavailable": "現在の状態ではこのセッションを再起動できません。",
-  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。"
+  "sessionRestartConnectionUnavailable": "接続を利用できません。再接続してからもう一度お試しください。",
+  "launchQueueConfigureExecutionCapacity": "実行上限を設定",
+  "launchQueueExecutionCapacity": "{{limit}}件中{{inUse}}件が実行中。確認時刻 {{checkedAt}}。",
+  "launchQueueExecutionCapacityDisconnected": "{{limit}}件中{{inUse}}件が実行中。容量接続を利用できません。最終確認 {{checkedAt}}。",
+  "launchQueueExecutionCapacityStale": "{{limit}}件中{{inUse}}件が実行中。容量情報は古くなっています。最終確認 {{checkedAt}}。",
+  "launchQueueExecutionScope": "全体の実行上限",
+  "launchQueueGradeHeading": "実行等級",
+  "launchQueueGradeNeedsConfiguration": "稼働中の実行等級に設定が必要です。",
+  "launchQueueGradeUsage": "{{limit}}件中{{inUse}}件の実行",
+  "launchQueueGradesUnavailable": "実行等級の観測を利用できません。",
+  "launchQueueWaitingExecutionCapacity": "実行枠を待機中です。"
 }

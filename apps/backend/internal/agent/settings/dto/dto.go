@@ -9,6 +9,7 @@ import (
 )
 
 type AgentProfileDTO struct {
+	ExecutionGrade   string `json:"execution_grade"`
 	ID               string `json:"id"`
 	AgentID          string `json:"agent_id"`
 	Kind             string `json:"kind"`

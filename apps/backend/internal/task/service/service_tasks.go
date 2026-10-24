@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/steptelemetry"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
@@ -104,7 +105,7 @@ type pendingTaskTitleSetter interface {
 
 func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
-		req.Priority != nil &&
+		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
 		req.Description == nil &&
 		req.State == nil &&
@@ -876,6 +877,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
 	}
@@ -1075,6 +1079,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		Description:            req.Description,
 		State:                  state,
 		Priority:               priority,
+		ExecutionGrade:         req.ExecutionGrade,
 		Position:               req.Position,
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
@@ -2100,6 +2105,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return nil, err
 	}
@@ -2138,7 +2148,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 	}
 	update := models.TaskFieldUpdate{
-		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
 		ParentID: req.ParentID, Metadata: req.Metadata,
 	}

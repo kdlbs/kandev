@@ -2887,5 +2887,15 @@
   "sessionRestartRequested": "Reinício da sessão solicitado",
   "sessionRestartFailed": "Falha ao reiniciar a sessão",
   "sessionRestartUnavailable": "Não é possível reiniciar esta sessão no estado atual.",
-  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente."
+  "sessionRestartConnectionUnavailable": "A ligação não está disponível. Volte a ligar e tente novamente.",
+  "launchQueueConfigureExecutionCapacity": "Configurar limites de execução",
+  "launchQueueExecutionCapacity": "{{inUse}} de {{limit}} execuções em uso. Verificado em {{checkedAt}}.",
+  "launchQueueExecutionCapacityDisconnected": "{{inUse}} de {{limit}} execuções em uso. A ligação de capacidade está indisponível. Última verificação em {{checkedAt}}.",
+  "launchQueueExecutionCapacityStale": "{{inUse}} de {{limit}} execuções em uso. Os dados estão desatualizados. Última verificação em {{checkedAt}}.",
+  "launchQueueExecutionScope": "Limites globais de execução",
+  "launchQueueGradeHeading": "Graus de execução",
+  "launchQueueGradeNeedsConfiguration": "É necessário configurar um grau de execução ativo.",
+  "launchQueueGradeUsage": "{{inUse}} de {{limit}} execuções",
+  "launchQueueGradesUnavailable": "As observações dos graus de execução estão indisponíveis.",
+  "launchQueueWaitingExecutionCapacity": "A aguardar capacidade de execução."
 }

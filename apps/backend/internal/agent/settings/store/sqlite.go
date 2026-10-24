@@ -106,6 +106,7 @@ func (r *sqliteRepository) initSchema() error {
 		failure_threshold INTEGER NOT NULL DEFAULT 3,
 		executor_preference TEXT NOT NULL DEFAULT '',
 		execution_agent_profile_id TEXT NOT NULL DEFAULT '',
+		execution_grade TEXT NOT NULL DEFAULT '',
 		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
@@ -336,6 +337,9 @@ func (r *sqliteRepository) initSchema() error {
 	// Office identifiers bind the execution profile that owns their launches.
 	// Added after the table-recreation block for the same reason as
 	// command_prefix / provider_kind.
+	if err := r.migrate.Apply("agent_profiles.execution_grade", `ALTER TABLE agent_profiles ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	_ = r.migrate.Apply("agent_profiles.execution_agent_profile_id", `ALTER TABLE agent_profiles ADD COLUMN execution_agent_profile_id TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
@@ -465,6 +469,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcHasEnabled := columnExists(tx, "agent_profiles", "enabled")
 	srcHasSortOrder := columnExists(tx, "agent_profiles", "sort_order")
+	srcHasExecutionGrade := columnExists(tx, "agent_profiles", "execution_grade")
 
 	srcHasCommandPrefix := columnExists(tx, "agent_profiles", "command_prefix")
 	srcHasFallbackModel := columnExists(tx, "agent_profiles", "fallback_model")
@@ -522,6 +527,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		srcCols += ", mcp_selected_servers"
 		dstCols += ", mcp_selected_servers"
 	}
+	if srcHasExecutionGrade {
+		srcCols += ", execution_grade"
+		dstCols += ", execution_grade"
+	}
 	if srcHasSortOrder {
 		srcCols += ", sort_order"
 		dstCols += ", sort_order"
@@ -556,6 +565,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		mcp_selection_mode TEXT NOT NULL DEFAULT 'inherit',
 		mcp_selected_servers TEXT NOT NULL DEFAULT '[]',
 		sort_order INTEGER NOT NULL DEFAULT 0,
+ execution_grade TEXT NOT NULL DEFAULT '',
 
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	)`); err != nil {
@@ -1221,7 +1231,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			provider_kind, provider_base_url, provider_api_key_secret_id, require_exact_model,
 			cursor_mcp_auth_enabled, cursor_plugins_mcp_enabled,
 			mcp_selection_mode, mcp_selected_servers,
-			execution_agent_profile_id
+			execution_agent_profile_id, execution_grade
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -1236,7 +1246,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?, ?,
 			?, ?,
 			?, ?,
-			?
+			?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1259,7 +1269,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, profile.ExecutionGrade,
 	)
 	return err
 }
@@ -1568,9 +1578,9 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profi
 			provider_kind = ?, provider_base_url = ?, provider_api_key_secret_id = ?, require_exact_model = ?,
 			cursor_mcp_auth_enabled = ?, cursor_plugins_mcp_enabled = ?,
 			mcp_selection_mode = ?, mcp_selected_servers = ?,
-			execution_agent_profile_id = ?
+			execution_agent_profile_id = ?, execution_grade = COALESCE(?, execution_grade)
 		WHERE id = ? AND deleted_at IS NULL
-		RETURNING enabled
+		RETURNING enabled, execution_grade
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
@@ -1592,10 +1602,10 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profi
 		dialect.BoolToInt(profile.CursorPluginsMCPEnabled),
 		normalizeMCPSelectionMode(profile.MCPSelectionMode),
 		mcpSelectedServersJSON,
-		profile.ExecutionAgentProfileID,
+		profile.ExecutionAgentProfileID, executionGradeUpdate(ctx),
 		profile.ID)
 	var committedEnabled bool
-	if err := row.Scan(&committedEnabled); err != nil {
+	if err := row.Scan(&committedEnabled, &profile.ExecutionGrade); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, fmt.Errorf("agent profile not found: %s", profile.ID)
 		}
@@ -1713,7 +1723,7 @@ const agentProfileSelectColumns = `
 		COALESCE(cursor_plugins_mcp_enabled, 1),
 		COALESCE(mcp_selection_mode, 'inherit'),
 		COALESCE(mcp_selected_servers, '[]'),
-		COALESCE(execution_agent_profile_id, '')
+		COALESCE(execution_agent_profile_id, ''), COALESCE(execution_grade, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1948,7 +1958,7 @@ func scanAgentProfile(scanner interface {
 		&cursorPluginsMCPEnabled,
 		&profile.MCPSelectionMode,
 		&mcpSelectedServersJSON,
-		&profile.ExecutionAgentProfileID,
+		&profile.ExecutionAgentProfileID, &profile.ExecutionGrade,
 	); err != nil {
 		return nil, err
 	}

@@ -810,5 +810,17 @@
   "toolPayload.firstRun": "首次运行将在备份准备完成后开始。",
   "toolPayload.analysisDetails": "分析详情",
   "toolPayload.runDetails": "运行详情",
-  "storageGoCacheBusyPolicySnapshot": "本次运行已启用任务执行期间清理 Go 缓存的设置。"
+  "storageGoCacheBusyPolicySnapshot": "本次运行已启用任务执行期间清理 Go 缓存的设置。",
+  "sessionCapacityAllHelp": "新执行必须同时满足总上限和明确的执行等级上限。0 表示阻止该等级，缺少等级则需要配置。",
+  "sessionCapacityAllLabel": "对所有执行应用限制",
+  "sessionCapacityAllTitle": "并发执行限制",
+  "sessionCapacityGradeAdd": "添加执行等级",
+  "sessionCapacityGradeMaximum": "等级 {{grade}} 的上限",
+  "sessionCapacityGradeName": "执行等级",
+  "sessionCapacityGradeNew": "新等级",
+  "sessionCapacityGradeRemove": "移除 {{grade}}",
+  "sessionCapacityGradeValidation": "请输入不重复且不超过 64 个字符的等级名称，上限为 0 到 2147483647 的整数。全执行范围至少需要一个等级。切换到自动范围前请明确移除等级上限。",
+  "sessionCapacityGradesUnavailable": "此后端不提供等级上限。",
+  "sessionCapacityTotalHelp": "总上限独立于各等级上限之和。在此范围内，手动启动也适用两类上限。",
+  "sessionCapacityTotalLabel": "最大并发执行数"
 }

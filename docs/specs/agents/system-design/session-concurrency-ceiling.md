@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-SESSION-CEILING-001
   - REQ-AGENTS-SESSION-CEILING-002
+  - REQ-AGENTS-SESSION-CEILING-003
 ---
 
 # Session Concurrency Ceiling System Design
@@ -24,21 +25,51 @@ in force when enabled.
 
 ## Requirement mapping
 
-| Requirement | Design section |
-| --- | --- |
-| `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery) |
+| Requirement                      | Design section                                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery)                |
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
+| `REQ-AGENTS-SESSION-CEILING-003` | [Execution-grade capacity](#execution-grade-capacity)                                                       |
+
+## Execution-grade capacity
+
+The existing capacity setting also stores `policy` (`automatic` by default,
+or explicitly `all`) and `grade_limits`. Defaults remain disabled. The legacy
+environment override retains automatic-only behavior. Settings apply the total,
+policy and grade map together under the admission controller's existing lock.
+
+The `execution_grade` profile and task field is an explicit, trimmed name of
+at most 64 Unicode characters without control characters. Empty is unconfigured.
+Omitted or null profile PATCH values retain the stored grade; an explicit empty
+string clears it. A nonempty task grade wins over the selected logical profile.
+Profile duplication and prepared execution snapshots preserve this classification.
+
+Admission persists `admitted_execution_grade` and its separate known bit.
+Active sessions retain their admitted grade across later profile/task edits.
+All-policy admission counts persisted active sessions and in-flight reservations
+once, and checks both the total and the selected grade's maximum. A zero grade
+maximum is valid. Unknown population and unconfigured grades have distinct
+refusal reasons; neither is treated as zero usage. Existing admitted work survives
+settings changes. Automatic-only policy preserves manual overrides.
+
+Explicit workflow starts capture their selected destination before grade
+admission. A lost promotion releases only that launch's reservation and readmits
+against the current selection. Existing deferred records provide arrival order
+for all-policy replay; this adds no polling loop. Queue projection uses the same
+locked admission observation for total, per-grade usage and unavailable state.
+The Settings editor saves or resets its draft through the existing API and
+retains stale/conflict feedback rather than claiming an unapplied change.
 
 ## Components and responsibilities
 
-| Component | Responsibility |
-| --- | --- |
-| `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations. It admits, refuses, confirms, and releases launches. |
-| Orchestrator launch seams | Pass the launch origin and complete replay payload to the controller. They consume a reservation only after launch success. |
-| `deferCeilingRefusal` | Merges the ceiling-owned keys into task `deferred_launch` with compare-and-set semantics. |
-| Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
-| Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
-| Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
+| Component                   | Responsibility                                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `sessionCeilingController`  | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations. It admits, refuses, confirms, and releases launches. |
+| Orchestrator launch seams   | Pass the launch origin and complete replay payload to the controller. They consume a reservation only after launch success.         |
+| `deferCeilingRefusal`       | Merges the ceiling-owned keys into task `deferred_launch` with compare-and-set semantics.                                           |
+| Ceiling sweep               | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind.                                     |
+| Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload.         |
+| Executor callbacks          | Confirm or release only when the callback execution still owns the session row.                                                     |
 
 ## Data and contracts
 

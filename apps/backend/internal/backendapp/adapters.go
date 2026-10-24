@@ -1199,6 +1199,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		return nil, err
 	}
 	return &executor.AgentProfileInfo{
+		ExecutionGrade:             info.ExecutionGrade,
 		ProfileID:                  info.ProfileID,
 		ProfileName:                info.ProfileName,
 		AgentID:                    info.AgentID,
