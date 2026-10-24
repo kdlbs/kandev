@@ -185,6 +185,11 @@ func (s *Service) persistDynamicLaunchDecision(
 	sessionID string,
 	decision dynamicruntime.RouteDecision,
 ) error {
+	// Hold the settings lock so a mode or model event from the previous
+	// candidate cannot land between this read and the candidate switch write.
+	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
+	settingsLock.Lock()
+	defer settingsLock.Unlock()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -195,6 +200,7 @@ func (s *Service) persistDynamicLaunchDecision(
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Status
@@ -212,6 +218,16 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
+	}
+	if DynamicCandidateRuntimeResetRequired(previousExecutionProfileID, decision.ExecutionProfileID) {
+		changed, err := s.persistDynamicCandidateRuntimeReset(ctx, session, expectedState, expectedUpdatedAt)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return dynamicruntime.ErrStaleGeneration
+		}
+		return nil
 	}
 	return s.repo.UpdateTaskSession(ctx, session)
 }
@@ -765,8 +781,12 @@ func (s *Service) dynamicLaunchDecision(
 		session.RouteGeneration == resolved.Generation {
 		return resolved.Decision, true, nil
 	}
+	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistDynamicRouteProjection(
+		ctx, session, previousExecutionProfileID, expectedState, expectedUpdatedAt,
+	); err != nil {
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.Decision, true, nil
