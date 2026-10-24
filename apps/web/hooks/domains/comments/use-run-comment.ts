@@ -520,6 +520,8 @@ async function runSessionComment({
  */
 export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const commentsById = useCommentsStore((s) => s.byId);
+  const walkthroughRuns = useRef(new Map<string, Promise<{ queued: boolean }>>());
   const storeApi = useAppStoreApi();
   const pendingPlanCommentAdmissionRef = useRef<{ key: string; id: string } | null>(null);
 
@@ -545,13 +547,30 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       }
       if (!sessionId) return { queued: false };
       try {
+        if (comment.source === "walkthrough") {
+          if (comment.status === "sent" || commentsById?.[comment.id]?.status === "sent") {
+            return { queued: false };
+          }
+          const existing = walkthroughRuns.current.get(comment.id);
+          if (existing) return await existing;
+          const submission = runSessionComment({
+            comment,
+            sessionId,
+            taskId,
+            storeApi,
+            markCommentsSent,
+          });
+          walkthroughRuns.current.set(comment.id, submission);
+          return await submission;
+        }
         return await runSessionComment({ comment, sessionId, taskId, storeApi, markCommentsSent });
       } catch (error) {
+        walkthroughRuns.current.delete(comment.id);
         console.error("Failed to send comment to agent:", error);
         throw error;
       }
     },
-    [sessionId, taskId, storeApi, markCommentsSent],
+    [sessionId, taskId, storeApi, markCommentsSent, commentsById],
   );
 
   return { runComment };

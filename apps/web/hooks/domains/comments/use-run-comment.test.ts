@@ -648,3 +648,47 @@ describe("useRunComment — session delivery failures", () => {
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
 });
+
+it("does not submit a walkthrough comment already acknowledged through this hook", async () => {
+  setup();
+  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
+  mockRequest.mockResolvedValue(undefined);
+  mockStoreState = makeStoreState("WAITING_FOR_INPUT");
+  const { result } = renderCommentHook();
+  const comment = makeWalkthroughComment();
+  await result.current.runComment(comment);
+  await result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledTimes(1);
+});
+
+it("retries rejected walkthrough delivery without acknowledging the failed attempt", async () => {
+  setup();
+  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
+  mockRequest.mockRejectedValueOnce(new Error("Delivery rejected")).mockResolvedValue(undefined);
+  const { result } = renderCommentHook();
+  const comment = makeWalkthroughComment();
+  await expect(result.current.runComment(comment)).rejects.toThrow("Delivery rejected");
+  expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  await result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledTimes(2);
+  expect(mockMarkCommentsSent).toHaveBeenCalledExactlyOnceWith([comment.id]);
+});
+
+it("shares an outstanding walkthrough submission instead of sending twice", async () => {
+  setup();
+  mockGetWebSocketClient.mockReturnValue({ request: mockRequest });
+  let accept!: () => void;
+  mockRequest.mockReturnValue(
+    new Promise<void>((resolve) => {
+      accept = resolve;
+    }),
+  );
+  const { result } = renderCommentHook();
+  const comment = makeWalkthroughComment();
+  const first = result.current.runComment(comment);
+  const second = result.current.runComment(comment);
+  expect(mockRequest).toHaveBeenCalledTimes(1);
+  accept();
+  await Promise.all([first, second]);
+  expect(mockMarkCommentsSent).toHaveBeenCalledExactlyOnceWith([comment.id]);
+});

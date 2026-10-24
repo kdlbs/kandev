@@ -101,6 +101,7 @@ function panelState(overrides: Record<string, unknown> = {}) {
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
+    markCommentsSent: vi.fn(),
     handleClearMessageComments: vi.fn(),
     clearEphemeral: vi.fn(),
     addContextFile: vi.fn(),
@@ -339,6 +340,7 @@ describe("passthrough chat composer cleanup", () => {
       handleClearPRFeedback: ReturnType<typeof vi.fn>;
       clearSessionPlanComments: ReturnType<typeof vi.fn>;
       handleClearWalkthroughComments: ReturnType<typeof vi.fn>;
+      markCommentsSent: ReturnType<typeof vi.fn>;
       handleClearMessageComments: ReturnType<typeof vi.fn>;
       clearEphemeral: ReturnType<typeof vi.fn>;
       addContextFile: ReturnType<typeof vi.fn>;
@@ -348,7 +350,8 @@ describe("passthrough chat composer cleanup", () => {
 
     expect(state.handleClearPRFeedback).toHaveBeenCalledTimes(1);
     expect(state.clearSessionPlanComments).not.toHaveBeenCalled();
-    expect(state.handleClearWalkthroughComments).toHaveBeenCalledTimes(1);
+    expect(state.handleClearWalkthroughComments).not.toHaveBeenCalled();
+    expect(state.markCommentsSent).toHaveBeenCalledWith(["walkthrough-comment-1"]);
     expect(state.handleClearMessageComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);
     expect(state.addContextFile).toHaveBeenCalledWith(SESSION_ID, {
