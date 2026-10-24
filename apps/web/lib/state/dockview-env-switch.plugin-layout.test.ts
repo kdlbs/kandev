@@ -402,3 +402,68 @@ describe("VERTICAL root through environment switches and resets", () => {
     expect(getPinnedTarget("right")).toBeUndefined();
   });
 });
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.9, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("plugin-free environment switches across root orientations", () => {
+  const plainHorizontal = horizontalLayout({ bottom: [TERMINAL] });
+  const plainVertical: LayoutState = {
+    rootOrientation: "VERTICAL",
+    columns: [
+      {
+        id: "center",
+        width: 300,
+        groups: [{ id: CENTER_GROUP, panels: [AGENT], activePanel: "chat" }],
+      },
+      {
+        id: "right",
+        pinned: true,
+        width: 400,
+        groups: [
+          { id: RIGHT_TOP_GROUP, panels: [FILES, CHANGES], activePanel: "files" },
+          { id: RIGHT_BOTTOM_GROUP, panels: [TERMINAL], activePanel: TERMINAL.id },
+        ],
+      },
+    ],
+  };
+
+  it("applies a VERTICAL default to a fresh environment opened from a horizontal task", async () => {
+    startIn("env-a", plainHorizontal, plainVertical);
+
+    await switchEnv("env-a", "env-fresh");
+
+    expect(shape(api).orientation).toBe("VERTICAL");
+    expect(rootSizes(api)).toEqual([300, 400]);
+    expect(getPinnedTarget("right")).toBeUndefined();
+  });
+
+  it("does not leak a VERTICAL task into a fresh environment whose default is horizontal", async () => {
+    startIn("env-a", plainVertical, plainHorizontal);
+
+    await switchEnv("env-a", "env-fresh");
+
+    expect(shape(api).orientation).toBe("HORIZONTAL");
+    expect(rootSizes(api)).toEqual([960, 240]);
+  });
+
+  it("restores a saved VERTICAL environment from a horizontal task", async () => {
+    saveEnvironment("env-saved", plainVertical);
+    startIn("env-a", plainHorizontal, null);
+
+    await switchEnv("env-a", "env-saved");
+
+    expect(shape(api).orientation).toBe("VERTICAL");
+    expect(rootSizes(api)).toEqual([300, 400]);
+  });
+
+  it("keeps a custom default's in-cap right ratio on the plugin-free fast path", async () => {
+    startIn("env-a", plainHorizontal, plainHorizontal);
+    const fromJSON = vi.spyOn(api, "fromJSON");
+
+    await switchEnv("env-a", "env-fresh");
+
+    expect(fromJSON).not.toHaveBeenCalled();
+    expect(rootSizes(api)).toEqual([960, 240]);
+    expect(getPinnedTarget("right")).toBe(240);
+    expect(getManualRightWidth("env-fresh")).toBeNull();
+  });
+});

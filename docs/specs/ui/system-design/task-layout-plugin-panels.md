@@ -194,9 +194,13 @@ the target IDs/params, tree, tab order and selected tabs, then apply the
 orientation-safe fixups above. Keep outgoing environment capture and incoming
 saved-layout precedence. Do not classify plugins as ephemeral, change revocation
 policy, automatically reopen panels, or write portable settings during switching.
-Plugin-free fast-path behavior and comparators remain unchanged; a new semantic
-fingerprint or generalized comparator redesign is unnecessary. The tradeoff is
-one normal restore for plugin-bearing switches instead of unsafe reuse.
+The fast path is also rejected when the live root orientation differs from the
+target's (saved grid orientation, else the effective default's
+`rootOrientation`, missing meaning horizontal), because component-only
+comparison cannot see the root axis. Plugin-free same-axis behavior and the
+comparators remain otherwise unchanged; a new semantic fingerprint or
+generalized comparator redesign is unnecessary. The tradeoff is one normal
+restore for plugin-bearing or axis-changing switches instead of unsafe reuse.
 
 For a fresh incoming environment, Task 02 carries the effective reusable
 default's resolved horizontal targets through the final
@@ -204,7 +208,9 @@ default's resolved horizontal targets through the final
 targets; fixups must not replace them with the stock ratio because canonical
 Files/Changes groups are present. Reuse the existing resolver and in-memory
 geometry path; do not infer the source from arbitrary live split sizes or
-manufacture a manual-right-width preference.
+manufacture a manual-right-width preference. A plugin-free fast-path switch to
+a fresh environment owns the same resolved right target, so the profile's
+right ratio does not depend on whether it contains a plugin panel.
 
 At this fresh-default boundary, an actual manual override retains precedence;
 otherwise a resolved reusable target wins over the stock automatic target,

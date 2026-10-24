@@ -41,6 +41,7 @@ vi.mock("./layout-manager", () => {
     // Used by applyPinnedColumnSizes and (indirectly) by the
     // formatWidthsSnapshot debug log it now emits.
     setPinnedTarget: vi.fn(),
+    setReusableRightTarget: vi.fn(),
     getPinnedTarget: vi.fn(() => undefined),
     RIGHT_TOP_GROUP: "group-right-top",
     RIGHT_BOTTOM_GROUP: "group-right-bottom",
@@ -202,7 +203,7 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     expect(resizeView).toHaveBeenCalledWith(2, 420);
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
 
-    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420);
+    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420, undefined);
   });
 });
 

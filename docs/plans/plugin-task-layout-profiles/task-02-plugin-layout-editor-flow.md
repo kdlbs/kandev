@@ -510,3 +510,35 @@ REQ-UI-TASK-LAYOUT-PROFILES-001 stays active. REQ-002 is implemented and verifie
 but its acceptance by the contract owner is a separate decision, so the draft statuses
 of the requirement and both designs are left unchanged. Implementation commit: `af1485a39f`
 (`feat(ui): add plugin task panels to reusable layout profiles`). Not pushed.
+
+### Adversarial review remediation
+
+Round 1 (Opus 5.5 reviewer, read-only) reported two findings, both accepted:
+
+- P2: the plugin-free fast path ignored root orientation, so a VERTICAL default or
+  saved environment was not applied after in-app navigation from a horizontal task,
+  and a VERTICAL task leaked into a horizontal fresh environment. `canUseFastEnvSwitch`
+  now rejects reuse when the live and target root orientations differ.
+- P3: a plugin-free fresh environment reverted a custom default's right ratio to the
+  stock ratio while the plugin path kept it. The fast path now owns the default's
+  resolved right target for the new environment and passes that owner to the final
+  fixups.
+- RED: four new real-Dockview cases in `dockview-env-switch.plugin-layout.test.ts`
+  (`expected 'HORIZONTAL' to be 'VERTICAL'` x2, `expected 'VERTICAL' to be
+  'HORIZONTAL'`, `expected [840, 360] to deeply equal [960, 240]`). GREEN after the
+  change; the mocked `dockview-env-switch-pinned.test.ts` factory gained the new export.
+- Final focused run: `pnpm exec vitest run lib/state/dockview-env-switch
+  lib/state/dockview-store.test.ts lib/state/dockview-layout-builders-fixups.test.ts
+  lib/state/layout-manager components/task/dockview-layout-setup`: 23 files,
+  244 tests passed. Changed-file ESLint, Prettier and web typecheck passed
+  (`NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`).
+- Browser verification rebuilt the backend, Vite bundle and fixture with
+  `TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp` and
+  `GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache` after
+  cache-volume exhaustion and a subsequent `/tmp` quota failure. Command:
+  `pnpm e2e:run --host --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts`. Result: 16 passed,
+  2 flaky (passed on retry), no terminal failures. Flakes were backend readiness
+  timeout and API `503 persistence_unavailable`, not layout assertions.
+- Document catalog, full specification lint and whitespace checks passed.
