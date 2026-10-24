@@ -1096,6 +1096,17 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
+      # The cooperative shutdown event is Win32-only; these targeted tests
+      # cover its listener, the backend signal controller, and the launcher.
+      - name: Test Windows cooperative shutdown
+        if: matrix.suite == 'native'
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race -v -timeout 10m ./internal/common/winproc/...
+          go test -tags fts5 -race -v -timeout 10m ./internal/backendapp -run '^TestStartupSignalController'
+          go test -race -v -timeout 10m ./internal/launcher -run '^TestWindowsManagedProcessGracefulStop'
+
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
         run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
