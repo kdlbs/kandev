@@ -808,6 +808,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	if err := s.AuthorizeWorkflowExecutorMutation(ctx, id); err != nil {
 		return nil, err
 	}
+	if workflow != nil && workflow.Source == models.WorkflowSourcePromptSource {
+		return nil, models.ErrPromptSourceLocked
+	}
 	if req.ExpectedUpdatedAt != nil && !workflow.UpdatedAt.Equal(*req.ExpectedUpdatedAt) {
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
@@ -930,6 +933,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return err
+	}
+	if workflow != nil && workflow.Source == models.WorkflowSourcePromptSource {
+		return models.ErrPromptSourceLocked
 	}
 	if workflow == nil {
 		return fmt.Errorf("workflow not found: %s", id)

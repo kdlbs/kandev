@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/workflow/stepevents"
 )
 
 // WorkflowProvider gives the workflow service access to workflows owned by the task domain.
@@ -30,16 +31,18 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	executorMutationChecker func(context.Context, string) error
-	repo                    *repository.Repository
-	logger                  *logger.Logger
-	workflowProvider        WorkflowProvider
-	workspaceProvider       WorkspaceProvider
-	resolveProfile          models.AgentProfileResolver
-	matchProfile            models.AgentProfileMatcher
-	importProfileCatalog    ImportProfileCatalog
-	syncOps                 SyncWorkflowOps
-	sessionAccessChecker    func(context.Context, string) error
+	promptSourceWorkflowPublisher func(context.Context, string, *taskmodels.Workflow)
+	promptSourceStepPublisher     *stepevents.Publisher
+	executorMutationChecker       func(context.Context, string) error
+	repo                          *repository.Repository
+	logger                        *logger.Logger
+	workflowProvider              WorkflowProvider
+	workspaceProvider             WorkspaceProvider
+	resolveProfile                models.AgentProfileResolver
+	matchProfile                  models.AgentProfileMatcher
+	importProfileCatalog          ImportProfileCatalog
+	syncOps                       SyncWorkflowOps
+	sessionAccessChecker          func(context.Context, string) error
 	// workflowAccessChecker / workspaceAccessChecker carry the task domain's
 	// per-user visibility rule into this package (see access.go).
 	workflowAccessChecker  func(context.Context, string) error

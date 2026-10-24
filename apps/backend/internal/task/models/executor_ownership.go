@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 type executorActorKey struct{}
@@ -17,6 +19,18 @@ func WithExecutorActor(ctx context.Context, userID string) context.Context {
 func ExecutorActorFromContext(ctx context.Context) (string, bool) {
 	actor, bound := ctx.Value(executorActorKey{}).(string)
 	return actor, bound
+}
+
+// ExecutorSourceCreator retains explicit durable attribution, including an
+// empty actor for legacy shared access, before considering an interactive user.
+func ExecutorSourceCreator(ctx context.Context) string {
+	if actor, bound := ExecutorActorFromContext(ctx); bound {
+		return actor
+	}
+	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
+		return identity.UserID
+	}
+	return ""
 }
 
 var ErrExecutorOwnershipChanged = errors.New("executor ownership changed")

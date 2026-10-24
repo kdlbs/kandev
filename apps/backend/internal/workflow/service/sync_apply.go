@@ -390,6 +390,25 @@ func eventsEqual(a, b models.StepEvents) bool {
 // (and the update must be skipped) when names are ambiguous or a removed step
 // still holds tasks.
 func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, steps []*models.WorkflowStep) (map[string]*models.WorkflowStep, []*models.WorkflowStep, string) {
+	existingByName, toDelete, warning := matchStepChanges(wf, pw, steps)
+	if warning != "" {
+		return nil, nil, warning
+	}
+	for _, st := range toDelete {
+		count, err := s.syncOps.CountTasksByWorkflowStep(ctx, st.ID)
+		if err != nil {
+			return nil, nil, fmt.Sprintf("workflow %q: failed to count tasks in step %q: %v", wf.Name, st.Name, err)
+		}
+		if count > 0 {
+			return nil, nil, fmt.Sprintf("workflow %q not updated: step %q was removed from the definition but still has %d task(s); move or archive them, then sync again", wf.Name, st.Name, count)
+		}
+	}
+	return existingByName, toDelete, ""
+}
+
+// matchStepChanges compares definitions without deciding whether removals may
+// be applied. Read-only drift uses the same names without imposing write gates.
+func matchStepChanges(wf *taskmodels.Workflow, pw models.WorkflowPortable, steps []*models.WorkflowStep) (map[string]*models.WorkflowStep, []*models.WorkflowStep, string) {
 	existingByName := make(map[string]*models.WorkflowStep, len(steps))
 	for _, st := range steps {
 		if _, dup := existingByName[st.Name]; dup {
@@ -408,13 +427,6 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 	for _, st := range steps {
 		if desiredNames[st.Name] {
 			continue
-		}
-		count, err := s.syncOps.CountTasksByWorkflowStep(ctx, st.ID)
-		if err != nil {
-			return nil, nil, fmt.Sprintf("workflow %q: failed to count tasks in step %q: %v", wf.Name, st.Name, err)
-		}
-		if count > 0 {
-			return nil, nil, fmt.Sprintf("workflow %q not updated: step %q was removed from the definition but still has %d task(s); move or archive them, then sync again", wf.Name, st.Name, count)
 		}
 		toDelete = append(toDelete, st)
 	}

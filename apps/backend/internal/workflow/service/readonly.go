@@ -38,6 +38,9 @@ func (s *Service) EnsureWorkflowMutable(ctx context.Context, workflowID string) 
 	if err != nil {
 		return nil //nolint:nilerr // fail open: guard only blocks resolved workflows
 	}
+	if wf.Source == taskmodels.WorkflowSourcePromptSource {
+		return taskmodels.ErrPromptSourceLocked
+	}
 	if wf.Source == taskmodels.WorkflowSourceGitHub {
 		return ErrWorkflowReadOnly
 	}

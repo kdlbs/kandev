@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
@@ -188,7 +187,7 @@ func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, w
 // Empty or unknown sources collapse to the manual default.
 func normalizeWorkflowSource(source string) string {
 	switch source {
-	case models.WorkflowSourceManual, models.WorkflowSourceGitHub:
+	case models.WorkflowSourceManual, models.WorkflowSourceGitHub, models.WorkflowSourcePromptSource:
 		return source
 	}
 	return models.WorkflowSourceManual
@@ -286,8 +285,16 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 
 // UpdateWorkflow updates an existing workflow
 func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutable(ctx, tx, workflow.ID); err != nil {
+		return err
+	}
 	workflow.UpdatedAt = time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
 	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
@@ -298,12 +305,20 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 	if rows == 0 {
 		return fmt.Errorf("workflow not found: %s", workflow.ID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *models.Workflow, expected time.Time) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutable(ctx, tx, workflow.ID); err != nil {
+		return err
+	}
 	workflow.UpdatedAt = time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ?
 		WHERE id = ? AND updated_at = ?
 	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID,
@@ -319,7 +334,7 @@ func (r *Repository) UpdateWorkflowIfUnchanged(ctx context.Context, workflow *mo
 	if rows == 0 {
 		return repoerrors.ErrTaskVersionConflict
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
@@ -367,6 +382,9 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutable(ctx, tx, id); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
 	`), id); err != nil {
@@ -505,11 +523,5 @@ func (r *Repository) ReorderWorkflowsIfUnchanged(
 }
 
 func workflowCreator(ctx context.Context) string {
-	if actor, bound := models.ExecutorActorFromContext(ctx); bound {
-		return actor
-	}
-	if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
-		return identity.UserID
-	}
-	return ""
+	return models.ExecutorSourceCreator(ctx)
 }

@@ -217,6 +217,9 @@ func (h *WorkflowHandlers) readOnlyWorkflowMessage(ctx context.Context, id strin
 	if err != nil {
 		return "", false
 	}
+	if workflow.Source == models.WorkflowSourcePromptSource {
+		return models.ErrPromptSourceLocked.Error(), true
+	}
 	if workflow.Source == models.WorkflowSourceGitHub {
 		return workflowReadOnlyMsg, true
 	}
