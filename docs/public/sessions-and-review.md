@@ -13,6 +13,21 @@ A session is one agent conversation on a task. Use it to direct work, inspect ch
 2. Watch chat and tool activity; answer clarification or permission requests.
 3. Inspect the diff, run required checks, and send focused feedback until the change is ready.
 
+## Answer clarification questions
+
+Questions support links, bold, italic, strikethrough, inline code, paragraphs, and simple lists.
+Select an HTTP or HTTPS reference in question text to open it in another tab.
+Links inside answer choices select the choice.
+
+To read an older question, open **Inbox > History** and expand its row.
+The expanded question supports the same formatting and reference links.
+Selecting a reference label in the collapsed summary expands the row.
+Opening a reference does not answer the question or change its status.
+
+Context paragraphs, permission requests, and your custom answers remain literal text.
+Clarification questions do not display embedded HTML, images, tables, or code panels.
+File references remain labels rather than opening workspace files.
+
 ## Start a parallel session
 
 You need a task with an environment and at least one agent profile compatible with that environment's executor.

@@ -195,6 +195,46 @@ describe("captureSSHInterruptionLogs", () => {
     expect(captures[1].attachedBytes).toBeGreaterThan(0);
   });
 
+  it("captures a remote tail when its host mount is unavailable and redacts before writing", async () => {
+    const state = fixture();
+    fs.unlinkSync(state.remote);
+    const readRemote = vi.fn((byteLimit: number) => {
+      expect(byteLimit).toBeGreaterThan(0);
+      expect(byteLimit).toBeLessThan(2 * 1024 * 1024);
+      return `${credential}\nAuthorization: Bearer ${credential}\nremote listener stopped\n`;
+    });
+    await captureSSHInterruptionLogs(state.info, state.backend, readRemote);
+    expect(readRemote).toHaveBeenCalledOnce();
+    const retained = fs.readFileSync(path.join(state.output, "ssh-remote-agentctl.log"), "utf8");
+    expect(retained).toContain("remote listener stopped");
+    expect(retained).not.toContain(credential);
+    expect(state.metadata().captures[2].error).toBeUndefined();
+    expect(state.metadata().captures[2].originalBytes).toBeUndefined();
+  });
+
+  it("does not read the remote container after a passing test", async () => {
+    const state = fixture();
+    const readRemote = vi.fn(() => "remote listener stopped\n");
+    await captureSSHInterruptionLogs(
+      { ...state.info, status: "passed" },
+      state.backend,
+      readRemote,
+    );
+    expect(readRemote).not.toHaveBeenCalled();
+    expect(state.attach).not.toHaveBeenCalled();
+  });
+
+  it("omits raw remote command failures from diagnostic metadata", async () => {
+    const state = fixture();
+    await captureSSHInterruptionLogs(state.info, state.backend, () => {
+      throw new Error(`docker exec failed: password=${credential}`);
+    });
+    const metadata = state.metadata();
+    expect(metadata.captures[2].error).toBe("diagnostic collection failed");
+    expect(JSON.stringify(metadata)).not.toContain(credential);
+    expect(state.info.status).toBe("failed");
+  });
+
   it("preserves the original failure and closes log descriptors when attachment fails", async () => {
     const state = fixture();
     const originalFailure = new Error("original restart assertion failed");

@@ -3,6 +3,7 @@ import { activeSessionId, seedClarificationSession } from "../../helpers/clarifi
 import { dwell, waitForHttp, watchWs } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionSettled } from "./quick-chat-helpers";
+import { expectClarificationReferencePopup } from "../../helpers/clarification-markdown";
 
 type UpdateNotification = {
   version: string;
@@ -531,6 +532,10 @@ test.describe("Mobile clarification multiline answer", () => {
       option.getByTestId("clarification-option-description").locator("strong"),
     ).toHaveText("production");
     await expect(option.locator("a")).toHaveCount(0);
+
+    const guidance = card.getByRole("link", { name: "storage guidance" });
+    await expectClarificationReferencePopup(testPage, () => guidance.tap());
+    await expect(overlay).toBeVisible();
 
     await option.scrollIntoViewIfNeeded();
     const [optionBox, overlayBox] = await Promise.all([
