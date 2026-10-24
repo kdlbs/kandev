@@ -230,7 +230,25 @@ The existing desktop and phone History scenarios include fenced code and assert 
 - The seven-file Vitest command above passed again: 65 tests. The changed component, helper, and two History specs passed scoped ESLint and Prettier checks. The 8 GiB TypeScript command passed again.
 - The existing single-line summary contract and public documentation remain accurate. No syntax, link policy, or payload contract changed.
 
-Remote CI, final screenshot publication, and review-thread completion are external delivery checks.
+### CI browser corrections
+
+CI exposed two existing test problems. The sidebar test reloaded after an optimistic visibility update, before persistence completed.
+It now checks the saved workspace layout before reloading. Recovery feedback tests now activate the failure banner's Retry button on desktop and phone.
+The separate stopped-session card can still be inspecting the session at that point.
+
+Verification used the original failing CI process selections, with updated catalog hashes for the changed tests.
+A task-local script used the repository's `partitionShard` and guarded raw runner. Each replay used two CPUs, one browser worker, and zero retries.
+
+- Shard 24, process 4: 34 tests passed, including the corrected desktop recovery scenario. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/replay-24-logs/kandev-run.e2e.EDYtjkvb.log`.
+- Shard 17, process 4: 31 tests passed, including the corrected sidebar persistence scenario. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/replay-17-logs/kandev-run.e2e.NN3dInrN.log`.
+- The selected phone recovery scenario passed. Log: `/tmp/kandev-run.e2e.lWZOoOv6.log`.
+- Scoped ESLint, Prettier, and the 8 GiB TypeScript command passed for the three changed browser specs.
+
+The replay worktree combined the feature with the current main tree. The backend build used the command-local override `MAKEFLAGS=GOFLAGS=-buildvcs=false` because Go's VCS lookup failed from the temporary worktree.
+Local runs selected unused E2E port ranges after initial fixture-startup failures. Setup failures are excluded from feature regression evidence.
+The corrections adjust test synchronization and action selection; the product contracts and public guide remain accurate.
+
+Remote CI and final review completion remain external delivery checks until the corrected tests are pushed and checked.
 
 ### Remaining limit
 

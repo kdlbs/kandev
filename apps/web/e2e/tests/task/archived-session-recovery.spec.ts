@@ -210,8 +210,10 @@ test.describe("archived session recovery", () => {
       fullPage: true,
     });
 
-    await expect(session.recoveryResumeButton()).toBeEnabled();
-    await session.recoveryResumeButton().click();
+    // Retry the failed automatic recovery while session inspection can still be pending.
+    const retry = banner.getByRole("button", { name: "Retry", exact: true });
+    await expect(retry).toBeEnabled();
+    await retry.click();
     await expect(banner).toHaveCount(0, { timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage, "archived recovery feedback");
 
