@@ -85,6 +85,41 @@ message_task_kandev(
 
 There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit; both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
 
+## Reading a send after a timeout
+
+Kanban task sessions can supply `operation_id` to name one logical send:
+
+```
+message_task_kandev(
+  task_id="<target task UUID>",
+  prompt="<message>",
+  operation_id="proposal-2026-10-23-a"
+)
+```
+
+After a timeout or lost response, call
+`get_task_message_operation_kandev(operation_id="proposal-2026-10-23-a")`.
+It reads the sending session's retained operation and delivers nothing.
+Use `operation_state` and `failure_code` to interpret the result.
+
+| Result | Meaning and next action |
+| --- | --- |
+| `pending` | The first attempt may still commit. Wait and read again. |
+| `committed` | Dispatch was accepted as `sent`, `queued`, or `started`. Do not resend; a queued receipt does not prove a provider reply. |
+| `failed/dispatch_rejected` | Definite rejection. `retry_safe=true` permits a fresh operation ID. |
+| `failed/outcome_unknown` | The delivery outcome remains unknown. Do not resend. |
+| `claimed=false` | No retained record exists. Bounded retention means this does not prove no historical delivery; `retry_safe=false`. |
+
+A replay with the same retained ID returns its recorded outcome without another
+message, queue entry, turn, or interrupt. Different target task, prompt, delivery
+mode, requested session, or parent-question ID is rejected with
+`operation_id_conflict`. The comparison uses the stored field values directly.
+
+The server supplies the trusted sending task/session. Another session cannot
+read or claim its operations, and readback never returns stored prompt content.
+Records remain for seven days and expire in bounded maintenance-admitted batches.
+Sends without `operation_id` retain their existing behavior.
+
 ## Autopilot parent questions
 
 An autopilot child does not call `ask_user_question_kandev`. If it reaches a
@@ -281,6 +316,7 @@ These tools complement cross-task communication for common coordination patterns
 |---|---|
 | `message_task_kandev` | Send a prompt to any task by UUID |
 | `get_task_conversation_kandev` | Read a task's message history (pagination, type filters); defaults to the primary session |
+| `get_task_message_operation_kandev` | Read your own retained send result after a timeout without delivering again |
 | `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |

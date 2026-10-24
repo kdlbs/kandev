@@ -607,6 +607,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "delivery_mode")
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
+		copyOptionalStringArg(payload, req, "operation_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil

@@ -250,6 +250,14 @@ func (f *fakeOrchestrator) QueueUserPrompt(ctx context.Context, taskID, sessionI
 	return err
 }
 
+func (f *fakeOrchestrator) QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error) {
+	queued, err := f.queue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser, planMode, nil, metadata)
+	if err != nil {
+		return "", err
+	}
+	return queued.ID, nil
+}
+
 func (f *fakeOrchestrator) GetMessageQueue() *messagequeue.Service { return f.queue }
 
 func (f *fakeOrchestrator) CheckQueueAdmissionReadiness(_ context.Context, identity messagequeue.QueueSessionIdentity) {
