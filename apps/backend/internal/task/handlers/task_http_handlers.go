@@ -2220,7 +2220,8 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 				responseKeySuccess: false, responseKeyPending: true, "task_id": taskID,
 			})
 		default:
-			handleNotFound(c, h.logger, err, "task not deleted")
+			handleNotFound(c, h.logger, err, "task not deleted",
+				zap.String("task_id", taskID), zap.Bool("cascade", cascade))
 		}
 		return
 	}
