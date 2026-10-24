@@ -359,6 +359,7 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   }
 
   const currentEnvId = refs.envIdRef.current;
+  useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
   const restored =
     !layout.initialLayout &&
     restoreEnvLayout(api, currentEnvId, appStore, DESKTOP_VALID_COMPONENTS);
@@ -381,8 +382,6 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
       rightPaneAvailable: paneState.available,
     });
   }
-
-  useDockviewStore.setState({ currentLayoutEnvId: currentEnvId });
 
   refs.readyDisposersRef.current.push(setupGroupTracking(api));
   const sessionTabSyncDisposable = setupSessionTabSync(api, appStore);

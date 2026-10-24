@@ -16,6 +16,7 @@
  *   width on `mouseup` so future rebalances restore to the user's choice.
  */
 import { LAYOUT_PINNED_MIN_PX } from "./caps";
+import type { LayoutState } from "./types";
 
 const targets = new Map<"sidebar" | "right", number>();
 
@@ -38,25 +39,38 @@ export function clearAllPinnedTargets(): void {
 }
 
 /**
- * The right column share resolved from a reusable layout's saved geometry, owned
- * by exactly one environment's active build. It ranks between an actual manual
- * width (always wins) and the stock responsive default, and is held as a ratio
- * so it scales with the workbench and stays under the runtime caps. In-memory
- * only: it is never a manual preference and never reaches portable storage.
+ * Unclamped reusable source geometry, owned by exactly one environment.
+ * Complete snapshots scale by their saved share; incomplete snapshots keep
+ * the saved absolute width. Runtime caps are applied only when resolving it.
  */
-type ReusableRightTarget = { envId: string | null; ratio: number };
+type ReusableRightTarget = {
+  envId: string | null;
+  ratio: number | null;
+  width: number;
+  minWidth: number;
+  maxWidth: number;
+};
 
 let reusableRightTarget: ReusableRightTarget | null = null;
 
-/** Own the resolved right width (`rightWidth` of a `totalWidth` workbench) for `envId`. */
-export function setReusableRightTarget(
-  envId: string | null,
-  rightWidth: number,
-  totalWidth: number,
-): void {
-  const valid =
-    Number.isFinite(rightWidth) && rightWidth > 0 && Number.isFinite(totalWidth) && totalWidth > 0;
-  reusableRightTarget = valid ? { envId, ratio: rightWidth / totalWidth } : null;
+/** Claim saved source geometry, never a runtime-clamped pixel result. */
+export function setReusableRightTarget(envId: string | null, layout: LayoutState): void {
+  const right = layout.columns.find((column) => column.id === "right" && column.pinned);
+  const validWidth = (width: number | undefined): width is number =>
+    typeof width === "number" && Number.isFinite(width) && width > 0;
+  if (layout.rootOrientation === "VERTICAL" || !right || !validWidth(right.width)) {
+    reusableRightTarget = null;
+    return;
+  }
+  const complete = layout.columns.every((column) => validWidth(column.width));
+  const total = complete ? layout.columns.reduce((sum, column) => sum + column.width!, 0) : 0;
+  reusableRightTarget = {
+    envId,
+    ratio: total > 0 ? right.width / total : null,
+    width: right.width,
+    minWidth: right.minWidth ?? LAYOUT_PINNED_MIN_PX,
+    maxWidth: right.maxWidth ?? Infinity,
+  };
 }
 
 /** The owned right width scaled to `totalWidth`, or null when `envId` is not the owner. */
@@ -67,7 +81,8 @@ export function getReusableRightWidth(
   const owned = reusableRightTarget;
   if (!owned || envId === undefined || owned.envId !== envId) return null;
   if (totalWidth === undefined || !Number.isFinite(totalWidth) || totalWidth <= 0) return null;
-  return Math.max(LAYOUT_PINNED_MIN_PX, Math.round(owned.ratio * totalWidth));
+  const width = owned.ratio === null ? owned.width : Math.round(owned.ratio * totalWidth);
+  return Math.max(owned.minWidth, Math.min(width, owned.maxWidth));
 }
 
 export function clearReusableRightTarget(): void {

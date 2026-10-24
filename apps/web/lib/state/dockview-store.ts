@@ -883,7 +883,6 @@ function performApplyCustomLayout(
     get().currentLayoutEnvId,
     appliedState?.columns ? appliedState : null,
     get().pinnedWidths,
-    safeWidth,
   );
   const hasSidebar = !!api.getPanel("sidebar");
   const restoredLayout = fromDockviewApi(api);
@@ -1674,23 +1673,22 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
 }
 
 /**
- * Record (or clear) the reusable right width the active build resolved for
- * `envId`, so final fixups, scheduled enforcement and the mounted automatic
- * refresh keep it instead of reverting to the stock ratio. Horizontal roots
- * only; an actual manual width still wins at every consumer.
+ * Retain the reusable source geometry for `envId`, so fixups and automatic
+ * refresh resolve its original share at each workbench size. Never retain
+ * the safety-clamped pixel result as the source. Horizontal roots only;
+ * an actual manual width still wins at every consumer.
  */
 function syncReusableRightTarget(
   envId: string | null,
   state: LayoutState | null,
   pinnedWidths: ReadonlyMap<string, number>,
-  totalWidth: number,
 ): void {
   const right = pinnedWidths.get("right");
   if (!state || right === undefined || state.rootOrientation === "VERTICAL") {
     clearReusableRightTarget();
     return;
   }
-  setReusableRightTarget(envId, right, totalWidth);
+  setReusableRightTarget(envId, state);
 }
 
 function resolveBuildDefaultPinnedWidths(
@@ -1754,7 +1752,7 @@ function performBuildDefault(
     basePreset,
     safeWidth,
   );
-  syncReusableRightTarget(get().currentLayoutEnvId, state, pinnedWidths, safeWidth);
+  syncReusableRightTarget(get().currentLayoutEnvId, state, pinnedWidths);
   set({
     isRestoringLayout: true,
     pinnedWidths,

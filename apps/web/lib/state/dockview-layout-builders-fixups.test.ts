@@ -223,7 +223,12 @@ describe("applyLayoutFixups — reusable right width and root orientation", () =
     vi.mocked(getGlobalSidebarWidth).mockReturnValue(null);
     vi.mocked(getPinnedWidth).mockReturnValue(350);
     // A 20% share of the 1470px workbench is 294px: in cap, and not the stock 441px.
-    setReusableRightTarget("env-a", 294, 1470);
+    setReusableRightTarget("env-a", {
+      columns: [
+        { id: "center", width: 1176, groups: [] },
+        { id: "right", pinned: true, width: 294, groups: [] },
+      ],
+    });
   });
 
   it("keeps the owning environment's reusable right width instead of the stock ratio", () => {

@@ -473,7 +473,7 @@ function applyFastSwitchGeometry(
   applyPinnedColumnSizes(api, saved, safeWidth, getManualRightWidth(newEnvId), defaultPinnedWidths);
 
   const reusableRight = defaultPinnedWidths.get("right");
-  if (reusableRight !== undefined) setReusableRightTarget(newEnvId, reusableRight, safeWidth);
+  if (reusableRight !== undefined) setReusableRightTarget(newEnvId, params.getDefaultLayout());
 
   api.layout(safeWidth, safeHeight);
   return applyLayoutFixups(

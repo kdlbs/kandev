@@ -944,6 +944,17 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const savedEnvironment = await createTaskWithSession(apiClient, seedData, "Notes Environment");
     await openTask(testPage, savedEnvironment.id);
     await expect(testPage.getByTestId("e2e-notes-panel")).toBeVisible({ timeout: 15_000 });
+    await testPage.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
+    await expect
+      .poll(
+        async () => {
+          const width = await getDockviewContainerWidth(testPage);
+          return Math.abs(((await rootSizes(testPage)).at(-1) ?? 0) / width - 0.2);
+        },
+        { message: "cold-ready task keeps its reusable ratio on sidebar collapse" },
+      )
+      .toBeLessThan(0.01);
+    await testPage.getByRole("button", { name: "Expand sidebar", exact: true }).click();
     await waitForPersistedLayoutWithPanel(testPage, savedEnvironment.session_id!, NOTES_ID);
 
     const promptProfile = horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE));

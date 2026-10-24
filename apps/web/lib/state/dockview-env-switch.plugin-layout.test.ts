@@ -378,6 +378,54 @@ describe("fresh default geometry after a plugin-bearing environment switch", () 
   });
 });
 
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["slow", "fast", "explicit"])("unclamped reusable source geometry (%s)", (mode) => {
+  it.each([
+    { center: 600, right: 600, finalWidth: 1600, initialRight: 320, finalRight: 800 },
+    { center: 950, right: 50, finalWidth: 4000, initialRight: 180, finalRight: 200 },
+    { center: undefined, right: 200, finalWidth: 1600, initialRight: 200, finalRight: 200 },
+  ])(
+    "restores source right=$right after initial constraints and wide/narrow/wide resizing",
+    async (geometry) => {
+      const layout = horizontalLayout({ bottom: [mode === "fast" ? TERMINAL : PROMPTS] });
+      if (geometry.center === undefined) delete layout.columns[0].width;
+      else layout.columns[0].width = geometry.center;
+      layout.columns[1].width = geometry.right;
+      startIn(
+        "env-old",
+        horizontalLayout({ bottom: [mode === "fast" ? TERMINAL : NOTES] }),
+        layout,
+      );
+      api.layout(800, HEIGHT);
+      if (mode === "explicit") {
+        useDockviewStore.getState().applyCustomLayout({
+          id: "source-profile",
+          name: "Source profile",
+          isDefault: false,
+          createdAt: "2026-10-24T00:00:00Z",
+          layout,
+        });
+        await settle();
+      } else {
+        await switchEnv("env-old", "env-fresh");
+      }
+      expect(rootSizes(api)[1]).toBe(geometry.initialRight);
+      const container = document.createElement("div");
+      let width = 800;
+      Object.defineProperties(container, {
+        clientWidth: { get: () => width },
+        clientHeight: { value: HEIGHT },
+      });
+      for (const next of [geometry.finalWidth, 800, geometry.finalWidth]) {
+        width = next;
+        syncDockviewContainerSize(api, container);
+        await settle();
+        expect(rootSizes(api)[1]).toBe(next === 800 ? geometry.initialRight : geometry.finalRight);
+      }
+    },
+  );
+});
+
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
 describe("VERTICAL root through environment switches and resets", () => {
   const vertical: LayoutState = {

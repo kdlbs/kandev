@@ -602,3 +602,42 @@ Round 2 (Sol 6.1 reviewer, read-only) reported three P2 findings, all accepted:
   tests/settings/mobile-layout-profiles.spec.ts` (same task-owned storage):
   6 passed. Log: `kandev-run.e2e.Okz7kfvv.log`. Catalog validation,
   full specification lint and whitespace checks passed.
+
+Round 3 (Sol 6.1 reviewer, read-only) reported two P2 findings, both accepted:
+
+- Cold-ready initialization claimed the reusable width for null/previous env
+  before assigning the hydrated task environment. `setupReadyDockview` now
+  assigns the known environment before restore/default construction. Genuine
+  null-env staging remains null. Extended the horizontal navigation browser
+  case with a cold direct task entry and sidebar-collapse ratio assertion.
+  RED against the prior production bundle: cold-ready ratio assertion failed.
+  Rebuilt GREEN: 1 passed with retries disabled
+  (`--grep "horizontal profile's saved" --retries=0`;
+  log `kandev-run.e2e.qV9DIzOg.log`).
+- The owned ratio was derived from a runtime-capped width. Ownership now takes
+  the original `LayoutState`, retaining the complete snapshot's unclamped
+  share or the incomplete snapshot's absolute width and column bounds.
+  Slow/default, plugin-free fast and explicit custom application all claim
+  that source. No portable settings or manual pixels are rewritten.
+  Nine real-Dockview RED/GREEN cases cover initially max-capped, initially
+  min-clamped, and incomplete geometry through wide/narrow/wide resizing.
+  RED included 640 instead of 800, 900 instead of 200, and 400 instead of 200.
+- Changed-file formatting and ESLint passed. Focused command from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders-fixups.test.ts
+  lib/state/dockview-pinned-enforce.test.ts lib/state/layout-manager
+  components/settings/layouts`: 33 files, 348 tests passed. Typecheck caught
+  missing `createdAt` in the new custom-layout fixture; added the required
+  metadata, then reran the 33-case switch suite (passed).
+- Final web typecheck passed with the corrected fixture
+  (`NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck`).
+- Rebuilt desktop browser run: `pnpm --dir apps/web e2e:run --host --project
+  chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts`: 20 passed, no flakes.
+  The shared mobile profile spec, run with `--no-build --project mobile-chrome`,
+  passed all 6 cases using those fresh artifacts. Same task-owned storage as
+  round 2; logs `kandev-run.e2e.1Inl2PZg.log` and
+  `kandev-run.e2e.fJNrLSsc.log`. Catalog, specification and whitespace checks passed.

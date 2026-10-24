@@ -226,14 +226,18 @@ Scope that transient geometry to the active environment/build; clear or replace
 it when switching source so a previous profile cannot leak into another task.
 No new portable setting, persistence tier, or plugin API is introduced.
 
-`layout-manager/pinned-targets.ts` owns this in-memory record as one
-`{ envId, ratio }` pair (resolved right width over the build's measured width),
-claimed by `performBuildDefault` and explicit custom-layout application, and
-released by an environment switch, preset application, or a VERTICAL root.
-`resolveEnvRightWidth` ranks manual width, owned ratio scaled to the current
-workbench, then the stock default, all under the runtime cap; final fixups
-(`applyLayoutFixups`, naming the owning environment) and the mounted automatic
-refresh both call it.
+`layout-manager/pinned-targets.ts` owns one in-memory source-geometry record
+for the active environment. Complete saved geometry supplies the unclamped
+right share; incomplete geometry supplies the saved absolute right width.
+Column bounds and runtime safety caps apply at each current measurement,
+never when retaining the source. Cold initialization binds the known
+environment before default construction; genuine null-environment staging
+remains separate. Default builds, fast fresh switches and explicit custom
+application claim ownership; environment switches, preset application and
+vertical roots release it. `resolveEnvRightWidth` ranks manual pixels, owned
+source geometry, then stock defaults. Final fixups and mounted refresh both
+use that resolver, so constraining and later expanding the container cannot
+permanently change the reusable share.
 Every container synchronization refreshes an owned reusable target from the
 new measured width before layout or enforcement, including sidebar-only
 changes with a fixed viewport and callbacks after Dockview's own observer has
