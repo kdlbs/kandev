@@ -52,5 +52,14 @@
   "fileStatusModified": "Modified",
   "fileStatusMoved": "Moved",
   "fileStatusMovedFrom": "Moved from {{oldPath}}",
-  "fileStatusUntracked": "Untracked"
+  "fileStatusUntracked": "Untracked",
+  "walkthroughComment": "Comment",
+  "walkthroughPending": "Pending",
+  "walkthroughSubmitted": "Submitted",
+  "walkthroughCommentCount_one": "{{count}} comment",
+  "walkthroughCommentCount_other": "{{count}} comments",
+  "walkthroughSelectStep": "Go to step",
+  "walkthroughUntitledStep": "Step {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}} ({{count}} comment)",
+  "walkthroughStepOption_other": "{{number}}. {{title}} ({{count}} comments)"
 }

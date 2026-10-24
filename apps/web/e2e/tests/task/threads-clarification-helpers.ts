@@ -213,6 +213,20 @@ async function scrollQuestion(page: Page, tile: Locator, direction: number, touc
       await client.detach();
     }
   }
+  await expect
+    .poll(() =>
+      tile.evaluate(async (element) => {
+        const areas = element.querySelectorAll(
+          '[data-testid="thread-footer-allocation"], [data-testid="clarification-scroll-region"]',
+        );
+        const before = Array.from(areas, (area) => area.scrollTop);
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        return Array.from(areas).every((area, index) => area.scrollTop === before[index]);
+      }),
+    )
+    .toBe(true);
 }
 
 export async function reachQuestionTarget(
@@ -283,7 +297,7 @@ export async function answerLongThreadQuestion(
       await capture.screenshot("submit-reachable");
     }
     if (input === "keyboard") await page.keyboard.press(key);
-    else if (input === "touch") await page.touchscreen.tap(geometry.x, geometry.y);
+    else if (input === "touch") await target.tap();
     else await page.mouse.click(geometry.x, geometry.y);
   };
   try {

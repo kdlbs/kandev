@@ -11,6 +11,7 @@ requirements:
 acceptance_criteria:
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
 system_design:
   - ../../specs/platform/system-design/interrupted-prompt-recovery.md
 ---
@@ -87,3 +88,45 @@ live durable recovery or invoke history continuation automatically.
 - No public documentation change is needed: existing Resume semantics and controls are retained.
 - No screenshots are required: request routing and admission changed; rendered markup is unchanged.
 - PR publication is tracked in the task handoff, outside this source verification record.
+
+### PR CI follow-up: concurrent resolution
+
+- CI exposed a first-attempt Quick Chat Resume rejection after native startup.
+  A deterministic orchestrator regression reproduced the same error when background
+  recovery committed authenticated resolution while explicit Resume gathered proof.
+- The repository now accepts the same completed resolution after transactional proof
+  revalidation. Incomplete evidence, stale identity, changed payload, different actions,
+  and independent incidents remain blocked. Repeated success does not change session
+  metadata or its timestamp.
+- The original desktop browser case passed 13 local runs with retries disabled before
+  the fix. The deterministic concurrency regression is the local failure evidence.
+- Initial native-recovery race tests passed for orchestrator and repository with SQLite
+  and an isolated PostgreSQL 17 instance. Documentation catalog and specification lint passed.
+- SQL guard and `go test -trimpath -race -p 2 ./internal/persistence/storeconformance -count=1`
+  passed with the isolated PostgreSQL database configured. The database server was stopped.
+- Command, from `apps/backend`, with `KANDEV_TEST_POSTGRES_DSN` set to the disposable database:
+
+  ```bash
+  GOMAXPROCS=4 go test -trimpath -race -p 2 ./internal/orchestrator ./internal/task/repository/sqlite -run 'Test(NativeResume|PostgresNativeResume|RecoverSessionUnknownPrompt|LoadedNativeRecovery)' -count=1
+  ```
+
+- Final contract checks passed after preserving the resolver's changed-state flag.
+  Separate authenticated verification reports completed recovery without resolving again.
+  The lifecycle real SQL/journal regression still confirms that repeated proof cannot
+  release work twice. SQLite and PostgreSQL both verify the completed incident and reject
+  stale proof, changed payload, different actions, and independent incidents.
+- Final command, from `apps/backend`, with the same isolated database configured:
+
+  ```bash
+  GOMAXPROCS=4 go test -trimpath -race -p 2 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/repository/sqlite -run 'Test(NativeResumeAcceptsConcurrentAuthenticatedResolution|NativeResumeAuthenticatedResolutionIsIdempotent|PostgresNativeResumeAuthenticatedResolutionIsIdempotent|NativeResumeProjectionWaitResolvesRealSQLAndJournal|RecoverSessionUnknownPromptKeepsNativeHistory|NativeResumeRepairsAbsentNoticeAndStreamThroughAuthenticatedProof|LoadedNativeRecoveryClearsAdmissionWithoutReplay)$' -count=1
+  ```
+
+- SQL guard passed again after the final code change. The isolated PostgreSQL server was stopped.
+- Final managed browser run: six cases passed (three desktop and three phone) with retries disabled:
+
+  ```bash
+  GOMAXPROCS=4 pnpm --dir apps/web e2e:run --project mobile-chrome tests/chat/quick-chat-resume-recovery.spec.ts tests/chat/mobile-quick-chat-resume-recovery.spec.ts -- --project=chromium --retries=0 --repeat-each=3
+  ```
+
+  The runner rebuilt the backend before execution. The failed stale-artifact attempt is not
+  validation evidence. No rendered UI changed in this follow-up.
