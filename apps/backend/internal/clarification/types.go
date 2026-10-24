@@ -30,6 +30,9 @@ type Request struct {
 // Answer is the wire type used by clarification responses.
 type Answer = protocol.Answer
 
+// AnsweredBy is the E5 answer-channel marker on clarification responses.
+type AnsweredBy = protocol.AnsweredBy
+
 // Response is the wire type used by clarification responses.
 type Response = protocol.Response
 

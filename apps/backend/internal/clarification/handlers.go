@@ -30,6 +30,7 @@ const (
 	metaPendingIDKey  = "pending_id"
 	metaRejectedKey   = "rejected"
 	metaRequestIDKey  = "request_id"
+	metaAnsweredByKey = "answered_by"
 
 	clarificationPersistenceTimeout = 30 * time.Second
 
@@ -452,11 +453,22 @@ func (h *Handlers) httpWaitForResponse(c *gin.Context) {
 // The frontend posts every answer at once when the user finishes the bundle
 // (decision A: per-question commit collected in the hook, batched on the wire).
 // Answers must contain exactly one entry per question in the original request,
-// or be empty when Rejected=true.
+// or be empty when Rejected=true. AnsweredBy is the E5 answer-channel marker:
+// callers resolving through another channel record it here; the frontend's
+// own popup leaves it empty.
 type RespondBody struct {
-	Answers      []Answer `json:"answers"`
-	Rejected     bool     `json:"rejected"`
-	RejectReason string   `json:"reject_reason"`
+	Answers      []Answer   `json:"answers"`
+	Rejected     bool       `json:"rejected"`
+	RejectReason string     `json:"reject_reason"`
+	AnsweredBy   AnsweredBy `json:"answered_by"`
+}
+
+// responseOutcome converts a RespondBody to the resolver's Outcome. The
+// direct conversion stays (RespondBody and Outcome match field-for-field),
+// so a future wire-only field cannot silently flow into the durable record
+// without touching this function.
+func responseOutcome(body RespondBody) Outcome {
+	return Outcome(body)
 }
 
 func (h *Handlers) httpRespond(c *gin.Context) {
@@ -467,7 +479,7 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 		return
 	}
 
-	res, claimed, err := h.resolver.ResolveBundle(c.Request.Context(), pendingID, Outcome(body))
+	res, claimed, err := h.resolver.ResolveBundle(c.Request.Context(), pendingID, responseOutcome(body))
 	h.writeResolutionResult(c, pendingID, res, claimed, err)
 }
 

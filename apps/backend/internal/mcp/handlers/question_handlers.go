@@ -287,12 +287,15 @@ func decodeBundleCursor(cursor string) (time.Time, string, error) {
 }
 
 // answerQuestionRequest is answer_question_kandev's request shape (N1):
-// pending_id plus either answers or rejected(+reason).
+// pending_id plus either answers or rejected(+reason). AnsweredBy is the
+// E5 answer-channel marker: callers resolving through another channel
+// (for example a Slack thread) record it here; other callers omit it.
 type answerQuestionRequest struct {
-	PendingID    string                 `json:"pending_id"`
-	Answers      []clarification.Answer `json:"answers"`
-	Rejected     bool                   `json:"rejected"`
-	RejectReason string                 `json:"reject_reason"`
+	PendingID    string                   `json:"pending_id"`
+	Answers      []clarification.Answer   `json:"answers"`
+	Rejected     bool                     `json:"rejected"`
+	RejectReason string                   `json:"reject_reason"`
+	AnsweredBy   clarification.AnsweredBy `json:"answered_by"`
 }
 
 // answerQuestionResponse is answer_question_kandev's response shape (N3,
@@ -327,6 +330,7 @@ func (h *Handlers) handleAnswerQuestion(ctx context.Context, msg *ws.Message) (*
 		Answers:      req.Answers,
 		Rejected:     req.Rejected,
 		RejectReason: req.RejectReason,
+		AnsweredBy:   req.AnsweredBy,
 	})
 	switch {
 	case err == nil:

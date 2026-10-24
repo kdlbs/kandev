@@ -22,6 +22,7 @@ const (
 	clarificationStatusResponding = "responding"
 
 	clarificationResponseDeliveryPendingKey = "response_delivery_pending"
+	clarificationAnsweredByMetadataKey      = "answered_by"
 )
 
 func nonTerminalSessionPredicate(messageAlias string) string {
@@ -585,6 +586,7 @@ func (r *Repository) restoreClarificationMessages(
 		restoredMetadata := maps.Clone(message.Metadata)
 		restoredMetadata["status"] = clarificationStatusPending
 		delete(restoredMetadata, "response")
+		delete(restoredMetadata, clarificationAnsweredByMetadataKey)
 		delete(restoredMetadata, clarificationResponseDeliveryPendingKey)
 		metadataJSON, marshalErr := json.Marshal(restoredMetadata)
 		if marshalErr != nil {
@@ -731,6 +733,7 @@ func (r *Repository) completeClaimedClarificationMessages(
 		WHERE id = ? AND %s = ?
 	`, claimedStatusExpr))
 	completedMetadataByMessage := make([]map[string]interface{}, len(messages))
+	answeredBy := clarificationAnsweredByFromResponses(responses)
 	for i, message := range messages {
 		questionID, _ := message.Metadata["question_id"].(string)
 		if questionID == "" {
@@ -739,6 +742,9 @@ func (r *Repository) completeClaimedClarificationMessages(
 		completedMetadata := maps.Clone(message.Metadata)
 		completedMetadata["status"] = status
 		completedMetadata[clarificationResponseDeliveryPendingKey] = true
+		if answeredBy != nil {
+			completedMetadata[clarificationAnsweredByMetadataKey] = answeredBy
+		}
 		if status == clarificationStatusAnswered {
 			response, ok := responses[questionID]
 			if !ok {
@@ -772,4 +778,20 @@ func (r *Repository) completeClaimedClarificationMessages(
 		message.UpdatedAt = updatedAt
 	}
 	return nil
+}
+
+// clarificationAnsweredByFromResponses extracts the bundle-wide answer-channel
+// marker the resolver passes through the reserved responses-map key, the same
+// way per-question answers are passed. A missing or empty marker yields nil,
+// leaving the durable rows without an "answered_by" metadata key.
+func clarificationAnsweredByFromResponses(responses map[string]interface{}) map[string]string {
+	raw, present := responses[models.ClarificationAnsweredByResponseKey]
+	if !present {
+		return nil
+	}
+	by, ok := raw.(models.ClarificationAnsweredBy)
+	if !ok || (by.Channel == "" && by.Ref == "") {
+		return nil
+	}
+	return map[string]string{"channel": by.Channel, "ref": by.Ref}
 }
