@@ -33,8 +33,10 @@ the implementation contract.
 - User agreed to stack on assignment. Planned PR target:
   `feature/clarify-mcp-assignme-mhh`. The original parent branch stays unchanged.
 
-After parent merge, reconcile the actual merge and retarget to main without
-replaying parent commits. No merge is authorized. Preserve other edits and
+The parent merged as `0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`. The local
+stack now includes that squash through the rebased assignment branch. Keep the
+PR target on assignment while it is unmerged; after assignment merges, reconcile
+its actual merge and retarget to main without replaying dependency commits. No merge is authorized. Preserve other edits and
 commits. Do not change the parent branch or sibling workspaces. No extra agents,
 tasks, sessions, or autopilot are authorized.
 
@@ -359,3 +361,60 @@ rather than the retained draft, so rejected writes cannot hide saved changes.
 Public docs type: how-to. Updated `docs/public/agents-and-profiles.md`; root README,
 feature-status/session guides, and screenshot catalog needed no changed instructions.
 The parent verification ledger remains historical and untouched.
+
+
+## Local stack rebase: 2026-10-24
+
+The coordinating session requested the exclusions step after assignment completed
+its authorized rebase. The worktree was clean. Before rewriting, created
+`backup/session-exclusions-pre-assignment-rebase-20261024` at
+`442e9f01f77bd091f9d12d8867fa027bc74cf83e`.
+
+Rebased only commits after OLD prerequisite
+`f9137074309bebe99e2c7576baefe936bc20358f` onto verified assignment tip
+`9c9abfb13b351ced2869185eb1e730f682e30637`, which contains parent squash
+`0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`. The replacement prerequisite is
+`23a403dc2224a668e7f35c60ff5892952608fd3b`; range-diff confirmed its patch is
+identical to the old prerequisite. It was not used as the old range boundary.
+
+Commit mapping:
+
+- `8ef7c8d6980910f61803d87ab5e4d57bb376458e` ->
+  `3c88cd7fa833e0a94c6ba28186ce90f1a613c557` (feature).
+- `442e9f01f77bd091f9d12d8867fa027bc74cf83e` ->
+  `b2670fffad2b8c0566d299ce41a167bd78fcaaac` (retained verification records).
+
+Conflicts were limited to eight settings locale files: preserved both assignment
+registration keys and exclusion keys. Range-diff shows no other feature patch
+change. The PATH portability fix already exists in assignment commit `c49beff60`;
+Git omitted that redundant hunk and retained both exclusion verification records.
+Committed-positive-ID comparison and neighboring E2E helper corrections are
+unchanged. No sibling branch, remote history, or runtime was modified.
+
+Rebase validation:
+
+- Refreshed workspace dependencies with `pnpm install --frozen-lockfile`.
+- Backend conditional writes, exclusions, resolver, handlers, and application
+  integration passed under race detection:
+  `go test -trimpath -race ./internal/agent/mcpconfig ./internal/agent/settings/store ./internal/agent/settings/handlers ./internal/backendapp -run 'MCP|Selection|Effective' -count=1`.
+- Lifecycle acceptance/defer/retry regressions passed:
+  `go test -trimpath -race ./internal/agent/runtime/lifecycle -run 'MCP|Mcp' -count=1`.
+- Actual disposable PostgreSQL 17.11 passed under race detection, not skipped:
+  `go test -trimpath -race ./internal/agent/settings/store -run 'PostgresMCPSessionExclusions|PostgresMCPSelection|PostgresMCPResolution|PostgresConfirmedMCPDelete' -count=1 -v`.
+  This includes concurrent positive/exclusion writers, legacy omission preserving
+  exclusions, reopen, cleanup, owner-scoped CAS, import, and deletion.
+- Ten frontend suites passed, 68 tests: the original eight focused exclusion
+  suites plus registration completion and definition-form integration tests.
+- `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Fresh managed desktop build and browser regressions passed, 13 cases:
+  `pnpm e2e:run --host --project chromium tests/chat/mcp-session-exclusions.spec.ts tests/chat/mcp-pending-changes.spec.ts tests/task/task-mcp-selection.spec.ts`.
+  Log: `/tmp/kandev-run.e2e.Lhc5dbMZ.log`.
+- Phone browser regressions passed, 9 cases, sequentially against that fresh build:
+  `pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-mcp-session-exclusions.spec.ts tests/chat/mobile-mcp-pending-changes.spec.ts tests/task/mobile-task-mcp-selection.spec.ts`.
+  Log: `/tmp/kandev-run.e2e.ioZDYK52.log`.
+- Specification catalog (403 decisions, 1732 specifications), full spec lint,
+  and whitespace checks passed.
+
+Existing work-order results above remain historical evidence. Rebase validation
+does not establish live-provider health. Planned PR base remains
+`feature/clarify-mcp-assignme-mhh`. No push or merge is authorized by this step.
