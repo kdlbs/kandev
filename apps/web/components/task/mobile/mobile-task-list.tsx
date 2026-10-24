@@ -14,6 +14,8 @@ import { SidebarTaskPagination } from "../sidebar-task-pagination";
 import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
 import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
+import { useSidebarFacetGrouping } from "@/hooks/domains/sidebar/use-sidebar-facet-grouping";
+import { isTaskListFacetOption } from "@/lib/tasks/tasks-list-options";
 function useSidebarGroupToggle(viewId: string) {
   const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
   return useCallback(
@@ -23,6 +25,7 @@ function useSidebarGroupToggle(viewId: string) {
 }
 
 export type MobileTaskListProps = {
+  workspaceId?: string | null;
   tasks: TaskSwitcherItem[];
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, StepDef[]>;
@@ -68,7 +71,7 @@ export type MobileTaskListProps = {
  * mobile drawer's view state (grouping, ordering, collapse, reorder, nest).
  */
 export function MobileTaskList(props: MobileTaskListProps) {
-  const view = useEffectiveSidebarView();
+  const view = useEffectiveSidebarView(props.workspaceId);
   const {
     pinnedTaskIds,
     orderedTaskIds,
@@ -82,12 +85,12 @@ export function MobileTaskList(props: MobileTaskListProps) {
   const handleToggleGroup = useSidebarGroupToggle(view.id);
   // See useGroupedSidebarView: the executorType group label is catalog-backed.
   const { i18n } = useTranslation();
-  const grouped = useMemo(() => {
+  const baseGrouped = useMemo(() => {
     if (props.pageEntries !== undefined) {
       return groupSidebarTaskPage(
         props.tasks,
         props.pageEntries,
-        view.group,
+        isTaskListFacetOption(view.group) ? "none" : view.group,
         subtaskOrderByParentId,
       );
     }
@@ -105,6 +108,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
     subtaskOrderByParentId,
     view,
   ]);
+  const grouped = useSidebarFacetGrouping(baseGrouped, view.group, props.workspaceId ?? null);
   const switcherProps = buildMobileTaskSwitcherProps(props, {
     grouped,
     collapsedGroupKeys: view.collapsedGroups,

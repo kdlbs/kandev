@@ -8,7 +8,10 @@ import type { Repository, SidebarTaskPageResponse, TaskSessionState } from "@/li
 import type { AggregatedSidebarTasks } from "./task-session-sidebar-aggregate";
 import type { SidebarItemContext } from "./task-session-sidebar-item";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
-import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
+import {
+  buildTaskSwitcherProps,
+  type TaskSessionSidebarProps,
+} from "./task-session-sidebar-switcher-props";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
@@ -44,13 +47,8 @@ import { applyView } from "@/lib/sidebar/apply-view";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { applySidebarPageMetadata } from "./sidebar-page-metadata";
 import { findSidebarTask } from "./task-session-sidebar-task-lookup";
-
-type TaskSessionSidebarProps = {
-  workspaceId: string | null;
-  workflowId: string | null;
-  /** Hide the embedded filter bar when the host surface (e.g. AppSidebar) renders its own. */
-  hideFilterBar?: boolean;
-};
+import { useSidebarFacetGrouping } from "@/hooks/domains/sidebar/use-sidebar-facet-grouping";
+import { isTaskListFacetOption } from "@/lib/tasks/tasks-list-options";
 
 const EMPTY_SIDEBAR_TASKS: AggregatedSidebarTasks["allTasks"] = [];
 
@@ -544,7 +542,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   const toggleSubtaskCollapsed = useAppStore((state) => state.toggleSubtaskCollapsed);
   const effectiveView = page.view;
   const prefs = useSidebarTaskPrefs();
-  const grouped = useMemo(
+  const baseGrouped = useMemo(
     () =>
       MOCK_SIDEBAR || pageEntries === undefined
         ? applyView(displayTasks, effectiveView, {
@@ -555,7 +553,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         : groupSidebarTaskPage(
             displayTasks,
             pageEntries,
-            effectiveView.group,
+            isTaskListFacetOption(effectiveView.group) ? "none" : effectiveView.group,
             prefs.subtaskOrderByParentId,
           ),
     [
@@ -567,6 +565,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
       prefs.subtaskOrderByParentId,
     ],
   );
+  const grouped = useSidebarFacetGrouping(baseGrouped, effectiveView.group, workspaceId);
   const { pinnedTaskIds, togglePinnedTask, handleReorderGroup, handleReorderSubtasks } = prefs;
   const selection = useSidebarSelection({
     workspaceId,

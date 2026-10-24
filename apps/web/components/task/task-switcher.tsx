@@ -162,10 +162,14 @@ function buildGroupSectionProps(
   },
 ): GroupSectionProps {
   const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
+  // Promoted children retain their real parent's saved sibling order, which
+  // cannot be changed by writing the section's root-task order.
+  const hasPromotedRoots =
+    grouped.groupKey?.startsWith("facet:") && group.tasks.some((task) => task.parentTaskId);
   return {
     group,
     grouping: grouped.groupKey,
-    subTasksByParentId: grouped.subTasksByParentId,
+    subTasksByParentId: group.subTasksByParentId ?? grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
     pinnedSet,
@@ -175,7 +179,7 @@ function buildGroupSectionProps(
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
     groupIndent: props.groupIndent,
-    onReorderGroup: props.onReorderGroup,
+    onReorderGroup: hasPromotedRoots ? undefined : props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
     onNestTask: props.onNestTask,
   };

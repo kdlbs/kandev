@@ -1924,7 +1924,7 @@ logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 ### Task-list facets
 
 `registerTaskListFacet({ id, label, getValues, subscribe? })` adds a choice after the built-in
-`/tasks` Sort and Group options. `getValues(context: TaskListFacetContext)` synchronously returns
+`/tasks` Sort and Group options and the saved sidebar view's Group options. `getValues(context: TaskListFacetContext)` synchronously returns
 `{ value, label, color? }[]` for `{ taskId, workspaceId? }`; `subscribe` invalidates the loaded
 page. The facet label and value labels come from the plugin verbatim. Return each value at most
 once for a task, and keep one label and color for a value across all tasks. An entry with an
@@ -1939,6 +1939,15 @@ is never sent to a task-list query; ordering and grouping by values remain page-
 plugin is unavailable, the list and controls temporarily use their built-in defaults while
 the saved selection remains intact and resumes when the plugin registers again. The host
 catches callback errors and revokes registrations and active subscriptions on unload.
+
+The left sidebar stores the same facet key in `group` on its workspace-scoped saved view or
+draft, independently of `/tasks` preferences. It requests the ordinary bounded page with
+built-in `none` grouping and without server disclosure, then groups only accepted page tasks
+on the client. Existing source filters, sort chain, pinning and sibling order are retained.
+Only nonempty sections render; multiple values repeat rows and no values use `Unassigned`.
+Parent/child membership and collapse keys are section-local. `subscribe` refreshes these
+groups without a task refetch. Unavailable facets render `None` without changing persisted
+state. No plugin API extension, backend facet query, sidebar facet sorting or filtering is added.
 
 ## Registry internals (host side)
 

@@ -356,16 +356,28 @@ type MultiSelectState = {
    * user toggled/range-selected. `null` when there is no active anchor.
    */
   anchorId: string | null;
+  /** Rendered occurrence of the anchor; repeated facet rows share a task ID, not a key. */
+  anchorOccurrenceId: string | null;
 };
 
 type MultiSelectAction =
   | { type: "reset" }
-  | { type: "toggle_select"; taskId: string }
-  | { type: "select_range"; taskId: string; orderedIds: string[] }
+  | { type: "toggle_select"; taskId: string; occurrenceId?: string }
+  | {
+      type: "select_range";
+      taskId: string;
+      orderedIds: string[];
+      occurrence?: TaskSelectionRange;
+    }
   | { type: "set_selected"; ids: Set<string> }
   | { type: "set_enabled"; value: boolean }
   | { type: "set_deleting"; value: boolean }
   | { type: "set_archiving"; value: boolean };
+
+export type TaskSelectionRange = {
+  key: string;
+  orderedKeys: string[];
+};
 
 /** @internal Exported for testing. */
 export const INITIAL_STATE: MultiSelectState = {
@@ -374,6 +386,7 @@ export const INITIAL_STATE: MultiSelectState = {
   isDeleting: false,
   isArchiving: false,
   anchorId: null,
+  anchorOccurrenceId: null,
 };
 
 /**
@@ -396,21 +409,27 @@ function realignAnchor(state: MultiSelectState, ids: Set<string>): string | null
  */
 function applyRangeSelect(
   state: MultiSelectState,
-  taskId: string,
-  orderedIds: string[],
+  action: Extract<MultiSelectAction, { type: "select_range" }>,
 ): MultiSelectState {
-  const anchor = state.anchorId;
-  const anchorIdx = anchor ? orderedIds.indexOf(anchor) : -1;
-  const targetIdx = orderedIds.indexOf(taskId);
+  const { taskId, orderedIds, occurrence } = action;
+  const keys = occurrence?.orderedKeys ?? orderedIds;
+  const anchor = state.anchorOccurrenceId ?? state.anchorId;
+  const target = occurrence?.key ?? taskId;
+  let anchorIdx = anchor ? keys.indexOf(anchor) : -1;
+  // Replacement selections retain a canonical anchor until a visible occurrence is known.
+  if (anchorIdx === -1 && occurrence && anchor === state.anchorId) {
+    anchorIdx = orderedIds.indexOf(state.anchorId ?? "");
+  }
+  const targetIdx = keys.indexOf(target);
   if (anchorIdx === -1 || targetIdx === -1) {
     const next = new Set(state.selectedIds);
     next.add(taskId);
-    return { ...state, selectedIds: next, anchorId: taskId };
+    return { ...state, selectedIds: next, anchorId: taskId, anchorOccurrenceId: target };
   }
   const [lo, hi] = anchorIdx < targetIdx ? [anchorIdx, targetIdx] : [targetIdx, anchorIdx];
   const next = new Set(state.selectedIds);
   for (let i = lo; i <= hi; i++) next.add(orderedIds[i]);
-  return { ...state, selectedIds: next };
+  return { ...state, selectedIds: next, anchorOccurrenceId: keys[anchorIdx] };
 }
 
 /** @internal Exported for testing. */
@@ -429,20 +448,28 @@ export function multiSelectReducer(
       // Adding anchors to the toggled task; removing realigns to a surviving id
       // (or clears the anchor when the selection is now empty) so a later
       // Shift+click can't range from a stale anchor.
+      const anchorId = added ? action.taskId : realignAnchor(state, next);
+      let anchorOccurrenceId = anchorId === state.anchorId ? state.anchorOccurrenceId : anchorId;
+      if (added) anchorOccurrenceId = action.occurrenceId ?? action.taskId;
       return {
         ...state,
         selectedIds: next,
-        anchorId: added ? action.taskId : realignAnchor(state, next),
+        anchorId,
+        anchorOccurrenceId,
       };
     }
     case "select_range":
-      return applyRangeSelect(state, action.taskId, action.orderedIds);
-    case "set_selected":
-      // Keep the range anchor pointing at a still-selected task. After a partial
-      // bulk failure (selection replaced with the failed ids) the old anchor may
-      // be gone, so realign to a remaining id rather than stranding the next
-      // Shift+click on an invalid anchor.
-      return { ...state, selectedIds: action.ids, anchorId: realignAnchor(state, action.ids) };
+      return applyRangeSelect(state, action);
+    case "set_selected": {
+      // Preserve the rendered anchor only while its canonical task remains selected.
+      const anchorId = realignAnchor(state, action.ids);
+      return {
+        ...state,
+        selectedIds: action.ids,
+        anchorId,
+        anchorOccurrenceId: anchorId === state.anchorId ? state.anchorOccurrenceId : anchorId,
+      };
+    }
     case "set_enabled":
       return { ...state, isMultiSelectEnabled: action.value };
     case "set_deleting":

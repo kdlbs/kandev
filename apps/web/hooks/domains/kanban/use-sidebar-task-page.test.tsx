@@ -574,3 +574,23 @@ it("offers Retry for a transient failure after correcting an invalid filter", as
   await waitFor(() => expect(hook.result.current.error).toBe("sidebar:queryRefreshFailed"));
   expect(hook.result.current.canRetry).toBe(true);
 });
+
+it("keeps a saved sidebar facet out of server queries and loads children for section-local disclosure", async () => {
+  const original = mocks.view;
+  mocks.view = { ...original, group: "facet:com.example.tags:tags" };
+  mocks.state.collapsedSubtaskParents = ["parent"];
+  vi.mocked(querySidebarTasks).mockResolvedValue(response(1, false, false));
+  try {
+    const hook = renderHook(() => useSidebarTaskPage("ws-1"));
+    await waitFor(() => expect(hook.result.current.response).not.toBeNull());
+    expect(vi.mocked(querySidebarTasks).mock.calls[0][1]).toMatchObject({
+      group: "none",
+      collapsed_group_keys: [],
+      collapsed_task_ids: [],
+      page_size: 100,
+    });
+    expect(hook.result.current.view.group).toBe("facet:com.example.tags:tags");
+  } finally {
+    mocks.view = original;
+  }
+});

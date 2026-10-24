@@ -349,7 +349,7 @@ export type UISliceState = {
   sidebarViews: SidebarSliceState;
   sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
   threadViews: ThreadViewSliceState;
-  /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
+  /** Collapsed sidebar parents: raw task IDs for builtins, section/task keys for facets. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
   /** Task ID currently shown in the kanban preview side-panel, or null if closed. */
   kanbanPreviewedTaskId: string | null;

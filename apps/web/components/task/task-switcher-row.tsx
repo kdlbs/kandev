@@ -16,6 +16,7 @@ export type SubtaskToggleInfo = {
 
 export type TaskRowProps = {
   task: TaskSwitcherItem;
+  occurrenceId?: string;
   nestCandidateTasks?: TaskSwitcherItem[];
   getNestCandidateTasks?: () => TaskSwitcherItem[];
   getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
@@ -53,8 +54,8 @@ export type TaskRowProps = {
   archivingTaskId?: string | null;
   isArchiving?: boolean;
   selectedTaskIds?: Set<string>;
-  onToggleSelectTask?: (taskId: string) => void;
-  onSelectTaskRange?: (taskId: string) => void;
+  onToggleSelectTask?: (taskId: string, occurrenceId?: string) => void;
+  onSelectTaskRange?: (taskId: string, occurrenceId?: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
   onBulkDelete?: (taskIds: string[]) => void;
   onBulkPin?: (taskIds: string[]) => void;
@@ -109,6 +110,7 @@ function getContextMenuProps(props: SelectedTaskRowProps, isArchived: boolean) {
 type TaskRowItemProps = Pick<
   SelectedTaskRowProps,
   | "task"
+  | "occurrenceId"
   | "isSubTask"
   | "depth"
   | "subtaskToggle"
@@ -127,6 +129,7 @@ type TaskRowItemProps = Pick<
 
 function TaskRowItem({
   task,
+  occurrenceId,
   isSubTask,
   depth,
   subtaskToggle,
@@ -158,8 +161,18 @@ function TaskRowItem({
           !isArchived && (selectedTaskIds?.size ?? 0) > 0,
           {
             onSelectTask,
-            onToggleSelectTask: archiveAware(onToggleSelectTask, isArchived),
-            onSelectTaskRange: archiveAware(onSelectTaskRange, isArchived),
+            onToggleSelectTask: archiveAware(
+              occurrenceId && onToggleSelectTask
+                ? (id: string) => onToggleSelectTask(id, occurrenceId)
+                : onToggleSelectTask,
+              isArchived,
+            ),
+            onSelectTaskRange: archiveAware(
+              occurrenceId && onSelectTaskRange
+                ? (id: string) => onSelectTaskRange(id, occurrenceId)
+                : onSelectTaskRange,
+              isArchived,
+            ),
           },
           isArchived,
         )
