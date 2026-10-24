@@ -18,13 +18,30 @@ import {
   syncPlugins,
   uninstallPlugin,
 } from "@/lib/api/domains/plugins-api";
+import { prepareThemeURL, commitThemeReview } from "@/lib/api/domains/themes-api";
 import { toActivePlugin } from "@/lib/plugins/active-plugin";
 import { buildHostApi } from "@/lib/plugins/host-api";
 import { loadPlugins, unloadPlugin } from "@/lib/plugins/host";
 import { summarizeSyncResult } from "@/lib/plugins/sync-summary";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
-import type { PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins";
+import type { PluginRecord, PluginStatus, SyncError, MarketplaceEntry } from "@/lib/types/plugins";
 import type { AppState } from "@/lib/state/store";
+
+async function installMarketplaceRelease(entry: MarketplaceEntry): Promise<InstallResult> {
+  const installed = await getPlugin(entry.id, { cache: "no-store" });
+  const installedTheme = installed.distribution?.kind === "theme";
+  if (!installedTheme && entry.kind !== "theme") return installPluginFromUrl(entry.package_url);
+  if (!installedTheme || entry.kind !== "theme") {
+    throw new Error(t("plugins:failedToUpdatePlugin", { name: entry.name }));
+  }
+  const review = await prepareThemeURL(
+    entry.package_url,
+    entry.id,
+    entry.version,
+    entry.package_sha256,
+  );
+  return commitThemeReview(review.id);
+}
 
 function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
   if (status === "active") {
@@ -237,11 +254,11 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // `{ ok, error, pluginId }` lets callers that need the outcome (the manual
   // update action and the Browse tab) reconcile local update state without
   // also duplicating the toast.
-  const marketplaceInstall = async (
-    url: string,
+  const finishMarketplaceInstall = async (
+    install: () => Promise<InstallResult>,
   ): Promise<{ ok: boolean; error?: string; pluginId?: string }> => {
     try {
-      const result = await installPluginFromUrl(url);
+      const result = await install();
       await afterInstall(result);
       return { ok: true, pluginId: result.plugin.id };
     } catch (err) {
@@ -259,7 +276,9 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
     installError,
     submitInstallUrl: (url: string) => runInstall(() => installPluginFromUrl(url)),
     submitInstallFile: (file: File) => runInstall(() => installPluginUpload(file)),
-    marketplaceInstall,
+    marketplaceInstall: (url: string) => finishMarketplaceInstall(() => installPluginFromUrl(url)),
+    marketplaceUpdate: (entry: MarketplaceEntry) =>
+      finishMarketplaceInstall(() => installMarketplaceRelease(entry)),
     closeInstallDialog,
   };
 }

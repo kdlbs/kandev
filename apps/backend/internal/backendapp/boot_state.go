@@ -74,6 +74,9 @@ func bootInitialState(
 			return state
 		}
 	}
+	if inventory := themeInventoryForBoot(p); inventory != nil {
+		state["themeInventory"] = inventory
+	}
 	if p.agentRuntimeAvailability != nil {
 		if snapshot, ok := p.agentRuntimeAvailability.Snapshot(); ok {
 			state["agentRuntime"] = snapshot

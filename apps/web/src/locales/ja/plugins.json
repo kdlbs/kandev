@@ -273,5 +273,19 @@
   "webAppUnavailable": "このキャンバスは利用不可。",
   "workspace": "ワークスペース",
   "writeCapabilities": "書き込みアクセス",
-  "yes": "はい"
+  "yes": "はい",
+  "themes": "テーマ",
+  "themeImport": "テーマをインポート",
+  "themeImportDescription": "インストール前にテーマパッケージまたは VS Code JSON ファイルを確認します。",
+  "themeFile": "テーマファイル（.tar.gz、.json、.jsonc）",
+  "themeBase": "基本の外観（指定されている場合は自動）",
+  "themeReview": "テーマを確認",
+  "themeInstall": "テーマをインストール",
+  "themeInstalled": "インストールしました。外観設定でテーマを選択して適用してください。",
+  "themeDataOnly": "このパッケージには色のデータのみが含まれ、実行時の権限はありません。",
+  "themeReport": "変換済み：{{mapped}}。近似変換：{{approximated}}。無視：{{ignored}}。基本色を使用：{{fallback}}。",
+  "themeCompatibility": "未対応の色には選択した基本パレットを使用します。構文の色はビューアーによって異なる場合があります。保存前にコントラストを確認してください。",
+  "themeEmpty": "テーマが見つかりません。テーマファイルをインポートするか、マーケットプレイスのソースを追加してください。",
+  "themeUnavailable": "保存したテーマは利用できません。基本の外観を使用しています。",
+  "themeBrowse": "テーマを探す"
 }

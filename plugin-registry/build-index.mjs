@@ -430,7 +430,7 @@ export async function buildEntry(
   const kind = spec.kind || "plugin";
   const previewError = validatePreviews(spec.previews, kind === "canvas");
   if (previewError) return { error: `${pluginId}: ${previewError}` };
-  if (kind !== "plugin" && kind !== "canvas") return { error: `${pluginId}: unsupported kind ${kind}` };
+  if (kind !== "plugin" && kind !== "canvas" && kind !== "theme") return { error: `${pluginId}: unsupported kind ${kind}` };
 
   let release;
   try {
@@ -460,12 +460,14 @@ export async function buildEntry(
         ),
         pluginId,
         version,
+        kind,
       });
     } catch (error) {
       return {
         error: `${pluginId}: package verification failed (${error.message})`,
       };
     }
+    if ((verified.kind || "plugin") !== kind || (kind === "theme" && !verified.license?.trim())) return {error: `${pluginId}: package kind or theme license does not match the listing`};
     if (verified.id !== pluginId || verified.version !== version) {
       return {
         error:
@@ -517,7 +519,7 @@ export async function buildEntry(
     repo_url: presentation.repo_url || canonicalRepoURL,
     version: version || null,
     min_kandev_version: presentation.min_kandev_version ?? null,
-    ...(kind === "canvas" ? { license: inspectedDescriptor.license } : {}),
+    ...(kind === "canvas" ? { license: inspectedDescriptor.license } : kind === "theme" ? {license: verified.license} : {}),
     package_url: asset.browser_download_url,
     package_sha256: kind === "canvas" ? packageSHA256 : verified.sha256,
     ...(kind === "canvas"
@@ -543,6 +545,7 @@ async function verifyReleasePackage({
   checksumAsset,
   pluginId,
   version,
+  kind = "plugin",
 }) {
   const packageBytes = await fetchBytes(
     asset.browser_download_url,
@@ -566,6 +569,8 @@ async function verifyReleasePackage({
         pluginId,
         "--expected-version",
         version,
+        "--expected-kind",
+        kind,
       ],
       { maxBuffer: 1 << 20, timeout: 60_000, killSignal: "SIGKILL" },
     );

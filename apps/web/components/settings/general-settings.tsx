@@ -1,4 +1,5 @@
 "use client";
+import { ThemeSettingsCard } from "./theme-settings-card";
 import { ImagePreviewDefaultsSettings } from "./image-preview-defaults-settings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,7 +17,6 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { settingsControlClassName } from "@/components/settings/settings-control";
 import { SettingsRow } from "@/components/settings/settings-group";
 import { SettingsPageHeader } from "@/components/settings/settings-typography";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
@@ -56,43 +56,6 @@ import {
   rebaseAppearanceDraft,
   type AppearanceState,
 } from "@/components/settings/appearance-settings-state";
-
-function ThemeSettingsCard({
-  theme,
-  isDirty,
-  onChange,
-}: {
-  theme: Theme;
-  isDirty: boolean;
-  onChange: (theme: Theme) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SettingsRow
-      isDirty={isDirty}
-      discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
-      data-testid="theme-settings-card"
-      label={t("settings:colorTheme")}
-      controlId="theme"
-      control={
-        <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-          <SelectTrigger
-            id="theme"
-            className={settingsControlClassName()}
-            data-settings-dirty={isDirty}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="system">{t("common:system")}</SelectItem>
-            <SelectItem value="light">{t("settings:light")}</SelectItem>
-            <SelectItem value="dark">{t("settings:dark")}</SelectItem>
-          </SelectContent>
-        </Select>
-      }
-    />
-  );
-}
 
 function ChatSubmitKeyCard({
   value,

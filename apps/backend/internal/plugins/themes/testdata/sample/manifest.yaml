@@ -1,0 +1,20 @@
+id: theme-study
+api_version: 2
+version: 1.0.0
+display_name: Monokai study
+author: Kandev contributors
+description: A Monokai-inspired demonstration palette with a paper variant.
+categories: [theme]
+distribution:
+  schema_version: 1
+  kind: theme
+  license: MIT
+themes:
+  - key: night
+    label: Night
+    base: dark
+    path: themes/night.json
+  - key: paper
+    label: Paper
+    base: light
+    path: themes/paper.json

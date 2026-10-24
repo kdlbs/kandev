@@ -110,6 +110,7 @@ func RegisterRoutes(
 	// tree versions reject a static sibling added after an existing wildcard for
 	// the same method.
 	ctrl.registerMarketplaceRoutes(api)
+	ctrl.registerThemeRoutes(api)
 	api.GET("/workspaces/:workspace_id/managed-conversation-destinations", ctrl.managedConversationDestinations)
 	api.GET("/settings", ctrl.getSettings)
 	api.PUT("/settings", authn.RequireAdmin(), ctrl.updateSettings)

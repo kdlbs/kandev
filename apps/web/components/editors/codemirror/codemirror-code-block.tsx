@@ -1,8 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
+import { codeMirrorTheme } from "@/lib/theme/codemirror-theme";
+
 import { useTheme } from "@/components/theme/app-theme";
 import CodeMirror from "@uiw/react-codemirror";
-import { vscodeDark, vscodeLight } from "@uiw/codemirror-theme-vscode";
+
 import { EditorView } from "@codemirror/view";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -24,8 +27,8 @@ const getLanguageExtension = (language?: string) => {
 export function CodeMirrorCodeBlock({ children, className }: CodeBlockProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
-  const { theme, systemTheme } = useTheme();
-  const effectiveTheme = theme === "system" ? systemTheme : theme;
+  const { effectiveTheme } = useTheme();
+  const colorTheme = useMemo(() => codeMirrorTheme(effectiveTheme), [effectiveTheme]);
 
   const code = String(children).replace(/\n$/, "");
   const languageExtension = getLanguageExtension(className);
@@ -66,7 +69,7 @@ export function CodeMirrorCodeBlock({ children, className }: CodeBlockProps) {
       {/* Code editor */}
       <CodeMirror
         value={code}
-        theme={effectiveTheme === "dark" ? vscodeDark : vscodeLight}
+        theme={colorTheme}
         extensions={
           languageExtension
             ? [languageExtension, EditorView.lineWrapping, paddingTheme]

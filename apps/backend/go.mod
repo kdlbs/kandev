@@ -3,6 +3,7 @@ module github.com/kandev/kandev
 go 1.26.0
 
 require (
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.0

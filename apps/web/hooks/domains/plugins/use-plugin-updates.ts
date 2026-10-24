@@ -119,7 +119,7 @@ export function usePluginUpdates() {
     }
 
     const next = new Map<string, MarketplaceEntry>();
-    for (const plugin of catalog.plugins) {
+    for (const plugin of [...catalog.plugins, ...(catalog.themes ?? [])]) {
       if (plugin.install_state === "installed" || plugin.install_state === "update_available") {
         next.set(plugin.id, plugin);
       }

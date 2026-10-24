@@ -273,5 +273,19 @@
   "webAppUnavailable": "이 캔버스를 사용할 수 없습니다.",
   "workspace": "워크스페이스",
   "writeCapabilities": "쓰기 권한",
-  "yes": "예"
+  "yes": "예",
+  "themes": "테마",
+  "themeImport": "테마 가져오기",
+  "themeImportDescription": "설치하기 전에 테마 패키지 또는 VS Code JSON 파일을 검토하세요.",
+  "themeFile": "테마 파일(.tar.gz, .json, .jsonc)",
+  "themeBase": "기본 모양(선언된 경우 자동 선택)",
+  "themeReview": "테마 검토",
+  "themeInstall": "테마 설치",
+  "themeInstalled": "설치되었습니다. 모양 설정에서 테마를 선택하여 적용하세요.",
+  "themeDataOnly": "이 패키지에는 색상 데이터만 포함되며 런타임 권한이 없습니다.",
+  "themeReport": "매핑됨: {{mapped}}. 근사 변환: {{approximated}}. 무시됨: {{ignored}}. 기본 색상 사용: {{fallback}}.",
+  "themeCompatibility": "지원되지 않는 색상은 선택한 기본 팔레트를 사용합니다. 구문 색상은 뷰어마다 다를 수 있습니다. 저장하기 전에 대비를 확인하세요.",
+  "themeEmpty": "테마를 찾을 수 없습니다. 테마 파일을 가져오거나 마켓플레이스 소스를 추가하세요.",
+  "themeUnavailable": "저장된 테마를 사용할 수 없습니다. 기본 모양을 사용합니다.",
+  "themeBrowse": "테마 찾아보기"
 }

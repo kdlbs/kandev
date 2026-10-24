@@ -135,3 +135,10 @@ than one source, the official source wins and later duplicates are hidden.
 Appearing in this registry is only about **discovery**. Anyone can still install
 an unlisted plugin by URL or by uploading a `.tar.gz` directly — the marketplace
 never removes those escape hatches.
+
+### Theme repositories
+
+List data-only palettes with `kind: theme` and `categories: [theme]`. The package
+verifier enforces the theme profile and the index builder requires its license.
+Release archives use the existing `<id>-<version>.tar.gz` naming convention.
+See [theme authoring](../docs/public/themes-authoring.md) for a reproducible sample.

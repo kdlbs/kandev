@@ -3748,3 +3748,9 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+## Data-only themes
+
+Theme packages use `distribution.kind: theme` and declare palette variants,
+without a runtime or executable contributions. See [Theme package reference](themes-authoring.md)
+and [Appearance and themes](appearance.md) for the format and import flow.

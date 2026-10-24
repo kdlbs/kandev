@@ -31,6 +31,7 @@ var validCategories = map[string]bool{
 	"tools":      true,
 	"analytics":  true,
 	"canvas":     true,
+	"theme":      true,
 }
 
 // validUISurfaces are the allowed values for UIPage.Surface.
@@ -131,7 +132,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRuntimeType()...)
 	if m.IsManaged() {
 		errs = append(errs, m.validateManagedRuntime()...)
-	} else {
+	} else if !m.IsThemeDistribution() {
 		errs = append(errs, m.validateEndpoints()...)
 	}
 	errs = append(errs, m.validateCategories()...)
@@ -149,6 +150,9 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateReferenceSources()...)
 	errs = append(errs, m.validateAgentTools()...)
 	errs = append(errs, m.validateDistribution()...)
+	if len(m.Themes) > 0 && !m.IsThemeDistribution() {
+		errs = append(errs, errors.New("themes require distribution.kind theme"))
+	}
 	return errors.Join(errs...)
 }
 

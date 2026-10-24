@@ -230,6 +230,9 @@ export type AppState = KanbanSlice & {
 
   // Plugins slice (actions merged via PluginsSliceActions intersection on AppState)
   plugins: (typeof defaultPluginsState)["plugins"];
+  themeInventory: (typeof defaultPluginsState)["themeInventory"];
+  themeDefinitions: (typeof defaultPluginsState)["themeDefinitions"];
+  themeError: string | null;
 
   // Review slice (actions merged via ReviewSliceActions intersection on AppState)
   taskReview: (typeof defaultReviewState)["taskReview"];

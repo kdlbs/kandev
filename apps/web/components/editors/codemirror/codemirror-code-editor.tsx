@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { codeMirrorTheme } from "@/lib/theme/codemirror-theme";
+
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
 import { IconMessagePlus } from "@tabler/icons-react";
-import { vscodeDark } from "@uiw/codemirror-theme-vscode";
+import { useTheme } from "@/components/theme/app-theme";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
@@ -137,6 +139,8 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
 }
 
 export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
+  const { effectiveTheme } = useTheme();
+  const colorTheme = useMemo(() => codeMirrorTheme(effectiveTheme), [effectiveTheme]);
   const {
     path,
     content,
@@ -194,7 +198,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
           ref={editorRef}
           value={content}
           height="100%"
-          theme={vscodeDark}
+          theme={colorTheme}
           extensions={[...state.extensions, codeMirrorCursorFlashExtension]}
           onChange={state.handleChange}
           basicSetup={{

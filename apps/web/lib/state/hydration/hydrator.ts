@@ -1047,6 +1047,13 @@ export function hydrateState(
     turnWindowObservationsAtRequestStart,
   } = options;
 
+  if (
+    state.themeInventory &&
+    (!draft.themeInventory ||
+      (draft.themeInventory.boot_id === state.themeInventory.boot_id &&
+        state.themeInventory.revision >= draft.themeInventory.revision))
+  )
+    draft.themeInventory = state.themeInventory;
   hydrateKanbanAndWorkspace(draft, state);
   hydrateSettings(draft, state);
   hydrateSession(draft, state, activeSessionId, forceMergeSessionId, {

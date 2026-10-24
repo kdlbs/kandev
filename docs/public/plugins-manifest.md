@@ -734,3 +734,9 @@ admitted but unclaimed runs before removing receipts.
 The displayed webhook URL uses the configured backend origin. For live Bitbucket
 delivery, expose that endpoint through an address reachable from your Bitbucket
 installation; a local development address alone is not externally reachable.
+
+## Data-only themes
+
+Theme packages use `distribution.kind: theme` and declare palette variants,
+without a runtime or executable contributions. See [Theme package reference](themes-authoring.md)
+and [Appearance and themes](appearance.md) for the format and import flow.

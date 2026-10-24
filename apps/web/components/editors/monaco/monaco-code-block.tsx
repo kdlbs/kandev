@@ -20,7 +20,8 @@ type MonacoCodeBlockProps = {
 export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
   const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, effectiveTheme } = useTheme();
+  const monacoColorTheme = effectiveTheme?.definition ? "kandev-custom" : resolvedTheme;
 
   const code = String(children).replace(/\n$/, "");
   const lang = className?.replace("language-", "").toLowerCase() ?? "";
@@ -54,7 +55,7 @@ export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
         height={height}
         language={language}
         value={code}
-        theme={resolvedTheme === "dark" ? "kandev-dark" : "kandev-light"}
+        theme={monacoColorTheme === "kandev-custom" ? monacoColorTheme : `kandev-${resolvedTheme}`}
         options={{
           readOnly: true,
           fontSize: 12,
