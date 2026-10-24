@@ -1158,6 +1158,11 @@ func (r *Repository) ListUnstartedTasks(
 	ctx context.Context, lookbackHours int, limit int, excludedTaskIDs ...string,
 ) ([]*UnstartedTaskRow, error) {
 	var rows []*UnstartedTaskRow
+	driver := r.ro.DriverName()
+	// The lookback placeholder is cast to INTEGER so Postgres does not infer
+	// it as text from the || concatenation (pgx then refuses to encode the
+	// int argument), and the run payload lookup goes through the dialect
+	// helper because json_extract does not exist on Postgres (#4741).
 	query := `
 		SELECT t.id,
 		       ` + RunnerProjection("t") + ` AS assignee_agent_profile_id,
@@ -1167,10 +1172,10 @@ func (r *Repository) ListUnstartedTasks(
 		  AND ` + taskrepo.IsFromOfficePredicate("t") + `
 		  AND ` + RunnerProjection("t") + ` != ''
 		  AND t.archived_at IS NULL` + andNotAutomationOriginT + `
-		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
+		  AND t.created_at >= ` + dialect.NowMinusHours(driver, "CAST(? AS INTEGER)") + `
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w
-		      WHERE json_extract(w.payload, '$.task_id') = t.id
+		      WHERE ` + dialect.JSONExtract(driver, "w.payload", "task_id") + ` = t.id
 		        AND w.status IN ('queued', 'claimed', 'finished')
 		  )
 	`
