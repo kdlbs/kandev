@@ -278,6 +278,14 @@ The corrected selections passed with two CPUs, one worker, and zero retries:
 - Shard 19, process 1: 41 passed. Log: `/tmp/kandev-pr-6516d6ea-33_nf3t6/diagnostics-replay-19-logs/kandev-run.e2e.ueGOXfs2.log`.
 - Scoped ESLint, Prettier, TypeScript, and specification lint passed after the final changes.
 
+### Secondary review correction
+
+The user-requested secondary review found no blockers and one optional CI reliability issue.
+The remote diagnostic call could wait indefinitely for Docker. It now sets a five-second timeout with `SIGKILL` for each Docker attempt. The existing retry uses the same timeout. Other SSH test commands keep their prior behavior.
+The stalled-child regression failed before the change after waiting 5.08 seconds. It now covers both the initial attempt and a retry, confirms partial credential-bearing output was emitted, and checks that collection returns promptly without retaining that output or replacing the original test failure.
+The successful remote-tail case also runs an executable Docker fixture. All 15 diagnostic tests, scoped ESLint, Prettier, TypeScript, and specification checks passed for this correction.
+Real Docker is unavailable locally, so fresh SSH container CI remains required after the push.
+
 ### Remaining limit
 
 The original active-question link text was not provided. Standard links pass through the actual active overlay on desktop and phone.

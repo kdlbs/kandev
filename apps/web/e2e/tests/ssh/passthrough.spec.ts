@@ -61,14 +61,18 @@ test(interruptionTest, async ({ testPage, apiClient, seedData, backend }) => {
       "agentctl.log",
     );
     interruptionLog = (byteLimit) =>
-      execInContainer(seedData.sshTarget, [
-        "sh",
-        "-c",
-        'test ! -L "$1" && test -f "$1" && tail -c "$2" -- "$1"',
-        "_",
-        remoteLog,
-        String(Math.min(byteLimit, 512 * 1024)),
-      ]);
+      execInContainer(
+        seedData.sshTarget,
+        [
+          "sh",
+          "-c",
+          'test ! -L "$1" && test -f "$1" && tail -c "$2" -- "$1"',
+          "_",
+          remoteLog,
+          String(Math.min(byteLimit, 512 * 1024)),
+        ],
+        5_000,
+      );
   }
   const backendPID = backend.pid();
   expect(backendPID).toBeTruthy();
