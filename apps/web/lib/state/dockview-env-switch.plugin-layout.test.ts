@@ -426,6 +426,58 @@ describe.each(["slow", "fast", "explicit"])("unclamped reusable source geometry 
   );
 });
 
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe.each(["reveal", "unmaximize"])(
+  "source geometry on %s after an absent-pane resize",
+  (action) => {
+    it.each([
+      { envId: "env-fresh", manual: null, owned: true, width: 1500, expected: 300 },
+      { envId: null, manual: null, owned: true, width: 1500, expected: 300 },
+      { envId: "env-fresh", manual: 310, owned: true, width: 1500, expected: 310 },
+      { envId: "env-fresh", manual: null, owned: true, width: 600, expected: 180 },
+      { envId: "env-fresh", manual: 310, owned: true, width: 600, expected: 180 },
+      { envId: "env-saved", manual: null, owned: false, width: 1500, expected: 240 },
+    ])(
+      "restores current geometry for $envId at $width (manual=$manual, owned=$owned)",
+      async (scenario) => {
+        const layout = horizontalLayout({ bottom: [PROMPTS] });
+        startIn("env-fresh", layout, layout);
+        useDockviewStore.setState({ currentLayoutEnvId: scenario.envId });
+        if (scenario.manual !== null) setManualRightWidth(scenario.envId, scenario.manual);
+        if (scenario.owned) {
+          useDockviewStore.getState().buildDefaultLayout(api);
+          await settle();
+        } else {
+          setPinnedTarget("right", 240);
+          getRootSplitview(api).resizeView(1, 240);
+          useDockviewStore.setState({ pinnedWidths: new Map([["right", 240]]) });
+        }
+        stopMounted.push(setupSashDragCapToggle(api), setupContainerResizeSync(api));
+        const before = shape(api);
+        if (action === "reveal") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().maximizeGroup(CENTER_GROUP);
+        await settle();
+        expect(api.getPanel(PROMPTS.id)).toBeUndefined();
+        const container = document.createElement("div");
+        Object.defineProperties(container, {
+          clientWidth: { value: scenario.width },
+          clientHeight: { value: HEIGHT },
+        });
+        syncDockviewContainerSize(api, container);
+        await settle();
+
+        if (action === "reveal") useDockviewStore.getState().toggleRightPanels();
+        else useDockviewStore.getState().exitMaximizedLayout();
+        await settle();
+
+        expect(rootSizes(api)).toEqual([scenario.width - scenario.expected, scenario.expected]);
+        expect(shape(api)).toEqual(before);
+        expect(getManualRightWidth(scenario.envId)).toBe(scenario.manual);
+      },
+    );
+  },
+);
+
 /** @covers AC-UI-TASK-LAYOUT-PROFILES-002.6 */
 describe("VERTICAL root through environment switches and resets", () => {
   const vertical: LayoutState = {

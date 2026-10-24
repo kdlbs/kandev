@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-TASK-LAYOUT-PROFILES-002
 created: 2026-10-10
-updated: 2026-10-11
+updated: 2026-10-24
 owners:
   - kandev
 ---
@@ -136,9 +136,15 @@ legacy horizontal default; an explicit `VERTICAL` must not become horizontal.
 `isStructuralComponent` already recognizes the generic plugin component, but
 structural retention alone does not preserve layout metadata.
 The editor resolves saved pinned widths with the same proportional scaling and
-caps as task application before loading Dockview. Reopening a horizontal
-override/custom profile and editing a tab must not replace its saved split
-ratio with the stock default. Vertical rows retain their own axis extents.
+caps as task application before loading Dockview, but retains the original source
+geometry separately from those constrained preview extents. Tab-only edits
+preserve source widths (including incomplete absolute-width geometry), bounds and
+nested weights. The preview baseline tracks split topology, group identity/order
+and measured extents, not tab order, selection or titles. Applying a profile or
+resizing the preview host refreshes that measured baseline without replacing the
+source. A genuine sash, size or structural edit adopts the new captured geometry.
+Override/custom save/reload and the shared phone settings surface use the same
+capture policy. Vertical rows retain their own axis extents and no width pinning.
 
 Task 01 fixes `rewriteReusableChatPanels` in `session-panels.ts` to preserve
 unchanged state metadata while replacing columns. Both
@@ -244,6 +250,15 @@ changes with a fixed viewport and callbacks after Dockview's own observer has
 already resized the grid. Non-owned saved pixel targets keep their existing
 container-only policy; viewport refresh is unchanged. Manual pixel widths
 retain precedence; vertical roots never enter horizontal target refresh.
+
+Right-pane reveal and maximize exit also resolve the owned source from the
+current measured container before applying their retained layouts. The resulting
+width map becomes the applied pinned target before scheduled enforcement; a
+resize while the right groups are absent must not require another resize event
+after restoration. Actual manual pixels still win and remain capped without
+rewriting their raw preference. Known and genuinely null environment identities
+are distinct owners. Non-owned saved layout pixel maps keep their existing
+restore policy. This changes geometry only, not panel eligibility or lifecycle.
 
 Regression coverage uses actual Dockview, real default builders/fixups, both
 enforcement boundaries, and mounted automatic refresh. On a measured 1200px

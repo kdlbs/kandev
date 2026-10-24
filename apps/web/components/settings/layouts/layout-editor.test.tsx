@@ -12,6 +12,12 @@ import {
   type LayoutState,
 } from "@/lib/state/layout-manager";
 import { LayoutEditor } from "./layout-editor";
+import { resolveCustomLayoutPinnedWidths } from "@/lib/state/dockview-store";
+import { toSerializedDockview } from "@/lib/state/layout-manager";
+import {
+  disposeDockview,
+  mountDockview,
+} from "@/lib/state/layout-manager/dockview-test-host.test-helpers";
 
 const PLUGIN_ID = "kandev-plugin-prompt-history";
 const PANEL_ID = `plugin:${PLUGIN_ID}:prompt-history`;
@@ -30,6 +36,7 @@ afterEach(async () => {
   pluginComponent.mockClear();
   await i18n.changeLanguage("en");
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function registerPrompts(): void {
@@ -200,16 +207,47 @@ describe("LayoutEditor plugin panels", () => {
     await waitFor(() => expect(tabLabels()).toContain(LOCALIZED_TITLE));
     expect(onChange).not.toHaveBeenCalled();
   });
+});
 
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-001.10, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("LayoutEditor source geometry", () => {
   it.each([
-    { orientation: "HORIZONTAL" as const, widths: [960, 240], expected: [960, 240] },
-    { orientation: "VERTICAL" as const, widths: [250, 350], expected: [250, 350] },
-    { orientation: "HORIZONTAL" as const, widths: [], expected: [840, 360] },
+    {
+      orientation: "HORIZONTAL" as const,
+      widths: [960, 240],
+      preview: 1200,
+      task: 1200,
+      right: 240,
+    },
+    {
+      orientation: "HORIZONTAL" as const,
+      widths: [960, 240],
+      preview: 600,
+      task: 1200,
+      right: 240,
+    },
+    {
+      orientation: "HORIZONTAL" as const,
+      widths: [600, 600],
+      preview: 800,
+      task: 1600,
+      right: 800,
+    },
+    { orientation: "HORIZONTAL" as const, widths: [950, 50], preview: 600, task: 4000, right: 200 },
+    {
+      orientation: "HORIZONTAL" as const,
+      widths: [undefined, 200],
+      preview: 600,
+      task: 1600,
+      right: 200,
+    },
+    { orientation: "VERTICAL" as const, widths: [250, 350], preview: 1200, task: 1200, right: 350 },
+    { orientation: "HORIZONTAL" as const, widths: [], preview: 1200, task: 1200, right: 360 },
   ])(
-    "preserves $orientation profile geometry when reopening and editing another tab ($widths)",
-    async ({ orientation, widths, expected }) => {
+    "preserves $orientation source $widths through a tab edit in a $preview px preview",
+    async ({ orientation, widths, preview, task, right }) => {
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-        new DOMRect(0, 0, 1200, 600),
+        new DOMRect(0, 0, preview, 600),
       );
       const savedProfile = profileWithPlugin();
       savedProfile.rootOrientation = orientation;
@@ -225,10 +263,77 @@ describe("LayoutEditor plugin panels", () => {
 
       await waitFor(() => expect(onChange).toHaveBeenCalled());
       const saved = lastLayout(onChange);
-      expect(saved.columns.map((column) => column.width)).toEqual(expected);
+      expect(saved.columns.map((column) => column.width)).toEqual(
+        widths.length ? widths : [840, 360],
+      );
       expect(saved.rootOrientation).toBe(orientation);
       expect(saved.columns[0].groups[0].panels.map((item) => item.id)).toEqual(["plan", "chat"]);
       expect(saved.columns[1].groups[1].panels[0].id).toBe(PANEL_ID);
+      cleanup();
+      const reloaded = JSON.parse(JSON.stringify(saved)) as LayoutState;
+      const afterReload = mountEditor(reloaded);
+      await waitForEditor();
+      await moveTabLeft("エージェント");
+      await waitFor(() => expect(afterReload).toHaveBeenCalled());
+      const resaved = lastLayout(afterReload);
+      vi.stubGlobal("innerWidth", task);
+      const live = mountDockview(task, 600);
+      try {
+        live.fromJSON(
+          toSerializedDockview(
+            resaved,
+            task,
+            600,
+            resolveCustomLayoutPinnedWidths(resaved.columns, task, orientation),
+          ),
+        );
+        expect(
+          live.getPanel(PANEL_ID)?.group.api[orientation === "VERTICAL" ? "height" : "width"],
+        ).toBe(right);
+      } finally {
+        disposeDockview(live);
+      }
+    },
+  );
+});
+
+/** @covers AC-UI-TASK-LAYOUT-PROFILES-002.3, AC-UI-TASK-LAYOUT-PROFILES-002.6 */
+describe("LayoutEditor intentional geometry edits", () => {
+  it.each(["resize", "split"])(
+    "saves an intentional %s instead of retaining old geometry",
+    async (action) => {
+      await i18n.changeLanguage("en");
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 600, 600),
+      );
+      const profile = profileWithPlugin();
+      profile.columns[0].width = 960;
+      profile.columns[1].width = 240;
+      profile.columns[1].pinned = true;
+      const onChange = mountEditor(profile);
+      await waitForEditor();
+      fireEvent.pointerDown(tabByLabel("Plan"));
+      fireEvent.click(tabByLabel("Plan"));
+      const toolbar = await screen.findByTestId("layout-editor-context-actions");
+      fireEvent.pointerDown(
+        within(toolbar).getByRole("button", {
+          name: action === "resize" ? "Arrange split" : "Split tab",
+        }),
+        { button: 0, ctrlKey: false },
+      );
+      fireEvent.click(
+        await screen.findByRole("menuitem", {
+          name: action === "resize" ? "Increase width" : "Below",
+        }),
+      );
+      await waitFor(() => expect(onChange).toHaveBeenCalled());
+      const saved = lastLayout(onChange);
+      expect(saved.columns.map((column) => column.width)).toEqual(
+        action === "resize" ? [460, 140] : [420, 180],
+      );
+      expect(saved.columns[0].groups.map((group) => group.panels.map((panel) => panel.id))).toEqual(
+        action === "resize" ? [["chat", "plan"]] : [["chat"], ["plan"]],
+      );
     },
   );
 });

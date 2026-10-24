@@ -18,6 +18,7 @@ import {
 } from "@/lib/state/layout-manager";
 import { resolveCustomLayoutPinnedWidths } from "@/lib/state/dockview-store";
 import { LayoutEditorActions, type LayoutEditorActionAnchor } from "./layout-editor-toolbar";
+import { useEditorGeometry } from "./layout-editor-geometry";
 import {
   refreshCanonicalTitles,
   restoreCanonicalTitles,
@@ -140,7 +141,7 @@ type ResizeSync = {
   apiRef: RefObject<DockviewApi | null>;
   holdApplying: () => void;
   cancelRelease: () => void;
-  onResized: () => void;
+  onResized: (api: DockviewApi) => void;
 };
 
 /** Keep Dockview's grid in step with the preview host's size without capturing it as an edit. */
@@ -161,7 +162,7 @@ function useResizeSync({
       if (width <= 0 || height <= 0) return;
       holdApplying();
       api.layout(width, height, true);
-      onResized();
+      onResized(api);
     });
     observer.observe(element);
     return () => {
@@ -172,16 +173,33 @@ function useResizeSync({
   }, [api, rootRef, apiRef, holdApplying, cancelRelease, onResized]);
 }
 
+function serializePreview(layout: LayoutState, width: number, height: number) {
+  const pinnedWidths = resolveCustomLayoutPinnedWidths(
+    layout.columns,
+    width,
+    layout.rootOrientation,
+  );
+  return toSerializedDockview(layout, width, height, pinnedWidths);
+}
+
 export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<DockviewApi | null>(null);
   const canonicalTitlesRef = useRef<CanonicalTitles>(new Map());
   const { applyingRef, holdApplying, cancelRelease } = useApplyingGuard();
+  const { seedGeometry, measurePreview, captureGeometry } = useEditorGeometry();
   const [api, setApi] = useState<DockviewApi | null>(null);
   const [selectedPanelId, setSelectedPanelId] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const [actionAnchor, setActionAnchor] = useState<LayoutEditorActionAnchor | null>(null);
   const bumpRevision = useCallback(() => setRevision((value) => value + 1), []);
+  const onResized = useCallback(
+    (current: DockviewApi) => {
+      measurePreview(current);
+      bumpRevision();
+    },
+    [measurePreview, bumpRevision],
+  );
 
   const updateActionAnchor = useCallback(() => {
     const root = rootRef.current;
@@ -201,10 +219,13 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
     const current = apiRef.current;
     if (!current || applyingRef.current || !editable) return;
     refreshCanonicalTitles(current, canonicalTitlesRef.current);
-    const captured = restoreCanonicalTitles(fromDockviewApi(current), canonicalTitlesRef.current);
+    const captured = restoreCanonicalTitles(
+      captureGeometry(fromDockviewApi(current)),
+      canonicalTitlesRef.current,
+    );
     if (captured.columns.length > 0) onChange(captured);
     setRevision((revision) => revision + 1);
-  }, [editable, onChange]);
+  }, [editable, onChange, captureGeometry]);
 
   const apply = useCallback(
     (current: DockviewApi, nextLayout: LayoutState) => {
@@ -213,18 +234,14 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
       const height = Math.max(320, Math.round(bounds?.height ?? current.height ?? 480));
       applyingRef.current = true;
       seedCanonicalTitles(nextLayout, canonicalTitlesRef.current);
-      const pinnedWidths = resolveCustomLayoutPinnedWidths(
-        nextLayout.columns,
-        width,
-        nextLayout.rootOrientation,
-      );
-      current.fromJSON(toSerializedDockview(nextLayout, width, height, pinnedWidths));
+      current.fromJSON(serializePreview(nextLayout, width, height));
       current.layout(width, height, true);
+      seedGeometry(current, nextLayout);
       setSelectedPanelId(current.activePanel?.id ?? current.panels[0]?.id ?? null);
       setRevision((revision) => revision + 1);
       holdApplying();
     },
-    [holdApplying],
+    [holdApplying, seedGeometry],
   );
 
   const onReady = useCallback(
@@ -249,7 +266,7 @@ export function LayoutEditor({ layout, editable, onChange }: LayoutEditorProps) 
     };
   }, [api, capture]);
 
-  useResizeSync({ api, rootRef, apiRef, holdApplying, cancelRelease, onResized: bumpRevision });
+  useResizeSync({ api, rootRef, apiRef, holdApplying, cancelRelease, onResized });
 
   useDisplayTitleReconciliation({
     api,

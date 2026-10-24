@@ -93,6 +93,8 @@ import {
   formatJsonRootSizes,
 } from "./dockview-widths-debug";
 
+import { getReusableRightWidth } from "./layout-manager/pinned-targets";
+import { resolveEnvRightWidth } from "./layout-manager/right-width";
 const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
@@ -590,6 +592,23 @@ function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number>
   return useDockviewStore.getState().pinnedWidths;
 }
 
+/** Revealing retained panes resolves owned source geometry at the current container, not old pixels. */
+function resolveRestoredPinnedWidths(
+  state: LayoutState,
+  totalWidth: number,
+  widths: Map<string, number>,
+  envId: string | null,
+): Map<string, number> {
+  if (state.rootOrientation === "VERTICAL" || getReusableRightWidth(envId, totalWidth) === null)
+    return widths;
+  const sidebar = state.columns.find((column) => column.id === "sidebar" && column.pinned);
+  const sidebarWidth = sidebar ? getPinnedWidth(sidebar, totalWidth, widths.get("sidebar")) : 0;
+  return new Map(widths).set(
+    "right",
+    resolveEnvRightWidth(totalWidth, sidebarWidth, getManualRightWidth(envId), envId),
+  );
+}
+
 /**
  * Snap pinned columns to their targets using the current store state.
  *
@@ -742,7 +761,13 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       });
 
       try {
-        applyLayoutAndSet(api, nextLayout, liveWidths, set);
+        const restoredWidths = resolveRestoredPinnedWidths(
+          nextLayout,
+          safeWidth,
+          liveWidths,
+          targetEnvId,
+        );
+        applyLayoutAndSet(api, nextLayout, restoredWidths, set);
       } catch {
         set({
           isRestoringLayout: false,
@@ -1648,7 +1673,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const measured = measureDockviewContainer(api);
       const safeWidth = measured.width;
       const safeHeight = measured.height;
-      const liveWidths = get().pinnedWidths;
+      const liveWidths = resolveRestoredPinnedWidths(
+        preMaximizeLayout,
+        safeWidth,
+        get().pinnedWidths,
+        currentLayoutEnvId,
+      );
       set({
         isRestoringLayout: true,
         preMaximizeLayout: null,

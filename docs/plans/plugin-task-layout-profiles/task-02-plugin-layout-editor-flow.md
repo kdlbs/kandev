@@ -641,3 +641,122 @@ Round 3 (Sol 6.1 reviewer, read-only) reported two P2 findings, both accepted:
   passed all 6 cases using those fresh artifacts. Same task-owned storage as
   round 2; logs `kandev-run.e2e.1Inl2PZg.log` and
   `kandev-run.e2e.fJNrLSsc.log`. Catalog, specification and whitespace checks passed.
+
+Round 4 accepted geometry remediation (2026-10-24, Sol 6.1):
+
+- Session metadata confirmed profile `af8936d3-6107-49fc-96a7-f4a488773939`;
+  the configured model is `openai-codex/gpt-6.1-sol`, exact-model required,
+  automatic fallback disabled. Runtime context reports the same model. No
+  further workers were launched. Starting HEAD:
+  `d744e70ac7811e12e09fafc9d01686466b69a934`; checkout initially clean.
+- F1: `LayoutEditor` retains source geometry independently of the constrained
+  preview. Capture compares measured split topology/group order/extents with
+  the preview baseline; tab/title edits retain source widths, bounds and nested
+  weights. Host resizing refreshes only the baseline. Genuine size/structural
+  edits adopt captured geometry. No plugin special case, schema or API change.
+- F1 RED, from `apps/web`:
+  `pnpm exec vitest run components/settings/layouts/layout-editor.test.tsx`:
+  3 failed, 10 passed after correcting the vertical control's test expectation.
+  Source 960/240 at preview 600 captured 420/180; source 600/600 at preview 800
+  captured 480/320; source 950/50 at preview 600 captured 420/180.
+  GREEN with the minimal source-retention change: 13 passed. The final matrix
+  also covers incomplete absolute-width geometry, JSON reload, re-edit and
+  real-Dockview wide application; genuine size and structural controls pass.
+  Existing canonical-title/registry-only dirty checks remain intact.
+- F2 RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-env-switch.plugin-layout.test.ts`:
+  4 failed, 37 passed after initializing the non-owned control's saved pixel
+  map. Reveal and Agent maximize exit, with known and null environment owners,
+  restored 1260/240 instead of 1200/300 after resizing to 1500 while absent.
+  GREEN: 41 passed. Both restore boundaries now resolve the owned source using
+  the current measurement before application updates pinned targets; scheduled
+  enforcement therefore sees the current width without another resize event.
+  Extended final controls cover minimum/cap clamping, genuine manual pixels,
+  non-owned saved targets, and the existing visible-pane positive control.
+- Formatting: plain `make fmt` stopped in Go formatting on the known full
+  default Go-cache volume. The complete command passed with task-owned storage:
+  `TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache make fmt`.
+  Final changed-file Prettier and `pnpm exec eslint --max-warnings 0` passed
+  for editor/helper/tests, store/switch tests and both settings browser specs.
+  Initial lint function-length warnings were resolved by bounded helper/test
+  grouping; typecheck caught an invalid Testing Library `exact` option, removed
+  before the final passing run.
+- Final adjacent regression command, from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders-fixups.test.ts
+  lib/state/dockview-pinned-enforce.test.ts lib/state/layout-manager
+  components/settings/layouts lib/layout/layout-profiles.test.ts
+  lib/layout/layout-profiles.plugin-panels.test.ts`: 35 files, 427 tests passed
+  after the final production edit. `NODE_OPTIONS=--max-old-space-size=10240
+  pnpm run typecheck` passed.
+- Browser coverage extends both existing override/custom cases: open at a 900px
+  viewport with a minimum-clamped preview, edit a tab, save/reload, then open a
+  wide task and measure the retained 20% share with actual fixture content.
+  Phone coverage edits/resaves both profile kinds through touch controls and
+  checks exact source extents after reload. Restore coverage hides/maximizes,
+  resizes, restores and measures the owned share, then repeats with genuine
+  manual width. Unit/component RED is the pre-fix gate for these state/geometry
+  defects; browser checks exercise the rebuilt production bundle.
+- First fresh managed desktop run: 19 passed, 1 failed before its restore
+  geometry assertion. Log `kandev-run.e2e.Tka9lRiH.log` in task-owned temporary
+  storage. The fixture's incidental PR Details tab carries `provider`, `prKey`
+  and `mrKey` keys whose values are `undefined`; the unchanged right-pane
+  serializability check rejects that live layout and disables reveal after
+  hiding. Focused diagnostic logs `kandev-run.e2e.Q4C9ONHy.log` and
+  `kandev-run.e2e.wDKCnubW.log` reproduce the disabled control with retries off.
+  `kandev-run.e2e.eaA8ZV7b.log:13` records exact live parameter types.
+  Geometry verification explicitly closes that unrelated review tab through
+  the normal UI before hide/restore; it does not change validation, panel
+  eligibility, or lifecycle. This review-tab variant remains a runtime limit,
+  not a passing geometry scenario. Parent was informed of this separate boundary.
+- Focused runtime proof:
+  `CAPTURE_PR_ASSETS=1 TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build
+  --project chromium tests/settings/layout-profiles.spec.ts
+  --grep "horizontal profile's saved" --retries=0`: 1 passed using the fresh
+  production artifacts. Log `kandev-run.e2e.eaA8ZV7b.log`; screenshots captured
+  for both restore actions.
+- No repeat real-package smoke or full `make test`: prior real Prompt History
+  evidence and the classified broad environment failures above are unchanged.
+  These fixes use the existing packaged fixture on disposable managed hosts.
+  No primary settings/runtime, push, PR, deployment, new review round, archive,
+  or `step_complete` action is part of this remediation.
+- Final desktop browser command (fresh backend, Vite production bundle and
+  packaged fixture), with task-owned `TMPDIR`/`GOCACHE` as above:
+  `CAPTURE_PR_ASSETS=1 scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --project chromium
+  tests/settings/layout-profiles.spec.ts tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  20 passed, no retries or flakes. Log `kandev-run.e2e.0KxJ2WyE.log`.
+- Final phone command reused those fresh artifacts with the same storage:
+  `CAPTURE_PR_ASSETS=1 scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome
+  tests/settings/mobile-layout-profiles.spec.ts --retries=0`: 8 passed,
+  no retries or flakes. Log `kandev-run.e2e.zdgsQnn8.log`. Reran after changing
+  screenshot framing to scroll the editor into view: 8 passed,
+  `kandev-run.e2e.CzpiwYl4.log`. Inspected the actual phone editor image and
+  retained both profile-kind captures under task-owned `round4-visual/`.
+- Final seven-file Prettier check and ESLint `--max-warnings 0` passed.
+  Web typecheck passed again after the final desktop test changes. Exported
+  `validateCoverage` evaluated all nine intended changed paths against the six
+  current package documents: `ok: true`, `status: covered`, no errors, both
+  owning requirement/design references accepted. Specification linter tests:
+  36 passed. Public instructions and historical CHANGELOG remain unchanged:
+  these fixes restore already-documented proportion and manual-width semantics.
+- Final documentation gates: `python3 scripts/list-docs.py validate` passed
+  (386 decisions, 1646 specifications); `python3 scripts/lint-spec-files.py --all`
+  passed; `git diff --check` passed.
+- Visual capture-only desktop rerun on the same fresh production artifacts:
+  `CAPTURE_PR_ASSETS=1 scripts/run-quiet e2e --summary --
+  pnpm --dir apps/web e2e:run --host --no-build --project chromium
+  tests/settings/layout-profiles.spec.ts
+  --grep "geometry when reopened|horizontal profile's saved" --retries=0`:
+  3 passed, log `kandev-run.e2e.Usx0VSzd.log`. Inspected successful resaved
+  task and maximize-exit images. Four desktop and two phone captures are retained
+  in `/home/clem/.kandev/agent-scratch/plugin-layout-review/round4-visual/`.
+  Managed runs completed their owned-runtime teardown; no primary instance
+  was used. All commands in this visual rerun use the task-owned storage above.

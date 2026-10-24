@@ -822,20 +822,27 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     test(`preserves ${profileId} geometry when reopened, edited, and saved again`, async ({
       testPage,
       apiClient,
+      seedData,
+      prCapture,
     }) => {
       await installFixturePlugin(testPage);
-      await testPage.setViewportSize({ width: 1600, height: 900 });
+      test.setTimeout(180_000);
+      await testPage.setViewportSize({ width: 900, height: 900 });
       await apiClient.saveUserSettings({
         saved_layouts: [
           savedProfile(
             profileId,
             "Horizontal plugin",
-            horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE)),
+            horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE), {
+              center: 960,
+              right: 240,
+            }),
           ),
         ],
       });
       const layouts = new LayoutSettingsPage(testPage);
       await layouts.open();
+      expect((await layouts.editor.boundingBox())?.width).toBeLessThan(900);
       await layouts.selectPanel("Files");
       await layouts.moveSelectedTabRight();
       await layouts.save();
@@ -849,6 +856,20 @@ test.describe("Plugin panel geometry in applied profiles", () => {
         "changes",
         "files",
       ]);
+      await testPage.setViewportSize({ width: 1600, height: 900 });
+      const task = await createTaskWithSession(apiClient, seedData, `Resaved ${profileId}`);
+      await openTask(testPage, task.id);
+      await expect
+        .poll(async () => {
+          const sizes = await rootSizes(testPage);
+          return Math.abs(sizes[1] / (sizes[0] + sizes[1]) - 0.2);
+        })
+        .toBeLessThan(0.01);
+      await testPage.locator(".dv-tab", { hasText: PROMPT_TITLE }).click();
+      await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+      await prCapture.screenshot(`resaved-source-geometry-${profileId}`, {
+        caption: "Wide task retains source proportions after a constrained settings edit",
+      });
     });
   }
 
@@ -933,6 +954,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(240_000);
     await installFixturePlugin(testPage);
@@ -999,6 +1021,44 @@ test.describe("Plugin panel geometry in applied profiles", () => {
         return Math.abs(right / container - 0.2);
       })
       .toBeLessThan(0.03);
+    // Exercise the configured Agent/Files/plugin layout without the fixture's incidental review tab.
+    const fixtureReview = testPage.locator(".dv-tab", { hasText: "Bitbucket Pull Request #42" });
+    await expect(fixtureReview).toHaveCount(1);
+    await fixtureReview.hover();
+    await fixtureReview.locator(".dv-default-tab-action").click();
+    await expect(fixtureReview).toHaveCount(0);
+    const maximizeAgent = testPage
+      .locator(".dv-tabs-and-actions-container")
+      .filter({
+        has: testPage.getByTestId(`session-tab-${freshEnvironment.session_id}`),
+      })
+      .getByTestId("dockview-maximize-btn");
+    for (const action of ["hide", "maximize"]) {
+      const toggle = testPage.getByTestId("task-right-panels-toggle");
+      if (action === "hide") await toggle.click();
+      else await maximizeAgent.click();
+      await expect(testPage.locator(".dv-tab", { hasText: PROMPT_TITLE })).toHaveCount(0);
+      await testPage.setViewportSize({ width: 1900, height: 900 });
+      await expect.poll(() => getDockviewContainerWidth(testPage)).toBeGreaterThan(container + 250);
+      if (action === "hide") await expect(toggle).toBeEnabled();
+      if (action === "hide") await toggle.click();
+      else await maximizeAgent.click();
+      await expect
+        .poll(async () => {
+          const width = await getDockviewContainerWidth(testPage);
+          return Math.abs(((await rootSizes(testPage)).at(-1) ?? 0) / width - 0.2);
+        })
+        .toBeLessThan(0.01);
+      await expect(testPage.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+      expect(await hasManualRightWidth(testPage)).toBe(false);
+      await prCapture.screenshot(`restored-source-geometry-${action}`, {
+        caption: "Restored right pane resolves the source share at the resized container",
+      });
+      await testPage.setViewportSize({ width: 1600, height: 900 });
+      await expect
+        .poll(async () => Math.abs(((await rootSizes(testPage)).at(-1) ?? 0) / container - 0.2))
+        .toBeLessThan(0.01);
+    }
 
     await session.sidebarTaskItem("Notes Environment").click();
     await expect(testPage.getByTestId("e2e-notes-panel")).toBeVisible({ timeout: 15_000 });
@@ -1010,6 +1070,19 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     const [, rightBefore] = await rootSizes(testPage);
     await dragRootSash(testPage, "last", 1, rightBefore + 80);
     await expect.poll(() => hasManualRightWidth(testPage)).toBe(true);
+    const manualWidth = (await rootSizes(testPage)).at(-1) ?? 0;
+    for (const action of ["hide", "maximize"]) {
+      if (action === "hide") await testPage.getByTestId("task-right-panels-toggle").click();
+      else await maximizeAgent.click();
+      await expect(testPage.locator(".dv-tab", { hasText: PROMPT_TITLE })).toHaveCount(0);
+      await testPage.setViewportSize({ width: 1900, height: 900 });
+      if (action === "hide") await testPage.getByTestId("task-right-panels-toggle").click();
+      else await maximizeAgent.click();
+      await expect
+        .poll(async () => Math.abs(((await rootSizes(testPage)).at(-1) ?? 0) - manualWidth))
+        .toBeLessThan(3);
+      await testPage.setViewportSize({ width: 1600, height: 900 });
+    }
     void freshEnvironment;
   });
 });

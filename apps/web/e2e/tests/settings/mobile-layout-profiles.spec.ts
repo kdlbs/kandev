@@ -5,7 +5,13 @@ import {
 } from "../../helpers/layout-assertions";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { installFixturePlugin, uninstallFixturePlugin } from "../../helpers/plugin-fixture";
-import { PROMPT_ID, PROMPT_TITLE, pluginPanel } from "../../helpers/plugin-layout";
+import {
+  PROMPT_ID,
+  PROMPT_TITLE,
+  horizontalPluginLayout,
+  pluginPanel,
+  savedProfile,
+} from "../../helpers/plugin-layout";
 
 type SavedProfile = {
   id: string;
@@ -177,6 +183,51 @@ test.describe("Mobile layout profiles", () => {
     await layouts.addPanel("Todos", true);
     await expect(layouts.editor.locator(".dv-tab", { hasText: "Todos" })).toBeVisible();
   });
+
+  for (const profileId of ["layout-override-default", "phone-custom-geometry"]) {
+    test(`keeps ${profileId} source proportions after a phone tab edit and reload`, async ({
+      testPage,
+      apiClient,
+      prCapture,
+    }) => {
+      const baseline = (await apiClient.getUserSettings()).settings.saved_layouts;
+      try {
+        await installFixturePlugin(testPage);
+        await apiClient.saveUserSettings({
+          saved_layouts: [
+            savedProfile(
+              profileId,
+              "Phone geometry",
+              horizontalPluginLayout(pluginPanel(PROMPT_ID, PROMPT_TITLE), {
+                center: 960,
+                right: 240,
+              }),
+            ),
+          ],
+        });
+        const layouts = new LayoutSettingsPage(testPage);
+        await layouts.openFromSettingsIndex();
+        await layouts.editor.locator(".dv-tab", { hasText: "Files" }).tap();
+        await layouts.actions.getByRole("button", { name: "Move tab right" }).tap();
+        await layouts.save();
+        await testPage.reload();
+        await expect(layouts.editor.locator(".dv-tab", { hasText: PROMPT_TITLE })).toBeVisible();
+        const profile = (await apiClient.getUserSettings()).settings.saved_layouts.find(
+          (candidate) => candidate.id === profileId,
+        );
+        const layout = profile?.layout as { columns: Array<{ width: number }> };
+        expect(layout.columns.map((column) => column.width)).toEqual([960, 240]);
+        await assertNoDocumentHorizontalOverflow(testPage, "resaved phone geometry");
+        await layouts.editor.scrollIntoViewIfNeeded();
+        await prCapture.screenshot(`phone-source-geometry-${profileId}`, {
+          caption: "Phone tab editing retains the desktop profile's source proportions",
+        });
+      } finally {
+        await apiClient.saveUserSettings({ saved_layouts: baseline });
+        await uninstallFixturePlugin(apiClient);
+      }
+    });
+  }
 
   test("chooses a registered plugin panel with a separate touch tap and saves it", async ({
     testPage,
