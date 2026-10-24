@@ -154,6 +154,33 @@ describe("project filter", () => {
   });
 });
 
+describe("require blockers done", () => {
+  // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-002.1
+  it("round-trips the stored setting through the form into the payload", () => {
+    const form = watchForm({ filter: { teamKey: "ENG", requireBlockersDone: true } });
+    expect(form.requireBlockersDone).toBe(true);
+    expect(buildWatchPayload(form)?.filter.requireBlockersDone).toBe(true);
+  });
+
+  // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.5
+  it("is off for new and legacy watches and is omitted from their payload", () => {
+    expect(makeEmptyForm("ws-1").requireBlockersDone).toBe(false);
+    expect(watchForm({ filter: { teamKey: "ENG" } }).requireBlockersDone).toBe(false);
+    expect(buildWatchPayload(readyForm())?.filter.requireBlockersDone).toBeUndefined();
+  });
+
+  // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-001.5
+  it("does not make an otherwise empty filter ready", () => {
+    expect(isWatchFormReady(readyForm({ teamKey: "", requireBlockersDone: true }))).toBe(false);
+  });
+
+  // @covers AC-INTEGRATIONS-LINEAR-BLOCKERS-002.1
+  it("survives a workspace switch", () => {
+    const form = readyForm({ requireBlockersDone: true });
+    expect(switchWatchWorkspace(form, "ws-2").requireBlockersDone).toBe(true);
+  });
+});
+
 describe("switchWatchWorkspace", () => {
   it("clears the previous workspace's Linear IDs and keeps the team key", () => {
     const form = readyForm({

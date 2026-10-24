@@ -266,30 +266,56 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 			zap.String("watch_id", w.ID), zap.Error(err))
 		seen = nil
 	}
+	out, fetched, err := s.searchIssueWatchPages(ctx, client, w, seen)
+	if err != nil {
+		return nil, err
+	}
+	if w.Filter.RequireBlockersDone {
+		if out, err = s.holdBlockedIssues(ctx, client, w, out, fetched, seen); err != nil {
+			return nil, err
+		}
+	}
+	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
+		if err := attachProjectDescriptions(ctx, client, out); err != nil {
+			return nil, err
+		}
+	}
+	// Order dispatch so the most important issues win the in-flight slots.
+	sortIssues(out, w.SortBy)
+	return out, nil
+}
+
+// searchIssueWatchPages pages through a watch's matches and returns the unseen
+// issues plus the IDs of every issue the pages contained.
+func (s *Service) searchIssueWatchPages(
+	ctx context.Context, client Client, w *IssueWatch, seen map[string]struct{},
+) ([]*LinearIssue, map[string]struct{}, error) {
 	// Page through matches (bounded by maxPages) so the sort below ranks the
 	// whole unseen backlog. Linear only orders by created/updated, so priority
 	// ordering must be done here over the full fetched set. Default order is a
 	// no-op for sortIssues, so paginating a default watch buys nothing but
 	// extra Linear calls and larger dispatch bursts — keep it on the legacy
-	// single-page fetch.
+	// single-page fetch. A watch that holds blocked issues back still pages,
+	// so issues it can start are not hidden behind a full page of blocked ones.
 	maxPages := issueWatchMaxPages
-	if w.SortBy == SortByDefault {
+	if w.SortBy == SortByDefault && !w.Filter.RequireBlockersDone {
 		maxPages = 1
 	}
 	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
+	fetched := make(map[string]struct{})
 	pageToken := ""
 	for page := 0; page < maxPages; page++ {
 		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
 		if err != nil {
 			if page == 0 {
-				return nil, err
+				return nil, nil, err
 			}
 			// A canceled/expired context means the poll is being torn down.
 			// Abort instead of publishing issues from an incomplete fetch —
 			// dispatch detaches the context, so partial results would still
 			// create tasks during shutdown or a canceled manual trigger.
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
+				return nil, nil, err
 			}
 			// Any other later-page error is non-fatal: rank/dispatch what we
 			// have; the next poll retries from the top.
@@ -299,6 +325,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		for i := range res.Issues {
 			issue := res.Issues[i]
+			fetched[issue.ID] = struct{}{}
 			if _, ok := seen[issue.Identifier]; ok {
 				continue
 			}
@@ -309,14 +336,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 		}
 		pageToken = res.NextPageToken
 	}
-	if strings.Contains(w.Prompt, ProjectDescriptionPlaceholder) {
-		if err := attachProjectDescriptions(ctx, client, out); err != nil {
-			return nil, err
-		}
-	}
-	// Order dispatch so the most important issues win the in-flight slots.
-	sortIssues(out, w.SortBy)
-	return out, nil
+	return out, fetched, nil
 }
 
 // attachProjectDescriptions fills ProjectDescription on every issue that
@@ -550,6 +570,8 @@ func normalizeFilter(f SearchFilter) SearchFilter {
 		CreatorID:   strings.TrimSpace(f.CreatorID),
 		EstimateMin: f.EstimateMin,
 		EstimateMax: f.EstimateMax,
+
+		RequireBlockersDone: f.RequireBlockersDone,
 	}
 	out.StateIDs = trimIDs(f.StateIDs)
 	out.LabelIDs = trimIDs(f.LabelIDs)
