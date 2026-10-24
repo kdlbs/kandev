@@ -73,6 +73,33 @@ passes `false`; it now excludes terminal sessions, which it accepted before.
 Both promote through `SetPrimarySession`, which neither moves queued messages
 nor changes an explicit session selection (`001.4`).
 
+With `features.terminalPrimaryQueueHandoff` on (`001.5`), `SetPrimarySession`
+first reads the current primary. When that session is COMPLETED, FAILED or
+CANCELLED, after the promotion write it schedules `handOffTerminalSessionQueue`
+to run after the caller returns. Promotion runs inside the stopping session's
+queue admission while the transfer locks both sessions in ID order, so running
+it inline deadlocks when the receiver's ID sorts first; the scheduled hand-off
+uses a context that does not claim the caller's admission. The worker is
+derived from the service-owned worker context, so `Stop` cancels it and waits
+for it, and no hand-off starts after `Stop`. Hand-offs are serialized and each
+resolves the task's current primary when it runs, not when it was scheduled:
+if successive promotions fail one primary after another, an earlier hand-off
+delivers to the latest primary instead of a session that already handed its
+own queue on. It transfers the queue with
+`messagequeue.TransferRetiredSessionWithDurableAttachmentPreparation`
+(attachments and compensation included), which lifts the retired source's
+Auto-run pause inside the transfer's admission on both sessions, so the
+repository's combined setting is the receiver's own value at commit, including
+a pause the user set while the hand-off waited. Inside that admission the
+hand-off also confirms the receiver still holds the primary role, holding the
+read side of `primarySwitchMu` until the transfer returns; `SetPrimarySession`
+takes the write side only around its repository write. If the role moved
+first, the transfer rolls back and the hand-off resolves the primary again (up
+to five attempts). It then offers the new primary to
+`DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
+the queue on the terminal session. The flag is read once at startup into the
+orchestrator service config.
+
 ## Failure and recovery
 
 A failed task or step read during selection treats every session as matching,

@@ -70,6 +70,10 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -892,6 +896,19 @@ type Service struct {
 	parkedLoopCancel  context.CancelFunc
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
+
+	// terminalQueueHandOffMu serializes terminal primary queue hand-offs so
+	// each one resolves the current primary after earlier hand-offs finish.
+	terminalQueueHandOffMu sync.Mutex
+	// primarySwitchMu orders SetPrimarySession's role change against a
+	// terminal queue hand-off's commit. The hand-off holds the read side from
+	// its in-admission receiver check until the transfer returns, so the role
+	// cannot move between that check and the commit. Only the repository write
+	// runs under the write side, so no admission is ever awaited while it is held.
+	primarySwitchMu sync.RWMutex
+	// beforeTerminalQueueTransfer is a test hook that runs after a hand-off
+	// resolves its receiver and before it transfers the queue. Nil in production.
+	beforeTerminalQueueTransfer func(toSessionID string)
 
 	// silentRestore workers are bounded to the startup inventory and joined
 	// during shutdown before the repositories and runtime are torn down.

@@ -91,6 +91,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Moving queued messages off a terminal primary session is opt-in; by default
+  # every queued message keeps its explicit session target.
+  KANDEV_FEATURES_TERMINAL_PRIMARY_QUEUE_HANDOFF:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

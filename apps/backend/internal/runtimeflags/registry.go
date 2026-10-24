@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keyTerminalPrimaryQueueHandoff                = "features.terminalPrimaryQueueHandoff"
+	envTerminalPrimaryQueueHandoff                = "KANDEV_FEATURES_TERMINAL_PRIMARY_QUEUE_HANDOFF"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -215,6 +217,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyTerminalPrimaryQueueHandoff,
+			EnvVar:          envTerminalPrimaryQueueHandoff,
+			Kind:            KindFeature,
+			Label:           "Hand off queues of finished primary sessions",
+			Description:     "When a task's primary session fails, is cancelled or completes, moves its queued messages to the session that becomes primary.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Queued messages can be delivered to a different session than the one they were queued for. Leave it off to keep every queued message on its original session.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.TerminalPrimaryQueueHandoff },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.TerminalPrimaryQueueHandoff = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
