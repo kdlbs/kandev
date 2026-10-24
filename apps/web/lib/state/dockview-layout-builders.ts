@@ -21,7 +21,7 @@ import {
   getRootOrientation,
   getRootSidebarWidth,
 } from "./layout-manager/applier";
-import { getOwnedRightColumn } from "./layout-manager/owned-right-column";
+import { getPinnedRightColumn } from "./layout-manager/pinned-right-column";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { t } from "@/lib/i18n";
 
@@ -169,34 +169,11 @@ function restorePinnedRightTarget(
   }
 }
 
-/** Constrain stock right groups or every group in the owned reusable right root child,
- *  then record its target width, clamped to the cap.
- *
- *  For the DEFAULT preset (the right column is pinned — identified by the
- *  well-known RIGHT_TOP_GROUP), the target is anchored to a STABLE width: the
- *  per-env manual width passed by the restore, or the responsive default when none.
- *  It is deliberately NOT read from the live splitview: dockview's
- *  post-`fromJSON` proportional rebalance reports a transient/rescaled size,
- *  and persisting that as the target ratcheted the right column wider on every
- *  restore (the dockview-wrong-width drift). The sidebar is handled the same
- *  way in `captureSidebarTarget` — neither pinned column captures its live size.
- *
- *  For the vscode/preview/plan presets the side column has a generated group id
- *  and is NOT pinned, so there is no saved/default width to fall back on; there
- *  we keep recording the just-restored live width so switching to one of those
- *  tasks doesn't leak the previous task's right target. Identified by
- *  `sv.length >= 3` (sidebar + center + side), since we have no stable group id
- *  to key off.
- *
- *  The default-preset branch runs regardless of column count: a task with the
- *  sidebar hidden has sv.length=2 but the LAST child IS the pinned right
- *  column. Without per-env capture there, the stale global right target from a
- *  previous task's drag leaks through `enforcePinnedTargets` and snaps the
- *  restored column to the wrong width (per-task width persistence bug).
- *
- *  The 2-column global-fallback restore (sidebar + center, right panels
- *  stripped) is excluded because neither right group exists in `api.groups`
- *  and `sv.length < 3` — its last splitview child is the CENTER column. */
+/** Constrain every group in the actual pinned right root child, including saved generated groups.
+ *  Manual pixels, a matching reusable source, then stock defaults supply its stable target;
+ *  transient post-restore splitview widths must never become a pinned target.
+ *  Legacy non-pinned generated presets retain their live last-child policy.
+ *  A sidebar/center-only fallback has neither a pinned right child nor three root children. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function captureRightTarget(
   api: DockviewApi,
@@ -205,19 +182,15 @@ function captureRightTarget(
   manualRightWidth: number | null | undefined,
   ownerEnvId: string | null | undefined,
 ): void {
-  // Reusable owners constrain every group in their actual right root child.
-  // Non-owned restores retain the stock-group and generated-preset policies.
   const measuredWidth = layoutWidth(api);
   const rightCap = computeRightMaxPx(measuredWidth, getRootSidebarWidth(api));
-  const owned = getOwnedRightColumn(api, ownerEnvId);
-  const groups =
-    owned?.groups ??
-    api.groups.filter((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP);
+  const right = getPinnedRightColumn(api);
+  const groups = right?.groups ?? [];
   for (const group of groups) {
     group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
   }
   if (!sv || sv.length < 2) return;
-  const idx = owned?.index ?? sv.length - 1;
+  const idx = right?.index ?? sv.length - 1;
   // Pinned right columns use the stable owned/manual/default target, never transient live sizes.
   if (groups.length > 0) {
     const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth, ownerEnvId);

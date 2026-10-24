@@ -251,17 +251,24 @@ already resized the grid. Non-owned saved pixel targets keep their existing
 container-only policy; viewport refresh is unchanged. Manual pixel widths
 retain precedence; vertical roots never enter horizontal target refresh.
 
-For an active horizontal reusable owner, `getOwnedRightColumn` locates the
-actual live right root child through the existing tree capture and returns every
-group in that child. Settings splits may create generated group IDs, and
-workbench reusable capture intentionally drops IDs; neither changes ownership.
-Mounted refresh, loose constraints and sash bookkeeping use this membership,
-as do proactive state enforcement and final build fixups. Refresh every child
-group's cap from the measured container before restoring the column target,
-otherwise one narrow-screen cap can constrain the whole branch after expansion.
-State enforcement resolves owned source geometry ahead of stale pinned pixels,
-with actual manual pixels still first. Canonical group-ID fallback remains
-only for the existing non-owned stock/preset policy. No nested-sidebar policy,
+`getPinnedRightColumn` locates the actual live horizontal pinned right root child
+through the existing tree capture and returns its index and every group beneath
+it. This is structural discovery, independent of reusable source ownership.
+Settings-generated group IDs and ID-free workbench capture both participate,
+including saved environments after SPA return or cold restore has cleared the
+transient ratio source. Mounted constraints, target enforcement, both adjacent
+sash boundaries and width bookkeeping use this membership, as do proactive
+state enforcement and final build fixups. Refresh every child group's cap from
+the current container before restoring the target.
+
+Width-source ownership remains separate in `getReusableRightWidth` and the
+resolvers: manual pixels win, only the matching environment may use a reusable
+ratio, and saved restore must not adopt the currently selected portable default.
+Without a ratio owner, the saved stock/pixel policy still targets the actual
+right child, never an unrelated last child. A sash of that child writes the
+current task's manual preference even when no reusable source or a foreign
+source exists; it never writes the foreign environment's preference.
+Legacy non-pinned preset behavior remains unchanged. No nested-sidebar policy,
 portable schema or panel eligibility/lifecycle change is introduced.
 
 Root child count is not evidence of an embedded sidebar: settings Split tab >
@@ -272,12 +279,12 @@ resolution and both enforcement boundaries use that same measured reservation;
 neither the Agent nor another ordinary child may reduce the right-column cap.
 This does not introduce pinning for a nested sidebar.
 
-When the owned right child is between other root children, both adjacent root
+When the pinned right child is between other root children, both adjacent root
 sashes resize it. Persist its post-drag width after either boundary, never after
 a nested or unrelated sash. Task environments retain those raw manual pixels
 through later layout/display changes; null-environment staging remains transient
 and does not create a task-scoped manual preference. The ordinary last-column,
-foreign-owner and vertical exclusions retain their existing behavior.
+vertical exclusion and environment-scoped source checks retain their behavior.
 
 Right-pane reveal and maximize exit also resolve the owned source from the
 current measured container before applying their retained layouts. The resulting

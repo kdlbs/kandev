@@ -966,7 +966,7 @@ test.describe("Plugin panel geometry in applied profiles", () => {
       saved.columns[1].width! / saved.columns.reduce((sum, column) => sum + column.width!, 0);
     await testPage.setViewportSize({ width: 1520, height: 900 });
     const task = await createTaskWithSession(apiClient, seedData, "Three root geometry and sash");
-    await openTask(testPage, task.id);
+    const session = await openTask(testPage, task.id);
     await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
     for (const viewport of [1520, 1920, 1520, 1920]) {
       await testPage.setViewportSize({ width: viewport, height: 900 });
@@ -985,15 +985,13 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     }
     expect(await hasManualRightWidth(testPage)).toBe(false);
     await dragRootSash(testPage, "last", 1, 500);
-    await expect
-      .poll(() =>
-        testPage.evaluate(() =>
-          Object.entries(window.sessionStorage)
-            .filter(([key]) => key.startsWith("kandev.dockview.manual-right-width-v1."))
-            .map(([, value]) => JSON.parse(value) as number),
-        ),
-      )
-      .toEqual([500]);
+    const manualWidths = () =>
+      testPage.evaluate(() =>
+        Object.entries(window.sessionStorage)
+          .filter(([key]) => key.startsWith("kandev.dockview.manual-right-width-v1."))
+          .map(([, value]) => JSON.parse(value) as number),
+      );
+    await expect.poll(manualWidths).toEqual([500]);
     await testPage.locator(".dv-tab", { hasText: "Changes" }).click();
     await expect.poll(async () => (await rootSizes(testPage))[1]).toBe(500);
     for (const viewport of [1520, 1920]) {
@@ -1006,6 +1004,38 @@ test.describe("Plugin panel geometry in applied profiles", () => {
     await prCapture.screenshot("settings-three-root-trailing-sash", {
       caption: "Settings Right split keeps three root groups and a trailing-sash manual width",
     });
+    const awayTitle = "Three root saved restore neighbor";
+    const away = await createTaskWithSession(apiClient, seedData, awayTitle);
+    await session.clickTaskInSidebar(awayTitle);
+    await expect(testPage).toHaveURL(new RegExp(`/t/${away.id}`));
+    await session.waitForDockviewReady();
+    await expect
+      .poll(() => getDockviewGroupWidth(testPage, "files"))
+      .toBeCloseTo(Math.round(share * 1600), 0);
+    await session.clickTaskInSidebar("Three root geometry and sash");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`));
+    await session.waitForDockviewReady();
+    for (const restoration of ["task-return", "reload"]) {
+      if (restoration === "reload") {
+        await testPage.reload();
+        await session.waitForLoad();
+        await session.waitForDockviewReady();
+      }
+      await expect.poll(manualWidths).toEqual([500]);
+      await expect.poll(() => getDockviewGroupWidth(testPage, "files")).toBe(500);
+      expect(await rootSizes(testPage)).toHaveLength(3);
+      for (const viewport of [1520, 1920]) {
+        await testPage.setViewportSize({ width: viewport, height: 900 });
+        await expect.poll(() => getDockviewContainerWidth(testPage)).toBeCloseTo(viewport - 320, 0);
+        await expect.poll(() => getDockviewGroupWidth(testPage, "files")).toBe(500);
+        expect(await rootSizes(testPage)).toHaveLength(3);
+      }
+      await expect(testPage.getByTestId("fixture-prompt-history-panel")).toBeVisible();
+      await prCapture.screenshot(`settings-three-root-${restoration}`, {
+        caption:
+          "Saved task restores the middle Files manual width independently of reusable ratios",
+      });
+    }
   });
 
   test("applies a VERTICAL root profile with root-axis proportions, nested widths, and stable sash state", async ({

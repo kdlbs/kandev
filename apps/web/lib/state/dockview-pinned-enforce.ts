@@ -25,7 +25,7 @@ import {
   getPinnedTarget,
   computeSidebarMaxPx,
 } from "./layout-manager";
-import { getOwnedRightColumn } from "./layout-manager/owned-right-column";
+import { getPinnedRightColumn } from "./layout-manager/pinned-right-column";
 import { getRootSidebarWidth } from "./layout-manager/applier";
 import { getReusableRightWidth, setPinnedTarget } from "./layout-manager/pinned-targets";
 import { computeRightMaxPx, LAYOUT_PINNED_MIN_PX } from "./layout-manager/caps";
@@ -106,17 +106,17 @@ function enforceRightColumn(
   sv: RightSplitview,
 ): void {
   const width = measureDockviewGridWidth(api);
-  const owned = getOwnedRightColumn(api, ctx.envId);
+  const right = getPinnedRightColumn(api);
   const sidebarWidth = getRootSidebarWidth(api);
   const target = resolveRightTarget(ctx, sidebarWidth, width);
-  if (owned) {
+  if (right) {
     const maximumWidth = computeRightMaxPx(width, sidebarWidth);
-    for (const group of owned.groups) {
+    for (const group of right.groups) {
       group.api.setConstraints({ maximumWidth, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
     setPinnedTarget("right", target);
   }
-  restoreColumnToTarget(sv, owned?.index ?? sv.length - 1, target);
+  restoreColumnToTarget(sv, right?.index ?? sv.length - 1, target);
 }
 
 /**

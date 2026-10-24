@@ -810,8 +810,16 @@ describe("generated right group policy controls", () => {
       await settle();
       expect(rootSizes(api)).toEqual([1280, 320]);
       expect(getPinnedTarget("right")).toBe(320);
-      expect(api.getPanel(PROMPTS.id)!.group.maximumWidth).toBe(320);
       expect(getManualRightWidth("env-saved-generated")).toBeNull();
+      const sv = getRootSplitview(api);
+      const sash: HTMLElement = sv.sashes[0].container;
+      sash.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+      sv.resizeView(1, 660);
+      sash.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+      await settle();
+      expect(rootSizes(api)).toEqual([940, 660]);
+      expect(getManualRightWidth("env-saved-generated")).toBe(660);
+      expect(getManualRightWidth(owner)).toBeNull();
     },
   );
 });

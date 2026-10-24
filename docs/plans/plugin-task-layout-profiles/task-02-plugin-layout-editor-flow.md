@@ -982,3 +982,134 @@ Round 6 accepted three-root geometry remediation (2026-10-24, Sol 6.1):
   `python3 scripts/lint-spec-files.py --all` passed;
   `python3 scripts/lint-spec-files.test.py` passed all 36 tests;
   `git diff --check` passed.
+
+Round 7 accepted saved-environment geometry remediation (2026-10-24, Sol 6.1):
+
+- Starting HEAD `416ae956109e09e3b5341bd4490c2dd4e89c95c1`, initially clean.
+  Session metadata again confirmed exact profile
+  `af8936d3-6107-49fc-96a7-f4a488773939`; no workers or model substitution.
+- Structural right-child discovery incorrectly required transient reusable
+  ratio ownership. Environment switching correctly releases that source before
+  restoring saved geometry, but proactive enforcement then resized the last
+  root child and mounted canonical-only fallback lost generated right groups.
+  Audited setup's target/constraint refresh, both sash boundaries and width
+  bookkeeping, builders/fixups, proactive enforcement and saved restore.
+- RED, from `apps/web`:
+  `pnpm exec vitest run lib/state/dockview-three-root.plugin-layout.test.ts`:
+  6 failed, 22 passed before production edits. Actual settings Split Right plus
+  task capture/filtering produced valid all-generated three-root geometry.
+  A genuine sash stored 500px; real SPA A -> fresh B -> saved A restoration
+  changed Files to 567px while the plugin received 500px. Cold restore via
+  `persistEnvLayoutNow`, detached subscriptions, cleared transient targets,
+  fresh Dockview, `restoreEnvLayout` and `createAppStore` initially retained
+  500px but shrank Files to 375px after mounted 1200px sync. Canonical-last
+  restoration controls passed.
+- Expanded RED, before production:
+  `pnpm exec vitest run lib/state/dockview-three-root.plugin-layout.test.ts
+  lib/state/dockview-env-switch.plugin-layout.test.ts --silent`:
+  10 failed, 79 passed. Foreign/null ratio ownership must not suppress the
+  current saved task's structural sash or constrain it to an old narrow cap.
+  Replaced the old no-sash-on-foreign-source assumption with assertions that
+  the current environment receives its own manual width and the foreign
+  environment does not. Replaced a stale maximum-width-only assertion with
+  an actual 660px drag beyond that cap, checking extents and raw storage.
+- Minimum fix renames/replaces `owned-right-column.ts` with
+  `pinned-right-column.ts` and `getPinnedRightColumn`: live horizontal tree
+  membership/index does not require a ratio owner. Setup imports that single
+  structural helper rather than retaining canonical/last-child fallback.
+  Proactive enforcement and final fixups use the same actual child and all
+  groups. Deleted the obsolete owned helper/imports and canonical-only setup
+  convention; no alias or schema change. Legacy non-pinned preset behavior
+  remains separate. Ratio resolution still requires exact environment ownership,
+  including known/null distinction; saved restore does not claim the current
+  portable default's source. Manual pixels and existing caps remain first.
+- GREEN, same two-file command: 89 passed. The new no-manual negative control
+  initially expected an uncapped stock 480px; reading the unchanged initial
+  sizing policy established its existing legacy 450px cap. Corrected that
+  control to 450px, not production defaults. Real saved tests retain that
+  stock/pixel policy rather than adopting the newly selected 20% portable
+  ratio. Six manual restoration cases cover both generated adjacent sashes
+  and canonical-last controls across SPA/cold restore, subsequent title/layout
+  events and 1200/1600px sync. They assert original raw 500px, a new post-restore
+  520px drag, and another environment's separate 650px preference.
+- Existing mocked measurement/fixup fixtures now expose their real root-child
+  shape instead of relying on the removed group-ID-only fallback. Their
+  behavioral assertions remain unchanged. Existing VERTICAL, null staging,
+  nested/unrelated sash, Below/Right split and hide/maximize coverage remains.
+- Final affected command, after the last production edit, from `apps/web`:
+  `pnpm exec vitest run components/task/dockview-desktop-layout.env-switch.test.tsx
+  components/task/dockview-layout-restore lib/state/dockview-env-switch
+  lib/state/dockview-three-root.plugin-layout.test.ts
+  components/task/dockview-layout-setup lib/state/dockview-store.test.ts
+  lib/state/dockview-layout-builders lib/state/dockview-pinned-enforce.test.ts
+  lib/state/layout-manager components/settings/layouts
+  lib/layout/layout-profiles.test.ts lib/layout/layout-profiles.plugin-panels.test.ts`:
+  37 files, 477 tests passed. Nine changed TS/TSX files passed Prettier and
+  ESLint `--max-warnings 0`. LSP status was retried: no server configured;
+  focused reference search migrated every old helper call/import.
+- Formatting/lint commands were `pnpm exec prettier --write` and
+  `pnpm exec eslint --max-warnings 0`, each with this explicit path set:
+  `components/task/dockview-layout-setup.ts`,
+  `components/task/dockview-layout-setup.measurement.test.ts`,
+  `lib/state/dockview-layout-builders.ts`,
+  `lib/state/dockview-layout-builders-fixups.test.ts`,
+  `lib/state/dockview-pinned-enforce.ts`,
+  `lib/state/layout-manager/pinned-right-column.ts`,
+  `lib/state/dockview-env-switch.plugin-layout.test.ts`,
+  `lib/state/dockview-three-root.plugin-layout.test.ts`,
+  `e2e/tests/settings/layout-profiles.spec.ts`.
+  `NODE_OPTIONS=--max-old-space-size=10240 pnpm run typecheck` passed.
+- Fresh managed desktop verification:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --project chromium tests/settings/layout-profiles.spec.ts
+  tests/task/task-default-layout.spec.ts
+  tests/layout/saved-layout-session-isolation.spec.ts --retries=0`:
+  **22 passed**, one clean aggregate, no retries or isolated recovery.
+  Backend, Vite production assets and packaged fixture rebuilt.
+  Log: `kandev-run.e2e.uF0vDBlP.log` in the task-owned `tmp` directory above.
+- The existing three-root Right-split browser scenario now continues after
+  the genuine 500px trailing-sash drag: create a fresh neighboring task, click
+  away/return through the shipped task sidebar, assert the middle Files width,
+  then reload the page and assert it again. Both saved restoration paths check
+  actual raw manual storage `[500]`, three root children, Files width 500px and
+  visible packaged plugin content across subsequent 1200/1600px workbench
+  resizing. The fresh neighbor retains its own reusable source share.
+  This is not same-mount-only proof or a mocked resize/storage echo.
+- Inspected and retained the successful pre-switch, task-return and cold-reload
+  images under
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round7-visual/`.
+  Existing Below/Right split, narrow-editor, saved isolation and ordinary
+  default-layout browser scenarios all remain in the passing aggregate.
+- Existing PR-tab undefined-params serialization exclusion and normal-UI close
+  prerequisite remain unchanged in the earlier hide/maximize scenario.
+  No PR-tab-present reveal claim or validation weakening. No full `make test`
+  or exact-head real Prompt History package smoke was repeated; prior limits
+  remain historical evidence, not claimed resolved by this fix. No primary
+  instance, shared cache or unrelated lock was modified.
+- Mobile reused the same fresh production artifacts and task-owned storage:
+  `CAPTURE_PR_ASSETS=1
+  TMPDIR=/home/clem/.kandev/agent-scratch/plugin-layout-review/tmp
+  GOCACHE=/home/clem/.kandev/agent-scratch/plugin-layout-review/go-cache
+  scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host
+  --no-build --project mobile-chrome tests/settings/mobile-layout-profiles.spec.ts
+  --retries=0`: **8 passed**, log `kandev-run.e2e.0VFw1VAD.log`.
+  Inspected the shared phone editor image and preserved custom/override captures
+  alongside the desktop images in `round7-visual/`. No new phone composition
+  or phone task-layout behavior. Managed runtimes completed owned teardown.
+- Companion design now separates structural membership from environment-owned
+  ratio resolution, saved precedence and current-task sash persistence. Earlier
+  evidence and requirement/design lifecycle statuses are unchanged. Public
+  guidance and historical CHANGELOG remain unchanged: this restores existing
+  per-task manual width and saved-layout semantics.
+  Normal-hook delivery receipts:
+  `/home/clem/.kandev/agent-scratch/plugin-layout-review/round7-hook-receipt.json`
+  and companion `round7-commit-hooks.log`. No push, PR, deployment, primary
+  settings/runtime mutation, `step_complete`, archive or new worker/reviewer.
+- Documentation gates passed: `python3 scripts/list-docs.py validate`
+  (386 decisions, 1646 specifications);
+  `python3 scripts/lint-spec-files.py --all`;
+  `python3 scripts/lint-spec-files.test.py` (36 passed);
+  `git diff --check`.

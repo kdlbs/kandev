@@ -6,10 +6,7 @@ import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import {
   computeRightMaxPx,
   getPinnedTarget,
-  getRootOrientation,
   LAYOUT_PINNED_MIN_PX,
-  RIGHT_TOP_GROUP,
-  RIGHT_BOTTOM_GROUP,
   setPinnedTarget,
 } from "@/lib/state/layout-manager";
 import {
@@ -24,9 +21,9 @@ import {
 } from "@/lib/state/layout-manager/right-width";
 import { getReusableRightWidth } from "@/lib/state/layout-manager/pinned-targets";
 import {
-  getOwnedRightColumn,
+  getPinnedRightColumn,
   type PinnedRightColumn,
-} from "@/lib/state/layout-manager/owned-right-column";
+} from "@/lib/state/layout-manager/pinned-right-column";
 import { getRootSidebarWidth } from "@/lib/state/layout-manager/applier";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
 import { withHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
@@ -73,18 +70,6 @@ let enforcing = false;
  *  reverted to the previous target on every intermediate layout change. */
 let sashDragging = false;
 let rightSashDragging = false;
-
-/** Owned reusable layouts use the actual right root child; other layouts retain stock group policy. */
-function getPinnedRightColumn(api: DockviewReadyEvent["api"]) {
-  if (getRootOrientation(api) === "VERTICAL") return null;
-  const owned = getOwnedRightColumn(api, useDockviewStore.getState().currentLayoutEnvId);
-  if (owned) return owned;
-  const groups = api.groups.filter((group) =>
-    [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id),
-  );
-  const sv = getRootSplitview(api);
-  return groups.length && sv ? { index: sv.length - 1, groups } : null;
-}
 
 /** Recompute the automatic right-column pinned target from the measured grid
  *  width and sidebar visibility; no-op when the right column is hidden or the

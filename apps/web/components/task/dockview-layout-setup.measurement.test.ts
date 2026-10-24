@@ -44,13 +44,23 @@ it("measures once before layout writes and remeasures on the next resize", () =>
   const setConstraints = vi.fn((_constraints: { maximumWidth: number; minimumWidth: number }) =>
     geometryReads.push("write"),
   );
+  const rightGroup = {
+    id: RIGHT_TOP_GROUP,
+    panels: [{ id: "files" }],
+    api: { setConstraints },
+  };
   const api = {
     width: 2000,
     hasMaximizedGroup: () => false,
-    groups: [{ id: RIGHT_TOP_GROUP, api: { setConstraints } }],
+    groups: [rightGroup],
+    getPanel: () => undefined,
     component: {
       gridview: {
         root: {
+          children: [
+            { view: { id: "group-center", panels: [{ id: "chat" }] } },
+            { view: rightGroup },
+          ],
           splitview: {
             length: 2,
             getViewSize: () => 300,

@@ -54,27 +54,42 @@ const CENTER_GROUP = "group-center";
 const RIGHT_BOTTOM_GROUP = "group-right-bottom";
 
 let mockResizeView: ReturnType<typeof vi.fn>;
+let mockRootSplitview: NonNullable<ReturnType<typeof getRootSplitview>>;
 
 function mockSplitview(sizesByIndex: number[]): void {
   mockResizeView = vi.fn();
-  vi.mocked(getRootSplitview).mockReturnValue({
+  mockRootSplitview = {
     length: sizesByIndex.length,
     getViewSize: (idx: number) => sizesByIndex[idx],
     resizeView: mockResizeView,
-  } as unknown as NonNullable<ReturnType<typeof getRootSplitview>>);
+  };
+  vi.mocked(getRootSplitview).mockReturnValue(mockRootSplitview);
 }
 
 function makeApi(groupIds: string[]): DockviewApi {
-  const sidebarGroup = {
+  const groups = groupIds.map((id) => ({
+    id,
+    panels: [{ id: id === SIDEBAR_GROUP ? "sidebar" : id }],
     locked: undefined as unknown,
     header: { hidden: true },
     width: 0,
     api: { setConstraints: vi.fn() },
-  };
+  }));
+  const right = groups.filter((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+  const rightNode =
+    right.length > 1
+      ? { children: right.map((group) => ({ view: group })), splitview: { getViewSize: () => 350 } }
+      : { view: right[0] };
+  const children = [
+    ...groups.filter((group) => !right.includes(group)).map((group) => ({ view: group })),
+    ...(right.length ? [rightNode] : []),
+  ];
+  const sidebarGroup = groups.find((group) => group.id === SIDEBAR_GROUP);
   return {
     width: 1470,
-    groups: groupIds.map((id) => ({ id, api: { setConstraints: vi.fn() } })),
-    getPanel: (id: string) => (id === "sidebar" ? { group: sidebarGroup } : null),
+    groups,
+    component: { gridview: { root: { splitview: mockRootSplitview, children } } },
+    getPanel: (id: string) => (id === "sidebar" && sidebarGroup ? { group: sidebarGroup } : null),
   } as unknown as DockviewApi;
 }
 
