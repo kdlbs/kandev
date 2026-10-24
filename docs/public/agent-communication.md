@@ -51,6 +51,8 @@ An explicit spawn creates a distinct session even when the workflow step is conf
 
 The returned `agent_profile_id` is the actual profile persisted and launched on the distinct new session.
 
+Additional spawns preserve the workflow's existing source-session binding, including when the current step pins a profile. Later workflow steps can still target the original conversation.
+
 Delivery behaviour depends on the target session's state at the moment of the call:
 
 | Target session state | What happens | Return value |

@@ -49,9 +49,10 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		AgentProfileID: profileID,
 		// An explicit spawn must add a session even when profile resolution
 		// falls back to launch defaults. Never route it to a workflow session.
-		ProfileExplicit: true,
-		Prompt:          req.Prompt,
-		SpawnOrigin:     spawnOriginFromSession(spawner),
+		ProfileExplicit:         true,
+		PreserveWorkflowBinding: true,
+		Prompt:                  req.Prompt,
+		SpawnOrigin:             spawnOriginFromSession(spawner),
 	})
 	if err != nil {
 		if errors.Is(err, models.ErrWorkspacePreparing) {

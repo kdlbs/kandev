@@ -36,6 +36,14 @@ deployment requirement.
    identity, name, profile, source binding and committed workflow route remain
    intact.
 
+Additional MCP spawns also carry server-only `PreserveWorkflowBinding` intent,
+separate from `ProfileExplicit`, through the launch request and start options.
+It prevents a sibling session from replacing a pinned source step's binding.
+Ordinary workflow and selector-backed launches still record their source session.
+The ceiling start payload persists this intent and restores it on replay; an
+older payload without the field retains ordinary recording behavior. The flag
+is not accepted or exposed through the public session-launch JSON schema.
+
 ## Profile and failure behavior
 
 A non-empty resolved spawn profile wins over workflow pins, defaults, and
@@ -62,6 +70,11 @@ caller/primary inheritance, empty-profile error and normal-default behavior,
 Office ownership, unchanged source state, and ordinary workflow reuse. Existing
 handler tests cover authorization, caller attribution and launch/name failures.
 Tool registration tests and public documentation describe the same contract.
+
+Pinned-source regressions cover same/different supplied profiles, caller and
+primary inheritance, and unchanged complete binding records. Persisted ceiling
+replay preserves the original binding and downstream source-target resolution;
+ordinary workflow and selector launches are positive recording controls.
 
 This is source-level acceptance. Release acceptance requires the containing
 release to launch a distinct session into a guarded turn with the intended

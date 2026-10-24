@@ -1435,6 +1435,9 @@ type startTaskOptions struct {
 	// Explicit MCP spawns also set this flag to bypass workflow session-target
 	// routing while retaining normal defaults for an empty profile.
 	ProfileExplicit bool
+	// PreserveWorkflowBinding leaves the source conversation owned by the
+	// workflow when this launch only adds an independent session.
+	PreserveWorkflowBinding bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
@@ -1896,7 +1899,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, failPreparedLaunch(fmt.Errorf("failed to reload launch session: %w", err))
 	}
-	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
+	if !opts.PreserveWorkflowBinding && explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
 		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
 			return nil, failPreparedLaunch(fmt.Errorf("load workflow source step for session binding: %w", stepErr))
 		} else if sourceStep != nil {

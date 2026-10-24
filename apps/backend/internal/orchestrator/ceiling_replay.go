@@ -593,12 +593,13 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	automationRun := automationRunFromCeilingPayload(payload)
 
 	opts := startTaskOptions{
-		ProfileExplicit:      boolField(payload, "profile_explicit"),
-		Env:                  env,
-		Route:                route,
-		AdditionalSkillSlugs: additionalSkillSlugs,
-		EntryOptions:         entryOptions,
-		WorkflowEntryID:      int64Field(payload, "workflow_entry_id"),
+		ProfileExplicit:         boolField(payload, "profile_explicit"),
+		PreserveWorkflowBinding: boolField(payload, "preserve_workflow_binding"),
+		Env:                     env,
+		Route:                   route,
+		AdditionalSkillSlugs:    additionalSkillSlugs,
+		EntryOptions:            entryOptions,
+		WorkflowEntryID:         int64Field(payload, "workflow_entry_id"),
 		// Origin must round-trip rather than be re-derived from auto_start:
 		// an AC-13d caller (Office-routed launch) passes autoStart=false with
 		// an explicit automatic Origin override, and re-deriving from
