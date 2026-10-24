@@ -47,6 +47,8 @@ keyboard and focus behavior remain unchanged.
 - `apps/packages/ui/src/modal-drawer-context.tsx`: shared scoped contexts.
 - `apps/web/components/task/mobile/session-task-switcher-sheet.test.tsx`:
   animation-aware pointer restoration and standalone/modal regression coverage.
+- `apps/web/components/task/mobile/drawer-dropdown-modality.test.tsx`:
+  direct shared-primitive retained exit and Root/NestedRoot modal overrides.
 - `apps/web/e2e/tests/task/mobile-nested-workspace-navigation.spec.ts`:
   first A-to-B and second B-to-A navigation, keyboard dismissal and focus.
 
@@ -86,6 +88,24 @@ pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome e2e/tests/task
 Use repository synthetic seeders only. Assert original inline pointer style
 after navigation, continued outside blocking while the drawer remains open,
 and actual destination content, rather than checking only the URL.
+
+### Review coverage corrections
+
+The shared-primitive suite exercises the implicit dropdown default directly,
+independently of a workspace consumer that can explicitly opt out of modality.
+It covers retained exit with empty and `auto` pointer styles and all twelve
+Root/NestedRoot combinations of drawer mode and explicit/default dropdown mode.
+Together with the existing consumer suite, 26 component cases pass. Removing
+only the shared default handoff in an isolated test transform causes four
+failures while the twelve original consumer controls and ten other mode controls
+pass. The production implementation is unchanged.
+
+The browser roundtrip seeds one uniquely task-correlated conversation message
+in each workspace and checks the visible destination chat in both directions.
+Both phone scenarios pass without retries. A disposable wrong-content fixture
+fails the new conversation assertion despite reaching the correct URL. The five
+successful captures were opened and inspected. These are focused local results,
+not the maintainer's prepared candidate's hosted results or a full CI pass.
 
 ## Evidence boundaries
 

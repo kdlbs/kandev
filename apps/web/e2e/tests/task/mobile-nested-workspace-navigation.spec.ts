@@ -18,6 +18,15 @@ test("nested workspace menu releases the Tasks drawer lock on both navigation di
     workflowId: workflow.id,
     startStepId: step.id,
   });
+  for (const task of [first, second]) {
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].task_id).toBe(task.id);
+    await apiClient.seedSessionMessage(sessions[0].id, {
+      type: "message",
+      content: `Destination conversation ${task.id}`,
+    });
+  }
   await testPage.goto(`/t/${first.id}`);
   const originalPointerEvents = await testPage.evaluate(() => document.body.style.pointerEvents);
   const workspaceAName = await apiClient
@@ -27,7 +36,7 @@ test("nested workspace menu releases the Tasks drawer lock on both navigation di
     { task: second, name: other.name },
     { task: first, name: workspaceAName },
   ]) {
-    const { rows } = await surface(testPage, true);
+    const { session, rows } = await surface(testPage, true);
     await expect
       .poll(() => testPage.evaluate(() => document.body.style.pointerEvents))
       .toBe("none");
@@ -39,6 +48,9 @@ test("nested workspace menu releases the Tasks drawer lock on both navigation di
     await menu.getByRole("menuitem", { name: destination.name, exact: true }).tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${destination.task.id}$`));
     await expect(rows).toBeHidden();
+    await expect(session.activeChat()).toContainText(
+      `Destination conversation ${destination.task.id}`,
+    );
     await expect
       .poll(() => testPage.evaluate(() => document.body.style.pointerEvents))
       .toBe(originalPointerEvents);
