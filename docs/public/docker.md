@@ -105,7 +105,7 @@ docker run -d --name kandev-extension-check \
 docker logs kandev-extension-check
 ```
 
-Open `http://localhost:38430`, configure an agent CLI in this disposable instance, create a disposable task with a **Local** or **Worktree** executor profile and a disposable repository, and run this command in that task's agent terminal. It reads no credentials and prints only the effective user, paths, tool version, and cache ownership:
+Open `http://localhost:38430`, configure an agent CLI in this disposable instance, and create a disposable task with a **Local** or **Worktree** executor profile and a disposable repository. Ask the running agent to execute these commands with its command tool and return the output. The commands read no credentials and print only the effective user, paths, tool version, and cache ownership:
 
 ```sh
 id
@@ -118,7 +118,7 @@ stat -c '%u:%g %n' "$HOME" "$HOME/.cache/kandev-extension-check"
 printf 'created on first start\n' > "$HOME/.cache/kandev-extension-check/probe"
 ```
 
-Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.19, and writable cache paths owned by the service user. A shell launched through the actual agent is the decisive check; an interactive container shell can have a different environment. Recreate only this disposable container with the **same** volume and image:
+Expect user `kandev` (UID 1000), `HOME=/data/home`, a `PATH` containing `/usr/bin`, PostgreSQL 15.19, and writable cache paths owned by the service user. The agent's command result is the decisive check; Kandev's task terminal and an interactive container shell are separate processes and can have different environments. Recreate only this disposable container with the **same** volume and image:
 
 ```bash
 docker stop kandev-extension-check
@@ -130,7 +130,7 @@ docker run -d --name kandev-extension-check \
 docker logs kandev-extension-check
 ```
 
-In a new Local or Worktree agent session, rerun the user, path, version, and ownership checks, then run `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, remove only this labelled container and its disposable volume if they contain no work you need.
+In a new Local or Worktree agent session, ask the agent to rerun the user, path, version, and ownership checks through its command tool, then execute `cat "$HOME/.cache/kandev-extension-check/probe"`. It should print `created on first start`. A missing package version fails `docker build`; a runtime ownership or PATH failure appears in the agent command output and server logs. After validation, remove only this labelled container and its disposable volume if they contain no work you need.
 
 For image versus volume installs and PATH precedence, see the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md). The [runtime persistence details](#persistence) explain which paths survive recreation. This procedure checks the server image; the Local Docker executor uses a separate task image.
 
