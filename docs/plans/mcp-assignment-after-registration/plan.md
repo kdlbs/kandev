@@ -22,19 +22,63 @@ then saved-only completion, then the three owner handoffs and recovery.
 
 Implementation was explicitly authorized on 2026-10-23. Work orders 01 and 02 are
 complete. Work order 03 is pending and requires the committed
-management navigation prerequisite. Parent PR #3293 remains open at the verified
-193de56ba2597b335a97b1e5ab01d09340f22647 tip.
+management navigation prerequisite. Parent PR #3293 was squash-merged as
+`0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`. The assignment branch was rebased
+onto that verified current-main tip on 2026-10-24.
 
 ## Baseline and coordination
 
 - Task: `5a8cb5cd-22ee-42e5-bd6d-e2179e899c8c`.
 - Workspace: `/home/zeval/.kandev/tasks/clarify-mcp-assignme_ymv86j32/pr3293-followup-source-20261022`.
 - Own branch: `feature/clarify-mcp-assignme-mhh`.
-- Fetched parent: `feature/plan-workspace-mcp-c-dcc` at
+- Historical fetched parent: `feature/plan-workspace-mcp-c-dcc` at
   `193de56ba2597b335a97b1e5ab01d09340f22647`, verified 2026-10-22.
-- Separate stacked PR targets the parent branch while #3293 is open. Reconcile
-  actual merge and retarget to main afterward without replaying parent changes.
-  No merge is authorized. Do not mutate the parent or sibling workspace.
+- Current base: `main` at `0b81ae48d4e2c358f80ac489e39388dfd8d7e6ab`, verified
+  against the remote on 2026-10-24. A future assignment PR targets `main`.
+  No PR exists yet. No merge or remote history rewrite is authorized.
+  Do not mutate the parent or sibling workspace.
+
+### Main rebase, 2026-10-24
+
+The user authorized the local rebase through the coordinating session. The
+worktree was clean. Backup branch
+`backup/clarify-mcp-assignment-pre-main-rebase-20261024` preserves old tip
+`f442aa28d8099b4a41152b9a895e8d8572ae67fb`.
+Only the three task commits after `193de56ba2597b335a97b1e5ab01d09340f22647`
+were replayed. There were no conflicts. `git range-diff` reports identical
+patches for all three commits; no parent PR commits were replayed.
+
+| Work | Old commit | Rebased commit |
+| --- | --- | --- |
+| WO01 conditional writes | `f9137074309bebe99e2c7576baefe936bc20358f` | `23a403dc2224a668e7f35c60ff5892952608fd3b` |
+| WO02 saved registration | `ea9246963405d2559dd33670d68212a89445ae1e` | `6bad3f57f3445fd5cd46dfa0bd5d1313543a49f4` |
+| Native cancellation fixture | `f442aa28d8099b4a41152b9a895e8d8572ae67fb` | `c49beff601fa0ce0d324efdccb1b1bb205e7c49c` |
+
+Exclusions must retain OLD WO01 `f9137074309bebe99e2c7576baefe936bc20358f`
+as its historical branch boundary for its separately authorized rebase. The new
+WO01 is the replacement prerequisite, not the old range boundary. No exclusions
+workspace or branch was changed here. Its committed saved-selection comparison
+and neighboring E2E corrections remain a separate integration follow-up.
+WO03 still requires committed management task 02 navigation.
+
+Rebase validation on 2026-10-24:
+
+- Refreshed workspace dependencies with `pnpm install --frozen-lockfile`.
+- Backend `go test -trimpath -race` across MCP config, settings store, settings
+  handlers, and backendapp with `-run 'MCP|Selection|Effective' -count=1`: passed.
+- Disposable PostgreSQL 17 conditional-writer, resolution, import, and confirmed
+  deletion tests under the race detector: passed.
+- Eight focused frontend test files: 45 tests passed.
+- Web typecheck (8 GiB Node heap) and `i18n:check`: passed.
+- Changed Go package lint against the new main base: passed, zero issues.
+- Focused assignment E2E: three desktop and three phone cases passed with
+  retries disabled. Managed runners ran sequentially against isolated fixtures.
+- Documentation catalog, specification lint, public documentation validation,
+  and `git diff --check`: passed.
+
+All evidence above was rerun after the rebase. Historical commit hook receipts
+remain historical; rebasing does not mean those hooks ran again. The subsequent
+plan-only commit uses the normal hooks. No push or merge was performed.
 
 Read the current parent head and specifications again before implementation.
 The parent's testing guide is historical context; its old ports and counts
