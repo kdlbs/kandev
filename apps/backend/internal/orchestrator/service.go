@@ -1723,6 +1723,9 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	if err := s.prepareFailedDynamicRouteRetry(ctx, request); err != nil {
+		return nil, err
+	}
 	return s.routeActionHandler(ctx, request)
 }
 

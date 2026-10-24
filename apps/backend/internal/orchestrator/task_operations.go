@@ -1334,7 +1334,9 @@ func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID 
 		return nil
 	}
 	switch task.State {
-	case "", v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateReview:
+	// A failed attempt does not cancel a newly admitted CREATED/WFI session.
+	// Session terminal checks above and the task-state CAS still fence a stop.
+	case "", v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateReview, v1.TaskStateFailed:
 	default:
 		return fmt.Errorf("task %s is %s; cannot schedule session %s", taskID, task.State, sessionID)
 	}
