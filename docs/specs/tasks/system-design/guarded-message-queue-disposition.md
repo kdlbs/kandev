@@ -82,13 +82,18 @@ payload gets a distinct key, and non-scheduled sources never enter this path.
 
 ## Session ownership recovery
 
-`messagequeue.RecoverTaskSessionQueue` moves eligible pending entries from the
-previous primary session to its replacement under the task repository's
-transaction boundary. Stored entry snapshots preserve the original body,
-attachment descriptors, provenance, and ordering. A task-scoped recovery
-receipt identifies the committed snapshot and lets a retry return the prior
-result instead of enqueueing duplicate work. Recovery rejects stale session
-incarnations and mismatched task/workspace ownership.
+`task.Repository.RecoverTaskSessionQueue` validates and locks the task and both
+sessions, then calls `messagequeue.RecoverSessionQueueInTransaction` within the
+same transaction. The source must be terminal and non-primary, and the
+destination must be the task's primary session. Stored entry snapshots
+preserve the original body, attachment descriptors, provenance, and ordering.
+A task-scoped recovery receipt identifies the committed snapshot and lets a
+retry return the prior result while transferred entries remain in the
+destination queue or have active delivery claims. Once all transferred work
+has been delivered or disposed, the receipt snapshot is redacted; replay then
+reports expiration and never re-enqueues work. Recovery rejects stale session
+incarnations and mismatched task/workspace ownership. Intentionally disposed
+queue entries are not recoverable.
 
 `task.Repository.DeleteTaskSessionWithAttachments` verifies the exact session
 incarnation and checks the queue before removing the row. If queue work remains,

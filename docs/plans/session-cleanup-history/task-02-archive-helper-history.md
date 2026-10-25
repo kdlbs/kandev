@@ -36,7 +36,8 @@ across desktop, kanban preview, and mobile.
   and task-scoped cleanup receipt.
 - Hard-delete disposable terminal session state when no retained evidence
   requires history.
-- Exclude archived sessions from primary selection and prompt admission.
+- Exclude archived sessions from primary selection, automatic and manual
+  recovery, and new prompt admission.
 - Localized history visibility and transcript reopening on all three surfaces.
 
 ## Out of scope
@@ -56,8 +57,8 @@ touch target.
 
 - Cleanup archives terminal helper sessions with retained conversation
   evidence and preserves transcript access; disposable sessions are removed.
-- Archived sessions cannot become primary or receive new prompts, and retrying
-  cleanup returns the original receipt.
+- Archived sessions cannot become primary, resume, or receive new prompts, and
+  retrying cleanup returns the original receipt.
 - Users can hide or reveal archived history and reopen the preserved transcript
   on desktop, kanban preview, and mobile.
 
@@ -76,5 +77,9 @@ executed on `4fe5501a4755b245e29f69c2b672274ca3cf8b05`; earlier inspected
 desktop, preview, and phone captures were executed on
 `e3a7eec3f14a2baad5b99433658c79c7b83417b1` and cover unchanged layouts. The
 final service-summary fallback correction was verified separately on the
-accepted candidate. This work order records prior evidence and does not claim
-that the current documentation-only successor has been rerun in the browser.
+accepted candidate. A follow-up implementation guard rejects archived rows in
+resume candidate admission and promptable-session loading; the resumption hook
+also skips automatic inspection and manual resume for archived rows. Focused
+backend and hook regression checks cover those paths. This local successor's
+browser history evidence remains the earlier captures listed above; the local
+source guard changes do not claim new browser runtime evidence.

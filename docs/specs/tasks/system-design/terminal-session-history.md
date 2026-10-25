@@ -36,12 +36,17 @@ present, it requires the session queue to be empty, sets `task_sessions.archived
 and records an `archived` cleanup receipt without deleting transcript rows. If
 evidence is absent, the existing purge path removes disposable state and
 records the corresponding cleanup receipt. A failure before commit leaves the
-session and its evidence unchanged.
+session and its evidence unchanged. The receipt's `queue_before_count` is zero
+because cleanup commits only after verifying that no pending queue work remains;
+the field records that disposition invariant rather than a rejected attempt's
+queue size.
 
 Session summary queries and the service fallback projection both carry
-`archived_at` to the API. Primary promotion and session prompt admission exclude
-archived rows. The history filter changes only which summaries are shown; it
-does not reactivate an archived conversation.
+`archived_at` to the API. Primary promotion, resume candidate admission, and
+session prompt admission reject archived rows. The session resumption hook
+skips automatic status/recovery work and manual resume for archived history.
+The history filter changes only which summaries are shown; it does not
+reactivate an archived conversation.
 
 ## History controls
 

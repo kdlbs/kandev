@@ -126,6 +126,7 @@ export type SessionLike = {
   started_at?: string;
   updated_at?: string;
   state?: string;
+  archived_at?: string | null;
   queue_incarnation_id?: string;
   resume_projection_id?: string;
   session_recovery_blocks?: SessionRecoveryBlockProjection[];

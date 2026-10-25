@@ -3886,6 +3886,9 @@ func (s *Service) loadResumeSessionCandidate(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	if session.ArchivedAt != nil {
+		return nil, ErrSessionNotPromptable
+	}
 	// A claim still "starting" behind a live, prompt-ready runtime is an
 	// unfinished activation write, so this admission attempt retries the durable
 	// completion for the current generation before the pending-route guard can
@@ -8009,6 +8012,9 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if session.ArchivedAt != nil {
+		return nil, ErrSessionNotPromptable
 	}
 	if promptErr := s.checkSessionPromptable(taskID, sessionID, session.State); promptErr != nil {
 		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {

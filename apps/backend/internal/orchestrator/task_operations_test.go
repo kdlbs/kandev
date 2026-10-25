@@ -550,6 +550,19 @@ func TestPromptTask_EmptySessionID(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-TERMINAL-SESSION-HISTORY-001.6
+func TestLoadPromptableSession_ArchivedSessionRejected(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	archivedAt := time.Now().UTC()
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET archived_at = ? WHERE id = ?`, archivedAt, "session1")
+	require.NoError(t, err)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	_, err = svc.loadPromptableSession(ctx, "task1", "session1")
+	require.ErrorIs(t, err, ErrSessionNotPromptable)
+}
+
 func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -5926,6 +5939,31 @@ func TestResumeTaskSession_NotResumable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no executor running record exists")
 	}
+}
+
+// @covers AC-TASKS-TERMINAL-SESSION-HISTORY-001.6
+func TestResumeTaskSession_ArchivedSessionCannotResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+	archivedAt := time.Now().UTC()
+	_, err := repo.DB().ExecContext(ctx, `UPDATE task_sessions SET archived_at = ?, agent_profile_id = ? WHERE id = ?`, archivedAt, "profile-1", "session1")
+	require.NoError(t, err)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-2"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.loadResumeSessionCandidate(ctx, "task1", "session1", executor.ResumeOptions{}, nil)
+	require.ErrorIs(t, err, ErrSessionNotPromptable)
+	require.False(t, launchCalled, "archived history must not launch an agent")
 }
 
 func TestResumeTaskSession_ArchivedTaskSkipsFailedState(t *testing.T) {

@@ -30,7 +30,7 @@ owners to clean up disposable sessions.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.3:** When a terminal helper has retained conversation evidence, cleanup shall archive its session and preserve that evidence with an explicit archive time and a durable cleanup receipt.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.4:** When a terminal helper has no retained conversation evidence, cleanup may hard-delete its disposable session state and shall record the cleanup outcome.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.5:** When a cleanup operation is retried after commit, the system shall return the original task-scoped receipt without repeating destructive effects.
-- **AC-TASKS-TERMINAL-SESSION-HISTORY-001.6:** Archived sessions shall not be eligible for primary selection, resume, or new prompt admission.
+- **AC-TASKS-TERMINAL-SESSION-HISTORY-001.6:** Archived sessions shall not be eligible for primary selection, automatic or manual resume/recovery, or new prompt admission.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.7:** Desktop, kanban preview, and mobile shall hide archived sessions by default and let the user explicitly reveal and reopen their preserved conversation history.
 - **AC-TASKS-TERMINAL-SESSION-HISTORY-001.8:** History controls shall have localized accessible names and remain touch-accessible on mobile.
 
