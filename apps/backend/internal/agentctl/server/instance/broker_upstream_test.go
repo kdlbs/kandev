@@ -2,8 +2,15 @@ package instance
 
 import (
 	"errors"
+	"net/url"
 	"testing"
 )
+
+func withUserinfo(raw string) string {
+	u, _ := url.Parse(raw)
+	u.User = url.UserPassword("name", "secret")
+	return u.String()
+}
 
 func TestValidateBrokerUpstream(t *testing.T) {
 	valid := []string{"", "http://127.0.0.1:8080/api/v1/git/credentials/resolve", "https://kandev.example/x/resolve"}
@@ -14,7 +21,7 @@ func TestValidateBrokerUpstream(t *testing.T) {
 	}
 	invalid := []string{
 		" http://h/resolve", "ftp://h/resolve", "/resolve", "http:///resolve",
-		"http://u:p@h/resolve", "http://h/resolve?x=1", "http://h/resolve#f", "http://h/resolve?",
+		withUserinfo("http://h/resolve"), "http://h/resolve?x=1", "http://h/resolve#f", "http://h/resolve?",
 		"http://h/other", "http://h/resolve/", "://bad",
 	}
 	for _, raw := range invalid {
