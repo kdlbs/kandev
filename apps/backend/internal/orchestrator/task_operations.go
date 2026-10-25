@@ -3620,7 +3620,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	resumeCtx := cancellableResumeContext(attempt)
 	exactAssignment, err := s.resolveExactProfileAssignment(resumeCtx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(resumeCtx), taskID, sessionID, err)
 	}
 	receiptAttempted := false
 	defer func() {

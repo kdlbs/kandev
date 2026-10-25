@@ -737,3 +737,55 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 		t.Fatal("failed-closed receipt is missing its failure reason")
 	}
 }
+
+func TestResumeTaskSessionRecordsDenialWhenAssignedProfileChanges(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	task, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorkspaceID = "ws1"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	const revision int64 = 42
+	seedExactProfileBindingSnapshot(t, repo, revision)
+	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
+		TaskID: "task1", WorkspaceID: "ws1", AgentProfileID: "profile-exact", ProfileRevision: revision, Generation: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.AgentExecutionID = "exec-old"
+	session.AgentProfileID = "profile-exact"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	session.ExactProfileGeneration = 1
+	session.ExactProfileRevision = revision
+	seedExactProfileSessionBinding(t, repo, session)
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, session.AgentExecutionID)
+	agentMgr := &mockAgentManager{isAgentRunning: false, repoForExecutionLookup: repo,
+		resolveProfileInfo: &executor.AgentProfileInfo{ProfileID: "profile-exact", WorkspaceID: "ws1", Enabled: false,
+			Revision: revision, Model: "exact-model"},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", WorkspaceID: "ws1", Title: "Exact", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	if _, err := svc.ResumeTaskSession(ctx, "task1", "session1"); !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("resume error = %v, want invalid exact profile", err)
+	}
+	receipt, err := repo.GetExactProfileLaunchReceipt(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt == nil || receipt.Outcome != models.ExactProfileLaunchOutcomeFailedClosed || receipt.InferenceStarted || receipt.Generation != 1 {
+		t.Fatalf("resume denial receipt = %+v, want failed_closed without inference", receipt)
+	}
+}
