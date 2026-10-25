@@ -317,3 +317,44 @@ Command: `pnpm --dir apps/web e2e:run --host --no-build --project chromium
 tests/chat/agent-goal.spec.ts --retries=0 --repeat-each=3`, through the managed
 runner with `taskset`. Log: `/tmp/question-images-checks/kandev-run.e2e.ywYEMNB7.log`.
 Changed-file ESLint, specification lint, and documentation coverage passed.
+
+
+### Additional E2E setup boundaries
+
+Workflow [40197079428](https://github.com/kdlbs/kandev/actions/runs/40197079428)
+passed 4,240 cases on the first attempt and skipped 40. Five cases passed after
+retry. The mobile transcript-controls case failed its single attempt. The corrected
+Quick Chat goal case passed. The six additional failures exposed test setup
+boundaries outside the image feature:
+
+- Mobile sidebar and workspace tests now wait for the opening drawer animation
+  before using controls inside it. CI showed a missing nested drawer and a
+  detached workspace option during a tap.
+- The mobile file-tree test waits for layout observers after reopening Files,
+  matching its initial-open setup. CI sampled a four-pixel gap before measurement.
+- The review-scroll test waits for the populated diff and settled dialog before
+  its first gesture. A visible header alone does not enable auto-marking while
+  the diff is pending.
+- The mobile composer-layout test disables automatic scrolling through its UI
+  control before setting a programmatic transcript position. Otherwise resize
+  following can return the transcript to the end and remove Jump to latest.
+- The delayed port-hydration test controls browser time while holding its response.
+  The normal WebSocket request deadline is five seconds. The test must exercise
+  response ordering without racing that independent timeout during UI actions.
+  It restores the clock and releases the response in cleanup.
+
+The original five mobile cases passed one focused local run, and the original
+port case passed three. These local results do not invalidate CI failures. The
+corrected port case passed three runs without retries under two CPUs and one
+worker (`--project chromium tests/session/port-forward-dialog.spec.ts --grep
+'merges late tunnel hydration' --retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.WL7Vp6BC.log`. Changed-file lint passed.
+These corrections preserve product behavior, assertions, and production timeouts.
+
+
+All 15 corrected mobile checks passed under two CPUs and one worker, with
+`--project mobile-chrome --retries=0 --repeat-each=3` and the five affected
+scenarios selected by title. Log:
+`/tmp/question-images-checks/kandev-run.e2e.kGjfcgey.log`. Together with the port
+case, all 18 constrained checks passed. Documentation catalog, specification
+lint, and changed-file coverage checks passed.
