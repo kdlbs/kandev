@@ -259,7 +259,7 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	id := c.Param("id")
 
 	// First check if instance exists
-	inst, found := m.instMgr.GetInstance(id)
+	_, found := m.instMgr.GetInstance(id)
 	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "instance not found",
@@ -268,15 +268,13 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	}
 	// A delete that names the token fingerprint it expects removes only that
 	// instance: a replacement that took the ID meanwhile survives.
+	var expected string
 	if values, present := c.Request.Header[expectedTokenFingerprintHeader]; present {
 		if len(values) != 1 || values[0] == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expected token fingerprint"})
 			return
 		}
-		if values[0] != inst.MCPTokenFingerprint() {
-			c.JSON(http.StatusOK, messageBody(fingerprintDiffersMessage))
-			return
-		}
+		expected = values[0]
 	}
 
 	// Use a detached context so cleanup isn't canceled when the HTTP client disconnects.
@@ -285,7 +283,11 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	stopCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := m.instMgr.StopInstance(stopCtx, id)
+	stopped, err := m.stopForDelete(stopCtx, id, expected)
+	if err == nil && !stopped {
+		c.JSON(http.StatusOK, messageBody(fingerprintDiffersMessage))
+		return
+	}
 	if err != nil {
 		m.logger.Error("failed to stop instance", zap.String("id", id), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -297,6 +299,13 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "instance stopped successfully",
 	})
+}
+
+func (m *ControlServer) stopForDelete(ctx context.Context, id, expected string) (bool, error) {
+	if expected == "" {
+		return true, m.instMgr.StopInstance(ctx, id)
+	}
+	return m.instMgr.StopInstanceMatching(ctx, id, expected)
 }
 
 func messageBody(msg string) gin.H { return gin.H{"message": msg} }

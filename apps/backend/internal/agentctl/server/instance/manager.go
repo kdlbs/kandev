@@ -685,9 +685,37 @@ func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	return m.stopInstance(ctx, id, inst)
 }
 
+// StopInstanceMatching stops the instance only while it still holds the token
+// with the given fingerprint, reporting whether it was stopped. The comparison
+// and the stop act on the same instance, so a replacement that took the ID
+// meanwhile is never removed.
+func (m *Manager) StopInstanceMatching(ctx context.Context, id, tokenFingerprint string) (bool, error) {
+	m.mu.RLock()
+	inst, ok := m.instances[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false, fmt.Errorf("instance %s not found", id)
+	}
+	return m.stopInstanceIf(ctx, id, inst, tokenFingerprint)
+}
+
 func (m *Manager) stopInstance(ctx context.Context, id string, inst *Instance) error {
+	_, err := m.stopInstanceIf(ctx, id, inst, "")
+	return err
+}
+
+// stopInstanceIf tears the instance down; a non-empty fingerprint is checked
+// under the per-instance stop lock before any teardown starts.
+func (m *Manager) stopInstanceIf(ctx context.Context, id string, inst *Instance, fingerprint string) (bool, error) {
 	inst.stopMu.Lock()
 	defer inst.stopMu.Unlock()
+	if fingerprint != "" && inst.MCPTokenFingerprint() != fingerprint {
+		return false, nil
+	}
+	return true, m.stopInstanceLocked(ctx, id, inst)
+}
+
+func (m *Manager) stopInstanceLocked(ctx context.Context, id string, inst *Instance) error {
 
 	// A concurrent successful stop may have removed the instance while this
 	// caller waited for the per-instance teardown lock.

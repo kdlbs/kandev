@@ -158,3 +158,31 @@ func containsCapability(caps []any, want string) bool {
 	}
 	return false
 }
+
+// A delete that names the old token must not remove a replacement that took
+// the same ID, and the manager reports whether anything was removed.
+func TestStopInstanceMatchingLeavesReplacementAlone(t *testing.T) {
+	cs, mgr := tokenFixture(t)
+	if rec := createTokenInstance(t, cs, "swap", "tok-1"); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rec.Code)
+	}
+	if err := mgr.StopInstance(t.Context(), "swap"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := createTokenInstance(t, cs, "swap", "tok-2"); rec.Code != http.StatusCreated {
+		t.Fatalf("recreate: %d", rec.Code)
+	}
+	t.Cleanup(func() { _ = mgr.StopInstance(t.Context(), "swap") })
+
+	stopped, err := mgr.StopInstanceMatching(t.Context(), "swap", config.TokenFingerprint("tok-1"))
+	if err != nil || stopped {
+		t.Fatalf("stale fingerprint: stopped=%v err=%v", stopped, err)
+	}
+	if _, ok := mgr.GetInstance("swap"); !ok {
+		t.Fatal("replacement was removed by a delete naming the old token")
+	}
+	stopped, err = mgr.StopInstanceMatching(t.Context(), "swap", config.TokenFingerprint("tok-2"))
+	if err != nil || !stopped {
+		t.Fatalf("matching fingerprint: stopped=%v err=%v", stopped, err)
+	}
+}
