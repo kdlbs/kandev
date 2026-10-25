@@ -195,6 +195,7 @@ func (r *PluginRemoteExecutor) CreateInstance(ctx context.Context, req *Executor
 		return nil, err
 	}
 	r.uploadPluginExecutorAgentCredentials(ctx, client, launch.request)
+	r.applyPluginExecutorGitIdentity(ctx, client, launch.request)
 	return r.finishPluginExecutorLaunch(ctx, launch, resource, client, token)
 }
 
