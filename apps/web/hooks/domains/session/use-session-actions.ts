@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
+import { listTaskSessions } from "@/lib/api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionRestart } from "./use-session-restart";
+import type { TaskSession } from "@/lib/types/http";
 
 export { isSessionStoppable, isSessionDeletable, isSessionResumable } from "./session-action-state";
 
@@ -36,6 +38,27 @@ type WsActionFn = (
   payload: Record<string, unknown>,
   options?: WsActionOptions,
 ) => Promise<boolean>;
+
+async function reconcileSessionCleanup(
+  taskId: string,
+  sessionId: string,
+  quickChatTask: boolean,
+  onArchived: (session: TaskSession) => void,
+  onRemoved: () => void,
+) {
+  if (quickChatTask) {
+    onRemoved();
+    return;
+  }
+  try {
+    const { sessions } = await listTaskSessions(taskId, { cache: "no-store" });
+    const retained = sessions?.find((session) => session.id === sessionId);
+    if (retained?.archived_at) onArchived(retained);
+    else if (!retained) onRemoved();
+  } catch {
+    // The state-change event or next hydration reconciles a retained archive.
+  }
+}
 
 /** Reports a request outcome and returns false when the operation cannot succeed. */
 function useWsAction(): WsActionFn {
@@ -90,6 +113,7 @@ function useWsAction(): WsActionFn {
 export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActionsArgs) {
   const wsAction = useWsAction();
   const removeTaskSession = useAppStore((state) => state.removeTaskSession);
+  const upsertTaskSessionFromEvent = useAppStore((state) => state.upsertTaskSessionFromEvent);
   const removeQuickChatSession = useAppStore((state) => state.removeQuickChatSession);
   const appStoreApi = useAppStoreApi();
   const { restart, isRestarting, isRestartPending } = useSessionRestart(sessionId, taskId);
@@ -157,7 +181,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       if (state.tasks.activeSessionId === sessionId) {
         const sessions = state.taskSessionsByTask.itemsByTaskId[taskId] ?? [];
         const remaining = sessions
-          .filter((s) => s.id !== sessionId)
+          .filter((s) => s.id !== sessionId && !s.archived_at)
           .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
         if (remaining.length > 0) {
           state.setActiveSessionAuto(taskId, remaining[0].id);
@@ -166,8 +190,16 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
         }
       }
 
-      removeTaskSession(taskId, sessionId);
-      removeQuickChatSession(sessionId);
+      await reconcileSessionCleanup(
+        taskId,
+        sessionId,
+        deletionTarget.kind === "quick-chat-task",
+        (retained) => upsertTaskSessionFromEvent(taskId, retained),
+        () => {
+          removeTaskSession(taskId, sessionId);
+          removeQuickChatSession(sessionId);
+        },
+      );
       onDeleted?.();
       return true;
     },
@@ -176,6 +208,7 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
       taskId,
       wsAction,
       removeTaskSession,
+      upsertTaskSessionFromEvent,
       removeQuickChatSession,
       appStoreApi,
       onDeleted,

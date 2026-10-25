@@ -5292,7 +5292,7 @@ func (r *Repository) setSessionPrimary(
 	}
 
 	// Set primary flag on the specified session
-	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?`
+	promoteQuery := `UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ? AND archived_at IS NULL`
 	if requireNonterminal {
 		promoteQuery += ` AND state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')`
 	}

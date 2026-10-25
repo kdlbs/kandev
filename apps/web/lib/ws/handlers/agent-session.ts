@@ -244,6 +244,7 @@ export function isStaleSessionStateEvent(
 // composer can switch affordance without a refetch; cancellation_* carry the
 // backend-owned cancellation projection.
 const CARRIED_WHEN_DEFINED = [
+  "archived_at",
   "session_recovery_blocks",
   "review_status",
   "error_message",

@@ -38,6 +38,10 @@ func TestDeleteTaskSessionArchivesTerminalTranscript(t *testing.T) {
 	require.Equal(t, "archived", receipt.Disposition)
 	require.True(t, receipt.EvidenceRetained)
 	require.Zero(t, receipt.QueueBeforeCount)
+	require.Error(t, repo.SetSessionPrimary(ctx, "source-close"))
+	primary, err := repo.GetTaskSession(ctx, "primary-close")
+	require.NoError(t, err)
+	require.True(t, primary.IsPrimary)
 }
 
 func TestDeleteTaskSessionRejectsPrimaryAndDeletesDisposableTerminalSession(t *testing.T) {

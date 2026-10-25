@@ -36,11 +36,18 @@ test.describe("mobile: session deletion", () => {
     const sheet = testPage.getByRole("dialog", { name: "Sessions" });
     const helperRow = sheet.getByTestId(`mobile-session-row-${helper.session_id}`);
     await expect(helperRow).toHaveCount(0);
+    const historyToggle = sheet.getByTestId("mobile-session-history-toggle");
+    await expect(historyToggle).toBeInViewport({ ratio: 1 });
+    await sheet.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
+    await expect(testPage.getByText("Kandev update available")).toHaveCount(0, {
+      timeout: 10_000,
+    });
     await prCapture.screenshot("session-history-hidden-mobile", {
       caption: "Mobile session sheet with terminal helper sessions hidden by default",
     });
 
-    const historyToggle = sheet.getByTestId("mobile-session-history-toggle");
     await expect(historyToggle).toBeVisible();
     await historyToggle.tap();
     await expect(helperRow).toBeVisible();
@@ -53,6 +60,7 @@ test.describe("mobile: session deletion", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
 
@@ -118,6 +126,12 @@ test.describe("mobile: session deletion", () => {
     // says the task workspace and files are retained.
     await expect(confirmation).toContainText("removes the session from active views");
     await expect(confirmation).toContainText("task workspace and its files are kept");
+    await confirmation.evaluate((element) =>
+      Promise.all(element.getAnimations().map((animation) => animation.finished)),
+    );
+    await prCapture.screenshot("session-delete-confirmation-mobile", {
+      caption: "Mobile session deletion confirmation preserves the task workspace and files",
+    });
 
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(confirmation).not.toBeVisible();
