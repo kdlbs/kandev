@@ -108,6 +108,7 @@ type RepoPrepareSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RunGitHooks            bool
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
@@ -168,6 +169,7 @@ type EnvPrepareRequest struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RunGitHooks            bool
 	RemoteSyncHandled      bool
 	// RefreshRepository is an optional provider-authenticated refresh deferred
 	// until worktree materialization. A valid reusable worktree bypasses it.
@@ -231,6 +233,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		WorktreeBranchTemplate:     r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       r.WorktreeBranchTicket,
 		PullBeforeWorktree:         r.PullBeforeWorktree,
+		RunGitHooks:                r.RunGitHooks,
 		RemoteSyncHandled:          r.RemoteSyncHandled,
 		RefreshRepository:          r.RefreshRepository,
 		RefreshRepositoryWithState: r.RefreshRepositoryWithState,

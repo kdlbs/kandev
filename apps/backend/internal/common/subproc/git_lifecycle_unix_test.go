@@ -20,7 +20,7 @@ func TestGitHelperCancellationReleasesSlot(t *testing.T) {
 	defer restore()
 
 	fakeDir, env := writeGitLifecycleFixture(t, `#!/bin/sh
-if [ "$1" = hold ]; then
+if printf "%s\n" "$@" | grep -qx for-each-ref; then
   (trap '' TERM INT; while :; do sleep 1; done) &
   printf '%s\n' "$!" > "$GIT_TEST_CHILD_PID"
   printf started > "$GIT_TEST_STARTED"
@@ -39,7 +39,7 @@ printf quick
 	}, 1)
 	go func() {
 		output, runErr, execErr := RunGitOutputAfterAcquire(ctx, GitLifecycle, time.Second, func(execCtx context.Context) *exec.Cmd {
-			cmd := NewGitCommand(execCtx, "hold")
+			cmd := NewGitCommand(execCtx, "for-each-ref")
 			cmd.Env = append([]string(nil), env...)
 			return cmd
 		})
@@ -60,7 +60,7 @@ printf quick
 	quickCtx, quickCancel := context.WithTimeout(context.Background(), time.Second)
 	defer quickCancel()
 	quick, runErr, execErr := RunGitOutputAfterAcquire(quickCtx, GitLifecycle, time.Second, func(execCtx context.Context) *exec.Cmd {
-		cmd := NewGitCommand(execCtx, "quick")
+		cmd := NewGitCommand(execCtx, "var")
 		cmd.Env = append([]string(nil), env...)
 		return cmd
 	})
@@ -75,7 +75,7 @@ printf quick
 
 func TestGitDescendantPipeCleanup(t *testing.T) {
 	fakeDir, env := writeGitLifecycleFixture(t, `#!/bin/sh
-if [ "$1" = descendant ]; then
+if printf "%s\n" "$@" | grep -qx rev-list; then
   (trap '' TERM INT; while :; do sleep 1; done) &
   printf '%s\n' "$!" > "$GIT_TEST_CHILD_PID"
   printf started > "$GIT_TEST_STARTED"
@@ -103,7 +103,7 @@ printf quick
 	}, 1)
 	go func() {
 		output, runErr, execErr := RunGitOutputAfterAcquire(ctx, GitLifecycle, time.Second, func(execCtx context.Context) *exec.Cmd {
-			cmd := NewGitCommand(execCtx, "descendant")
+			cmd := NewGitCommand(execCtx, "rev-list")
 			cmd.Env = append([]string(nil), env...)
 			return cmd
 		})
@@ -130,7 +130,7 @@ printf quick
 
 func TestGitDescendantPipeCleanupAfterParentExit(t *testing.T) {
 	fakeDir, env := writeGitLifecycleFixture(t, `#!/bin/sh
-if [ "$1" = descendant ]; then
+if printf "%s\n" "$@" | grep -qx rev-list; then
   (trap '' TERM INT; while :; do sleep 1; done) &
   printf '%s\n' "$!" > "$GIT_TEST_CHILD_PID"
   printf started > "$GIT_TEST_STARTED"
@@ -144,7 +144,7 @@ printf quick
 	output, runErr, execErr := RunGitOutputAfterAcquire(
 		context.Background(), GitLifecycle, time.Second,
 		func(execCtx context.Context) *exec.Cmd {
-			cmd := NewGitCommand(execCtx, "descendant")
+			cmd := NewGitCommand(execCtx, "rev-list")
 			cmd.Env = append([]string(nil), env...)
 			return cmd
 		},

@@ -288,6 +288,7 @@ export async function createRepositoryAction(payload: {
   worktree_branch_prefix: string;
   worktree_branch_template: string;
   pull_before_worktree: boolean;
+  run_git_hooks?: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
@@ -311,6 +312,7 @@ export async function createRepositoryAction(payload: {
         worktree_branch_prefix: payload.worktree_branch_prefix,
         worktree_branch_template: payload.worktree_branch_template,
         pull_before_worktree: payload.pull_before_worktree,
+        run_git_hooks: payload.run_git_hooks,
         setup_script: payload.setup_script,
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,

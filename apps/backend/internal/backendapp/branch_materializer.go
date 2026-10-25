@@ -193,6 +193,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		WorktreeBranchTemplate: taskRepositoryBranchTemplate(repo, tr),
 		WorktreeBranchTicket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
 		PullBeforeWorktree:     repo.PullBeforeWorktree,
+		RunGitHooks:            repo.RunGitHooks,
 		TaskDirName:            env.TaskDirName,
 		WorkspaceRelativePath:  tr.WorkspaceRelativePath,
 		RepoName:               repo.Name,

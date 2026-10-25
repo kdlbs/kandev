@@ -40,7 +40,7 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 		t.Run(tc.name, func(t *testing.T) {
 			binDir := canonicalTempDir(t)
 			capturePath := filepath.Join(canonicalTempDir(t), "git-env")
-			fakeGit := "#!/bin/sh\nprintf '%s\\n%s' \"$GIT_CONFIG_KEY_1\" \"$GIT_CONFIG_VALUE_1\" > \"$CAPTURE_PATH\"\n" +
+			fakeGit := "#!/bin/sh\ncase \"$*\" in *--get-regexp*) exit 1;; esac\nprintf '%s\\n%s' \"$GIT_CONFIG_KEY_1\" \"$GIT_CONFIG_VALUE_1\" > \"$CAPTURE_PATH\"\n" +
 				"helper_command=${GIT_CONFIG_VALUE_1#!}\nsh -c \"$helper_command get\" > \"$CAPTURE_PATH.helper\"\n" +
 				"if [ \"$BLOCK_GIT\" = 1 ]; then exec sleep 10; fi\nexit 1\n"
 			if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(fakeGit), 0o755); err != nil {
@@ -155,8 +155,9 @@ func TestScopedWorkspaceRefreshUsesOnlyAuthenticatedOrigin(t *testing.T) {
 	}
 	capturePath := filepath.Join(root, "git-refresh")
 	fakeGit := `#!/bin/sh
-if [ "$3" = "config" ]; then printf '%s\n' "https://bitbucket.org/acme/repository.git"; exit 0; fi
-if [ "$3" = "remote" ]; then exit 0; fi
+while [ "$1" = -C ] || [ "$1" = -c ]; do shift 2; done
+if [ "$1" = "config" ]; then printf '%s\n' "https://bitbucket.org/acme/repository.git"; exit 0; fi
+if [ "$1" = "remote" ]; then exit 0; fi
 	printf '%s\n' "$@" >> "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
 helper_command=${GIT_CONFIG_VALUE_1#!}
@@ -229,8 +230,9 @@ func TestScopedWorkspaceBasicAuthRefreshUsesExactCheckout(t *testing.T) {
 	}
 	capturePath := filepath.Join(root, "git-basic-refresh")
 	fakeGit := `#!/bin/sh
-if [ "$3" = "config" ]; then printf '%s\n' "https://dev.azure.com/acme/p/_git/repository"; exit 0; fi
-if [ "$3" = "remote" ]; then exit 0; fi
+while [ "$1" = -C ] || [ "$1" = -c ]; do shift 2; done
+if [ "$1" = "config" ]; then printf '%s\n' "https://dev.azure.com/acme/p/_git/repository"; exit 0; fi
+if [ "$1" = "remote" ]; then exit 0; fi
 printf '%s\n' "$@" > "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
 helper_command=${GIT_CONFIG_VALUE_1#!}

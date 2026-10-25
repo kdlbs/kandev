@@ -3648,6 +3648,16 @@
           "authority": "workspace.manage",
           "sensitive": true,
           "settings_href": "/settings"
+        },
+        {
+          "key": "repository.run_git_hooks",
+          "field_path": "run_git_hooks",
+          "label": "Run Git hooks",
+          "description": "Whether Kandev-managed Git runs this repository's hooks. Changed only from repository settings.",
+          "json_type": "boolean",
+          "support": "read_only",
+          "classification": "computed",
+          "owner": "workspace"
         }
       ],
       "operations": [

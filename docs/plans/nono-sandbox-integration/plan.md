@@ -12,10 +12,14 @@ requirements:
   - REQ-AGENTS-SANDBOX-008
   - REQ-PLUGINS-SANDBOX-001
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005
+  - REQ-AGENTS-GITISOLATION-001
+  - REQ-AGENTS-GITISOLATION-002
+  - REQ-AGENTS-GITISOLATION-003
 system_design:
   - ../../specs/agents/system-design/sandbox-policies.md
   - ../../specs/plugins/system-design/sandbox-provider-capability.md
   - ../../specs/tasks/system-design/bootstrap-attempt-recovery.md
+  - ../../specs/agents/system-design/managed-git-repository-code-isolation.md
 legacy_specs: []
 ---
 
@@ -143,6 +147,7 @@ Each criterion listed in work-order frontmatter needs a behavioral assertion, no
 | SANDBOX-007.1-6 | `profile-execution-section.test.tsx`, `policy_test.go`: prefix preservation, plugins-disabled save, executor context, coexistence, source and ceiling |
 | SANDBOX-008.1-2, .4, .8 | `execution_snapshot_test.go`: `TestExecutionSnapshot`, `TestExecutionEvidence`. `execution-status.test.ts`: stale/foreign events, reconnect, legacy unknown, redaction, current/next separation |
 | SANDBOX-008.3, .5-7 | `session-execution-indicator.test.tsx`, `session-execution-details.test.tsx`: truthful icons, protection scope, capability states, keyboard, touch and tab event isolation |
+| GITISOLATION-001.1-15, 002.1-9, 003.1-4 | Evidence is owned by the [managed Git plan](../managed-git-repository-code-isolation/plan.md): `subproc/git_policy_test.go`, hooks persistence and propagation tests, repository settings Playwright on desktop and mobile |
 | TASK-LAUNCH-FAILURE-RECOVERY-005.1-5 | `bootstrap_attempt_recovery_test.go`: `TestBootstrapAttempt`, pending-launch controls, same-session retry, sibling isolation, exact queue dispatch |
 
 ## E2E tests
@@ -170,9 +175,10 @@ No broad suite or generic review work order is added.
 - [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
 - [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
+- [ ] [Task 11: Isolate managed Git from repository-supplied code](task-11-managed-git-isolation.md)
 
 Execute sequentially in listed order: 01, 02, 03, 04, 05, 06, 07, 10, 08, 09.
-Task IDs remain stable after adding Task 10. Dependency lists state hard prerequisites, not permission to delegate.
+Task 11 has no dependency on the others and may run at any point. Task IDs remain stable after adding Task 10 and Task 11. Dependency lists state hard prerequisites, not permission to delegate.
 The user retains model and implementation control in this primary session.
 
 ## Delivery
@@ -188,6 +194,8 @@ Integrate later main changes only on this feature branch and rerun affected chec
 Use `gh pr create --draft --base main --body-file <prepared-file>` after authorized commit/push and task checks.
 Use the repository PR template. Identify #4538 as the merged prerequisite and distinguish host and plugin deliverables.
 Never commit or push to the former parent branch. Do not merge the follow-up PR.
+
+Task 11 is the one exception. It ships as a PR on `nova28/kandev` with base `sandbox/nono-plus`; the operator lifted the embargo for it. Push with `git push fork HEAD:refs/heads/<branch>` and open it with `gh pr create --repo nova28/kandev --base sandbox/nono-plus`. Never open a PR on `kdlbs/kandev`.
 
 ## Verification results
 
@@ -205,6 +213,8 @@ The coverage check used `/tmp/kandev-nono-design-evidence/validate-coverage.cjs`
 It did not modify runtime source or publish a GitHub check.
 The STE check retains advisory passive-voice findings and does not claim formal dictionary compliance.
 The original nine implementation work orders remained pending at that checkpoint.
+
+Managed Git amendment on 2026-10-26: Task 11 adds an eleventh work order, tracked through the managed Git plan.
 
 Execution UI amendment on 2026-10-23: ten work orders now remain pending.
 Amendment validation passed:

@@ -469,6 +469,7 @@ type httpCreateRepositoryRequest struct {
 	WorktreeBranchPrefix   string                                 `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate string                                 `json:"worktree_branch_template"`
 	PullBeforeWorktree     *bool                                  `json:"pull_before_worktree"`
+	RunGitHooks            *bool                                  `json:"run_git_hooks"`
 	SetupScript            string                                 `json:"setup_script"`
 	CleanupScript          string                                 `json:"cleanup_script"`
 	DevScript              string                                 `json:"dev_script"`
@@ -610,6 +611,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
 		PullBeforeWorktree:     body.PullBeforeWorktree,
+		RunGitHooks:            body.RunGitHooks,
 		SetupScript:            body.SetupScript,
 		CleanupScript:          body.CleanupScript,
 		DevScript:              body.DevScript,
@@ -701,6 +703,7 @@ type httpUpdateRepositoryRequest struct {
 	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix"`
 	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template"`
 	PullBeforeWorktree     *bool                                   `json:"pull_before_worktree"`
+	RunGitHooks            *bool                                   `json:"run_git_hooks"`
 	SetupScript            *string                                 `json:"setup_script"`
 	CleanupScript          *string                                 `json:"cleanup_script"`
 	DevScript              *string                                 `json:"dev_script"`
@@ -731,6 +734,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
 		PullBeforeWorktree:     body.PullBeforeWorktree,
+		RunGitHooks:            body.RunGitHooks,
 		SetupScript:            body.SetupScript,
 		CleanupScript:          body.CleanupScript,
 		DevScript:              body.DevScript,

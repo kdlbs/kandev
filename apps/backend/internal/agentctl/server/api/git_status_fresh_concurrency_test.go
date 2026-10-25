@@ -282,7 +282,13 @@ func (g *gitStatusCommandGate) assertInvocationCounts(t *testing.T, repos []stri
 }
 
 const gitStatusWrapperScript = `#!/bin/sh
-if [ "$#" -ge 3 ] && [ "$1" = "status" ] && [ "$2" = "--porcelain" ] && [ "$3" = "--untracked-files=no" ]; then
+if [ "$1" = "-c" ] || [ "$1" = "--config-env" ]; then
+	managed_args=$(printf '%s\n' "$@" | awk 'f{print;next} $0=="-c"||$0=="--config-env"{getline;next} {f=1;print}')
+else
+	managed_args=$(printf '%s\n' "$@")
+fi
+first_args=$(printf '%s\n' "$managed_args" | head -n 3 | tr '\n' ' ')
+if [ "$first_args" = "status --porcelain --untracked-files=no " ]; then
 	repo=${PWD##*/}
 	printf '%s\n' "$repo" >> "$KANDEV_TEST_GIT_LOG"
 	printf '%s\n' "$repo" > "$KANDEV_TEST_GIT_EVENTS"

@@ -238,6 +238,9 @@ if [ -n "${KD_GIT_LOG:-}" ]; then
 fi
 
 case "${1:-} ${2:-}" in
+	"config --null")
+		exit 1
+		;;
 	"rev-parse --verify")
 		echo "1111111111111111111111111111111111111111"
 		exit 0

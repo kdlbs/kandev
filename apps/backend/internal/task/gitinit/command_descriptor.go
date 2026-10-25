@@ -73,7 +73,13 @@ func runInheritedDirectory(gitPath string, gitArgs []string) int {
 		fmt.Fprintf(os.Stderr, "git init helper: enter inherited directory: %v\n", err)
 		return 1
 	}
-	if err := subproc.ExecGit(gitPath, gitArgs, withoutHelperEnvironment(os.Environ())); err != nil {
+	env := withoutHelperEnvironment(os.Environ())
+	vector, err := subproc.ManagedGitArgs(context.Background(), env, gitArgs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git init helper: managed Git policy: %v\n", err)
+		return 1
+	}
+	if err := subproc.ExecGit(gitPath, vector, subproc.ManagedGitEnv(env)); err != nil {
 		fmt.Fprintf(os.Stderr, "git init helper: execute git: %v\n", err)
 		return 1
 	}

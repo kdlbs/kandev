@@ -194,7 +194,42 @@ func startManagedGit(ctx context.Context, cmd *exec.Cmd, pipes ...io.Closer) (*m
 		return nil, err
 	}
 	PrepareGitCommand(cmd)
+	if err := applyManagedGitPolicy(ctx, cmd); err != nil {
+		_ = closeGitPipes(pipes...)
+		return nil, err
+	}
+	return startManagedGitUnpolicied(ctx, cmd, pipes...)
+}
+
+// applyManagedGitPolicy rewrites the argument vector of a Git command so it
+// starts no repository-supplied program. A command whose executable is not Git
+// is left alone.
+func applyManagedGitPolicy(ctx context.Context, cmd *exec.Cmd) error {
+	if len(cmd.Args) == 0 || cmd.Args[0] != gitBinaryName || !isGitExecutable(cmd.Path) {
+		return nil
+	}
+	vector, err := buildManagedGitVector(ctx, cmd.Dir, cmd.Env, cmd.Args[1:])
+	if err != nil {
+		return err
+	}
+	cmd.Args = append([]string{gitBinaryName}, vector...)
+	cmd.Env = ManagedGitEnv(cmd.Env)
+	return nil
+}
+
+func isGitExecutable(path string) bool {
+	if path == gitBinaryName {
+		return true
+	}
+	resolved, err := GitExecutablePath()
+	return err == nil && path == resolved
+}
+
+// startManagedGitUnpolicied starts a prepared command without rewriting it.
+// Driver enumeration uses it so it does not enumerate itself.
+func startManagedGitUnpolicied(ctx context.Context, cmd *exec.Cmd, pipes ...io.Closer) (*managedGitProcess, error) {
 	if err := prepareGitLifecycleCommand(cmd); err != nil {
+		_ = closeGitPipes(pipes...)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {

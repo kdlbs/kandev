@@ -379,6 +379,9 @@ func TestPluginExecutorLeasedControlHandshakeAndInstanceCreation(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"token":"issued-control-token"}`))
+		case "/identity":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(managedGitIdentityBody))
 		case "/api/v1/instances":
 			var request struct {
 				ID        string `json:"id"`
@@ -432,9 +435,10 @@ func TestPluginExecutorLeasedControlHandshakeAndInstanceCreation(t *testing.T) {
 	if err != nil || created == nil || created.Port != 41234 {
 		t.Fatalf("CreateInstance() = %#v, %v", created, err)
 	}
-	if len(calls) != 2 || calls[0].authorization != "" || calls[1].authorization != "Bearer issued-control-token" ||
-		calls[0].lease != "lease-1" || calls[1].lease != "lease-1" {
-		t.Fatalf("control requests = %+v, want handshake then authenticated create with the provider lease", calls)
+	if len(calls) != 3 || calls[0].authorization != "" || calls[1].path != "/identity" ||
+		calls[2].authorization != "Bearer issued-control-token" ||
+		calls[0].lease != "lease-1" || calls[1].lease != "lease-1" || calls[2].lease != "lease-1" {
+		t.Fatalf("control requests = %+v, want handshake, capability check, then authenticated create with the provider lease", calls)
 	}
 
 	current.Store(now.Add(91 * time.Second).UnixNano())

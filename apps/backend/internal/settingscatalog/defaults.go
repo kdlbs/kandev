@@ -447,6 +447,8 @@ func repositoryDomain() DomainDescriptor {
 		}
 		fields = append(fields, field)
 	}
+	fields = append(fields, integrationReadOnly("repository", "run_git_hooks", "Run Git hooks",
+		"Whether Kandev-managed Git runs this repository's hooks. Changed only from repository settings.", "boolean", owner))
 	return supportedDomain("workspaces", "repository", "Repositories", "Workspace repository settings.", owner, ScopeResource, targetRulesResourceWorkspace(), fields...)
 }
 

@@ -149,7 +149,7 @@ func installInstanceComparisonGitShim(t *testing.T, startedMarker string) string
 }
 
 func runInstanceComparisonGitShim() {
-	args := os.Args[1:]
+	args := stripLeadingGitConfig(os.Args[1:])
 	if len(args) < 2 {
 		os.Exit(0)
 	}
@@ -203,4 +203,13 @@ func instanceComparisonTestTarget() models.ComparisonTarget {
 			RemoteURL: "https://github.com/upstream/widget.git",
 		},
 	}
+}
+
+// stripLeadingGitConfig drops the managed policy's leading "-c key=value" pairs
+// so a shim can switch on the subcommand.
+func stripLeadingGitConfig(args []string) []string {
+	for len(args) >= 2 && args[0] == "-c" {
+		args = args[2:]
+	}
+	return args
 }

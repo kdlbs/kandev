@@ -323,7 +323,12 @@ func TestCleanupWorktreesPreservingBranches_HeadRaceRemainsRetryable(t *testing.
 	wrapper := filepath.Join(binDir, "git")
 	branchRef := "refs/heads/" + wt.Branch
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"-c\" ] && [ \"$3\" = \"update-ref\" ] && [ \"$4\" = \"-d\" ]; then\n" +
+		"prev=\"\"; hit=0\n" +
+		"for a in \"$@\"; do\n" +
+		"  if [ \"$prev\" = \"update-ref\" ] && [ \"$a\" = \"-d\" ]; then hit=1; fi\n" +
+		"  prev=\"$a\"\n" +
+		"done\n" +
+		"if [ \"$hit\" = 1 ]; then\n" +
 		"  \"" + realGit + "\" -C \"$PWD\" update-ref \"" + branchRef + "\" \"" + racingHead + "\"\n" +
 		"fi\n" +
 		"exec \"" + realGit + "\" \"$@\"\n"

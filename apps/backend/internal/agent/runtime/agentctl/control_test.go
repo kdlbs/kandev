@@ -274,7 +274,7 @@ func TestSubprocessAdmission_FailureModes(t *testing.T) {
 }
 
 func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
-	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	srv, got := captureServer(t, withManagedGitIdentity(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`)).ServeHTTP)
 
 	autoApprove := true
 	req := &CreateInstanceRequest{
@@ -389,7 +389,7 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 // TestCreateInstance_MarshalsMCPToolNamePresentationCapability covers the
 // wire portion of AC-TASKS-MCP-TOOL-NAMES-001.5.
 func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) {
-	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	srv, got := captureServer(t, withManagedGitIdentity(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`)).ServeHTTP)
 	req := &CreateInstanceRequest{
 		WorkspacePath:              "/workspace/task-1",
 		NamespacesMCPToolsByServer: true,
@@ -412,7 +412,7 @@ func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) 
 func TestCreateInstance_AcceptsBoth200And201(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusCreated} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			srv := httptest.NewServer(jsonResponder(status, `{"id":"i","port":1}`))
+			srv := httptest.NewServer(withManagedGitIdentity(jsonResponder(status, `{"id":"i","port":1}`)))
 			t.Cleanup(srv.Close)
 
 			resp, err := newTestControlClient(t, srv).CreateInstance(
@@ -455,7 +455,7 @@ func TestCreateInstance_FailureModes(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(jsonResponder(tc.status, tc.body))
+			srv := httptest.NewServer(withManagedGitIdentity(jsonResponder(tc.status, tc.body)))
 			t.Cleanup(srv.Close)
 
 			resp, err := newTestControlClient(t, srv).CreateInstance(
@@ -475,6 +475,9 @@ func TestCreateInstance_UsesLongerHTTPTimeout(t *testing.T) {
 	var remaining time.Duration
 	c := NewControlClient("agentctl.test", 80, newTestLogger())
 	c.httpClient.Transport = controlRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/identity" {
+			return managedGitIdentityResponse(req), nil
+		}
 		deadline, ok := req.Context().Deadline()
 		if !ok {
 			t.Fatal("request has no deadline")
@@ -501,12 +504,12 @@ func TestCreateInstance_UsesLongerHTTPTimeout(t *testing.T) {
 
 func TestCreateInstance_CallerDeadlineStillApplies(t *testing.T) {
 	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withManagedGitIdentity(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-release:
 		case <-r.Context().Done():
 		}
-	}))
+	})))
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(release) })
 
@@ -523,12 +526,12 @@ func TestCreateInstance_CallerDeadlineStillApplies(t *testing.T) {
 
 func TestCreateInstance_SendsControlAuthToken(t *testing.T) {
 	var auth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withManagedGitIdentity(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":"inst-1","port":41234}`))
-	}))
+	})))
 	t.Cleanup(srv.Close)
 
 	c := newTestControlClient(t, srv, WithControlAuthToken("control-token"))
@@ -543,7 +546,7 @@ func TestCreateInstance_SendsControlAuthToken(t *testing.T) {
 // TestCreateInstance_CopiesClientUnderRotation is meaningful under -race:
 // credential rotation replaces the transport while creation copies the client.
 func TestCreateInstance_CopiesClientUnderRotation(t *testing.T) {
-	srv := httptest.NewServer(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	srv := httptest.NewServer(withManagedGitIdentity(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`)))
 	t.Cleanup(srv.Close)
 	c := newTestControlClient(t, srv, WithControlAuthToken("initial-token"))
 

@@ -82,7 +82,7 @@ func TestPushPreflightUsesStableGitEnvironment(t *testing.T) {
 	}
 	shimDir := t.TempDir()
 	envPath := filepath.Join(shimDir, "push-env")
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in\nls-remote|push) printf 'LANG=%%s\\nLC_ALL=%%s\\nGIT_TERMINAL_PROMPT=%%s\\n' \"$LANG\" \"$LC_ALL\" \"$GIT_TERMINAL_PROMPT\" > \"$KANDEV_TEST_PUSH_ENV\";;\nesac\nexec %s \"$@\"\n", realGit)
+	script := fmt.Sprintf("#!/bin/sh\nwhile [ \"${1:-}\" = \"-c\" ]; do shift 2; done\ncase \"$1\" in\nls-remote|push) printf 'LANG=%%s\\nLC_ALL=%%s\\nGIT_TERMINAL_PROMPT=%%s\\n' \"$LANG\" \"$LC_ALL\" \"$GIT_TERMINAL_PROMPT\" > \"$KANDEV_TEST_PUSH_ENV\";;\nesac\nexec %s \"$@\"\n", realGit)
 	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

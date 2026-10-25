@@ -9,6 +9,7 @@ import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
@@ -62,7 +63,41 @@ type RepositoryBasicFieldsProps = RepoFieldsBaseProps & {
   sourceType: string;
   worktreeBranchTemplate: string;
   pullBeforeWorktree: boolean;
+  runGitHooks: boolean;
 };
+
+function RepositoryGitHooksField({
+  repositoryId,
+  savedRepository,
+  onUpdate,
+  runGitHooks,
+}: Pick<
+  RepositoryBasicFieldsProps,
+  "repositoryId" | "savedRepository" | "onUpdate" | "runGitHooks"
+>) {
+  const { t } = useTranslation();
+  const switchId = `repo-run-git-hooks-${repositoryId}`;
+  return (
+    <div className="space-y-2" data-testid="repository-run-git-hooks">
+      <div className="flex items-center gap-2">
+        <Switch
+          id={switchId}
+          checked={runGitHooks}
+          onCheckedChange={(checked) => onUpdate(repositoryId, { run_git_hooks: checked })}
+          data-testid="repository-run-git-hooks-switch"
+          data-settings-dirty={runGitHooks !== (savedRepository?.run_git_hooks ?? false)}
+        />
+        <Label
+          htmlFor={switchId}
+          className="flex min-h-11 flex-1 cursor-pointer items-center md:min-h-0"
+        >
+          {t("workspaces:runGitHooks")}
+        </Label>
+      </div>
+      <p className="text-sm text-muted-foreground">{t("workspaces:runGitHooksHelp")}</p>
+    </div>
+  );
+}
 
 function RepositoryBasicFields({
   repositoryId,
@@ -73,6 +108,7 @@ function RepositoryBasicFields({
   sourceType,
   worktreeBranchTemplate,
   pullBeforeWorktree,
+  runGitHooks,
 }: RepositoryBasicFieldsProps) {
   const { t } = useTranslation();
   return (
@@ -140,6 +176,12 @@ function RepositoryBasicFields({
           </div>
         </div>
       </div>
+      <RepositoryGitHooksField
+        repositoryId={repositoryId}
+        savedRepository={savedRepository}
+        onUpdate={onUpdate}
+        runGitHooks={runGitHooks}
+      />
     </>
   );
 }
@@ -287,6 +329,7 @@ function RepositoryEditView({
               repository.worktree_branch_template ?? defaultWorktreeBranchTemplate
             }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
+            runGitHooks={repository.run_git_hooks ?? false}
           />
 
           <RepositoryBranchPolicies repository={repository} workspaceId={workspaceId} />

@@ -54,6 +54,10 @@ func (c *taskPodControl) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 		return
 	}
+	if r.URL.Path == "/identity" {
+		writeManagedGitIdentity(w)
+		return
+	}
 	if r.URL.Path == "/api/v1/instances" {
 		var request agentctl.CreateInstanceRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {

@@ -15,6 +15,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -386,6 +387,11 @@ type InstanceConfig struct {
 	// credential-free comparison bindings. Targets are installed before
 	// tracker polling so an unavailable target cannot fall back to origin.
 	ComparisonTargets map[string]models.ComparisonTarget
+
+	// GitHooks maps workspace entry keys to repositories that opted into
+	// running their Git hooks. Absent entries mean hooks off. It is a
+	// launch-time snapshot and never changes for the life of the instance.
+	GitHooks map[string]bool
 
 	// RemoteContributions maps workspace repository subpaths to the
 	// server-authored contribution binding used for source-routed writes.
@@ -768,6 +774,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.ComparisonTargets) > 0 {
 		cfg.ComparisonTargets = cloneComparisonTargets(overrides.ComparisonTargets)
 	}
+	if len(overrides.GitHooks) > 0 {
+		cfg.GitHooks = maps.Clone(overrides.GitHooks)
+	}
 	if len(overrides.RemoteContributions) > 0 {
 		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
@@ -830,6 +839,7 @@ type InstanceOverrides struct {
 	ProviderGatewayAuth        *acpprovider.GatewayAuth
 	BaseBranches               map[string]string
 	ComparisonTargets          map[string]models.ComparisonTarget
+	GitHooks                   map[string]bool
 	RemoteContributions        map[string]models.RemoteContribution
 	ContributionDestinations   map[string]models.ContributionDestination
 	WorkspaceSourceRoots       []string

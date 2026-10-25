@@ -16,7 +16,7 @@ import (
 // UpdateWorkflowFields writes only supplied columns and returns the row observed
 // by that statement. Unrelated columns never enter the assignment list.
 func (r *Repository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
-	assignments := []string{"updated_at = ?"}
+	assignments := []string{updatedAtAssignment}
 	args := []any{time.Now().UTC()}
 	appendString := func(column string, value *string) {
 		if value != nil {

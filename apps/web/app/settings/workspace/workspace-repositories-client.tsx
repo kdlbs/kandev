@@ -67,6 +67,7 @@ function buildDraftRepo(
     worktree_branch_prefix: "feature/",
     worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
+    run_git_hooks: false,
     setup_script: "",
     cleanup_script: "",
     dev_script: "",

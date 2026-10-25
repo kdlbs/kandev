@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // hardenedSubmoduleConfig are the `-c` git config overrides applied when
@@ -57,6 +59,7 @@ var hardenedSubmoduleConfig = []string{
 // context deadline. Kept separate from initSubmodules so tests can assert the
 // hardening flags/env are present at the sink.
 func (m *Manager) newSubmoduleUpdateCmd(ctx context.Context, dir string) *exec.Cmd {
+	ctx = subproc.WithGitHooks(ctx, false)
 	args := make([]string, 0, len(hardenedSubmoduleConfig)*2+4)
 	for _, c := range hardenedSubmoduleConfig {
 		args = append(args, "-c", c)

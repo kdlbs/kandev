@@ -509,6 +509,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		WorktreeBranchTemplate:     req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:       req.WorktreeBranchTicket,
 		PullBeforeWorktree:         req.PullBeforeWorktree,
+		RunGitHooks:                req.RunGitHooks,
 		RemoteSyncHandled:          req.RemoteSyncHandled,
 		RefreshRepository:          req.RefreshRepository,
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
