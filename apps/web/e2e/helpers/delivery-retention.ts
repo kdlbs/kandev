@@ -66,6 +66,7 @@ export async function pruneSavedDelivery(
   const db = new DatabaseSync(dbPath);
   let historicalGap: { stream_id: string; sequence: number; payload: string } | undefined;
   try {
+    db.exec("PRAGMA busy_timeout=5000");
     const policy = db
       .prepare("SELECT value FROM settings WHERE key = 'tool_payload_retention'")
       .get() as { value: string } | undefined;

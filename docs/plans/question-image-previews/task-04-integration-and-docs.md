@@ -622,3 +622,17 @@ case passed all three repeated checks under the same limits and with retries off
 Log: `/tmp/question-images-checks/kandev-run.e2e.3BO7QYKA.log`. Changed-file lint,
 specification lint, documentation catalog, and work-order coverage passed. No UI
 capture or public documentation change is needed for the fixture-only correction.
+
+The post-commit desktop check reproduced `database is locked` in the same helper's
+historical-gap write, before recovery began. Log:
+`/tmp/question-images-checks/kandev-run.e2e.oPRumBzN.log`. Its separate write
+connection now uses the same five-second busy timeout. Both fixture connections
+write while the disposable backend is active; read-only probes are unchanged.
+The correction remains test-only and does not alter retention deadlines.
+
+With both write connections configured, all three desktop retention checks passed
+under two CPUs and one worker with retries off (`--project chromium
+tests/session/delivery-retention.spec.ts --grep 'preserves saved history'
+--retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.PlXJpd2t.log`. Changed-file lint,
+specification lint, and documentation catalog passed.
