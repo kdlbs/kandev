@@ -55,17 +55,13 @@ func TestGuardedGuard_ReadRefusesCaseVariantReferences(t *testing.T) {
 	}
 }
 
-func TestGuardedGuard_DiagnosticBundleIsSelfClass(t *testing.T) {
+func TestGuardedGuard_DiagnosticBundleIsDenied(t *testing.T) {
 	f := newGuardedFixture(t)
-	for _, payload := range []map[string]any{{"source": "backend"}, {"source": "backend", "task_id": fxCaller}} {
-		guarded, _ := f.call(t, f.principal, ws.ActionMCPGetDiagnosticBundle, payload)
-		require.Nil(t, guarded, payload)
-	}
 	for _, payload := range []map[string]any{
-		{"task_id": fxPlain}, {"task_id": fxForeign}, {"session_id": "sess-floored"},
+		{"source": "backend"}, {"source": "backend", "task_id": fxCaller}, {"task_id": fxPlain},
 	} {
 		guarded, _ := f.call(t, f.principal, ws.ActionMCPGetDiagnosticBundle, payload)
-		assertWSError(t, guarded, ws.ErrorCodeForbidden)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 	}
 }
 

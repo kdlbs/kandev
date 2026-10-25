@@ -1,6 +1,7 @@
 package process
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -139,5 +140,33 @@ func TestUnguardedKandevPromptKeepsStandingApproval(t *testing.T) {
 	m.nonCoordinatorAutoApproval(req)
 	if len(req.Options) != 3 {
 		t.Fatalf("unguarded options changed: %v", optionKinds(req))
+	}
+}
+
+func TestGuardedKandevApproval_SandboxLaunchRoute(t *testing.T) {
+	launch, _ := processSandboxFixture(t)
+	launch.MCPURL = "http://127.0.0.1:31234/" + strings.Repeat("a", 64) + "/mcp"
+	cfg := &config.InstanceConfig{
+		Port: 43210, InjectedKandevMCP: true, AutoApprovePermissions: true,
+		McpServers: []config.McpServerConfig{{Name: "kandev", Type: "http", URL: "http://localhost:43210/mcp"}},
+	}
+	m := NewManager(cfg, newTestLogger(t))
+	if err := m.ConfigureExecution(ExecutionConfiguration{ArgsPresent: true, Args: []string{"agent"}, Sandbox: launch}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SandboxRequired {
+		t.Fatal("fixture must exercise the Sandbox-only guarded disjunct")
+	}
+	if !m.guardedSession() {
+		t.Fatal("a manager with a sandbox launch is a guarded session")
+	}
+	if m.adapterAutoApprove() {
+		t.Fatal("adapter auto-approve must be off for a sandbox launch")
+	}
+	if opt, response := m.nonCoordinatorAutoApproval(allowRequest("mcp__kandev__create_task_kandev")); opt != nil || response != nil {
+		t.Fatal("create_task must not be approved silently")
+	}
+	if opt, response := m.nonCoordinatorAutoApproval(allowRequest("mcp__kandev__list_workspaces_kandev")); opt != nil || response == nil {
+		t.Fatal("a read tool must be approved by the guarded policy")
 	}
 }

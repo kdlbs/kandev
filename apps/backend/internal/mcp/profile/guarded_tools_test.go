@@ -9,7 +9,7 @@ func TestGuardedToolClasses(t *testing.T) {
 	want := map[string]GuardedToolClass{
 		"list_workspaces": ClassRead, "list_agents": ClassDenied, "list_executor_profiles": ClassDenied, "get_task_document": ClassRead,
 		"step_complete": ClassSelf, "write_task_document": ClassSelf, "show_rich_output": ClassSelf,
-		"get_diagnostic_bundle": ClassSelf, "answer_question": ClassDenied, "publish_canvas": ClassDenied,
+		"get_diagnostic_bundle": ClassDenied, "answer_question": ClassDenied, "publish_canvas": ClassDenied,
 		"list_plugin_tools": ClassDenied, "create_task": ClassChildWrite, "move_task": ClassChildWrite, "message_task": ClassChildWrite,
 		"audit_task_transfer_attempt": ClassInternal,
 		"transfer_task":               ClassDenied, "archive_task": ClassDenied, "delete_task": ClassDenied,
@@ -22,10 +22,8 @@ func TestGuardedToolClasses(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"create_agent_profile", "update_settings", "nope", "mcp.create_task", "create_task_kandev"} {
-		if _, ok := GuardedToolByName(name); ok && name != "" {
-			if got, _ := GuardedToolByName(name); got.Class != ClassDenied {
-				t.Errorf("%s must not be classified usable", name)
-			}
+		if got, ok := GuardedToolByName(name); ok && got.Class != ClassDenied {
+			t.Errorf("%s must not be classified usable: %v", name, got.Class)
 		}
 	}
 }
