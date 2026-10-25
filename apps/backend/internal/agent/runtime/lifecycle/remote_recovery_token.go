@@ -38,6 +38,10 @@ func (c remoteTokenControl) DeleteInstanceMatching(ctx context.Context, _, finge
 	if c.ri.tokenControl != nil {
 		return c.ri.tokenControl.DeleteInstanceMatching(ctx, c.ri.InstanceID, fingerprint)
 	}
+	if fingerprint != "" {
+		// The runtime stop path cannot carry the token precondition.
+		return errors.New("runtime exposes no conditional delete handle")
+	}
 	rt, err := c.m.backendForRuntime(c.ri.RuntimeName)
 	if err != nil {
 		return err
