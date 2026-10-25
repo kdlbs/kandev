@@ -26,7 +26,7 @@ func (s *Service) captureSnapshot(ctx context.Context, request CaptureRequest) (
 		return AttemptSnapshot{}, contract.ErrInvalidPolicy
 	}
 	roots := append(slices.Clone(s.protectedRoots), request.Launch.Root)
-	grants, err := contract.ResolveRuntimeDirectories(resolved.Revision.Policy.Grants, request.WorkDir, request.AgentState, roots)
+	grants, err := contract.ResolveAttemptGrants(resolved.Revision.Policy.Grants, request.WorkDir, request.AgentState, roots, request.SessionID)
 	if err != nil {
 		return AttemptSnapshot{}, err
 	}

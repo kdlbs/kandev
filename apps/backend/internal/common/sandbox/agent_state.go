@@ -96,7 +96,8 @@ func validAgentStateScope(scope AgentStateScope) bool {
 	if (scope.SessionID == "") == (scope.ExecutionID == "") {
 		return false
 	}
-	for _, value := range []string{scope.OrgID, scope.AgentProfileID, scope.InstallationID, scope.ProviderKey} {
+	// An empty organization identifies installations with organizations disabled.
+	for _, value := range []string{scope.AgentProfileID, scope.InstallationID, scope.ProviderKey} {
 		if value == "" {
 			return false
 		}

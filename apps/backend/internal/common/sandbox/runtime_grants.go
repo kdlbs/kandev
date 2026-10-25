@@ -3,6 +3,19 @@ package sandbox
 const ReferenceWorkDir = "work_dir"
 const ReferenceAgentState = "agent_state"
 
+// ResolveAttemptGrants binds runtime paths and omits task-only services for
+// utility attempts. The saved policy remains unchanged.
+func ResolveAttemptGrants(grants Grants, workDir string, state *AgentState, protectedRoots []string, sessionID string) (Grants, error) {
+	resolved, err := ResolveRuntimeDirectories(grants, workDir, state, protectedRoots)
+	if err != nil {
+		return Grants{}, err
+	}
+	if sessionID == "" {
+		resolved.KandevMCP = false
+	}
+	return resolved, nil
+}
+
 // ResolveWorkDirectory binds logical work grants without allocating agent state.
 func ResolveWorkDirectory(grants Grants, workDir string, protectedRoots []string) (Grants, error) {
 	return ResolveRuntimeDirectories(grants, workDir, nil, protectedRoots)

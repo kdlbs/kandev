@@ -55,7 +55,7 @@ func NewApprovalChannels(service *Service, normalize ApprovalNormalizer, live Ap
 // Open reserves a private callback before the immutable launch is materialized.
 // Its URL must be written only to a protected runtime artifact.
 func (b *ApprovalChannels) Open(ctx context.Context, orgID, attemptID string, excludedPorts []int, replies ApprovalReplies) (*ApprovalChannel, error) {
-	if ctx.Err() != nil || orgID == "" || attemptID == "" || b.normalize == nil || b.live == nil || !validApprovalReplies(replies) {
+	if ctx.Err() != nil || attemptID == "" || b.normalize == nil || b.live == nil || !validApprovalReplies(replies) {
 		return nil, ErrConflict
 	}
 	b.mu.Lock()

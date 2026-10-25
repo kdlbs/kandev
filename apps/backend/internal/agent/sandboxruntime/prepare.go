@@ -115,7 +115,7 @@ func (p *Prepared) compile(ctx context.Context, req PrepareRequest, resolved *po
 	if err = p.prepareAgentState(req, resolved); err != nil {
 		return nil, nil, contract.Grants{}, err
 	}
-	grants, err := contract.ResolveRuntimeDirectories(resolved.Revision.Policy.Grants, req.WorkDir, p.agentState, []string{p.manager.base})
+	grants, err := contract.ResolveAttemptGrants(resolved.Revision.Policy.Grants, req.WorkDir, p.agentState, []string{p.manager.base}, req.SessionID)
 	if err != nil {
 		return nil, nil, contract.Grants{}, err
 	}

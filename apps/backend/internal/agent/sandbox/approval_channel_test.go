@@ -75,6 +75,22 @@ func TestSandboxApprovalChannelBindsOneOperatorDecision(t *testing.T) {
 	require.NoError(t, replay.Body.Close())
 }
 
+func TestSandboxApprovalChannelSupportsUnassignedOrganization(t *testing.T) {
+	service, attempt, _ := approvalStoreFixture(t, sqlitePolicyDB(t))
+	channels := NewApprovalChannels(service, func(context.Context, *Attempt, []byte) (ApprovalOperation, error) {
+		return ApprovalOperation{}, ErrConflict
+	}, func(context.Context, *Attempt) error { return nil })
+	t.Cleanup(func() { require.NoError(t, channels.Close()) })
+	replies := ApprovalReplies{Allow: `{}`, Deny: `{}`, Timeout: `{}`}
+	unassigned, err := channels.Open(t.Context(), "", attempt.ID, nil, replies)
+	require.NoError(t, err)
+	named, err := channels.Open(t.Context(), "org", attempt.ID, nil, replies)
+	require.NoError(t, err)
+	require.NotEqual(t, unassigned.URL(), named.URL())
+	_, err = channels.Open(t.Context(), "", attempt.ID, nil, replies)
+	require.ErrorIs(t, err, ErrConflict, "the same authority cannot open duplicate channels")
+}
+
 func TestSandboxApprovalChannelRejectsUnboundAndOversizedRequests(t *testing.T) {
 	service, attempt, _ := approvalStoreFixture(t, sqlitePolicyDB(t))
 	channels := NewApprovalChannels(service, func(context.Context, *Attempt, []byte) (ApprovalOperation, error) {

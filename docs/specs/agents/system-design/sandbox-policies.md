@@ -67,7 +67,7 @@ The executor mode is `disabled` or `required`. Optional describes plugin install
 An absent reference means inherit, never disable. A required executor with no eligible default refuses launch.
 Agent profiles, workflow steps, and tasks hold only optional revision references.
 Resolve explicit task, workflow step, agent default, then executor default.
-Task-free utility operations use agent and executor defaults only.
+Task-free utilities use agent and executor defaults. Omit the task MCP grant when no session exists. Preserve saved policy intent and capture the reduced runtime grants. Task sessions still require a scoped MCP forwarder.
 A policy-aware discovery request must identify its Local/Worktree executor context. Missing context fails rather than certifying an unrelated host default.
 Once a higher-priority reference exists, invalidity fails admission. It never falls through to a weaker default.
 
@@ -80,8 +80,8 @@ Resolve inheritance, include implicit groups, and compare the effective result b
 Freeze inherited contents and hashes. Do not follow mutable registry names at launch.
 
 V1 permits exact path roots with read/write modes, logical `work_dir` and `agent_state` roots, and explicit route/service grants.
-A filesystem entry contains either an absolute `path` or one logical `reference`, never both. Compare logical roots by identity and access mode when publishing a revision. After workspace allocation, core resolves `work_dir` from its owned execution context and checks the resulting absolute path against protected roots. A missing or unsafe work directory refuses launch. The attempt stores both immutable intent and resolved grants; disposable paths do not replace reusable policy intent.
-The optional `agent_state` grant binds to a core-owned child home. Its identity includes organization, workspace, session, agent profile, provider installation, and provider key. Keep it separate from per-attempt supervisor state. Core retains agent files across attempt cleanup and locks the allocation against concurrent use. Store the allocation scope in the immutable attempt. A literal path into protected storage cannot use this exception. Require the same logical grant in the executor ceiling. Refuse missing scope, symlink substitution, or a closed ownership lease. Deleting session data must release this allocation only after every owned process has stopped.
+A filesystem entry contains an absolute `path` or logical `reference`, never both. Compare logical roots by identity and access mode. Core resolves `work_dir` from its owned workspace and checks protected roots. Missing or unsafe directories refuse launch. Attempts store immutable intent and resolved grants.
+The optional `agent_state` grant binds to a core-owned child home, separate from supervisor state. Its identity includes organization, workspace, session, agent profile, provider installation, and provider key. Empty organization IDs identify installations with organizations disabled. Core retains agent files across attempts and locks against concurrent use. Store the allocation scope in the immutable attempt. Literal paths cannot bypass protected storage. Require the same logical grant in the executor ceiling. Refuse missing ownership scope, symlink substitution, or closed leases. Delete session state only after every owned process stops.
 
 Core supplies child home, config, state, and temporary directories as runtime references. These references carry paths, never credentials. The provider binds them into its child environment without changing the supervisor environment. No real home contents or operator credentials are copied. An absent state grant does not imply host-home access. Utility state is disposable and must have a distinct execution scope.
 

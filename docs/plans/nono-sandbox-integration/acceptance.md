@@ -249,3 +249,11 @@ The browser uses controlled API and event fixtures. This does not prove full man
 - `/tmp/kandev-nono-learning-i18n.log`, `/tmp/kandev-nono-learning-typecheck.log`, and `/tmp/kandev-nono-learning-ui-lint.log`: pass. Screenshots `/tmp/kandev-sandbox-learning-desktop.png` and `/tmp/kandev-sandbox-learning-phone.png` were inspected. Browser tests use controlled API responses and do not prove actual managed-agent acceptance.
 
 Presentation-only report suppression, explicit restart review, child-state deletion, and full managed-agent acceptance remain open. Main `100.101.37.39:9998` remains PID 46448. Retained manual instances were preserved.
+
+## Actual discovery failure and generic integration fixes (2026-10-25)
+
+The isolated authenticated instance at `http://100.101.37.39:57397` uses the packaged provider, Nono 0.80.0, Pi ACP 0.0.34, and Pi CLI 1.3.0. Agent profiles have no command prefix. The saved executor policy preview succeeds, but the first real profile discovery returned HTTP 500 before any sandbox attempt was persisted. It did not start an agent or prove recovery.
+
+The failure exposed two generic integration defects. Child-state and approval-channel allocation rejected the valid empty organization scope used when organizations are disabled. Task-free discovery also tried to allocate a task MCP relay without a session. Regression tests reproduce both failures. Core now preserves organization separation, omits the MCP grant only from task-free runtime grants, and retains the saved policy intent. Task sessions still refuse a missing scoped MCP forwarder. No provider-specific core rule was added.
+
+`/tmp/kandev-nono-empty-org-channel-red.log` and `/tmp/kandev-nono-utility-mcp-red.log` record the failing cases. `/tmp/kandev-nono-discovery-regression.log` records passing race checks for the complete common sandbox, policy, and sandbox runtime packages, including the packaged provider. Specification catalog and lint pass (`/tmp/kandev-nono-discovery-spec.log`). These checks do not replace actual managed-agent acceptance. The retained test instance still runs the earlier build.

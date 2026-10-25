@@ -14,6 +14,24 @@ func stateScope() AgentStateScope {
 	return AgentStateScope{OrgID: "org", WorkspaceID: "workspace", SessionID: "session", AgentProfileID: "profile", InstallationID: "provider", ProviderKey: "sandbox"}
 }
 
+func TestAgentStateSupportsUnassignedOrganizationWithoutSharingNamedOrganization(t *testing.T) {
+	base := t.TempDir()
+	scope := stateScope()
+	scope.OrgID = ""
+	state, err := OpenAgentState(base, scope)
+	require.NoError(t, err)
+	home := state.Directories().Home
+	require.NoError(t, state.Close())
+	state, err = OpenAgentState(base, scope)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, state.Close()) })
+	require.Equal(t, home, state.Directories().Home)
+	named, err := OpenAgentState(base, stateScope())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, named.Close()) })
+	require.NotEqual(t, home, named.Directories().Home)
+}
+
 func TestAgentStatePersistsAcrossAttemptsWithoutExposingSupervisorFiles(t *testing.T) {
 	base := t.TempDir()
 	state, err := OpenAgentState(base, stateScope())
