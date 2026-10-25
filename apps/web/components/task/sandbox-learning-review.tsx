@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -171,6 +171,7 @@ function LearningContent({
   setScope: (value: "workspace" | "installation") => void;
 }) {
   const { t } = useTranslation();
+  const id = useId();
   if (model.revision)
     return (
       <div className="space-y-3">
@@ -188,9 +189,9 @@ function LearningContent({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="learning-name">{t("agents:sandboxPolicyName")}</Label>
+        <Label htmlFor={`${id}-name`}>{t("agents:sandboxPolicyName")}</Label>
         <Input
-          id="learning-name"
+          id={`${id}-name`}
           value={name}
           onChange={(event) => setName(event.target.value)}
           maxLength={128}
@@ -198,12 +199,9 @@ function LearningContent({
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="learning-scope">{t("agents:learningScope")}</Label>
+        <Label htmlFor={`${id}-scope`}>{t("agents:learningScope")}</Label>
         <Select value={scope} onValueChange={(value) => setScope(value as typeof scope)}>
-          <SelectTrigger
-            id="learning-scope"
-            className="h-7 max-md:min-h-11 pointer-coarse:min-h-11"
-          >
+          <SelectTrigger id={`${id}-scope`} className="h-7 max-md:min-h-11 pointer-coarse:min-h-11">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

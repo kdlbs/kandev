@@ -4,7 +4,7 @@ import { projectExecutionFixture } from "./execution-details";
 import { enableSandboxSettingsFixture } from "./execution-settings";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
-function reportFixture(sessionId: string): SandboxReport {
+export function reportFixture(sessionId: string): SandboxReport {
   return {
     schema_version: 1,
     attempt_id: "ui-attempt",

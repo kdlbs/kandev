@@ -53,6 +53,9 @@ export function SandboxReportLearning({
           </li>
         ))}
       </ul>
+      {!model.canPropose && selectedIds.length === 0 && (
+        <p className="text-muted-foreground">{t("agents:learningUnavailable")}</p>
+      )}
       <Dialog>
         <DialogTrigger asChild>
           <Button
@@ -60,9 +63,9 @@ export function SandboxReportLearning({
             variant="outline"
             size="sm"
             className="h-7 min-h-7 max-md:min-h-11 pointer-coarse:min-h-11 cursor-pointer"
-            disabled={!model.canPropose || selectedIds.length === 0}
+            disabled={selectedIds.length === 0}
           >
-            {t("agents:learningReviewSelected")}
+            {t(model.revision ? "agents:learningViewRevision" : "agents:learningReviewSelected")}
           </Button>
         </DialogTrigger>
         <SandboxLearningReview model={model} selectedIds={selectedIds} />

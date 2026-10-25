@@ -238,3 +238,14 @@ The browser uses controlled API and event fixtures. This does not prove full man
 - Desktop and phone screenshots were inspected: `/tmp/kandev-sandbox-report-desktop.png`, `/tmp/kandev-sandbox-report-phone.png`. Phone widths 393, 700, and 767 preserve touch targets and prevent document overflow.
 - Final typecheck, scoped frontend/backend lint, localization, SQL guard, and public-doc validation pass. Main `100.101.37.39:9998` remains PID 46448. Retained manual instances were not changed.
 - Learning publication, explicit restart review, child-state deletion, and actual managed-agent acceptance remain open.
+
+
+## Policy learning and draft checkpoint (2026-10-25)
+
+- Host draft: https://github.com/kdlbs/kandev/pull/4769. Provider draft: https://github.com/kdlbs/kandev-plugin-nono/pull/2. Both target main and remain drafts. Host checkpoint `265bee1a764bf80d85a68695ad33f125bf1eea96` passed normal commit hooks without bypass. The provider pins that SDK commit.
+- `/tmp/kandev-nono-learning-policy-recheck.log`: full policy and required-store race tests pass with SQLite and PostgreSQL. Publication preserves provenance after attempt deletion, rejects stale evidence, and admits one winner in a concurrent publication.
+- `/tmp/kandev-nono-learning-runtime-green.log`: actual packaged Nono proposal compilation and publication pass. `/tmp/kandev-nono-learning-conformance.log`: SQLite and PostgreSQL fresh schema, replay, CRUD, timestamps, conflicts, and transaction checks pass. The initial narrow SQL-guard invocation rejected unused global exemptions. The required whole-internal scan then passed (`/tmp/kandev-nono-learning-sqlguard.log`).
+- `/tmp/kandev-nono-draft-refactor-tests.log`: 81 focused frontend tests pass, including learning authority, stale responses, and no automatic retry. `/tmp/kandev-nono-learning-browser-red.log`: publication exposed a disabled focus-return target. Desktop and phone scenarios pass after the fix (`/tmp/kandev-nono-learning-browser-desktop.log`, `/tmp/kandev-nono-learning-browser-phone.log`).
+- `/tmp/kandev-nono-learning-i18n.log`, `/tmp/kandev-nono-learning-typecheck.log`, and `/tmp/kandev-nono-learning-ui-lint.log`: pass. Screenshots `/tmp/kandev-sandbox-learning-desktop.png` and `/tmp/kandev-sandbox-learning-phone.png` were inspected. Browser tests use controlled API responses and do not prove actual managed-agent acceptance.
+
+Presentation-only report suppression, explicit restart review, child-state deletion, and full managed-agent acceptance remain open. Main `100.101.37.39:9998` remains PID 46448. Retained manual instances were preserved.

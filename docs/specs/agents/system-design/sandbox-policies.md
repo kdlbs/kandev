@@ -203,7 +203,7 @@ Do not claim external MCP servers inherit confinement merely because the agent i
 
 ## Persistence and learning
 
-Core owns `sandbox_policy_heads`, `sandbox_policy_revisions`, `sandbox_policy_bindings`, `sandbox_task_guards`, `sandbox_attempts`, and `sandbox_reports`. Approval integration also requires `sandbox_approval_requests`. Attempt snapshots freeze the resolved policy, ceiling, provider package, runtime digest, launch envelope, and resolved filesystem grants. Versioned lifecycle updates cannot rewrite those snapshots. A running lifecycle state records an owned process; it is not an active-confinement claim. Terminal attempts reject late running events.
+Core owns `sandbox_policy_heads`, `sandbox_policy_revisions`, `sandbox_policy_bindings`, `sandbox_task_guards`, `sandbox_attempts`, `sandbox_reports`, `sandbox_learning_proposals`, and `sandbox_approval_requests`. Attempt snapshots freeze the resolved policy, ceiling, provider package, runtime digest, launch envelope, and resolved filesystem grants. Versioned lifecycle updates cannot rewrite those snapshots. A running lifecycle state records an owned process; it is not an active-confinement claim. Terminal attempts reject late running events.
 Task guards retain the last admitted permission limit across context changes and service reloads. Compare-and-swap writes reject concurrent admission against a stale limit. Child admission checks the captured parent limit. These guards are policy authority records, not evidence that a process is sandboxed.
 Use the existing database abstraction and migrations for SQLite and PostgreSQL.
 Store schema version, content hash, dependency hashes, source kind, operator ID, timestamps, ceiling identity, and selection source.

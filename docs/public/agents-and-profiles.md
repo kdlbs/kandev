@@ -925,6 +925,8 @@ The review stays open to show the delivery result. Expired, stale, disconnected,
 
 Open **Execution details > Denials** to read captured denial evidence. Select **Refresh report** for a new bounded read. The report shows its capture time, supported denial classes, source integrity, and whether cleanup produced a final capture. An incomplete or empty capture does not prove that no operations were denied. A failed refresh keeps earlier records visible and reports the failure. Reading or refreshing a report does not grant access or change a policy.
 
+Operators can select denial records and choose **Review selected denials**. Enter a policy name and choose a workspace or installation scope. Select **Review changes** to inspect the added access and source policy. Select **Create revision** only after reviewing that diff. Creation preserves the source policy, report digest, selected records, and provider identity. Select the new revision separately in policy settings. The running task keeps its captured policy. Stale reports, revoked sources, changed ceilings, and additions outside the captured ceiling are rejected.
+
 
 
 </details>
