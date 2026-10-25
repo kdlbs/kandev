@@ -8,6 +8,7 @@
 - Early exact-profile launch denials omitted their immutable failed-closed receipt, while a receipt write error could be hidden on success. Denials now record receipts and storage errors surface without replacing the original launch failure (commit 95ffb52e83).
 - A receipt write error after an agent started could release its launch reservation before bookkeeping. Launch ownership and post-launch bookkeeping now finish before that error is returned; race and injected-error regressions cover the path (commit 28640bb65d).
 - Retry handling now carries an internal typed result from the assignment and execution observed by that attempt. The existing `(task_id, session_id)` receipt and launch-response field remain the first historical session audit; a later successful or failed retry cannot overwrite it or use it as evidence of the current outcome. Both retry orders have service-level regressions.
+- Review found that native resume can return an execution together with a readiness error. Current-attempt classification now requires both an execution and a nil launch error before it claims inference; the native and ordinary readiness failures both retain a failed-closed first audit.
 
 ## Follow-up tasks created
 

@@ -616,6 +616,15 @@ func TestStartCreatedSession_RejectsSessionProfileChangedAtExactBinding(t *testi
 }
 
 func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t *testing.T) {
+	t.Run("ordinary resume", func(t *testing.T) {
+		testResumeTaskSessionRecordsFailedClosedReceiptWhenPromptReadinessFails(t, "")
+	})
+	t.Run("native resume returns execution with error", func(t *testing.T) {
+		testResumeTaskSessionRecordsFailedClosedReceiptWhenPromptReadinessFails(t, "native-conversation")
+	})
+}
+
+func testResumeTaskSessionRecordsFailedClosedReceiptWhenPromptReadinessFails(t *testing.T, nativeConversationID string) {
 	oldReadyTimeout := agentPromptReadyTimeout
 	oldReadyInterval := agentPromptReadyInterval
 	agentPromptReadyTimeout = 20 * time.Millisecond
@@ -709,12 +718,14 @@ func TestResumeTaskSession_RecordsFailedClosedReceiptWhenPromptReadinessFails(t 
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
-	execution, err := svc.ResumeTaskSession(ctx, "task1", "session1")
+	execution, err := svc.ResumeTaskSessionWithOptions(ctx, "task1", "session1", executor.ResumeOptions{
+		RequiredNativeConversationID: nativeConversationID,
+	})
 	if err == nil {
 		t.Fatal("ResumeTaskSession succeeded despite prompt-readiness timeout")
 	}
-	if execution != nil {
-		t.Fatalf("execution = %#v, want nil on readiness failure", execution)
+	if (execution != nil) != (nativeConversationID != "") {
+		t.Fatalf("execution = %#v, native conversation %q", execution, nativeConversationID)
 	}
 	if !errors.Is(err, ErrAgentNotReadyForPrompt) {
 		t.Fatalf("ResumeTaskSession error = %v, want prompt-not-ready error", err)

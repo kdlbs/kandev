@@ -161,16 +161,19 @@ func TestExactProfileAttemptResultKeepsCurrentRetrySeparateFromFirstReceipt(t *t
 			first := &ExactProfileLaunchDecision{AgentProfileID: "profile-first", Generation: 1, Revision: 11, Model: "model-first"}
 			second := &ExactProfileLaunchDecision{AgentProfileID: "profile-second", Generation: 2, Revision: 22, Model: "model-second"}
 			var firstExecution, secondExecution *executor.TaskExecution
+			var firstErr, secondErr error
 			if tc.firstFailure {
+				firstErr = errors.New("first attempt denied")
 				secondExecution = &executor.TaskExecution{AgentExecutionID: "execution-retry"}
 			} else {
 				firstExecution = &executor.TaskExecution{AgentExecutionID: "execution-first"}
+				secondErr = errors.New("retry denied")
 			}
-			firstResult := exactProfileAttemptResultFor(first, firstExecution)
+			firstResult := exactProfileAttemptResultFor(first, firstExecution, firstErr)
 			if err := service.recordExactProfileLaunchReceipt(ctx, "task1", "session1", firstResult); err != nil {
 				t.Fatal(err)
 			}
-			secondResult := exactProfileAttemptResultFor(second, secondExecution)
+			secondResult := exactProfileAttemptResultFor(second, secondExecution, secondErr)
 			if err := service.recordExactProfileLaunchReceipt(ctx, "task1", "session1", secondResult); err != nil {
 				t.Fatal(err)
 			}
@@ -191,5 +194,16 @@ func TestExactProfileAttemptResultKeepsCurrentRetrySeparateFromFirstReceipt(t *t
 				t.Fatalf("current retry execution = %q, want %q", secondResult.ExecutionID, secondExecution.AgentExecutionID)
 			}
 		})
+	}
+}
+
+func TestExactProfileAttemptResultDoesNotClaimInferenceWhenExecutionReturnsError(t *testing.T) {
+	observed := &ExactProfileLaunchDecision{AgentProfileID: "profile-exact", Generation: 1, Revision: 42, Model: "exact-model"}
+	result := exactProfileAttemptResultFor(observed,
+		&executor.TaskExecution{AgentExecutionID: "execution-started"}, errors.New("native readiness failed"))
+	if result == nil || result.Outcome != models.ExactProfileLaunchOutcomeFailedClosed || result.InferenceStarted ||
+		result.AgentProfileID != observed.AgentProfileID || result.Generation != observed.Generation ||
+		result.ProfileRevision != observed.Revision {
+		t.Fatalf("execution plus error result = %+v, want observed failed_closed without inference", result)
 	}
 }

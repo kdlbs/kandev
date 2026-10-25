@@ -200,7 +200,7 @@ type exactProfileAttemptResult struct {
 }
 
 func exactProfileAttemptResultFor(
-	exact *ExactProfileLaunchDecision, execution *executor.TaskExecution,
+	exact *ExactProfileLaunchDecision, execution *executor.TaskExecution, launchErr error,
 ) *exactProfileAttemptResult {
 	if exact == nil {
 		return nil
@@ -210,7 +210,7 @@ func exactProfileAttemptResultFor(
 		ProfileRevision: exact.Revision, Model: exact.Model,
 		Outcome: models.ExactProfileLaunchOutcomeFailedClosed,
 	}
-	if execution != nil {
+	if launchErr == nil && execution != nil {
 		result.ExecutionID = execution.AgentExecutionID
 		result.Outcome = models.ExactProfileLaunchOutcomeApplied
 		result.InferenceStarted = true
@@ -251,7 +251,7 @@ func (s *Service) recordExactProfileResolutionDenial(
 		return resolutionErr
 	}
 	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID,
-		exactProfileAttemptResultFor(observed, nil)))
+		exactProfileAttemptResultFor(observed, nil, resolutionErr)))
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {

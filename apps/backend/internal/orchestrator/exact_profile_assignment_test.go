@@ -79,7 +79,7 @@ func TestExactProfileReceiptWriteErrorIsReturned(t *testing.T) {
 	service := &Service{repo: &exactReceiptErrorRepo{err: writeErr}}
 	err := service.recordExactProfileLaunchReceipt(context.Background(), "task-1", "session-1",
 		exactProfileAttemptResultFor(&ExactProfileLaunchDecision{AgentProfileID: "profile-1", Generation: 1, Revision: 2, Model: "model-1"},
-			&executor.TaskExecution{AgentExecutionID: "execution-1"}))
+			&executor.TaskExecution{AgentExecutionID: "execution-1"}, nil))
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("receipt error = %v, want storage failure", err)
 	}
@@ -91,7 +91,7 @@ func TestExactProfileLaunchReceiptStoresOnlyBoundedFailureCategory(t *testing.T)
 
 	if err := service.recordExactProfileLaunchReceipt(context.Background(), "task-1", "session-1",
 		exactProfileAttemptResultFor(&ExactProfileLaunchDecision{AgentProfileID: "profile-1", Generation: 1, Revision: 2, Model: "model-1"},
-			nil)); err != nil {
+			nil, errors.New("provider response from /private/worktree with credential detail"))); err != nil {
 		t.Fatalf("record receipt: %v", err)
 	}
 	if repo.receipt == nil {
