@@ -16,6 +16,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -38,7 +39,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 }
 
 // CreateTurnWithStepStamp is documented on the TurnRepository interface. It
-// reads the task's current step inside a transaction that takes the same
+// reads the task's current step and entry inside a transaction taking the same
 // readTaskStepInTx lock a step move takes, so the read and the turn insert
 // are serialized against concurrent movers of the same task row rather than
 // racing a plain unlocked GetTask against a later, separate insert. A
@@ -71,10 +72,11 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 
 	stamped := false
 	if found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			_ = tx.Rollback()
+			committed = true
+			return false, r.insertTurnWithSessionLock(ctx, turn)
 		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
 		stamped = true
 	}
 
@@ -86,6 +88,23 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 	}
 	committed = true
 	return stamped, nil
+}
+
+// stampTurnWorkflowEntryTx runs after the task row is locked, so the entry
+// read observes the same committed arrival as the workflow-step stamp.
+func (r *Repository) stampTurnWorkflowEntryTx(ctx context.Context, tx stepTransitionTx, turn *models.Turn, stepID string) error {
+	entryID, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, turn.TaskID)
+	if err != nil {
+		return err
+	}
+	if turn.Metadata == nil {
+		turn.Metadata = map[string]interface{}{}
+	}
+	turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+	if entryID > 0 {
+		turn.Metadata[models.TurnMetaKeyWorkflowStepTransitionIDAtStart] = entryID
+	}
+	return nil
 }
 
 // stampTurnDefaults fills in the ID/timestamp defaults CreateTurn and
@@ -498,7 +517,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id, ts.queue_incarnation_id,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id,
-	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out`
+	ts.cost_subcents, ts.tokens_in, ts.tokens_cached_in, ts.tokens_out, ts.executor_actor_user_id`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -921,12 +940,12 @@ func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
 			id, task_id, executor_type, executor_id, executor_profile_id,
-			control_port, status, materialization_session_id, workspace_path,
+			control_port, status, materialization_session_id, workspace_path, workspace_layout,
 			container_id, sandbox_id, task_dir_name, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
 		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
-		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.WorkspaceLayout, candidate.ContainerID,
 		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
 		return fmt.Errorf("create workspace binding: %w", err)
 	}
@@ -1185,6 +1204,11 @@ func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *model
 
 // createTaskSession inserts a task session through the supplied database handle.
 func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
+	if actor, bound := models.ExecutorActorFromContext(ctx); bound {
+		session.ExecutorActorUserID = actor
+	} else if identity, ok := authn.IdentityFromContext(ctx); ok && !identity.Synthetic {
+		session.ExecutorActorUserID = identity.UserID
+	}
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -1271,12 +1295,12 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id, name
+			is_primary, review_status, is_passthrough, task_environment_id, name, executor_actor_user_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			?
+			?, ?
 		)
 	`), session.ID, session.TaskID, session.QueueIncarnationID, agentProfileID,
 		session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
@@ -1285,7 +1309,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name, session.ExecutorActorUserID)
 
 	if err != nil {
 		return err
@@ -1533,7 +1557,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2282,6 +2306,15 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	// UpdateSessionMetadata or SetSessionMetadataKey. A full-row write here
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
+
+	// is_primary is never promoted here: the conditional write only releases
+	// an owned flag for a snapshot-guarded write whose copy says non-primary
+	// and keeps the stored selection otherwise, so a full-row write carrying a
+	// copy read before a promotion cannot make the demoted session primary
+	// again and leave the task with two primaries. Promotion and demotion
+	// still belong to the task-scoped SetSessionPrimary transactions. No
+	// unique index backs the column, so that single-writer guard is load
+	// bearing.
 
 	// agent_profile_id is stored as NULL when empty. No unique index
 	// constrains (task_id, agent_profile_id) at this UPDATE path — office
@@ -3710,7 +3743,7 @@ func removeSessionMetadataKeyIfStateQuery(driver string) string {
 }
 
 // SetSessionACPSessionID mirrors the agent's ACP session id into the session's
-// "acp" metadata map as a single atomic UPDATE. json_patch merges the sub-key,
+// "acp" metadata map as a single atomic UPDATE. Each dialect merges the sub-key,
 // so keys session_info already wrote (title, ...) survive without a
 // read-modify-write round trip. The write only happens while the session's
 // executors_running row still holds acpSessionID as its resume token — i.e.
@@ -3723,17 +3756,34 @@ func (r *Repository) SetSessionACPSessionID(ctx context.Context, sessionID, acpS
 		return false, fmt.Errorf("failed to serialize metadata patch: %w", err)
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE task_sessions
 		SET metadata = json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json(?)),
 		    updated_at = ?
 		WHERE id = ?
-		  AND json_extract(metadata, '$.acp.session_id') IS NOT ?
+		  AND json_extract(` + sqliteMetadataObject + `, '$.acp.session_id') IS NOT ?
 		  AND EXISTS (
 			SELECT 1 FROM executors_running er
 			WHERE er.session_id = task_sessions.id AND er.resume_token = ?
 		  )
-	`), string(patch), now, sessionID, acpSessionID, acpSessionID)
+	`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(` + postgresMetadataObject + `, '{acp}',
+				(CASE WHEN jsonb_typeof((` + postgresMetadataObject + `)->'acp') = 'object'
+					THEN (` + postgresMetadataObject + `)->'acp' ELSE '{}'::jsonb END)
+				|| (?::jsonb->'acp'), true)::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND (` + postgresMetadataObject + `)#>>'{acp,session_id}' IS DISTINCT FROM ?
+			  AND EXISTS (
+				SELECT 1 FROM executors_running er
+				WHERE er.session_id = task_sessions.id AND er.resume_token = ?
+			  )
+		`
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), string(patch), now, sessionID, acpSessionID, acpSessionID)
 	if err != nil {
 		return false, err
 	}
@@ -3749,17 +3799,19 @@ func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string
 		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
 	}
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions
-		SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.last_agent_error', json(?)),
-			updated_at = ?
-		WHERE id = ?
-			AND json_extract(metadata, '$.last_agent_error.message') = ?
-			AND (
-				json_extract(metadata, '$.last_agent_error.occurred_at') = ?
-				OR julianday(json_extract(metadata, '$.last_agent_error.occurred_at')) = julianday(?)
-			)
-	`), string(valueJSON), now, sessionID, expected.Message, expected.OccurredAt.UTC().Format(time.RFC3339Nano), expected.OccurredAt.UTC().Format(time.RFC3339Nano))
+	driver := r.db.DriverName()
+	message := dialect.JSONExtractPath(driver, "metadata", models.SessionMetaKeyLastAgentError, "message")
+	occurredAt := dialect.JSONExtractPath(driver, "metadata", models.SessionMetaKeyLastAgentError, "occurred_at")
+	equivalentTime := "julianday(" + occurredAt + ") = julianday(?)"
+	if dialect.IsPostgres(driver) {
+		equivalentTime = "(" + occurredAt + ")::timestamptz = ?::timestamptz"
+	}
+	query := metadataKeyUpdateQuery("task_sessions", driver) +
+		" AND " + message + " = ? AND (" + occurredAt + " = ? OR " + equivalentTime + ")"
+	args := metadataKeyUpdateArgs(driver, models.SessionMetaKeyLastAgentError, string(valueJSON), now, sessionID)
+	expectedTime := expected.OccurredAt.UTC().Format(time.RFC3339Nano)
+	args = append(args, expected.Message, expectedTime, expectedTime)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -4438,7 +4490,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
 		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
-		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut,
+		&session.CostSubcents, &session.TokensIn, &session.TokensCachedIn, &session.TokensOut, &session.ExecutorActorUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -4672,7 +4724,7 @@ func (r *Repository) purgePromptSequencesForSessionsTx(ctx context.Context, tx *
 // in session-scoped worktree queries.
 const envRepoSelectCols = `
 	ter.id, ter.task_environment_id, ter.repository_id,
-	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+	COALESCE(ter.workspace_relative_path, ''), COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
 	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
 	COALESCE(ter.worktree_branch_owner, 'unknown'), COALESCE(ter.worktree_integration_ref, ''),
 	COALESCE(ter.worktree_recovery_head_sha, ''),
@@ -4687,7 +4739,7 @@ func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 	row := &models.TaskEnvironmentRepo{}
 	var compactedAt, mergedAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
-		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
+		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.WorkspaceRelativePath, &row.BranchSlug,
 		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 		&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
 		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.Position,
@@ -4874,7 +4926,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 		var compactedAt, mergedAt, deletedAt sql.NullTime
 		row := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
-			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.WorkspaceRelativePath, &row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 			&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
 			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,

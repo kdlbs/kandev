@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForActiveTaskSession } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -517,6 +518,9 @@ test.describe("Workflow automation", () => {
     const sessions = await apiClient.listTaskSessions(task.id);
     expect(sessions.total).toBe(1);
     expect(sessions.sessions[0].state).toBe("CREATED");
+
+    // The row exists before preparation returns and selects it in the task route.
+    await waitForActiveTaskSession(testPage, task.id, sessions.sessions[0].id);
 
     // The agent was NOT started — the "Start agent" button should be visible,
     // confirming the auto-start was blocked for this non-auto-start step.

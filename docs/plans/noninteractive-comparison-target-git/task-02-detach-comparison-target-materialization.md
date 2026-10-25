@@ -1,11 +1,19 @@
 ---
 id: "02-detach-comparison-target-materialization"
 title: "Detach comparison-target materialization"
-status: done
+status: completed
 wave: 2
 depends_on: ["01-propagate-instance-git-environment"]
 plan: "plan.md"
-spec: "../../specs/platform/requirements/workspace-git-status.md"
+requirements:
+  - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+acceptance_criteria:
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.5
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.16
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.17
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.18
+system_design:
+  - ../../specs/platform/system-design/workspace-git-status.md
 ---
 
 # Task 02: Detach comparison-target materialization
@@ -93,3 +101,34 @@ Record the red and green commands. Record startup timing proof, cancellation pro
 - Review fix: the `StatusStopped` cleanup path now continues through adapter, shell, and process teardown when comparison-target shutdown returns an error.
 - Test portability: lifecycle coverage uses a copied test executable as the Git shim, so state, cancellation, stale-result, and startup assertions also compile on Windows.
 - Test determinism: preparation, target updates, and lazy tracker creation now use completion channels plus a closed fetch gate instead of wall-clock performance thresholds.
+
+
+### PR #3680 Windows fixture repair (2026-10-10)
+
+The Windows process cohort failed the stale matching-operation recovery test:
+its copied Go-executable Git shim reached an unavailable comparison ref before
+ready publication. The success path now fetches from the fixture's existing
+local bare repository through a repository-local URL rewrite. It keeps the
+canonical provider identity and production deadlines. It checks the real
+comparison ref's commit as well as cancellation of the stale operation.
+Blocked fetch, failure, supersession and teardown cases retain their causal
+shims. Native Windows validation remains a fresh CI requirement.
+
+
+The affected race group exposed a lifecycle omission: manager teardown stopped
+root and discovered repository trackers but omitted cached lazy trackers. Their
+detached comparison refresh could therefore outlive the manager. The focused
+`TestComparisonTargetLazyTrackerCancellationOnShutdown` regression failed before
+the correction, including with a blocked tracker-owned status observation.
+Teardown now snapshots cached lazy trackers and stops them through the existing
+tracker cancellation and drain path. This restores AC-PLATFORM-WORKSPACE-GIT-STATUS-001.5
+and the work order's existing shutdown contract. Git deadlines and comparison
+publication rules remain unchanged. The focused shutdown and real-Git recovery
+regressions each passed three race runs. The affected comparison-target group
+also passed with `-race -count=3` (111.6 seconds), without leaked goroutines.
+The changed-package Go lint reported zero issues. Both full affected packages
+passed: `go test ./internal/agentctl/server/process ./internal/agentctl/server/instance`
+(process: 160.0 seconds; instance: 1.0 second). Documentation catalog, full
+specification lint, whitespace checks and the trusted candidate coverage
+evaluator passed. The evaluator accepted all 15 affected work orders. These
+are local checks; native Windows and complete CI remain delivery gates.

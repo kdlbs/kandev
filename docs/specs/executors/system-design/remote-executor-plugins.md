@@ -238,6 +238,40 @@ Provider lifecycle and task-session state remain separate concepts.
 One unresolved allocation blocks a later launch for that session. No new idempotency key is generated
 to escape uncertainty. Provider implementations must support recovery by the original identity.
 
+## Repository materialization credentials
+
+Materialization implements AC-EXECUTORS-PLUGIN-002.5 through
+AC-EXECUTORS-PLUGIN-002.7. Providers retain the existing bootstrap contract;
+Git broker issuance, scope checks, and reissue remain authoritative.
+
+Instance admission removes inherited managed broker authorization and generated
+credential config before merging `CreateRequest.Env`. Runtime helper tools and
+unrelated Git configuration remain available. Standalone default collection keeps
+its existing behavior. The request becomes `InstanceConfig.AgentEnv`. Agentctl takes
+a detached snapshot of the current instance Git environment under the process
+manager's existing lock. One request uses one snapshot throughout clone, fetch,
+PR-base preparation, sparse checkout, and checkout. An explicit operation-scoped
+Git runner carries this environment through both `materializeGitOutput` and
+`materializeCheckoutGit`; no process-global environment mutation is permitted.
+
+Build the command environment using the current instance snapshot as the source
+of managed authorization. Preserve process-installed helper tooling when absent
+from that snapshot, including `KANDEV_GITHUB_CREDENTIAL_HELPER_PATH`. Capture
+installed tooling during manager construction, as existing managed Git activation
+does; do not re-read mutable ambient credentials per command. Do not fall back to
+startup broker leases when the instance lacks current authorization. Use `internal/gitconfigenv` to preserve and validate unrelated indexed config.
+
+Both runners retain `subproc.NewGitCommand`, classified `GitLifecycle` capacity,
+existing verb-specific timeouts, cancellation, stdin handling, and final
+noninteractive Git environment enforcement. Preparation failures retain sanitized
+errors. Repository validation, cleanup, origin scrubbing, and response shapes
+remain unchanged. Secrets remain transient command environment values, never
+serialized into the repository or a provider checkpoint.
+
+No workspace credential-mode default changes: `executor` uses credentials already
+available on the remote executor; `managed` permits host-issued scoped credentials.
+Public documentation must explain that distinction for private plugin repositories.
+
 ## Recovery and cleanup
 
 Reuse the inventory and ownership contracts in ADR 0003, ADR 0025, and the generation-fencing ADR.

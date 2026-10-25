@@ -52,6 +52,7 @@ async function seedAndOpenSheet(
   await testPage.getByTestId("mobile-task-picker-trigger").click();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   await expect(sheet.getByTestId("sidebar-filter-bar")).toBeVisible({ timeout: 10_000 });
+  await waitForFiniteAnimations(sheet);
   return sheet;
 }
 

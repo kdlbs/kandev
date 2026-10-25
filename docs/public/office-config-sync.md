@@ -1,6 +1,7 @@
 ---
 title: "Office Config Sync"
 description: "Keep an Office workspace's agents, skills, projects, and routines in sync with a GitHub or GitLab repository."
+status: experimental
 ---
 
 # Office Config Sync
@@ -11,7 +12,9 @@ Projects can list local paths and supported Git URLs as repository sources, incl
 
 An explicit repository selection remains in effect, and child tasks inherit their parent's repository context. Later project or source edits do not change existing task attachments.
 
-Office mode is currently feature-flagged. Config sync settings appear under **Office workspace Settings > Config Sync** when Office is enabled.
+Office mode is currently feature-flagged. Config sync settings appear under **Office > Preferences > Config Sync** when Office is enabled.
+
+For first-time setup, use [Get started with Office](office-getting-started.md). For UI-managed definitions, backups, and the other configuration surfaces, see [Office operations](office-operations.md#manage-workspace-configuration).
 
 This is a separate capability from [Workflow Sync](workflow-sync.md): Workflow Sync reconciles regular Kanban workflows from a flat directory of portable workflow files; Office Config Sync reconciles an Office workspace's agents, skills, projects, and routines from the Office config directory tree described below. The two do not interact and share no configuration.
 
@@ -19,7 +22,7 @@ This is a separate capability from [Workflow Sync](workflow-sync.md): Workflow S
 
 1. Commit an Office config tree (`agents/`, `skills/`, `projects/`, `routines/`) to a GitHub or GitLab repository.
 2. Grant the workspace connection read access.
-3. Pick the provider, then fill in the repository (or project path), branch, and directory in **Office workspace Settings > Config Sync**.
+3. Pick the provider, then fill in the repository (or project path), branch, and directory in **Office > Preferences > Config Sync**.
 4. Save, then select **Sync now** for the first immediate reconciliation. Saving alone does not fetch anything.
 
 ## Prerequisites and credentials
@@ -95,7 +98,7 @@ Raw-git **Push** is never refused; it remains the only way to write Office confi
 
 ### Definition bundle export
 
-The read-only **Export** page under **Office workspace Settings > Export** obtains a server-owned manifest before offering a download. The manifest contains the exact `.kandev/...` file paths and serialized bytes that the backend will package. You can select individual files or download the complete bundle.
+The read-only **Export** page under **Office > Preferences > Export** obtains a server-owned manifest before offering a download. The manifest contains the exact `.kandev/...` file paths and serialized bytes that the backend will package. You can select individual files or download the complete bundle.
 
 The selected download submits the manifest revision with the selected paths. If the workspace changes after the manifest was loaded, the backend returns `409 Conflict` and the page reloads the manifest instead of producing a mixed-revision archive. The ZIP entries are the selected manifest paths, with no client-side YAML reconstruction.
 

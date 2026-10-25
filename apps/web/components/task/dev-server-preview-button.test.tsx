@@ -28,9 +28,11 @@ vi.mock("@/lib/api", () => ({
   stopProcess: (...args: unknown[]) => api.stopProcess(...args),
 }));
 
+const storeApi = { getState: () => appState };
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(appState),
-  useAppStoreApi: () => ({ getState: () => appState }),
+  useAppStoreApi: () => storeApi,
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -99,9 +101,7 @@ describe("DevServerPreviewButton", () => {
   });
 
   it("issues a single start when both header controls are clicked at once", async () => {
-    // The control renders in two dockview headers; each has its own pending
-    // flag, so only shared in-flight state can keep the backend's non-atomic
-    // dedup from being raced into a second dev process.
+    // Both Dockview controls share admission even inside one render turn.
     let resolveStart: (value: unknown) => void = () => {};
     api.startProcess.mockImplementation(
       () =>

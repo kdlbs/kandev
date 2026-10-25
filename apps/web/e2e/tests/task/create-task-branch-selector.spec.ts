@@ -7,6 +7,8 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 
+test.use({ trace: "retain-on-failure" });
+
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -15,7 +17,7 @@ function escapeRe(s: string) {
 useRegularMode();
 
 test.describe("Branch selector behavior with executor types", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
 
   test("branch selector is editable for local executor (user can switch existing branches)", async ({
     testPage,
@@ -165,6 +167,8 @@ test.describe("Branch selector behavior with executor types", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      await expect(testPage.getByTestId("remote-repo-popover-content")).toHaveCount(0);
+      await expect(testPage.getByTestId("remote-repo-chip-trigger")).toBeFocused();
 
       // Select local executor profile
       const executorSelector = testPage.getByTestId("executor-profile-selector");
@@ -192,7 +196,7 @@ test.describe("Branch selector behavior with executor types", () => {
  * repo via apiClient.createRepository so it shows up in the workspace selector.
  */
 test.describe("Fresh-branch flow", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
 
   type Setup = {
     repoDir: string;
@@ -510,6 +514,8 @@ test.describe("Fresh-branch flow", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      // Finish the repository popover's focus restoration before opening the executor picker.
+      await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toBeFocused();
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
@@ -594,6 +600,7 @@ test.describe("Fresh-branch flow", () => {
         .filter({ hasText: /worktree/i })
         .first()
         .click();
+      await expect(executorSelector).toBeFocused();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await branchSelector.click();
@@ -602,6 +609,8 @@ test.describe("Fresh-branch flow", () => {
         .first()
         .click();
       await expect(branchSelector).toContainText("develop");
+      // Finish the branch popover's focus restoration before opening the executor picker.
+      await expect(branchSelector).toBeFocused();
 
       await executorSelector.click();
       await testPage
@@ -617,7 +626,7 @@ test.describe("Fresh-branch flow", () => {
 });
 
 test.describe("Branch refresh + filter", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
 
   test("refresh button in branch dropdown triggers ?refresh=true request", async ({
     testPage,
@@ -650,6 +659,7 @@ test.describe("Branch refresh + filter", () => {
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
+    await expect(testPage.getByTestId("executor-profile-selector")).toBeFocused();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
@@ -738,6 +748,8 @@ test.describe("Branch refresh + filter", () => {
       .click();
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();
+    // Finish the executor popover's focus restoration before opening the next picker.
+    await expect(testPage.getByTestId("executor-profile-selector")).toBeFocused();
 
     const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
     await expect(branchSelector).toBeEnabled({ timeout: 5_000 });

@@ -357,7 +357,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		c.JSON(http.StatusGone, gin.H{"code": "tool_payload_removed", "message_id": message.ID, "removed_at": marker["removed_at"], "summary": message.Content})
 		return
 	}
-	if message.PayloadDigest != "" {
+	if message.PayloadDigest != "" || models.HasIncrementalShellOutput(message.Metadata) {
 		// Large output was externalized at write time (see
 		// externalizeMessagePayload) and message.Metadata currently holds
 		// only the small has_output/stdout_bytes/... summary

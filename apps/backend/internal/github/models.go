@@ -1078,6 +1078,7 @@ func NormalizeCleanupPolicy(s string) string {
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type ReviewWatch struct {
 	GitHubHost          string       `json:"github_host" db:"github_host"`
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1148,19 +1149,20 @@ type GitHubRepo struct {
 // derived parent and permission fields deliberately do not carry raw API
 // response shapes into task metadata.
 type GitHubRepository struct {
-	ID             int64
-	NodeID         string
-	FullName       string
-	Owner          string
-	Name           string
-	CloneURL       string
-	HTMLURL        string
-	DefaultBranch  string
-	Fork           bool
-	ParentID       int64
-	ParentFullName string
-	PushAccess     bool
-	AdminAccess    bool
+	ID              int64
+	NodeID          string
+	FullName        string
+	Owner           string
+	Name            string
+	CloneURL        string
+	HTMLURL         string
+	DefaultBranch   string
+	Fork            bool
+	ParentID        int64
+	ParentFullName  string
+	PushAccess      bool
+	PushAccessKnown bool
+	AdminAccess     bool
 }
 
 // RepoBranch represents a branch in a GitHub repository.
@@ -1276,6 +1278,7 @@ type NewReviewPREvent struct {
 	ExecutorProfileID    string `json:"executor_profile_id"`
 	Prompt               string `json:"prompt"`
 	PR                   *PR    `json:"pr"`
+	CreatedByUserID      string `json:"created_by_user_id,omitempty"`
 }
 
 // PRStatsRequest defines filters for PR stats queries.
@@ -1376,6 +1379,7 @@ type Issue struct {
 // Repos holds the list of repositories to monitor. An empty list means all repos.
 type IssueWatch struct {
 	GitHubHost          string       `json:"github_host" db:"github_host"`
+	CreatedByUserID     string       `json:"-" db:"created_by_user_id"`
 	ID                  string       `json:"id" db:"id"`
 	WorkspaceID         string       `json:"workspace_id" db:"workspace_id"`
 	WorkflowID          string       `json:"workflow_id" db:"workflow_id"`
@@ -1425,6 +1429,7 @@ type NewIssueEvent struct {
 	ExecutorProfileID    string `json:"executor_profile_id"`
 	Prompt               string `json:"prompt"`
 	Issue                *Issue `json:"issue"`
+	CreatedByUserID      string `json:"created_by_user_id,omitempty"`
 }
 
 // CreateIssueWatchRequest is the request body for creating an issue watch.

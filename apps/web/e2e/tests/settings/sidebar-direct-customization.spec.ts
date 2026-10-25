@@ -18,6 +18,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
 test("customizes visibility and presentation from the menu and settings", async ({
   testPage: page,
   apiClient,
+  seedData,
 }) => {
   await page.goto("/tasks");
   const sidebar = page.getByTestId("app-sidebar");
@@ -30,6 +31,15 @@ test("customizes visibility and presentation from the menu and settings", async 
   await expect(menu.getByText("Sidebar settings", { exact: true })).toBeVisible();
   await menu.getByTestId("sidebar-visibility-home").click();
   await expect(sidebar.getByRole("link", { name: "Home", exact: true })).toHaveCount(0);
+  // Visibility updates optimistically. Reload only after the layout is saved.
+  await expect
+    .poll(async () => {
+      const { settings } = await apiClient.getUserSettings();
+      return settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.nodes.find(
+        (node) => node.id === "home",
+      )?.visible;
+    })
+    .toBe(false);
   await page.reload();
   await expect(sidebar.getByRole("link", { name: "Home", exact: true })).toHaveCount(0);
   await create.click({ button: "right" });
@@ -278,4 +288,34 @@ test("collapses every navigation entry and restores zero after expansion and rel
   await page.keyboard.press("Home");
   await expect(divider).toHaveAttribute("aria-valuenow", "0");
   await expect.poll(height).toBe(0);
+});
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-006.9 AC-UI-SIDEBAR-CUSTOMIZATION-006.1
+test("keeps desktop prompt context gestures out of sidebar settings", async ({
+  testPage: page,
+}) => {
+  await page.goto("/tasks");
+  const sidebar = page.getByTestId("app-sidebar");
+  const create = sidebar.getByTestId("create-task-button");
+  await create.click();
+  const dialog = page.getByTestId("create-task-dialog");
+  const prompt = dialog.getByTestId("task-description-input");
+  const menu = page.getByTestId("sidebar-customize-menu");
+  await prompt.fill("Keep this desktop draft");
+  await prompt.click({ button: "right" });
+  await expect(menu).toBeHidden();
+  await expect(prompt).toHaveText("Keep this desktop draft");
+  await prompt.click();
+  await expect(prompt).toBeFocused();
+  await prompt.fill("Still editable after context click");
+  await expect(prompt).toHaveText("Still editable after context click");
+  await dialog.getByTestId("submit-cancel").click();
+  await expect(dialog).toBeHidden();
+  await create.click();
+  await prompt.click();
+  await expect(prompt).toBeFocused();
+  await expect(menu).toBeHidden();
+  await dialog.getByTestId("submit-cancel").click();
+  await create.click({ button: "right" });
+  await expect(menu.getByText("Sidebar settings", { exact: true })).toBeVisible();
 });

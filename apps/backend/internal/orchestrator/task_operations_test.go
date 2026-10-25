@@ -1600,6 +1600,12 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 		cancelAgentBlock:   make(chan struct{}),
 		cancelAgentEntered: make(chan struct{}, 1),
 	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(agentMgr.cancelAgentBlock)
+		}
+	})
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
@@ -1616,29 +1622,37 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	// don't depend on real subprocess timing.
 	<-agentMgr.cancelAgentEntered
 
-	// Fire several duplicates while the first is still parked. Each joins the
-	// owner operation and waits for its result rather than invoking the manager.
-	const duplicates = 5
-	duplicateDone := make(chan error, duplicates)
-	for i := 0; i < duplicates; i++ {
-		go func() {
-			duplicateDone <- svc.CancelAgent(context.Background(), "session1")
-		}()
+	// Fire a duplicate while the first is still parked. Wait until it joins the
+	// owned operation before releasing the first call, so scheduling cannot turn
+	// a late duplicate into a new cancellation.
+	svc.cancellationOperationsMu.Lock()
+	operation := svc.cancellationOperations["session1"]
+	svc.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		t.Fatal("expected in-flight cancellation operation")
+	}
+	duplicateDone := make(chan error, 1)
+	go func() {
+		duplicateDone <- svc.CancelAgent(context.Background(), "session1")
+	}()
+	select {
+	case <-operation.joined:
+	case <-time.After(5 * time.Second):
+		t.Fatal("duplicate cancel did not join the in-flight operation")
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
 	}
 
-	// Release the first call. The owner and all joiners observe the same result;
+	// Release the first call. The owner and its duplicate observe the same result;
 	// after the operation clears, a fresh cancel is allowed through.
+	released = true
 	close(agentMgr.cancelAgentBlock)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first CancelAgent returned error: %v", err)
 	}
-	for i := 0; i < duplicates; i++ {
-		if err := <-duplicateDone; err != nil {
-			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
-		}
+	if err := <-duplicateDone; err != nil {
+		t.Fatalf("duplicate cancel returned error: %v", err)
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
@@ -5557,6 +5571,32 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
+}
+
+func TestStartTaskWithLaunchContextPassesCausingRunID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cause", "session-cause", models.TaskSessionStateCompleted)
+	task, err := repo.GetTask(ctx, "task-cause")
+	require.NoError(t, err)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[task.ID] = task.ToAPI()
+
+	var launchReq *executor.LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchReq = req
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-cause"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	_, err = svc.StartTaskWithLaunchContext(ctx, task.ID, "profile-1", executor.LaunchContext{
+		CausingRunID: "office-run-1",
+		Prompt:       "Run the Office step",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, launchReq)
+	require.Equal(t, "office-run-1", launchReq.CausingRunID)
 }
 
 func TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch(t *testing.T) {

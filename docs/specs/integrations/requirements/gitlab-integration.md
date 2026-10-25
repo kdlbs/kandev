@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-10-13
+updated: 2026-10-22
 owners:
   - tbd
 ---
@@ -76,6 +76,20 @@ that every test succeeded. An optional manual job has raw status `manual` and
 This clarification excludes CI configuration edits, job execution, credentials,
 new fetching or cache policies, persistence changes, race repairs, other
 providers, new copy, and layout or touch-interaction changes.
+
+#### Watch dialog ownership
+
+Integrations owns the create/edit lifetime of GitLab review and issue watches,
+including the same behavior on desktop and phone. Implementation and evidence
+belong to the [watch-dialog package](../../../plans/gitlab-watch-dialog-ownership/plan.md).
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.20:** Closing a pending create or update shall remain available. Its eventual result shall apply to the originally submitted workspace, kind, watch and normalized payload, with the existing accepted store publication and truthful success or failure feedback.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.21:** After closing, reopening or replacing a watch dialog, an earlier submission shall not dismiss the current dialog, change its raw draft or focus/caret, publish an inline error there, or release its pending Save state. This applies to the same watch, another watch, create mode, another kind or workspace, and unmount/remount.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.22:** A current opening's successful Save shall dismiss it; a failed Save shall retain its draft, show its inline error, release its pending state and allow retry. A new opening shall start with usable Save/Cancel controls independent of an earlier pending submission.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.23:** Each opening shall initialize from the selected watch or create defaults. Same-identity watch data refreshes shall preserve an existing raw draft and pending ownership; changing workspace, kind or selected watch shall initialize the newly selected form. Development lifecycle replay shall preserve these guarantees.
+
+This clarification excludes persistent drafts after closure, watch-list cache
+ownership, new polling or API contracts, and changes to other integrations.
 
 ## System design
 

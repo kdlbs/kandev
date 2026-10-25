@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -200,7 +202,7 @@ func mustTriggerFireTime(t *testing.T, repo *officesqlite.Repository, routineID 
 // requireInflightRun returns the in-flight run for the agent or fails
 // the test. Wrapping the lookup keeps the e2e test focused on the
 // fire/dispatch sequence rather than the repo's null-check ergonomics.
-func requireInflightRun(t *testing.T, repo *officesqlite.Repository, agentID string) *officemodels.Run {
+func requireInflightRun(t *testing.T, repo *officesqlite.Repository, agentID string) *runsmodels.Run {
 	t.Helper()
 	run, err := repo.FindInflightRunForAgent(context.Background(), agentID)
 	if err != nil {

@@ -27,7 +27,7 @@ const (
 	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
 	recoveryActionResume                   = "resume"
 	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionFreshStart               = executor.RecoveryActionFreshStart
 	recoveryActionRuntimeRetry             = "runtime_retry"
 	recoveryActionContinueHistory          = "continue_from_history"
 )
@@ -182,6 +182,8 @@ type continuationCheckpoint struct {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
+	// reusePreparedPrimary is reserved for the recorded dependency launch consumer.
+	reusePreparedPrimary  bool
 	TaskID                string                        `json:"task_id"`
 	Intent                SessionIntent                 `json:"intent,omitempty"`
 	SessionID             string                        `json:"session_id,omitempty"`
@@ -191,16 +193,17 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
 	// agent launch, even for passthrough profiles (whose prepare would normally
 	// be eagerly upgraded so the PTY exists). It backs the session.ensure
@@ -414,6 +417,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	// binding when a caller can access more than one task.
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
+	}
+	if response, err := s.prioritizeRestartRestore(ctx, req, intent); err != nil || response != nil {
+		return response, err
 	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
@@ -837,6 +843,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	return &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -900,7 +909,12 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{
+			ProfileExplicit:      req.ProfileExplicit,
+			SpawnOrigin:          req.SpawnOrigin,
+			MCPServerIDs:         req.MCPServerIDs,
+			reusePreparedPrimary: req.reusePreparedPrimary,
+		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -976,6 +990,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
 		options.noInitialTurn = true
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,

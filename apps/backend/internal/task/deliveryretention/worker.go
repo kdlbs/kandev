@@ -108,6 +108,7 @@ type Worker struct {
 	wg           sync.WaitGroup
 	suspended    bool
 	retryAttempt int
+	discovery    discoveryProgress
 }
 
 func New(repo Repository, pool *db.Pool, options Options) *Worker {
@@ -184,6 +185,7 @@ func (w *Worker) Stop() {
 
 func (w *Worker) loop(ctx context.Context) {
 	defer w.wg.Done()
+	defer func() { w.discovery = discoveryProgress{} }()
 	for ctx.Err() == nil {
 		if w.suspended {
 			readiness := w.checkReadiness(ctx)
@@ -217,6 +219,7 @@ func (w *Worker) loop(ctx context.Context) {
 				continue
 			}
 		}
+		w.discovery = discoveryProgress{}
 		if !wait(ctx, w.opts.After, delay) {
 			return
 		}
@@ -354,7 +357,7 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		if err != nil {
 			return false, err
 		}
-		if result.DiscoveryAdvanced {
+		if w.discovery.advance(result.DiscoveryBefore, result.DiscoveryAfter) {
 			snapshot.DiscoveryBatches++
 		}
 		snapshot.Candidates += result.Candidates

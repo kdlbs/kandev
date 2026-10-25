@@ -5,6 +5,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import { getSessionRestartStore } from "@/lib/session/session-restart-state";
 import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
@@ -1098,6 +1099,52 @@ describe("session.state_changed → active session switching with pins", () => {
 
     expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
+});
+
+describe("session.state_changed during restart", () => {
+  // @covers AC-TASKS-SESSION-TAB-RESTART-001.2, AC-TASKS-SESSION-TAB-RESTART-001.6
+  it.each([true, false])(
+    "preserves only the restarting selection and pin (target pending: %s)",
+    (restartingTarget) => {
+      const old = { id: "s-old", task_id: "t-1", state: "RUNNING" };
+      const sibling = {
+        id: "s-new",
+        task_id: "t-1",
+        state: "WAITING_FOR_INPUT",
+        started_at: "2026-10-19T12:00:00Z",
+      };
+      const store = makeStore({
+        tasks: {
+          activeTaskId: "t-1",
+          activeSessionId: old.id,
+          pinnedSessionId: old.id,
+          lastSessionByTaskId: {},
+        },
+        taskSessions: { items: { [old.id]: old, [sibling.id]: sibling } },
+        taskSessionsByTask: { itemsByTaskId: { "t-1": [old, sibling] } },
+      });
+      getSessionRestartStore(store).setState(
+        new Set([restartingTarget ? old.id : "s-other"]),
+        true,
+      );
+      const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+      handler({
+        id: "restart-cancelled",
+        type: "notification",
+        action: STATE_CHANGED_EVENT,
+        payload: { task_id: "t-1", session_id: old.id, new_state: "CANCELLED" },
+      });
+
+      if (restartingTarget) {
+        expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
+        expect(store.setState).not.toHaveBeenCalled();
+      } else {
+        expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", sibling.id);
+        expect(store.setState).toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 describe("session.state_changed → active session handoff on terminal", () => {

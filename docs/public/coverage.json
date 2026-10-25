@@ -100,11 +100,14 @@
       ],
       "sources": [
         "apps/backend/internal/orchestrator/workflow_store.go",
-        "apps/web/components/kanban-with-preview.tsx"
+        "apps/web/components/kanban-with-preview.tsx",
+        "apps/web/components/task/sidebar-filter/use-filter-value-options.ts"
       ],
       "tests": [
         "apps/backend/internal/orchestrator/workflow_store_test.go",
-        "apps/web/components/kanban-with-preview.test.ts"
+        "apps/web/components/kanban-with-preview.test.ts",
+        "apps/web/e2e/tests/task/sidebar-repository-filter-none.spec.ts",
+        "apps/web/e2e/tests/task/mobile-sidebar-repository-filter-none.spec.ts"
       ],
       "mcpTools": [
         "create_workflow_kandev",
@@ -406,7 +409,9 @@
         "apps/backend/internal/agent/agents/runtime_update_capability.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate.go",
         "apps/web/components/settings/agent-runtime-policies.tsx",
-        "apps/web/components/update-available-toast-bridge.tsx"
+        "apps/web/components/update-available-toast-bridge.tsx",
+        "apps/backend/internal/common/launchwrapper/prepare.go",
+        "apps/backend/internal/agentctl/server/utility/launch_wrapper.go"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -430,7 +435,11 @@
         "apps/backend/internal/agent/registry/runtime_update_coverage_test.go",
         "apps/backend/internal/agent/settings/controller/agent_autoupdate_test.go",
         "apps/web/e2e/tests/settings/agent-runtime-notifications.spec.ts",
-        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts"
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts",
+        "apps/backend/internal/common/launchwrapper/prepare_test.go",
+        "apps/backend/internal/agentctl/server/utility/generic_wrapper_test.go",
+        "apps/web/e2e/tests/cli-mode/generic-launch-wrappers.spec.ts",
+        "apps/web/e2e/tests/cli-mode/mobile-generic-launch-wrappers.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",
@@ -505,7 +514,8 @@
       "stability": "stable",
       "docs": [
         "integrations",
-        "configuration"
+        "configuration",
+        "workflow-sync"
       ],
       "sources": [
         "apps/web/components/app-sidebar/sections/integrations-section.tsx",
@@ -842,7 +852,13 @@
         "coordination",
         "feature-status",
         "office-provider-routing",
-        "office-config-sync"
+        "office-config-sync",
+        "office",
+        "office-getting-started",
+        "office-agents",
+        "office-tasks",
+        "office-routines",
+        "office-operations"
       ],
       "sources": [
         "apps/backend/internal/office/routes.go",
@@ -850,14 +866,33 @@
         "apps/backend/internal/office/configsync/service.go",
         "apps/backend/internal/office/configsync/handlers.go",
         "apps/backend/internal/office/configsync/reconcile.go",
-        "apps/web/app/office/workspace/settings/components/office-config-sync-section.tsx"
+        "apps/web/app/office/workspace/settings/components/office-config-sync-section.tsx",
+        "apps/web/app/office/setup/setup-wizard.tsx",
+        "apps/web/app/office/agents/[id]/components/agent-configuration-tab.tsx",
+        "apps/web/app/office/components/new-task-dialog.tsx",
+        "apps/backend/config/workflows/office-default.yml",
+        "apps/web/app/office/routines/create-routine-dialog.tsx",
+        "apps/web/app/office/workspace/costs/create-budget-form.tsx",
+        "apps/web/app/office/components/workspace-pause-banner.tsx",
+        "apps/backend/internal/office/shared/assignment_eligibility.go",
+        "apps/backend/internal/office/costs/range.go"
       ],
       "tests": [
         "apps/backend/internal/office/onboarding/service_test.go",
         "apps/web/src/office-routes.test.ts",
         "apps/backend/internal/office/configsync/reconcile_test.go",
         "apps/backend/internal/office/configsync/handlers_test.go",
-        "apps/web/hooks/domains/office/use-office-config-sync.test.ts"
+        "apps/web/hooks/domains/office/use-office-config-sync.test.ts",
+        "apps/web/e2e/tests/office/onboarding.spec.ts",
+        "apps/web/e2e/tests/office/new-task-dialog.spec.ts",
+        "apps/web/e2e/tests/office/agent-governance.spec.ts",
+        "apps/web/e2e/tests/office/workflow-quorum-transitions.spec.ts",
+        "apps/web/e2e/tests/office/routine-catch-up-policy-ui.spec.ts",
+        "apps/web/e2e/tests/office/budget-enforcement.spec.ts",
+        "apps/web/e2e/tests/office/workspace-kill-switch.spec.ts",
+        "apps/backend/internal/office/shared/assignment_eligibility_test.go",
+        "apps/backend/internal/office/costs/range_test.go",
+        "apps/web/app/office/workspace/costs/budget-policy-card.test.tsx"
       ]
     },
     {

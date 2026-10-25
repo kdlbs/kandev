@@ -12,6 +12,8 @@ import {
 } from "../../helpers/dynamic-unclassified-fallback";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("dynamic unclassified fallback", () => {
   test("uses repeated safe failures and keeps unsafe cases on manual recovery", async ({
     testPage,
@@ -211,4 +213,10 @@ test.describe("dynamic unclassified fallback", () => {
       }
     }
   });
+});
+
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status !== testInfo.expectedStatus) {
+    await testInfo.attach("backend-log", { path: backend.logPath, contentType: "text/plain" });
+  }
 });

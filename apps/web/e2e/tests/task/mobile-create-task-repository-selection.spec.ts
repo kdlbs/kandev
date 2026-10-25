@@ -1,12 +1,51 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { KanbanPage } from "../../pages/kanban-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { dwell } from "../../helpers/causal-waits";
 
 useRegularMode();
 
 test.describe("Create task workspace repository picker on mobile", () => {
+  test("opens parent workspace help and persists the selected layout", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await mobile.mobileFab.tap();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-create-advanced-settings-trigger").tap();
+    const layoutSetting = dialog.getByTestId("task-create-initial-workspace-layout-setting");
+    await expect(layoutSetting).toBeVisible();
+    const info = layoutSetting.getByTestId("task-create-initial-workspace-layout-info");
+    await info.tap();
+    await expect(
+      testPage.getByTestId("task-create-initial-workspace-layout-help-drawer"),
+    ).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
+    const checkbox = layoutSetting.getByTestId("task-create-initial-workspace-layout-checkbox");
+    await checkbox.tap();
+    await expect(checkbox).toHaveAttribute("data-state", "checked");
+    await dialog.getByTestId("task-title-input").fill("Mobile parent workspace task");
+    await dialog.getByTestId("task-description-input").fill("Create beside the repository");
+    await dialog.getByRole("button", { name: "Create only", exact: true }).tap();
+    await expect(dialog).toHaveCount(0);
+
+    const card = new KanbanPage(testPage).taskCardByTitle("Mobile parent workspace task");
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    const cardTestId = await card.getAttribute("data-testid");
+    const taskId = cardTestId?.replace(/^task-card-/, "");
+    if (!taskId || taskId === cardTestId) throw new Error(`unexpected task card: ${cardTestId}`);
+    await expect
+      .poll(() => apiClient.getTask(taskId), { timeout: 15_000 })
+      .toMatchObject({ initial_workspace_layout: "task_root" });
+  });
+
   test("marks another row's repository while keeping it selectable", async ({
     testPage,
     prCapture,

@@ -187,5 +187,10 @@
   "providerRecoveryDisabledBody": "自動続行は無効です。再開して再試行するか、新しいセッションを開始してください。",
   "providerRecoveryUnsafeBody": "保留中の操作があるか、結果が不明なため、自動続行を停止しました。再開する前に作業を確認してください。",
   "providerRecoveryUnsupportedBody": "このエージェントは中断された会話を自動復元できません。再開して再試行するか、新しいセッションを開始してください。",
-  "providerRecoveryEvidenceBody": "会話の識別情報または安全性の情報が不足しているため、自動続行を停止しました。再開する前に作業を確認してください。"
+  "providerRecoveryEvidenceBody": "会話の識別情報または安全性の情報が不足しているため、自動続行を停止しました。再開する前に作業を確認してください。",
+  "capacityRetryWindowEndsAt": "自動復旧は {{time}} に終了します。",
+  "retainedTurnRecoveryWindowExpiredBody_other": "自動復旧の期限が {{count}} 回の試行後に終了しました。新しいメッセージを送信できます。",
+  "retainedTurnRecoveryRestartBody": "Kandev の再起動後、自動復旧が停止しました。新しいメッセージを送信できます。",
+  "capacityRetryWindowEnding": "自動復旧は {{countdown}} 後に終了します。",
+  "retainedTurnRecoveryWindowExpiredBody_one": "自動復旧の期限が {{count}} 回の試行後に終了しました。新しいメッセージを送信できます。"
 }

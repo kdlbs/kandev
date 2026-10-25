@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { createAppStore } from "@/lib/state/store";
+import { applyTaskOverviewPatch } from "@/lib/ws/handlers/task-overview";
 import type { TaskNavigationIdentity } from "./task-navigation-reads";
 import {
   beginTaskNavigation,
@@ -16,6 +17,106 @@ const apiMocks = vi.hoisted(() => ({
 }));
 const ACTIVE_TASK_ID = "task-active";
 const RETAINED_TASK_ID = "task-retained";
+
+describe("task navigation canonical overview refresh", () => {
+  afterEach(() => {
+    apiMocks.fetchTask.mockReset();
+    apiMocks.listTaskSessions.mockReset();
+  });
+
+  function makeStore() {
+    return createAppStore({
+      workspaces: { activeId: "workspace", items: [] },
+      tasks: { activeTaskId: ACTIVE_TASK_ID },
+      kanban: {
+        workflowId: "workflow",
+        tasks: [
+          {
+            id: ACTIVE_TASK_ID,
+            workspaceId: "workspace",
+            workflowId: "workflow",
+            workflowStepId: "in-progress",
+            updatedAt: "2026-10-15T10:00:00Z",
+            title: "Original task",
+          },
+        ],
+      },
+    } as never);
+  }
+
+  function refreshedTask() {
+    return {
+      id: ACTIVE_TASK_ID,
+      workspace_id: "workspace",
+      workflow_id: "workflow",
+      workflow_step_id: "review",
+      updated_at: "2026-10-15T10:01:00Z",
+      title: "Refreshed task",
+    } as TaskNavigationIdentity["task"];
+  }
+
+  it("repairs shared placement after a move missed before websocket connection", async () => {
+    const store = makeStore();
+    apiMocks.fetchTask.mockResolvedValue(refreshedTask());
+    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    await readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+
+    expect(store.getState().taskOverview.byId[ACTIVE_TASK_ID]).toMatchObject({
+      workflowStepId: "review",
+      title: "Refreshed task",
+    });
+    expect(store.getState().kanban.tasks[0].workflowStepId).toBe("review");
+    expect(store.getState().taskOverview.reads).toEqual({});
+  });
+
+  it("preserves a live placement patch while accepting other refreshed fields", async () => {
+    const store = makeStore();
+    const response = deferred<TaskNavigationIdentity["task"]>();
+    apiMocks.fetchTask.mockReturnValue(response.promise);
+    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+    const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+    await Promise.resolve();
+    store.setState((state) =>
+      applyTaskOverviewPatch(
+        state,
+        ACTIVE_TASK_ID,
+        {
+          id: ACTIVE_TASK_ID,
+          workflowStepId: "done",
+        },
+        "workspace",
+      ),
+    );
+    response.resolve(refreshedTask());
+    await read;
+
+    expect(store.getState().taskOverview.byId[ACTIVE_TASK_ID]).toMatchObject({
+      workflowStepId: "done",
+      title: "Refreshed task",
+    });
+    expect(store.getState().taskOverview.reads).toEqual({});
+  });
+
+  it("discards a refresh after its workspace scope changes", async () => {
+    const store = makeStore();
+    const response = deferred<TaskNavigationIdentity["task"]>();
+    apiMocks.fetchTask.mockReturnValue(response.promise);
+    apiMocks.listTaskSessions.mockResolvedValue({ sessions: [], total: 0 });
+    const read = readTaskNavigationIdentity(store, ACTIVE_TASK_ID);
+    const outcome = read.catch((error: unknown) => error);
+    await Promise.resolve();
+    store.setState((state) => ({
+      workspaces: { ...state.workspaces, activeId: "other-workspace" },
+      workspaceContextGeneration: state.workspaceContextGeneration + 1,
+    }));
+    response.resolve(refreshedTask());
+
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(store.getState().taskOverview.byId[ACTIVE_TASK_ID]).toBeUndefined();
+    expect(store.getState().taskOverview.reads).toEqual({});
+  });
+});
 
 vi.mock("@/lib/api", () => apiMocks);
 

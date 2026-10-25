@@ -1,6 +1,9 @@
 {
   "exemptions": [
+    {"file": "internal/db/schema_tables.go", "symbol": "ExistingSQLiteTablesContext", "rule": "sqlite-catalog", "reason": "Central SQLite-only table inventory rejects other drivers before querying the catalog"},
     {"file": "internal/launcher/backup_sqlite.go", "symbol": "verifyProductionSnapshot", "rule": "sqlite-catalog", "reason": "Launcher production snapshots open only the sqlite3 driver read-only and require SQLite integrity verification before publication"},
+    {"file": "internal/task/inventoryrepair/alias_dependencies.go", "symbol": "inspectAliasSchema", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair observes the complete schema before allowing dependent-row removal"},
+    {"file": "internal/task/inventoryrepair/alias_foreign_keys.go", "symbol": "aliasForeignKeyQuery", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair records existing violations before fencing and rejects new violations before publication"},
     {"file": "internal/task/inventoryrepair/journal.go", "symbol": "verifyBackup", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair verifies its backup before any inventory mutation"},
     {"file": "internal/system/toolretention/scan.go", "symbol": "consumeRow", "rule": "sqlite-date-function", "reason": "Tool payload retention rejects non-SQLite engines before scanning; julianday validates legacy SQLite timestamp strings"},
     {"file": "internal/task/repository/sqlite/tool_payload_retention_scan.go", "symbol": "payloadTaskEligibilityTemplate", "rule": "sqlite-date-function", "reason": "PayloadTaskEligible requires the sqlite3 driver before validating legacy timestamps with SQLite date functions"},
@@ -114,7 +117,6 @@
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "backfillExecutorsRunningFromTaskSessions", "rule": "raw-placeholder", "reason": "This backfill is a SQLite-only legacy migration"},
     {"file": "internal/task/repository/sqlite/base_migrations.go", "symbol": "healDuplicateTaskEnvForTask", "rule": "raw-placeholder", "reason": "This repair is a SQLite-only legacy migration"},
     {"file": "internal/task/repository/sqlite/task_transfer_relations.go", "symbol": "transferRelationTableNames", "rule": "sqlite-catalog", "reason": "The SQLite branch is an explicit dialect boundary for the transfer relation inventory"},
-    {"file": "internal/task/repository/sqlite/session.go", "symbol": "DismissLastAgentError", "rule": "sqlite-date-function", "reason": "The task SQLite repository owns this SQLite date expression"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "sqlite-catalog", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/testutil/sqlite_template.go", "symbol": "build", "rule": "sqlite-catalog", "reason": "SQLite test template checkpoints its WAL before cloning the database file"},
@@ -138,6 +140,7 @@
     {"file": "internal/utility/store/sqlite.go", "symbol": "migrateTemplatePlaceholders", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "NormalizeEmptyBuiltinBinding", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "DeleteAgent", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/workflowsync/store.go", "symbol": "RecordSyncFailure", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"},
     {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"}
   ]
 }

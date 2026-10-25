@@ -474,11 +474,6 @@ func (t *promptTurnState) cursorRetriableFailure() bool {
 	return failure
 }
 
-func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
-	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
-	return failure, occurredAt
-}
-
 func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
 		return false, "", time.Time{}, false
@@ -694,6 +689,23 @@ func (a *Adapter) GetAgentInfo() *AgentInfo {
 	return a.agentInfo
 }
 
+// SupportsSessionResume reports the ACP session/resume capability negotiated
+// during initialize. It is intentionally distinct from the static registry
+// resume setting used by Kandev's own conversation fallback.
+func (a *Adapter) SupportsSessionResume() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.SessionCapabilities.Resume != nil
+}
+
+// SupportsSessionLoad reports the ACP session/load capability negotiated during
+// initialize.
+func (a *Adapter) SupportsSessionLoad() bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.capabilities.LoadSession
+}
+
 // SetPendingContext sets the context to be injected into the next prompt.
 // This is used by the fork_session pattern for ACP agents that don't support session/load.
 // The context will be prepended to the first prompt sent to this session.
@@ -797,6 +809,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 }
 
 func (a *Adapter) sendUpdateNow(event AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.mu.RLock()
 	if a.closed {
 		a.mu.RUnlock()
@@ -832,6 +845,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event = streams.BoundGenericToolEvent(event)
 	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:

@@ -122,12 +122,16 @@ portable credentials. No provider or account fallback is injected on failure.
 
 ### Claude Code and Codex CLI version and model discovery
 
-For Claude and Codex, the agent card shows the installed vendor CLI's version
-next to the detected path (for example "Claude Code 2.1.220" or "Codex CLI
-0.155.1"), or a muted "version unknown" line with a short reason when the
-version command fails or times out. Reinstalling or upgrading through the
-card's install action re-detects the version automatically, without a
-backend restart.
+Agent cards show the **Session runtime** selected for new structured sessions. For a
+runtime managed by Kandev, the card names the npm package and selected version.
+A native CLI or custom command is identified separately; unavailable identity or
+version information is shown as unknown. This label does not confirm authentication
+or a successful launch, and does not describe existing sessions or passthrough commands.
+
+Expand **Diagnostics** to see the detected local CLI path. For Claude and Codex,
+this also shows the installed vendor CLI version, or an unknown version with the
+reason discovery failed. This local installation may differ from the session runtime.
+The card's install action refreshes discovery without a backend restart.
 
 The profile editor's Start model dropdown includes suggestions from the host CLI. The Codex
 CLI publishes a model list (`codex app-server`), so its dropdown shows that
@@ -461,7 +465,7 @@ This order applies only to Settings. Task creation, in-task agents, handoff, and
 | Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
 | Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
 | CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
-| Command prefix                         | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                                                                                                                                                                                                               |
+| Command prefix                         | Optional launcher argv for structured sessions, ACP probes, and native terminal passthrough. No provider plugin is required.                                                                                                                                                                                                                                                               |
 | Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
 | Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
 | CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
@@ -537,6 +541,14 @@ unclassified failures. The error catalogue is versioned and can grow as
 provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
+
+Native code review uses the same saved candidate policy for classified provider
+failures and keeps its selected candidate across prompt batches in one review
+run. Each prompt batch permits at most eight candidate dispatch attempts. Partial
+output, cancellation,
+and inference admission refusals stop automatic fallback. A request deadline
+without confirmed child termination also stops the review, even while its parent
+budget remains active; automatic recovery from that deadline is not available.
 
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a
@@ -655,7 +667,7 @@ routing release runtime is unavailable. HTTP 500 means release failed and the
 hold remains. A 401 or 403 requires checking authentication, settings access,
 and the current per-boot interlock. Bearer credentials are rejected on this
 settings route. The interlock is an accidental-mutation guard, not an
-authentication credential; see [Scope agent profiles](security.md#scope-agent-profiles).
+authentication credential; see [Scope agent profiles and MCP definitions](security.md#scope-agent-profiles-and-mcp-definitions).
 
 ### Host probes and executor model catalogs
 
@@ -697,6 +709,31 @@ compatible, with strictness off until a user enables it. Optional portable
 configuration can copy selected allowlisted files to a remote executor, but it
 cannot guarantee equal host and executor model catalogs.
 
+When a started ACP probe fails during discovery, inspect the backend logs for
+the child-side cause. Failed profile probes record the managed-runtime failure
+classification and a bounded, sanitized stderr tail while their response stays
+generic. A line cut off at the beginning of the retained tail is omitted to
+avoid exposing part of a credential.
+
+### Handle a quiet agent turn
+
+After five minutes without turn output, Chat shows **Still waiting for the
+agent.** or identifies the tool it is waiting on. The turn stays active.
+Silence alone does not mean the agent failed or that it is safe to repeat the
+instruction.
+
+Select **Cancel turn** to request cancellation. The control stays disabled and
+shows a progress indicator until the request settles, including after a page reload.
+When cancellation is confirmed, you can continue the conversation. If Kandev
+cannot confirm the outcome, delivery remains blocked and Chat shows the
+existing recovery controls. Kandev does not automatically replay the instruction.
+
+Select **Resume** to check the saved conversation. If received events are still
+being applied, Resume can wait up to 10 seconds. Its control stays busy during
+the check. If the wait expires or the evidence cannot be verified, delivery
+stays blocked. You can try Resume again after the connection or storage issue
+is resolved.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
@@ -735,7 +772,7 @@ apply.
 </details>
 
 <details>
-<summary>CLI flags and ACP command prefixes</summary>
+<summary>CLI flags and command prefixes</summary>
 
 ### CLI flags
 
@@ -747,11 +784,29 @@ Claude CLI passthrough uses standard output by default. Add an enabled `--verbos
 
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
 
-### ACP command prefixes
+### Command prefixes
 
-**Command prefix** is available for ACP launches, not terminal-passthrough launches. Kandev parses the prefix into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
+**Command prefix** wraps structured agent sessions, ACP model discovery and utility prompts, and native terminal passthrough. Basic wrapping requires no provider-specific plugin. Kandev parses the prefix into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
 
 The prefix must contain a nonempty first argv element that is not flag-like. Malformed quotes, a trailing escape, an empty launcher, or a prefix beginning with `-` is rejected when you save or preview it. If an older persisted profile contains an invalid prefix, Kandev fails the launch rather than silently running the agent without its configured launcher. Check the command preview after changing a prefix.
+
+The wrapper executable and all paths must exist on the execution host. Host model discovery uses the Kandev host. Remote sessions use their executor. A bare executable name uses the final process `PATH`. A relative executable path is relative to the working directory. Kandev does not search the current directory implicitly.
+
+Use these references as complete, separately quoted arguments:
+
+- `"{{kandev.work_dir}}"` resolves to the current execution working directory.
+- `"{{kandev.managed_npm_dir}}"` resolves to Kandev's private managed npm directory on that host.
+
+For example, `"/opt/launchers/safe wrapper" --work-dir "{{kandev.work_dir}}" --` passes the working directory as one argument. Embedded references such as `--work-dir={{kandev.work_dir}}`, unknown references, and references in the executable position are rejected. Triple braces escape a literal reference: `"{{{kandev.work_dir}}}"` passes `{{kandev.work_dir}}` unchanged.
+
+Kandev applies the wrapper once per process launch, including restart and resume. A missing wrapper or incompatible execution runtime fails the operation. Kandev does not retry without the wrapper. A failed model refresh preserves the selected model. Correct the prefix and select **Refresh models** to retry.
+
+Wrapped ACP probes require an authenticated agentctl control connection. Agentctl with authentication disabled refuses wrapped control requests. Native non-ACP utility transports do not support wrappers and return **unsupported**. This restriction does not prevent a supported agent's native terminal passthrough from using a wrapper.
+
+SSH native terminal passthrough does not yet carry wrapper settings. Kandev refuses a wrapped SSH terminal launch before starting the remote agent. Local native terminal wrapping and compatible remote ACP execution remain supported.
+
+Wrapping alone does not establish a sandbox policy. The wrapper owns its access rules and platform support. Rich sandbox configuration through plugins is not implemented.
+
 
 </details>
 
@@ -765,6 +820,8 @@ Kandev has two secret scopes:
 - **Workspace** secrets belong to one workspace and can be selected by that workspace's repositories. They are not available to shared agent or executor profiles.
 
 The General page manages Global secrets. Manage Workspace secrets from **Settings > Workspaces > _workspace_ > Secrets**. Agent and executor profile selectors intentionally show Global secrets only; a Workspace reference saved through an older or direct API path is rejected when the profile is saved or launched.
+
+To rotate a secret, choose **Edit**, change the name or value, and save. The edit form replaces that secret’s row, hiding any previously revealed value. After saving, choose **Reveal** to fetch the current value. These controls are also available on phones. Saving does not change the environment of an already-running process or an open terminal. To use the new value in a task, stop its sessions, preserve uncommitted work, use **Reset Environment**, and launch a new session; a restart or warm resume can retain the old environment snapshot. For Sprites, verify the old sandbox was destroyed.
 
 Copy or move a secret between scopes from the **Copy/Move** action on any secret row. The dialog picks Copy or Move, chooses a destination (Global or another workspace), and lets you edit the target name; it is pre-filled as `<name> (from Global)` or `<name> (from <workspace name>)` so copied secrets keep their origin visible. Moving removes the original after the copy is safely in place, and the value is transferred server-side between encrypted rows. It is never shown or copied through the browser. A target name that already exists in the destination blocks the action until you rename it.
 
@@ -816,7 +873,7 @@ conversation from saved history. It does not restore private harness state.
 
 ## Structured ACP and terminal passthrough
 
-ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including command prefixes and structured configuration, do not add those capabilities to a terminal-passthrough CLI.
+ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including structured configuration, do not add those capabilities to a terminal-passthrough CLI.
 
 Terminal custom profiles use passthrough and preserve the CLI's native PTY interface. This is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom ACP profiles use structured ACP sessions. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 
@@ -874,27 +931,75 @@ The shared auth file is keyed by MCP server name. Kandev does not compare server
 To stop sharing, clear the option and launch that profile again. That launch removes only the Kandev-created link for its project. Running processes keep credentials they already loaded. Cursor may refresh credentials through the link, but Kandev does not copy refreshed credentials back to source projects. A later launch rebuilds the shared file from those source projects. Kandev preserves a native-refreshed credential while its original source remains unchanged. Changed or removed source credentials invalidate that preservation; Kandev does not treat an old shared snapshot as an independent source.
 
 <details>
-<summary>Configure external MCP servers</summary>
+<summary>Configure workspace MCP servers</summary>
 
-## Add external MCP servers to a profile
+## Add MCP servers to a workspace
 
-When an agent advertises MCP support, open its profile's **MCP** section. The editor accepts either a servers map or an object containing `mcpServers`.
+Open **Settings > Workspaces > _workspace_ > MCP servers**. The **Configured** view stores reusable MCP definitions for that workspace. The existing **External MCP** page is different: it exposes Kandev's own MCP endpoint to outside clients.
 
-Supported server types are `stdio`, `http`, `sse`, and `streamable_http`. If `type` is absent, a `command` implies `stdio` and a `url` implies `http`. Connection mode can be:
+Choose **Add MCP server** for one of these setup modes:
 
-- `auto`: per-session for stdio and shared for a network transport;
-- `per_session`: create a connection for each agent session;
-- `shared`: reuse a network connection. Stdio cannot use shared mode.
+- **Remote endpoint** connects to an HTTP or SSE endpoint when an agent uses the definition.
+- **Managed npm package** pins an exact package name and version. Kandev materializes it in a task executor's managed cache when an agent first uses it.
+- **Existing executable** runs a command that must already exist in the task executor. Kandev does not install it.
 
-The built-in task-aware server is injected separately. A profile server named `kandev` is ignored so it cannot replace the task server.
+Add non-secret settings and bind required values to workspace secrets. Saving a definition validates and stores it, but does not download, connect to, or start the server. MCP headers and environment values can reach the agent process, so use short-lived, narrowly scoped credentials.
 
-Executor policy can allow or deny transports or server names, rewrite URLs, and inject environment values. In the current launch wiring, profile MCP resolution starts from the standalone allow-all baseline for every executor and then overlays the selected executor profile's explicit MCP policy. A blank SSH, Sprites, or other remote policy therefore inherits allowed `stdio`, HTTP, SSE, and streamable HTTP transports; it does **not** receive the deny-all remote default defined elsewhere in the runtime. Set an explicit restrictive executor MCP policy before relying on remote isolation.
+The **Marketplace** view combines Kandev-curated templates with cached public Registry discovery. Registry metadata is publisher supplied and is not a Kandev security review. Review the publisher, transport, endpoint or exact package version, requested settings, and secret bindings before selecting **Add MCP server**. A marketplace action stores the reviewed workspace definition only; it does not install or start the server.
 
-MCP JSON, including `headers` and server `env`, is stored as profile configuration. The raw editor has no secret-reference field for those values, so do not paste long-lived credentials into it unless access to the profile store is an acceptable boundary. Prefer a server that can inherit a narrowly scoped profile environment secret.
+If public Registry discovery is unavailable, Kandev shows the most recent successful cache and marks it stale or degraded. Deprecated or deleted entries cannot be added from the marketplace. Existing configured servers remain available until you edit or disable them.
 
-Passthrough injection adds CLI-specific exposure. Codex encodes MCP environment values and HTTP headers into `-c` process arguments, which another local user may read through process inspection. Cursor and Pi write project-local `.cursor/mcp.json` or `.pi/mcp.json`; when either file already exists, Kandev merges its entries and deliberately does not remove them at teardown because it does not own the user's file. Review and remove persisted entries or credentials yourself.
+## Select workspace MCP servers for agents
 
-Kandev does not validate a server-name syntax centrally, so blank or unusual names can fail or be transformed differently by each CLI. A missing command/URL, unsupported or denied transport, or server-name policy denial skips that server with a warning. Configuring `shared` mode for a stdio server is different: it aborts profile MCP resolution with an error. Review launch/session logs when an expected tool is missing.
+After a definition is configured, select it where it should apply:
+
+- In an agent profile, choose the workspace context first when the profile is global. The selection applies only to that profile in that workspace.
+- In repository settings, open the collapsed **MCP servers** section.
+- In **New Task**, open **Advanced**, then use the compact **MCP servers**
+  count selector to choose task-level additions. The info icon explains inherited
+  servers. Desktop opens a popover; touch screens open a drawer.
+- When starting another agent session, choose session-level additions.
+- In an existing task session, click the **MCP plug** in the composer and select
+  **Customize**. Desktop opens a dialog; phones open one sheet. **Connections**
+  keeps server status and tool inspection available. Inherited entries show
+  their profile, repository, task, or session name when available. Choose
+  additions under **Additional servers**. The **From task setup** group shows
+  inherited entries, which are read-only. Each entry separates its description
+  and setup/transport badges from a **Where it comes from** section with named
+  origin badges. A server selected by
+  several scopes shows each contributing source. These describe configuration;
+  check **Connections** for evidence of delivery or loaded tools.
+
+Selections are additive. The effective set combines every selected repository, profile, task, and session definition, includes every repository attached to the task, and reports duplicate origins once. A lower scope cannot remove an inherited server. Changing a definition or selection does not alter an active turn.
+
+The plug shows a clock while saved changes wait for idle, a next-start marker
+when reconnection is unsupported, and a failure marker when application fails.
+The dialog explains each state and offers retry when needed. **Setup up to date**
+means the saved configuration was applied, not that every connection works.
+Waiting changes use an amber clock, next-start changes use a blue marker, and
+application failures use a red alert. Each state includes an explanation of
+what remains in use and when the saved changes apply. Background refresh
+keeps loaded choices visible while you search or edit.
+
+In **Customize**, **Changes waiting to apply** lists each server that will be
+added, removed, or updated. The same action appears beside its server choice.
+Unchecking a server queues its removal; it stays in the last accepted setup
+until the change applies. The pending list stays visible independently of
+search and can still name a removed catalog entry.
+
+Older sessions may not have a recorded setup to compare. Their saved choices
+remain intact, but Customize explains why it cannot list individual changes.
+If the saved and accepted setups match while confirmation is pending, the UI
+says so. Once application is confirmed, the pending list clears. These are
+setup changes; **Connections** still owns connection status.
+
+For an existing task session, MCP changes save immediately. A compatible ACP
+provider applies them by reconnecting the same session after the current turn
+is idle. Providers without safe reconnection apply saved changes when the agent
+starts again. The state notice tells you which timing applies. If reconnect
+fails, the previous applied selection remains active and the UI offers retry.
+
+Existing legacy profile MCP JSON is imported into workspace definitions when possible. During migration, the legacy profile configuration remains the fallback for a profile-workspace pair that has not imported successfully. New persistent profile selections use the workspace catalog.
 
 </details>
 
@@ -917,13 +1022,23 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes. If a queued automatic launch has an invalid built agent or continue command, Kandev drops that launch instead of retrying it. Correct the profile before starting the task again. Temporary provider or environment failures are not command-validation failures.
 - **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
+- **MCP selection cannot save:** the previous saved selection remains in
+  effect. A forbidden response explains that the current connection cannot save
+  selections. Kandev's built-in port and editor forwarding consume their own
+  control authentication before reaching the application. A separate proxy that
+  sends bearer authorization to the application can still cause protected
+  settings writes to be rejected; use a browser connection that preserves the
+  application's authentication. A stale browser page instead shows **Reload
+  required**; reload before retrying.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open **MCP servers** in that
   session's chat toolbar. Select `kandev`, then find the tool in the scrollable
   list. Select the tool to inspect its description, token estimate, and
   arguments. Use **Back to tools**, then **Back to servers** on touch devices.
   **Connected** means the built-in server completed MCP initialize. **Active**
-  means it served `tools/list`. A gray row explains an intentional omission.
+  means it served `tools/list`. **Not available** explains why a server was
+  omitted, such as an unsupported HTTP transport. The desktop hover and phone
+  drawer separate **Saved changes** from **Current agent** evidence.
   Red identifies an explicit sanitized error. **Delivered, connection
   unverified** applies to a profile server that connects directly to the agent.
   Kandev cannot inspect that server's tools. Inspect the affected session

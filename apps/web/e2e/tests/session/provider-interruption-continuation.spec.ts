@@ -8,6 +8,7 @@ import {
   assertContinuationSettingRetired,
 } from "../../helpers/provider-interruption-continuation";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -108,6 +109,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
   seedData,
 }) => {
   const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const gateway = watchWs(testPage);
   try {
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
@@ -160,7 +162,15 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     } finally {
       await viewer.close();
     }
+    const cancelResponse = gateway.waitForResponse("session.recover", {
+      timeout: 35_000,
+      requestWhere: (payload) =>
+        payload.action === "cancel_retry" &&
+        payload.task_id === fixture.taskId &&
+        payload.session_id === fixture.sessionId,
+    });
     await session.recoveryCancelRetryButton().click();
+    expect((await cancelResponse).payload.cancelled).toBe(true);
     const cancelled = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,

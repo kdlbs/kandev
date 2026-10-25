@@ -18,7 +18,7 @@ func TestNativeResumeCrossStoreStateDisposition(t *testing.T) {
 	model := []string{
 		"BBBBBBB", // SQL prepared
 		"BBBBBBB", // SQL accepted
-		"BBBRBBB", // SQL dispatching: only journal unknown proves abandonment
+		"BBBRRRR", // SQL dispatching: matching unproven history becomes unknown
 		"BBBRRRR", // SQL unknown: retain historical labels while retiring
 		"BBBBBKK", // SQL completed: no terminal journal evidence may be invented
 		"BBBBBKK", // SQL failed

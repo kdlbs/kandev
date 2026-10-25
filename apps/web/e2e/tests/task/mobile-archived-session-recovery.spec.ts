@@ -211,7 +211,7 @@ test.describe("mobile: archived session recovery", () => {
     expect(summaryBox).not.toBeNull();
     expect(summaryBox!.height).toBeGreaterThanOrEqual(44);
 
-    await session.recoveryResumeButton().tap();
+    await banner.getByRole("button", { name: "Retry", exact: true }).tap();
     await expect(banner).toHaveCount(0, { timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage, "mobile archived recovery feedback");
 

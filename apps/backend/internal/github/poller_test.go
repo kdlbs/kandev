@@ -64,6 +64,16 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	return poller, svc, mockClient, store
 }
 
+func TestPollerContextUsesNonBlockingBackgroundAdmission(t *testing.T) {
+	ctx := pollerContext(context.Background())
+	if githubWorkClass(ctx) != WorkClassBackground {
+		t.Fatalf("work class = %v, want background", githubWorkClass(ctx))
+	}
+	if !nonBlockingGitHubAdmission(ctx) {
+		t.Fatal("poller context must use non-blocking admission")
+	}
+}
+
 // seedTask inserts a minimal task row for JOIN-based queries. Pass archived=true
 // to seed an archived task (archived_at set to now).
 func seedTask(t *testing.T, store *Store, taskID string, archived bool) {
@@ -2004,48 +2014,6 @@ func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
 	})
 }
 
-func TestWaitForRateLimit_SkipsWhenHealthy(t *testing.T) {
-	poller, _, _, _ := setupPollerTest(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if !poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected true when no exhaustion recorded")
-	}
-}
-
-func TestSearchBucketExhausted(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-
-	if poller.searchBucketExhausted("test") {
-		t.Errorf("expected false when no exhaustion recorded")
-	}
-
-	// Mark the search bucket exhausted with a future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceSearch,
-		Limit:     30,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-
-	if !poller.searchBucketExhausted("test") {
-		t.Errorf("expected true when search bucket exhausted")
-	}
-
-	// Other buckets exhausting must not trip the search guard.
-	poller2, svc2, _, _ := setupPollerTest(t)
-	svc2.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceCore,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(5 * time.Minute),
-		UpdatedAt: time.Now(),
-	})
-	if poller2.searchBucketExhausted("test") {
-		t.Errorf("expected false when only core (not search) is exhausted")
-	}
-}
-
 func TestDetectPRForWatch_FailsClosedWithoutWorkspace(t *testing.T) {
 	poller, _, mockClient, _ := setupPollerTest(t)
 
@@ -2113,21 +2081,4 @@ func TestCheckIssueWatches_BailsOutWhenSearchExhaustedMidCycle(t *testing.T) {
 	}
 
 	poller.checkIssueWatches(ctx)
-}
-
-func TestWaitForRateLimit_ReturnsFalseOnContextCancel(t *testing.T) {
-	poller, svc, _, _ := setupPollerTest(t)
-	// Force exhaustion with a far-future reset.
-	svc.RateTracker().Record(RateSnapshot{
-		Resource:  ResourceGraphQL,
-		Limit:     5000,
-		Remaining: 0,
-		ResetAt:   time.Now().Add(time.Hour),
-		UpdatedAt: time.Now(),
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately so the timer select returns ctx.Done first
-	if poller.waitForRateLimit(ctx, ResourceGraphQL, "test") {
-		t.Errorf("expected false when context cancelled during sleep")
-	}
 }

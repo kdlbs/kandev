@@ -9,6 +9,11 @@ Kandev runs Git commands in the selected repository workspace for a task session
 
 Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, provider-appropriate pull-request or merge-request creation, **Rebase**, and **Merge** when a Git-capable session is selected.
 
+When a damaged workspace prevents a change check during task deletion, you can
+acknowledge the unknown changes and delete the task. Physical cleanup remains
+subject to ownership and Git identity checks. See
+[delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 ## Quick path
 
 1. Inspect the selected repository in **Changes**.
@@ -82,6 +87,8 @@ the pull-request target. Before launch, Kandev prepares one exact fork remote fo
 and configures Git to use it for pushes. Run ordinary **Push** or `git push`; do not rename `origin`
 or replace it with a fork. The PR workflow uses the canonical repository and an explicit
 `<fork-owner>:<branch>` head. Other tasks keep the normal `origin` push behavior.
+
+When its recorded checkout identity is complete, changing only the comparison base of an existing Worktree task, such as retargeting a stacked pull request to `main`, keeps its current checkout available for Resume and additional sessions. Incomplete identity evidence uses the existing guarded recovery flow. Kandev retains the checkout's recorded identity while using the updated base for comparisons. An explicit checkout-branch selection still requires the matching checkout.
 
 ### Compare a fork pull request
 
@@ -291,78 +298,129 @@ sensitive data.
 
 ### Repair inconsistent worktree inventory
 
-A healthy checkout can disagree with its saved branch, repository ID, or task
-root. This can produce “advanced from audited commit”, “incomplete worktree
-identity”, or “owned by another task” errors. These messages require inspection:
-they can also indicate a real ownership or commit change. Repeated resume or
-cleanup attempts do not repair inconsistent inventory.
+Use the source maintenance utility when healthy Git checkouts disagree with
+saved worktree ownership, branch, repository, or task-root records. Duplicate
+physical-worktree claims now stop normal admission and cleanup with an ambiguous
+inventory ownership error. Repeated resume or cleanup attempts do not repair them.
 
-The source maintenance command `cmd/worktree-inventory-repair` supports explicit
-repairs for local SQLite installations using the host **Worktree** executor.
-Application and rollback require Linux and permission to inspect host processes
-across all users through `/proc`. An inaccessible process blocks repair; this can
-require a privileged operator. Preview and verification only read state.
-Use a backend build containing the repair startup guard before applying a repair.
-The utility ignores inherited `GIT_*` environment settings; its plan selects the
-repository and checkout paths.
+The utility supports **local SQLite installations and the host Worktree
+executor**. Apply and rollback require Linux and permission to inspect processes
+across all users through `/proc`. PostgreSQL, remote executors, and non-Linux
+application are unsupported. Discovery, preview, and verification only read state.
+Use a backend build with the repair startup guard before applying a repair.
 
-1. Build the utility from `apps/backend`:
+1. **Build the utility** from `apps/backend`:
 
    ```bash
    go build -o worktree-inventory-repair ./cmd/worktree-inventory-repair
+   umask 077
    ```
 
-2. Prepare a private JSON input using the
-   [repair plan fields](https://github.com/kdlbs/kandev/blob/main/apps/backend/internal/task/inventoryrepair/plan.go).
-   Set `version` to `1`, `driver` to `sqlite`, a unique `operation_id`, and absolute
-   `home`, `database`, and `tasks_root` paths. Each repair names an exact worktree,
-   environment, repository, source path, destination path, attached branch, HEAD
-   commit, and source-root task. Every relocation requires a matching `workspaces`
-   entry naming the environment's canonical task root and every bound session.
-   Include an old cleanup job only when its incomplete snapshot needs a linked
-   successor. Omit `expected_rows` and `expected_git` on
-   the first preview; the command fills these observations.
-
-3. Review the preview and retain its `plan` object as the application input:
+2. **Discover duplicate claims** using the installation's absolute paths:
 
    ```bash
-   umask 077
+   ./worktree-inventory-repair --discover \
+     --home /srv/kandev --database /srv/kandev/data.db \
+     --tasks-root /srv/kandev/tasks --limit 50 > discovery.json
+   ```
+
+   Discovery reads database claims without electing an owner or changing Git.
+   Continue with `--after` set to the returned `next_after` cursor until no cursor
+   remains. The default page has 50 physical IDs, with a maximum of 100. Oversized
+   groups are reported without partial selections. Do not treat discovery as
+   authorization to remove a row.
+
+3. **Prepare an explicit private plan.** Use the
+   [repair plan fields](https://github.com/kdlbs/kandev/blob/main/apps/backend/internal/task/inventoryrepair/plan.go)
+   and a unique `operation_id`. Set `driver` to `sqlite` and provide absolute
+   `home`, `database`, and `tasks_root` paths.
+
+   Use `version: 2` for duplicate ownership. Each `repairs` entry names the exact
+   physical ID, canonical environment and repository, attached branch, HEAD,
+   repository path, checkout path, and marked root owner. Set `source_path` and
+   `path` to the same existing checkout. Each corresponding `aliases` entry names
+   its `worktree_id`, one `canonical_row_id`, and the complete `alias_row_ids` list:
+
+   ```json
+   {
+     "worktree_id": "physical-worktree-id",
+     "canonical_row_id": "canonical-inventory-row-id",
+     "alias_row_ids": ["legacy-root-alias-row-id"]
+   }
+   ```
+
+   The canonical checkout must agree with Git registration, the branch and HEAD,
+   the repository record, and the enclosing task's ownership marker. A root alias
+   must belong to that same environment and have no root `.git` metadata.
+
+   For a copied child environment, also provide `redundant_environments` with its
+   `environment_id`, `canonical_environment_id`, saved `group_id`, and complete
+   `session_ids` and `snapshot_ids` lists. Every copied slot must refer to a proven
+   canonical checkout. The saved sharing policy, group ownership, and membership
+   must agree. Include `workspaces` only for explicit workspace-path corrections.
+   Unmatched slots, unknown references, mixed active/deleted claims, and incomplete
+   selections refuse the entire repair.
+
+   Version 2 does not move files or supersede cleanup jobs. Use the existing
+   version-1 plan for a branch correction or explicit relocation. A version-1
+   relocation requires a matching `workspaces` entry with every bound session.
+   Include an old cleanup job only when its incomplete snapshot needs a linked
+   successor. Never edit the old snapshot to make cleanup pass.
+
+4. **Stop consumers and produce a fresh preview.** Stop the backend through its
+   normal service or launcher, and stop processes using the selected task roots.
+   Omit `expected_rows`, `expected_git`, and `expected_consumer_paths` from the
+   initial input. Preview supplies these exact observations:
+
+   ```bash
    ./worktree-inventory-repair --plan input.json > preview.json
    jq '.plan' preview.json > repair.json
    ```
 
-   Check the proposed changes and any `blockers`. Preview preserves tracked,
-   untracked, and ignored files, the index, refs, and ownership markers.
+   Review the selected rows, dependent records, and `blockers`. Keep the complete
+   returned plan. A version-2 repair can preserve an idle `CREATED` or
+   `WAITING_FOR_INPUT` session only after proving that no runtime or host process
+   still uses the workspace. A cleanup job must be cancelled or succeeded.
+   Changed observations require a new preview and review.
 
-4. Stop the backend through its normal service or launcher, and stop processes
-   using the selected task roots. Refresh and review the preview if state changed.
-   Then apply and verify before restarting:
+5. **Apply and verify before restarting:**
 
    ```bash
    ./worktree-inventory-repair --plan repair.json --apply
    ./worktree-inventory-repair --plan repair.json --verify
    ```
 
+   Version 2 removes only selected alias slots, rebinds proven sessions and Git
+   snapshots, and removes fully redundant environments in one transaction.
+   It preserves conversation and resume identities, session states, commits,
+   staged changes, tracked, untracked, and ignored files, refs, and root markers.
+   Existing cancelled cleanup snapshots retain their original bytes.
+
 A held backend lock means an instance still owns the installation. A process
 inspection permission error means the utility cannot establish that consumers
-are absent; use an authorized account with sufficient visibility. Neither error
+are absent. Use an authorized account with sufficient visibility. Neither error
 is a stale-lock signal. Do not delete ownership locks or bypass these checks.
 
 The command retains a private SQLite backup and journal under
-`<home>/inventory-repairs/<operation_id>/`. It moves selected checkouts with
-`git worktree move`, preserves their content and refs, and changes only the
-selected inventory. When a cleanup snapshot needs repair, its original bytes
-remain on the cancelled predecessor; the linked successor captures new source
-evidence through the normal cleanup worker.
+`<home>/inventory-repairs/<operation_id>/`. Version 1 moves explicitly selected
+checkouts with `git worktree move`. When it supersedes a cleanup job, the original
+snapshot stays on the cancelled predecessor and the linked successor captures
+new source evidence through the normal worker.
 
-If interrupted, rerun the same plan with `--apply` to finish or `--rollback` to
-reverse it. Changed inventory or checkout content prevents either operation.
-An unresolved journal blocks backend startup; retain the journal and backup
-until resolved. Startup reports the repair recovery command without suggesting
-a second instance. Verify before restarting; online verification may observe
-concurrent changes. After restart, check the cleanup job and resume the affected
-session. Metadata verification alone does not establish that those operations
-have completed. Normal dirty-checkout, branch, and ownership guards still apply.
+If interrupted, rerun the same saved plan with `--apply` to finish or
+`--rollback` to restore the original records. Rollback restores parent records
+before their dependents. Changed inventory or checkout content prevents recovery.
+An unresolved journal blocks backend startup. Retain its journal and backup,
+resolve the interrupted operation, and verify before restarting.
+
+After restart, resume the affected session or retry archive or confirmed delete
+through the normal task controls. Check the resulting cleanup job separately.
+**Metadata verification does not mean cleanup completed.** Borrowed workspaces
+remain protected, and dirty-file, branch, commit, ownership, and deletion-consent
+checks still apply. An archived borrower session can continue to protect a
+shared checkout. A cascade delete can report pending cleanup after deleting the
+task rows. Inspect the durable cleanup jobs and workspace-group status separately;
+a completed task cleanup job does not clear an older group cleanup error.
 
 ### Named branch policies
 
@@ -416,8 +474,8 @@ After creation, Kandev copies any repository-configured files and runs its setup
 
 ### Deleting a task with local worktree changes
 
-Task deletion checks every owned worktree before it changes the task or starts
-cleanup. If Git reports tracked or untracked changes, deletion stops and the
+Normal task deletion checks every owned worktree before it changes the task or
+starts cleanup. If Git reports tracked or untracked changes, deletion stops and the
 task remains visible. The confirmation dialog lists the affected worktrees and
 requires an explicit choice to permanently discard those changes before a
 retry.
@@ -428,6 +486,11 @@ shared-reference, and branch-safety checks. A branch with unique commits is
 preserved. If the checkout becomes dirty after admission, cleanup preserves the
 checkout and records a terminal failure instead of retrying the destructive
 operation automatically.
+
+To remove the task while preserving its files and branches, select **Keep
+workspace files**. This option also works when workspace inspection fails. See
+[Delete a task when its workspace cannot be checked](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked)
+for the recovery steps and retention limits.
 
 ## Everyday operations
 
@@ -481,6 +544,10 @@ polling is paused. These actions do not wait for the background interval.
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
 
+Turn changed-files cards show the repository interval for one agent turn. Kandev captures the start and end in the executor and stores the historical diff data with the task.
+
+Kandev does not rebuild an earlier diff from the current `HEAD` or working tree. Later edits, commits, and branch changes do not alter that turn's summary. See [Tasks and Workflows](tasks-and-workflows.md#show-changed-files-after-a-turn) for the user preference and navigation steps.
+
 The Changes toolbar shows a spinner while Git status or inline commit details load.
 If a read fails, it shows a warning and retries automatically with increasing
 delays. The panel keeps the last available file and history data visible while
@@ -495,6 +562,11 @@ Two similarly named actions have very different semantics:
 Do not reset or amend commits already consumed by other users unless you intend to rewrite and force-push the branch. Kandev hides some revert/reset actions for commits it knows are pushed, but that UI guard is not a repository policy or API authorization boundary.
 
 ## Create a pull request or merge request
+
+Submitting closes the creation dialog immediately. If you reopen it while an earlier
+request finishes, that result keeps its original task and repository association
+and preserves your new title, description, and draft choice. A partial failure
+reopens the original form for retry only when you have not replaced that form.
 
 For an ordinary task, **Create PR** first runs:
 
@@ -593,6 +665,11 @@ Worktree cleanup audits the Git worktree and checkout before it runs the reposit
 - Normal task deletion audits each owned worktree before mutation. Tracked or untracked changes stop deletion and keep the task, checkout, and local branch in place until the user explicitly consents to discard them. With consent, cleanup removes the checkout only after the normal ownership and identity audits pass. A clean branch is removed only when its current commit is already contained by the recorded base or repository default; a clean branch with unique commits is preserved after its checkout is reclaimed. Remote branches are never deleted.
 - **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree, preserves unpublished or ambiguous local work, and removes a Kandev-owned local branch only when its exact head is already contained in the recorded integration ref. The next launch materializes a fresh environment.
 - Office handoff cleanup uses the same fail-closed local-branch policy when it releases a worktree.
+
+Archive removes eligible Kandev-owned worktree directories and their staged, unstaged, untracked,
+and ignored files during background cleanup. Commit and push work you need before archiving;
+archive does not wait for a clean checkout or make an automatic commit. Runtime and ownership
+checks still apply. Ordinary local executor repository folders are left in place.
 
 Archive cleanup uses that policy too. If a task is archived before integration, the branch remains. A later full storage-maintenance run can revisit a bounded set of those archived rows and remove the exact local ref after integration is proven. Ref deletion includes the expected head SHA, so an external branch update causes retention instead of deleting the changed ref. Kandev never removes a remote ref through this cleanup.
 

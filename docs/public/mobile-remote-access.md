@@ -21,7 +21,8 @@ Todo, usage, sharing, and conversation controls remain available below the
 notice. Extra controls wrap onto another line on narrow screens. The action
 labelled with the next workflow step still moves the task to that step. In task
 Chat, that action occupies a right-aligned row above the transcript utility
-icons, with the message composer below those icons.
+icons. Status icons and transcript utilities share the row below it when they
+fit. They wrap onto additional rows when needed, with the message composer below.
 
 ## Confirm an action on a phone
 

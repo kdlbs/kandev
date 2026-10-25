@@ -627,7 +627,7 @@ func opaqueMCPConnectionID(connectionID string) string {
 func (s *Server) RegisterRoutes(router gin.IRouter) {
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -638,7 +638,7 @@ func (s *Server) RegisterRoutes(router gin.IRouter) {
 func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
 	router.GET("/mcp/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/mcp/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP backend routes",
 		zap.String("sse", "/mcp/sse"),
@@ -1428,6 +1428,9 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithIdempotentHintAnnotation(false),
 			mcp.WithOpenWorldHintAnnotation(false),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete")),
+			mcp.WithString("workspace_cleanup", mcp.Enum("delete", "retain"), mcp.Description("Use retain to delete the task while keeping workspace files, including when workspace inspection fails. Defaults to delete.")),
+			mcp.WithBoolean("discard_worktree_changes", mcp.Description("Allow removal of local workspace changes.")),
+			mcp.WithBoolean("allow_unverified_workspace_changes", mcp.Description("Acknowledge that workspace changes cannot be checked. Requires discard_worktree_changes=true and workspace_cleanup=delete. Task removal succeeds independently of pending physical cleanup.")),
 		),
 		s.wrapHandler("delete_task_kandev", s.deleteTaskHandler()),
 	)
@@ -1962,7 +1965,8 @@ const askUserQuestionOutputSchema = `{
     "type": "object",
     "description": "Answer keyed by question id.",
     "properties": {
-      "selected_option": {"type": "string"},
+      "selected_option": {"type": "string", "description": "ID of the selected option."},
+      "selected_label": {"type": "string", "description": "Exact label of the selected option. Omitted when the ID cannot identify one offered option."},
       "custom_text": {"type": "string"},
       "answered": {"type": "boolean"},
       "rejected": {"type": "boolean"}
@@ -1974,14 +1978,14 @@ const askUserQuestionOutputSchema = `{
 func (s *Server) registerInteractionTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("ask_user_question_kandev",
-			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 concrete options with short labels and descriptions; use a stable id when response keys matter. Set allow_custom_text=false when the user must choose an offered option. Call only when required input cannot be inferred, and bundle related questions in one call. Returns answers keyed by question id; a rejected bundle includes rejected=true and may include reject_reason.`),
+			mcp.WithDescription(`Ask the user 1-4 related questions and wait for all answers. Each question requires a prompt and 2-6 options with labels and descriptions. Use a stable id when response keys matter. Set allow_custom_text=false to require an offered option. Call only when required input cannot be inferred. Returns answers keyed by question id, with selected_option (ID) and selected_label (exact option label) for a matched selection. A rejected bundle includes rejected=true and may include reject_reason.`),
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithRawOutputSchema(json.RawMessage(askUserQuestionOutputSchema)),
 			mcp.WithArray(questionsArg, mcp.Required(),
 				mcp.Description(`Array of 1-4 question objects. Each question must have a "prompt" (the question text) and an "options" array (2-6 entries with label + description). Optional fields: "id" (stable identifier in the response map; auto-generated if omitted), "title" (≤12 chars short label), "allow_custom_text" (boolean, defaults to true).`),
 				mcp.MinItems(1),
 				mcp.MaxItems(4),
-				mcp.Items(buildQuestionSchemaItem()),
+				mcp.Items(buildOperatorQuestionSchemaItem()),
 			),
 			mcp.WithString("context", mcp.Description("Optional single block of shared background information. Preserved verbatim; use context_paragraphs for multiple paragraphs.")),
 			mcp.WithArray(contextParagraphsArg,

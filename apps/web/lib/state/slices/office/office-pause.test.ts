@@ -39,7 +39,7 @@ function mutateSuccess(
   return { kind: "mutate-success", paused, record };
 }
 
-describe("office pause store actions: begin/reset", () => {
+describe("office pause store actions: begin/read", () => {
   it("beginPauseRequest returns a strictly increasing tag", () => {
     const store = makeStore();
     const first = store.getState().beginPauseRequest();
@@ -48,14 +48,34 @@ describe("office pause store actions: begin/reset", () => {
     expect(store.getState().office.pause.requestSeq).toBe(second);
   });
 
-  it("resetPauseState clears the record and marks status unknown", () => {
+  it("beginPauseRead clears the record for another workspace and marks status loading", () => {
     const store = makeStore();
     const tag = store.getState().beginPauseRequest();
     store.getState().applyPauseResponse(tag, WS_1, WS_1, readSuccess(true, makeRecord()));
-    store.getState().resetPauseState();
-    expect(store.getState().office.pause.status).toBe("unknown");
+    store.getState().beginPauseRead(WS_2);
+    expect(store.getState().office.pause.status).toBe("loading");
     expect(store.getState().office.pause.record).toBeNull();
   });
+});
+
+describe("office pause cached workspace ownership", () => {
+  it.each(["read-success", "mutate-success"] as const)(
+    "an accepted %s synchronizes the cache owner before a later remount",
+    (kind) => {
+      const store = makeStore();
+      store.getState().beginPauseRead(WS_1);
+      const tag = store.getState().beginPauseRequest(kind === "read-success" ? "read" : "mutate");
+      store.getState().applyPauseResponse(tag, WS_2, WS_2, {
+        kind,
+        paused: true,
+        record: makeRecord(),
+      });
+      expect(store.getState().office.pause.workspaceId).toBe(WS_2);
+      store.getState().beginPauseRead(WS_2);
+      expect(store.getState().office.pause.status).toBe("loading");
+      expect(store.getState().office.pause.record?.id).toBe("pause-1");
+    },
+  );
 });
 
 describe("office pause store actions: read-success", () => {
@@ -104,7 +124,7 @@ describe("office pause store actions: read-success", () => {
 });
 
 describe("office pause store actions: read-failure and F51 guards", () => {
-  it("sets status unknown but does not clear an existing record", () => {
+  it("sets status error but does not clear an existing record", () => {
     const store = makeStore();
     const readTag = store.getState().beginPauseRequest();
     store.getState().applyPauseResponse(readTag, WS_1, WS_1, readSuccess(true, makeRecord()));
@@ -113,14 +133,14 @@ describe("office pause store actions: read-failure and F51 guards", () => {
       .getState()
       .applyPauseResponse(failTag, WS_1, WS_1, { kind: "read-failure" });
     expect(applied).toBe(true);
-    expect(store.getState().office.pause.status).toBe("unknown");
+    expect(store.getState().office.pause.status).toBe("error");
     expect(store.getState().office.pause.record?.id).toBe("pause-1");
   });
 
   // F51: the GET/POST failure rows carry the same two supersession guards
   // as the success rows — a stale or wrong-workspace failure must not
-  // downgrade a freshly-applied `known` state back to `unknown`.
-  it("F51: a wrong-workspace read-failure does not flip status to unknown", () => {
+  // downgrade a freshly-applied `known` state back to `error`.
+  it("F51: a wrong-workspace read-failure does not flip status to error", () => {
     const store = makeStore();
     const readTag = store.getState().beginPauseRequest();
     store.getState().applyPauseResponse(readTag, WS_2, WS_2, readSuccess(false));

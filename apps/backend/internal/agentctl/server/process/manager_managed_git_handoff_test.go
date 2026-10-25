@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +72,7 @@ printf 'username=synthetic\npassword=synthetic\n'
 	cfg := &config.InstanceConfig{WorkDir: dir}
 	mgr := NewManager(cfg, newTestLogger(t))
 	t.Cleanup(func() { require.NoError(t, mgr.StopForTeardown(context.Background())) })
-	for _, configure := range []func(string, []string, bool, map[string]string, string, []string, bool) error{mgr.Configure, mgr.ConfigureWithEnvironment} {
+	for _, configure := range []func(string, []string, bool, map[string]string, string, []string, bool, ...launchwrapper.Spec) error{mgr.Configure, mgr.ConfigureWithEnvironment} {
 		env := map[string]string{
 			"PATH": os.Getenv("PATH"), "HOME": dir, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.DevNull,
 			"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "",

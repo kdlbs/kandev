@@ -4,6 +4,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import { createStandardProfile } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 
 export async function withTaskActionSettings(api: ApiClient, run: () => Promise<void>) {
@@ -97,8 +98,11 @@ export class ThreadActionsPage {
     }
   }
   async press(locator: Locator) {
-    if (this.mobile) await locator.tap();
-    else await locator.click();
+    if (this.mobile) {
+      const drawer = this.page.getByTestId("task-management-drawer");
+      if (await drawer.isVisible()) await waitForFiniteAnimations(drawer);
+      await locator.tap();
+    } else await locator.click();
   }
   async open(taskId: string) {
     await this.trigger(taskId).scrollIntoViewIfNeeded();
@@ -112,8 +116,10 @@ export class ThreadActionsPage {
   }
   async nested(name: string) {
     const option = this.choice(name);
-    if (this.mobile) await option.tap();
-    else {
+    if (this.mobile) {
+      await this.press(option);
+      await expect(this.page.getByTestId("task-management-drawer")).toHaveAccessibleName(name);
+    } else {
       await this.movePointer(option);
       await option.click();
       await expect(option).toHaveAttribute("aria-expanded", "true");

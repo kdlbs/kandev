@@ -101,4 +101,3 @@ whose idempotent create otherwise returns the task an earlier attempt made,
 if any. Recovery keeps
 `final_spec_json` and `decided_by` from the first claim, and never touches a
 session.
-

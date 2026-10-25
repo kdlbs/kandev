@@ -25,6 +25,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 export type QuickChatTabDragProps = {
@@ -393,18 +394,12 @@ function useQuickChatTabRename({
     setIsEditing(true);
   }, [isRenameable, name]);
 
-  const handleInputBlur = useCallback(
-    (event: FocusEvent<HTMLInputElement>) => {
-      if (
-        event.relatedTarget instanceof Node &&
-        editContainerRef.current?.contains(event.relatedTarget)
-      ) {
-        return;
-      }
-      commit();
-    },
-    [commit],
-  );
+  const { onBlur: handleInputBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: isEditing,
+    inputRef,
+    containerRef: editContainerRef,
+    onLeave: commit,
+  });
 
   const handleDraftChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setDraft(event.target.value);
@@ -417,13 +412,15 @@ function useQuickChatTabRename({
       if (event.nativeEvent.isComposing) return;
       if (event.key === "Enter") {
         event.preventDefault();
+        cancelPendingBlur();
         commit();
       } else if (event.key === "Escape") {
         event.preventDefault();
+        cancelPendingBlur();
         cancel();
       }
     },
-    [cancel, commit],
+    [cancel, commit, cancelPendingBlur],
   );
 
   return {

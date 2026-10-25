@@ -1,5 +1,7 @@
+import { act, renderHook } from "@testing-library/react";
+import type { FitAddon } from "@xterm/addon-fit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildTerminalWsUrl } from "./use-passthrough-terminal";
+import { buildTerminalWsUrl, useFitAndResize } from "./use-passthrough-terminal";
 import {
   computeCanConnect,
   computeTerminalPaneState,
@@ -122,6 +124,30 @@ describe("buildTerminalWsUrl", () => {
         sessionId: "session-1",
       }),
     ).toBe("ws://localhost:38429/terminal/session/session-1?mode=agent");
+  });
+});
+
+describe("useFitAndResize", () => {
+  it("sends a valid initial size when a forced resize precedes panel layout", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      width: 0,
+      height: 0,
+    } as DOMRect);
+    const terminal = { cols: 80, rows: 24, refresh: vi.fn() } as unknown as Terminal;
+    const sendResize = vi.fn();
+    const options = {
+      xtermRef: { current: terminal },
+      fitAddonRef: { current: { fit: vi.fn() } as unknown as FitAddon },
+      terminalRef: { current: container },
+      lastDimensionsRef: { current: { cols: 0, rows: 0 } },
+      sendResize,
+    };
+
+    const { result } = renderHook(() => useFitAndResize(options));
+    act(() => result.current(true));
+
+    expect(sendResize).toHaveBeenCalledWith(80, 24);
   });
 });
 

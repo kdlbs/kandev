@@ -91,7 +91,12 @@ export function readCookie(name: string): string | null {
     .map((part) => part.trim())
     .filter((part) => part.startsWith(encodedName));
   const entry = entries[entries.length - 1];
-  return entry ? decodeURIComponent(entry.slice(encodedName.length)) : null;
+  if (!entry) return null;
+  try {
+    return decodeURIComponent(entry.slice(encodedName.length));
+  } catch {
+    return null;
+  }
 }
 
 export function readActiveWorkspaceCookie(): string | null {

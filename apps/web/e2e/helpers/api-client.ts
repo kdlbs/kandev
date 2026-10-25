@@ -37,6 +37,15 @@ import type {
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
+  MCPDefinitionInput,
+  MCPDefinitionPatch,
+  MCPMarketplaceInstallInput,
+  MCPMarketplaceSearchResponse,
+  MCPServerDefinition,
+  MCPSelectionResponse,
+  MCPSelectionScope,
+} from "../../lib/types/http-mcp";
+import type {
   GitLabMRApproval,
   GitLabMRCommit,
   GitLabMRDiscussion,
@@ -334,6 +343,7 @@ type CreateTaskOpts = {
   blocked_by?: string[];
   /** Force the start-when-unblocked intent on or off; defaults from start_agent. */
   start_when_unblocked?: boolean;
+  mcp_server_ids?: string[];
   /** One of "critical" | "high" | "medium" | "low". Server defaults to "medium" when omitted. */
   priority?: TaskPriority;
 };
@@ -406,6 +416,7 @@ function buildCreateTaskBody(
   setIf(body, "workspace_mode", options.workspace_mode);
   setIf(body, "workspace_group_id", options.workspace_group_id);
   setIf(body, "blocked_by", options.blocked_by);
+  setIf(body, "mcp_server_ids", options.mcp_server_ids);
   if (options.start_when_unblocked !== undefined) {
     body.start_when_unblocked = options.start_when_unblocked;
   }
@@ -440,6 +451,7 @@ type OptionalAgentTaskOpts = {
   start_when_unblocked?: boolean;
   /** Prepare the task without launching its session so E2E fixtures can bind it first. */
   start_agent?: boolean;
+  mcp_server_ids?: string[];
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -466,6 +478,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (opts.autopilot) fields.autopilot = true;
   setIf(fields, "attachments", opts.attachments);
   setIf(fields, "blocked_by", opts.blocked_by);
+  setIf(fields, "mcp_server_ids", opts.mcp_server_ids);
   if (opts.start_when_unblocked !== undefined) {
     fields.start_when_unblocked = opts.start_when_unblocked;
   }
@@ -479,7 +492,10 @@ const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
  * HTTP API client for seeding test data via the backend REST API.
  */
 export class ApiClient {
-  constructor(private baseUrl: string) {}
+  constructor(
+    private baseUrl: string,
+    private ensureBackendReady?: () => Promise<void>,
+  ) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
   async rawRequest(
@@ -489,6 +505,7 @@ export class ApiClient {
     options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
     const { extraHeaders, ...requestOptions } = options ?? {};
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}${path}`, {
       method,
       headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
@@ -503,6 +520,7 @@ export class ApiClient {
     body?: unknown,
     extraHeaders?: Record<string, string>,
   ): Promise<T> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
@@ -564,6 +582,96 @@ export class ApiClient {
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
     return this.request("GET", "/api/v1/workspaces");
+  }
+
+  async listMCPServers(workspaceId: string): Promise<MCPServerDefinition[]> {
+    const response = await this.request<{ servers?: MCPServerDefinition[] }>(
+      "GET",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+    );
+    return response.servers ?? [];
+  }
+
+  async createMCPServer(
+    workspaceId: string,
+    payload: MCPDefinitionInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+      payload,
+    );
+  }
+
+  async updateMCPServer(
+    workspaceId: string,
+    serverId: string,
+    payload: MCPDefinitionPatch,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "PATCH",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+      payload,
+    );
+  }
+
+  async deleteMCPServer(workspaceId: string, serverId: string, revision: number): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}?expected_revision=${revision}&confirm=true`,
+    );
+  }
+
+  async searchMCPMarketplace(query = ""): Promise<MCPMarketplaceSearchResponse> {
+    const search = query.trim() ? `?search=${encodeURIComponent(query.trim())}` : "";
+    return this.request("GET", `/api/v1/mcp-marketplace${search}`);
+  }
+
+  async installMCPMarketplaceEntry(
+    workspaceId: string,
+    payload: MCPMarketplaceInstallInput,
+  ): Promise<MCPServerDefinition> {
+    return this.request(
+      "POST",
+      `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-marketplace/install`,
+      payload,
+    );
+  }
+
+  async getMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "GET",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async replaceMCPSelections(
+    scope: MCPSelectionScope,
+    ownerId: string,
+    workspaceId: string,
+    definitionIds: string[],
+  ): Promise<MCPSelectionResponse> {
+    const resources: Record<MCPSelectionScope, string> = {
+      profile: "agent-profiles",
+      repository: "repositories",
+      task: "tasks",
+      task_session: "task-sessions",
+    };
+    return this.request(
+      "PUT",
+      `/api/v1/${resources[scope]}/${encodeURIComponent(ownerId)}/mcp-selections`,
+      { workspace_id: workspaceId, definition_ids: definitionIds },
+    );
   }
 
   // --- Coordinator (docs/specs/coordinator/) ---
@@ -756,8 +864,8 @@ export class ApiClient {
    * Without this guard the per-test cleanup deletes the seeded CEO and
    * cascades into "No agents yet" failures across office tests.
    */
-  async cleanupTestProfiles(keepIds: string[]): Promise<void> {
-    const { agents } = await this.listAgents();
+  async cleanupTestProfiles(keepIds: string[], agentSnapshot?: Agent[]): Promise<void> {
+    const agents = agentSnapshot ?? (await this.listAgents()).agents;
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
         if (profile.workspaceId) continue;
@@ -1525,6 +1633,8 @@ export class ApiClient {
         on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_merged?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_pr_closed?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
       auto_advance_requires_signal?: boolean;
       wip_limit?: number;
@@ -1573,6 +1683,7 @@ export class ApiClient {
     workspaceId: string,
     yamlContent: string,
   ): Promise<{ created: string[]; skipped: string[] }> {
+    await this.ensureBackendReady?.();
     const res = await fetch(`${this.baseUrl}/api/v1/workspaces/${workspaceId}/workflows/import`, {
       method: "POST",
       headers: { "Content-Type": "application/x-yaml" },
@@ -2152,6 +2263,20 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
   }
 
+  async mockGitHubSetRepositoryDetails(
+    owner: string,
+    repo: string,
+    pushAccess: boolean | null,
+    adminAccess = false,
+  ): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repository-details", {
+      owner,
+      repo,
+      push_access: pushAccess,
+      admin_access: adminAccess,
+    });
+  }
+
   private async seedMockGitHubRepositoryAccess(
     items: Array<{ repo_owner: string; repo_name: string }>,
   ): Promise<void> {
@@ -2320,6 +2445,10 @@ export class ApiClient {
     base_branch: string;
     author_login: string;
     state?: string;
+    /** RFC 3339; GitHub reports it for merged PRs. */
+    merged_at?: string;
+    /** RFC 3339; GitHub reports it for merged and closed PRs. */
+    closed_at?: string;
     head_sha?: string;
     head_repo_owner?: string;
     head_repo_name?: string;
@@ -3585,6 +3714,10 @@ export class ApiClient {
     await this.request("POST", "/api/v1/linear/mock/states", { teamKey, states });
   }
 
+  async mockLinearSetProjects(teamKey: string, projects: MockLinearProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/linear/mock/projects", { teamKey, projects });
+  }
+
   async mockLinearAddIssues(issues: MockLinearIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/linear/mock/issues", { issues });
   }
@@ -3754,7 +3887,7 @@ export class ApiClient {
     workflowStepId: string;
     agentProfileId: string;
     executorProfileId?: string;
-    filter?: { teamKey?: string };
+    filter?: { teamKey?: string; projectIds?: string[] };
     prompt?: string;
     enabled?: boolean;
     pollIntervalSeconds?: number;
@@ -3780,15 +3913,37 @@ export class ApiClient {
     enabled: boolean;
     lastError?: string;
     lastErrorAt?: string;
+    prompt?: string;
+    filter?: { teamKey?: string; projectIds?: string[] };
   } | null> {
     // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
     // walk the workspace list and find by id. Scoped by workspace_id so the
     // result set stays small even if the install accumulates watchers. The
     // list endpoint wraps the rows in a { watches: [...] } envelope.
     const { watches } = await this.request<{
-      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+      watches: Array<{
+        id: string;
+        enabled: boolean;
+        lastError?: string;
+        lastErrorAt?: string;
+        prompt?: string;
+        filter?: { teamKey?: string; projectIds?: string[] };
+      }>;
     }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
     return watches.find((w) => w.id === watchId) ?? null;
+  }
+
+  async deleteLinearIssueWatches(workspaceId: string): Promise<void> {
+    const { watches } = await this.request<{ watches: Array<{ id: string }> }>(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+    for (const w of watches) {
+      await this.request(
+        "DELETE",
+        `/api/v1/linear/watches/issue/${encodeURIComponent(w.id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      );
+    }
   }
 
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
@@ -3921,6 +4076,7 @@ export class ApiClient {
   }
 
   async runtimeUpdateTaskStatus(token: string, taskId: string, status: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${taskId}/status`, {
       method: "POST",
       headers: {
@@ -3932,6 +4088,7 @@ export class ApiClient {
   }
 
   async runtimePostComment(token: string, taskId: string, body: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/comments`, {
       method: "POST",
       headers: {
@@ -3947,6 +4104,7 @@ export class ApiClient {
     parentTaskId: string,
     data: { title: string; description?: string; assigneeAgentId?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/tasks/${parentTaskId}/subtasks`, {
       method: "POST",
       headers: {
@@ -3966,6 +4124,7 @@ export class ApiClient {
     token: string,
     data: { name: string; role: string; reason?: string },
   ): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/agents`, {
       method: "POST",
       headers: {
@@ -3977,6 +4136,7 @@ export class ApiClient {
   }
 
   async runtimePutMemory(token: string, path: string, content: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       method: "PUT",
       headers: {
@@ -3988,6 +4148,7 @@ export class ApiClient {
   }
 
   async runtimeGetMemory(token: string, path: string): Promise<Response> {
+    await this.ensureBackendReady?.();
     return fetch(`${this.baseUrl}/api/v1/office/runtime/memory${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -4357,6 +4518,8 @@ export type MockJiraTicket = {
 };
 
 export type MockLinearTeam = { id: string; key: string; name: string };
+
+export type MockLinearProject = { id: string; name: string; content?: string };
 
 export type MockLinearState = {
   id: string;

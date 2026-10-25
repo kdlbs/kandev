@@ -24,10 +24,12 @@ During workspace Git refreshes, users must be able to keep reading eligible exis
 - **AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.2:** When refresh returns identical displayed content, the view shall preserve scroll position, selection, folding, and expanded context. Pending refresh shall not reset these states or replace readable content. Desktop and phone shall provide the same behavior.
 - **AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.3:** When refresh changes displayed content, the view shall keep the same file and surviving line at its previous viewport offset. If the line is removed, it shall restore to nearest surviving same-side content, then clamp the previous offset if no line survives. Confirmed file removal or checkout, environment, repository, layer, or comparison replacement shall not reuse unrelated content.
 
+- **AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.4:** Changes shall automatically retry temporary failures when reading session commits or the cumulative diff. During recovery it shall retain the last successful result, including a confirmed empty result. Before the first successful commits result it shall show loading rather than a clean empty message. Recovery shall stop after success or loss of the read's active scope; permanent errors shall not retry indefinitely.
+
 ## Out of scope
 
 - Backend Git publication and wire formats.
-- Refresh scheduling and retry policy.
+- Working-tree enrichment scheduling and retry policy.
 - Persistent historical diff storage.
 
 ## System design

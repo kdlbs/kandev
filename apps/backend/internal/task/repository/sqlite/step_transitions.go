@@ -106,9 +106,16 @@ type stepTransitionTx interface {
 // serialized against other writers of the same task row. On SQLite the
 // writer pool already serializes writers, so the plain read is sufficient.
 func (r *Repository) readTaskStepInTx(ctx context.Context, tx stepTransitionTx, taskID string) (workflowID, stepID string, found bool, err error) {
+	return r.readTaskStepInTxMode(ctx, tx, taskID, false)
+}
+
+func (r *Repository) readTaskStepInTxMode(ctx context.Context, tx stepTransitionTx, taskID string, noWait bool) (workflowID, stepID string, found bool, err error) {
 	query := `SELECT workflow_id, workflow_step_id FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
+		if noWait {
+			query += ` NOWAIT`
+		}
 	}
 	var wf, step sql.NullString
 	err = tx.QueryRowContext(ctx, r.db.Rebind(query), taskID).Scan(&wf, &step)
@@ -178,8 +185,8 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	attribution := steptelemetry.FromContext(ctx)
 	insertSQL := `
 		INSERT INTO task_step_transitions
-			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, causing_run_id, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	args := []any{
 		in.taskID,
@@ -191,6 +198,7 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 		string(attribution.Trigger),
 		string(attribution.ActorKind),
 		nullableString(attribution.ActorID),
+		nullableString(attribution.CausingRunID),
 		steptelemetry.ContractVersion,
 		occurredAt,
 	}

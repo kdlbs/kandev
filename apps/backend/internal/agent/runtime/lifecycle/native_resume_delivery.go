@@ -18,6 +18,9 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if !exists || execution == nil {
 		return fmt.Errorf("native resume execution is unavailable")
 	}
+	if execution.IsPassthrough {
+		return m.checkNativeResumeLegacyHistory(ctx, sessionID)
+	}
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
 	if client == nil {
@@ -78,7 +81,7 @@ func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentc
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("native conversation has not resumed")
 	}
-	if status == nil || !status.Durable || status.Version != journal.CurrentVersion {
+	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) {
 		return fmt.Errorf("native resume durable storage is unavailable")
 	}
 	if status.SessionID != execution.SessionID || status.IncarnationID != execution.DeliveryIncarnationID ||

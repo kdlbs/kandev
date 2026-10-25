@@ -37,8 +37,8 @@ session-activity authority remain with Tasks and Platform.
 
 - [Agent Resume and Runtime Recovery](requirements/agent-resume-runtime-recovery.md)
 - [Agent Rich Output](requirements/agent-rich-output.md)
-- [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Stall Recovery](requirements/agent-stall-recovery.md)
+- [Google Antigravity ACP Agent](requirements/antigravity-acp-agent.md)
 - [Agent Install Detection Bounds](requirements/agent-install-detection-bounds.md)
 - [Collapsible Agent Blocks on the Agents Settings Page](requirements/collapsible-agent-blocks.md)
 - [Cursor Subagent Metadata](requirements/cursor-subagent-metadata.md)
@@ -49,12 +49,13 @@ session-activity authority remain with Tasks and Platform.
 - [Agent Git permission boundary](requirements/git-operations-permission-boundary.md)
 - [Agent Creation Governance](requirements/governance.md)
 - [Granular Agent Permissions](requirements/granular-permissions.md)
-- [Harness session continuity](requirements/harness-session-continuity.md) (draft)
 - [Hide Disabled Agent Profiles from Left Panel Navigation](requirements/hide-disabled-profiles-nav.md)
 - [Injected Skill Naming](requirements/injected-skill-naming.md)
-- [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
+- [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
+- [Harness session continuity](requirements/harness-session-continuity.md) (draft)
+- [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
   profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
@@ -71,7 +72,9 @@ session-activity authority remain with Tasks and Platform.
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
+- [Workspace MCP Configuration](requirements/workspace-mcp-configuration.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
+- [Probe Failure Diagnostics](requirements/probe-failure-diagnostics.md)
 
 ### System design
 
@@ -88,8 +91,8 @@ session-activity authority remain with Tasks and Platform.
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 1](system-design/runtime-updates-01.md)
 - [Managed Agent Runtime Versions and Updates System Design Part 2](system-design/runtime-updates-02.md)
-- [Managed Runtime Default Activation](system-design/runtime-default-activation.md)
 - [Managed npm runtime recovery](system-design/managed-npm-runtime-recovery.md)
+- [Managed Runtime Default Activation](system-design/runtime-default-activation.md)
 - [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
 - [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)
 - [MCP Protocol Compatibility](system-design/mcp-protocol-compatibility.md)
@@ -103,8 +106,12 @@ session-activity authority remain with Tasks and Platform.
 - [Subagent context persistence System Design Part 7](system-design/subagent-context-persistence-07.md)
 - [Subagent context persistence System Design Part 8](system-design/subagent-context-persistence-08.md)
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
+- [Workspace MCP Configuration](system-design/workspace-mcp-configuration.md)
+- [Workspace MCP pending comparison](system-design/workspace-mcp-pending-changes.md)
+- [Workspace MCP setup and resolution delivery](system-design/workspace-mcp-resolution-delivery.md)
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
+- [Probe Failure Diagnostics](system-design/probe-failure-diagnostics.md)
 
 ## Migration record
 

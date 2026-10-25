@@ -1,4 +1,5 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator, SliceSet } from "@/lib/state/slice-creator";
+import type { TaskOverviewState } from "../task-overview-types";
 import type { Draft } from "immer";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 import { generateUUID } from "@/lib/utils";
@@ -9,6 +10,7 @@ import {
   recordTaskRemovalResult,
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
+import { journalSnapshotTaskStages } from "./snapshot-task-stages";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import {
   acknowledgeWorkflowSessionFocus,
@@ -89,12 +91,8 @@ export const defaultKanbanState: KanbanSliceState = {
   taskRemoval: createTaskRemovalState(),
 };
 
-type KanbanSliceSet = Parameters<
-  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
->[0];
-type KanbanSliceGet = Parameters<
-  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
->[1];
+type KanbanSliceSet = Parameters<SliceCreator<KanbanSlice>>[0];
+type KanbanSliceGet = Parameters<SliceCreator<KanbanSlice>>[1];
 
 type SidebarArchivedTaskActions = Pick<
   KanbanSliceActions,
@@ -505,12 +503,11 @@ function createTaskActions(set: KanbanSliceSet, get: KanbanSliceGet): TaskAction
   };
 }
 
-export const createKanbanSlice: StateCreator<
-  KanbanSlice,
-  [["zustand/immer", never]],
-  [],
-  KanbanSlice
-> = (set, get) => ({
+type KanbanStore = KanbanSlice & { taskOverview?: TaskOverviewState };
+export const createKanbanSlice: (
+  set: SliceSet<KanbanStore>,
+  get: () => KanbanStore,
+) => KanbanSlice = (set, get) => ({
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
   ...createTaskActions(set, get),
@@ -543,14 +540,16 @@ export const createKanbanSlice: StateCreator<
       }
       draft.workflows.items = reordered;
     }),
-  setWorkflowSnapshot: (workflowId, data) =>
+  setWorkflowSnapshot: (workflowId, data, options) =>
     set((draft) => {
+      if (draft.taskOverview && !options?.stageClaimsReconciled)
+        draft.taskOverview = journalSnapshotTaskStages(
+          draft.taskOverview,
+          data.tasks,
+          get().kanbanMulti.snapshots[workflowId]?.tasks,
+        );
       draft.kanbanMulti.snapshots[workflowId] = data;
-      // Seed this workflow's steps into orderRevisionByStepId even when it
-      // is not the currently-active board (hydrate() only walks the active
-      // kanban.steps), so a task.reordered WS event for a background
-      // "All Workflows" column is still gated on a real revision rather
-      // than the no-recorded-revision fallback.
+      // Background workflow reorders require the snapshot's real step revisions.
       draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
         draft.kanbanMulti.orderRevisionByStepId,
         data.steps,

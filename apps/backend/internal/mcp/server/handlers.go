@@ -356,20 +356,6 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskPRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		removeLifecyclePromptFields(result)
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 func (s *Server) manageTaskChangeRequestHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		operation, err := req.RequireString("operation")
@@ -517,42 +503,6 @@ func validateChangeRequestAutomationTarget(args map[string]interface{}) string {
 	return ""
 }
 
-func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
-		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
-		}
-		for _, key := range []string{
-			"auto_fix_enabled", "auto_merge_enabled",
-			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
-		} {
-			if value, ok := args[key].(bool); ok {
-				payload[key] = value
-			}
-		}
-		for _, key := range []string{"auto_fix_prompt_override"} {
-			if value, ok := args[key].(string); ok {
-				payload[key] = value
-			}
-		}
-		if len(payload) == 1 {
-			return mcp.NewToolResultError("at least one PR automation option is required"), nil
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPRAutomation, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func (s *Server) reportTaskPRAutoFixOutcomeHandler() server.ToolHandlerFunc {
-	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportPRAutoFixOutcome)
-}
-
 func (s *Server) reportTaskChangeRequestAutoFixOutcomeHandler() server.ToolHandlerFunc {
 	return s.reportTaskAutoFixOutcomeHandler(ws.ActionMCPReportTaskChangeRequestAutoFixOutcome)
 }
@@ -608,19 +558,6 @@ func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolR
 	return mcp.NewToolResultError("failed to process MR automation request"), nil
 }
 
-func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(
-			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
-		); err != nil {
-			return s.mrAutomationToolError("get task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 // copyMRIdentityArgs copies the optional repository_id/project_path/mr_iid
 // triple that scopes a patch to one linked MR. repository_id is frequently
 // an empty string on self-managed hosts without a numeric project ID (R6),
@@ -646,42 +583,6 @@ func copyMRIdentityArgs(payload, args map[string]interface{}) error {
 
 func isValidMRIID(value float64) bool {
 	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && math.Trunc(value) == value
-}
-
-func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload := map[string]interface{}{"task_id": s.taskID}
-		args := req.GetArguments()
-		if hasLifecyclePromptOverrideArgument(args) {
-			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
-		}
-		if err := copyMRIdentityArgs(payload, args); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		fieldCount := 0
-		for _, key := range []string{
-			"auto_fix_enabled", "auto_merge_enabled",
-			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
-		} {
-			if value, ok := args[key].(bool); ok {
-				payload[key] = value
-				fieldCount++
-			}
-		}
-		if value, ok := args["auto_fix_prompt_override"].(string); ok {
-			payload["auto_fix_prompt_override"] = value
-			fieldCount++
-		}
-		if fieldCount == 0 {
-			return mcp.NewToolResultError("at least one MR automation option is required"), nil
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
-			return s.mrAutomationToolError("update task MR automation failed", err)
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
 }
 
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
@@ -941,6 +842,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		for _, q := range questions {
+			if _, ok := q["images"]; ok {
+				return mcp.NewToolResultError("parent questions do not support images"), nil
+			}
+			for _, option := range q[optionsArg].([]map[string]interface{}) {
+				if _, ok := option["images"]; ok {
+					return mcp.NewToolResultError("parent questions do not support images"), nil
+				}
+			}
+		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
@@ -1027,6 +938,9 @@ func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.Cal
 			return nil, errResult
 		}
 		questions[i] = q
+	}
+	if err := validateQuestionImagePayloads(questions); err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
 	}
 	return questions, nil
 }
@@ -1167,6 +1081,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -1185,6 +1102,28 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but

@@ -100,9 +100,8 @@ func copyDeliveryTerminalIdentity(payload *AgentEventPayload, terminal *streams.
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
-// neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, and activityEpoch lets the consumer revalidate that
-// classification before applying a terminal transition.
+// Acceptance and output are independent. The activity epoch lets the consumer
+// reject a stale snapshot before writing an advisory notice.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -111,6 +110,7 @@ func (p *EventPublisher) PublishAgentStalled(
 	stalledFor time.Duration,
 	activityEpoch uint64,
 	neverStarted bool,
+	accepted bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -124,6 +124,8 @@ func (p *EventPublisher) PublishAgentStalled(
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,
+		PromptAccepted:   accepted,
+		OutputObserved:   !neverStarted,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID
@@ -191,6 +193,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
 		RunID:                  execution.RunID,
+		CausingRunID:           execution.CausingRunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
 		TaskID:                 execution.TaskID,
@@ -353,24 +356,28 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 		attemptID = execution.currentStartupAttemptID()
 	}
 
-	payload := ACPSessionCreatedPayload{
-		TaskID:                    execution.TaskID,
-		SessionID:                 execution.SessionID,
-		AgentProfileID:            execution.ID,
-		AgentExecutionID:          execution.ID,
-		AttemptID:                 attemptID,
-		ACPSessionID:              sessionID,
-		DeliveryStreamID:          execution.DeliveryStreamID,
-		DeliveryIncarnationID:     execution.DeliveryIncarnationID,
-		DeliveryHarnessGeneration: execution.DeliveryHarnessGeneration,
-	}
-
+	payload := newACPSessionCreatedPayload(execution, sessionID, attemptID)
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
 	if err := p.eventBus.Publish(context.Background(), events.AgentACPSessionCreated, event); err != nil {
 		p.logger.Error("failed to publish ACP session event",
 			zap.String("event_type", events.AgentACPSessionCreated),
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
+	}
+}
+
+func newACPSessionCreatedPayload(execution *AgentExecution, sessionID, attemptID string) ACPSessionCreatedPayload {
+	return ACPSessionCreatedPayload{
+		TaskID:                             execution.TaskID,
+		SessionID:                          execution.SessionID,
+		AgentProfileID:                     execution.ID,
+		AgentExecutionID:                   execution.ID,
+		AttemptID:                          attemptID,
+		ACPSessionID:                       sessionID,
+		DeliveryStreamID:                   execution.DeliveryStreamID,
+		DeliveryIncarnationID:              execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:          execution.DeliveryHarnessGeneration,
+		DeliveryReplacesNativeConversation: execution.ReplacesNativeConversation,
 	}
 }
 
@@ -464,6 +471,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		TurnID:                      event.TurnID,
 		Data:                        event.Data,
 		CanonicalProjection:         event.CanonicalProjection,
+		ShellOutputHasContent:       event.ShellOutputHasContent,
 		MessageID:                   event.CanonicalMessageID,
 		IsAppend:                    event.CanonicalMessageAppend,
 		MessageType:                 canonicalMessageType(event),

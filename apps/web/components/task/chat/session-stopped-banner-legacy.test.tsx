@@ -34,15 +34,21 @@ const SESSION_RECOVER_ACTION = "session.recover";
 const RESUME_BUTTON_TEST_ID = "recovery-resume-button";
 const RETRY_CONNECTION_BUTTON = "recovery-retry-connection-button";
 const STOP_BUTTON = "recovery-stop-button";
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.recoveryBlocks.length = 0;
+  mocks.request.mockReset();
+});
 
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
-it("offers explicit Resume for an empty legacy delivery fence without replaying a prompt", async () => {
+it.each([
+  { reason: "unresolved_durable_work", delivery_submission_id: "" },
+  { reason: "unknown_prompt_outcome", delivery_submission_id: "cancelled-prompt" },
+])("offers explicit Resume for $reason without replaying a prompt", async (block) => {
   mocks.recoveryBlocks.push({
     id: "legacy-fence",
     consumer_reference: "agent_delivery",
-    reason: "unresolved_durable_work",
-    delivery_submission_id: "",
+    ...block,
     delivery_stream_id: "",
   });
   let complete: (value: unknown) => void = () => {};

@@ -111,6 +111,25 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 - A partially created workflow stays represented by the user's draft. Save retries only missing or still-dirty operations and must not create a duplicate workflow.
 - Existing API authorization and validation errors are surfaced beside the shared action and by the relevant field or section when available.
 
+### Mounted Linear connection refreshes
+
+For AC-UI-SETTINGS-MANUAL-SAVE-001.4, an acknowledged Linear Save or confirmed
+Remove remains visible when an earlier configuration read completes. Overlapping
+reads publish only the latest admitted result for the mounted workspace. Later
+health and absent-configuration results remain visible; transient read failures
+retain the accepted configuration. Same-route Save and confirmed Remove cannot
+submit overlapping configuration
+mutations; the pending action disables conflicting submissions and releases the
+gate after success or failure. Initial loading still seeds the form before
+background refreshes begin. Locale changes preserve that initial-load lifetime
+and any raw draft; they do not restart form seeding. Test connection cannot
+start during a pending Save or Remove.
+Background health refreshes do not replace the draft
+or its Reset baseline. Failed writes retain the draft and accepted baseline.
+Successful Remove clears
+only its unchanged submitted draft; edits made while removal is pending remain
+dirty against the new absent-configuration baseline.
+
 ## Persistence Guarantees
 
 - Only a successful explicit Save or an immediate named command changes durable settings.

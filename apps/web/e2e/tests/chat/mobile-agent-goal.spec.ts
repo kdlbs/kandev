@@ -91,6 +91,7 @@ test.describe("mobile agent goal visibility", () => {
     await chip.tap();
     const drawer = testPage.getByTestId("agent-goal-drawer-content");
     await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
     await expect(drawer).toContainText("Coordinate contributor PR reviews");
     await expect(drawer).toContainText("The agent may continue automatically between replies.");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile agent goal drawer");

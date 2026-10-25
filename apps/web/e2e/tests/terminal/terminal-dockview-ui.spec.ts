@@ -1,3 +1,4 @@
+import { visitOtherBrowserTab } from "../../helpers/external-focus";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -12,6 +13,9 @@ import { dwell } from "../../helpers/causal-waits";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
+import { composeTabRename } from "../../helpers/tab-rename-composition";
+
+test.use({ channel: "chromium" });
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -183,6 +187,9 @@ test.describe("Terminals — dockview UI", () => {
     await tabletTestPage.getByRole("menuitem", { name: /^Rename/ }).click();
     await expect(secondRenameInput).toBeVisible();
     await expect(secondRenameInput).toBeFocused();
+    // @covers AC-UI-EDIT-FOCUS-001.4 (tablet right-panel consumer)
+    await composeTabRename(secondRenameInput);
+    await expect(firstTab).toContainText("double click rename");
     await secondRenameInput.fill("context menu rename");
     await tabletTestPage.keyboard.press("Enter");
     await expect(secondTab).toContainText("context menu rename", { timeout: 10_000 });
@@ -738,6 +745,14 @@ test.describe("Terminals — dockview UI", () => {
     // Input replaces the title text. Type a custom name and Enter.
     const input = testPage.getByTestId("terminal-tab-rename-input");
     await expect(input).toBeVisible({ timeout: 5_000 });
+    await input.fill("build watcher");
+    // @covers AC-UI-EDIT-FOCUS-001.1
+    await visitOtherBrowserTab(testPage, async () => {
+      await expect(input).toHaveValue("build watcher");
+      await expect(input).toBeVisible();
+    });
+    // @covers AC-UI-EDIT-FOCUS-001.4 (desktop Dockview consumer)
+    await composeTabRename(input);
     await input.fill("build watcher");
     await input.press("Enter");
 

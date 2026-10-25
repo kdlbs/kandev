@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-29
-updated: 2026-09-02
+updated: 2026-10-20
 owners:
   - Kandev
 ---
@@ -21,8 +21,13 @@ An agent turn can remain `RUNNING` after it stops emitting events. Silence alone
   window update, an available-commands update, or a session-info update. A
   metadata frame can be emitted by a booting or hung adapter that has produced
   no turn event.
-- **Never-started prompt:** A dispatched prompt for which no turn event has been
-  observed since dispatch.
+- **Accepted prompt:** A current prompt acknowledged by its owned agent runtime.
+  Acceptance does not prove assistant output, tool effects, or provider health.
+- **Unconfirmed prompt:** A prompt whose acceptance is not established. Missing
+  acknowledgment does not prove rejection or absence of effects.
+- **Silent prompt:** An unsettled prompt with no recent turn event.
+- **Never-started prompt:** Historical no-output classification, superseded by
+  criteria .12 through .14.
 
 ## Requirements
 
@@ -38,11 +43,16 @@ An agent turn can remain `RUNNING` after it stops emitting events. Silence alone
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.4:** The notice is a single compact inline row with muted neutral copy and a neutral **Cancel turn** action. It has no warning/error colors, alert icon, tinted background, or alert-card treatment.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.5:** On phones, **Cancel turn** remains inline and content-width rather than becoming a full-width row, while retaining a minimum 44px touch height. Activating it uses the existing `agent.cancel` request.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.6:** The notice remains visible and actionable while the affected prompt's `turn_id` is the active turn in a `RUNNING` session and no subsequent agent turn activity has been observed, including after a page reload. It is hidden when that turn resumes producing agent content, reasoning, tool calls or updates, plan updates, or permission requests, when it settles, or when a later turn becomes active. Queued user input and system status messages do not resolve an advisory notice.
-- **AC-AGENTS-AGENT-STALL-RECOVERY-001.7:** Detection after genuine agent activity does not change task state, session state, prompt admission, or process liveness. A current five-minute snapshot with no genuine event since prompt dispatch is a launch failure and moves the session and task to `FAILED`.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.7:** Detection after genuine agent activity does not change task state, session state, prompt admission, or process liveness. A current five-minute snapshot with no genuine event since prompt dispatch is a launch failure and moves the session and task to `FAILED`. **Superseded by criteria .12 through .14.**
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.8:** The backend logs the first stall detected for a prompt generation and does not emit another notice or log entry on every watchdog check.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.9:** When an execution emits only metadata frames after a prompt is dispatched, the system shall not extend the five-minute inactivity threshold; only a turn event or newly delivered user input for the current prompt shall restart it.
-- **AC-AGENTS-AGENT-STALL-RECOVERY-001.10:** When a never-started prompt is classified as a launch failure, the system shall stop its agent execution so no agent process for that session remains running, and shall record the failure even when the stop fails.
-- **AC-AGENTS-AGENT-STALL-RECOVERY-001.11:** When the terminal never-started classification is applied, the session and task shall settle in `FAILED` with the launch-failure message; the teardown shall not replace that state with a cancellation state.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.10:** When a never-started prompt is classified as a launch failure, the system shall stop its agent execution so no agent process for that session remains running, and shall record the failure even when the stop fails. **Superseded by criteria .12 through .14.**
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.11:** When the terminal never-started classification is applied, the session and task shall settle in `FAILED` with the launch-failure message; the teardown shall not replace that state with a cancellation state. **Superseded by criteria .12 through .14.**
+
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.12:** When a running prompt remains silent for five minutes, Kandev shall show the advisory notice even if no output has appeared. Acceptance or missing acceptance evidence shall not cause an inactivity-only failure, cancellation, process stop, or change to prompt admission.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.13:** Kandev shall distinguish prompt acceptance from output and tool effects. Late or stale acceptance shall not affect another turn. Metadata alone shall prove neither acceptance nor terminal failure; explicit startup errors and trustworthy terminal outcomes retain their existing failure behavior.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.14:** When the user selects Cancel turn, Kandev shall use bounded, current-turn cancellation. Confirmed settlement shall use normal admission checks. Missing confirmation shall preserve delivery uncertainty and explicit recovery controls, including after reload, without automatic resend or queue dispatch. A stale cancellation shall not affect a successor turn.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.15:** At the first stall notice, Kandev shall retain one bounded diagnostic record of observed acceptance, progress, runtime identity, available versions, and delivery state. Unavailable provider details shall remain unknown. The record shall exclude prompts, tool arguments, credentials, and raw vendor logs; capture failure shall not stop the turn or suppress cancellation.
 
 ## Migrated source detail
 
@@ -68,14 +78,12 @@ Implementation plans:
 
 ### Advisory inactivity recovery
 
-The observable rules are the acceptance criteria of
-REQ-AGENTS-AGENT-STALL-RECOVERY-001. The inactivity clock measures time since
-the last turn event or user input for the current prompt, so an adapter that
-emits only metadata frames cannot hold a never-started prompt open forever. A
-stall observed after genuine turn activity stays advisory and leaves the turn
-and its process running. A never-started prompt is the terminal exception: it
-posts an error notice, stops the agent execution, and settles the session and
-task in `FAILED`.
+The acceptance criteria above define advisory inactivity. Metadata cannot
+postpone the notice. Silence before or after visible output leaves the process
+running. Trusted terminal diagnostics and explicit startup errors retain their
+existing handling. [The silent prompt decision](../../../decisions/2026-10-20-silent-prompt-acceptance.md)
+supersedes the historical no-output terminal rule; delivery is tracked in the
+[silent prompt work package](../../../plans/silent-prompt-recovery/plan.md).
 
 ### Explicit completion signal recovery
 
@@ -97,9 +105,8 @@ task in `FAILED`.
 - A failed reconciliation does not lose the signal. Later watchdog ticks
   retry a `WAITING_FOR_INPUT` session while the matching signal remains.
 
-With the never-started classification, this is one of the two automatic
-state-changing exceptions to the advisory inactivity rule. Silence after a turn
-event, without an accepted explicit completion signal, remains advisory.
+An accepted explicit completion signal remains an automatic state-changing
+exception. Silence alone remains advisory.
 
 ### Correlated terminal diagnostics
 
@@ -181,11 +188,11 @@ sanitized diagnostic message for the collapsed technical-details surface.
   cancel action still appear.
 - If the agent acknowledges cancellation, normal cancellation reconciliation
   makes the session input-ready.
-- If the agent does not acknowledge cancellation, the existing bounded
-  cancel-escalation path releases the prompt and reconciles the session.
-- Cancel escalation clears every prompt-admission barrier for the cancelled
-  turn, including a pending dispatch-only completion. A later prompt can
-  dispatch without a backend restart.
+- If cancellation cannot establish an authoritative outcome, durable delivery
+  remains blocked under [disconnect reconciliation](../../platform/requirements/durable-agent-delivery.md).
+  Releasing a local waiter or reaching a timeout does not prove cancellation.
+  Legacy cancellation keeps its existing bounded behavior without granting
+  permission to bypass durable uncertainty.
 - If notice-message persistence fails, the failure is logged without changing
   or terminating the running session.
 - If OpenCode does not support error-only stderr emission, changes its log
@@ -215,42 +222,13 @@ sanitized diagnostic message for the collapsed technical-details surface.
 
 ## Scenarios
 
-- **GIVEN** a running prompt whose top-level shell tool is `in_progress`,
-  **WHEN** no agent event arrives for five minutes, **THEN** one compact neutral
-  notice names that tool and offers **Cancel turn** while the session remains
-  `RUNNING`.
-- **GIVEN** a running prompt with no known active tool, **WHEN** no agent event
-  arrives for five minutes, **THEN** one generic notice offers **Cancel turn**
-  while the session remains `RUNNING`.
-- **GIVEN** a notice already exists for the active prompt generation,
-  **WHEN** subsequent watchdog checks observe the same stall, **THEN** Kandev
-  creates no duplicate notice and emits no repeated stall log.
-- **GIVEN** a persisted notice belongs to an earlier prompt generation,
-  **WHEN** a later prompt is `RUNNING`, **THEN** the earlier notice is not
-  rendered and a delayed stall event cannot create a new notice for it.
-- **GIVEN** a stall notice is visible, **WHEN** the user activates
-  **Cancel turn**, **THEN** the existing cancellation path settles the turn and
-  the session becomes available for new input without a backend restart.
-- **GIVEN** a dispatch-only prompt never reports completion and cancellation
-  escalates, **WHEN** the user sends a later prompt, **THEN** Kandev dispatches
-  it without a backend restart.
-- **GIVEN** a stall notice is visible on a phone viewport, **WHEN** the user taps
-  **Cancel turn**, **THEN** the same cancellation outcome is reachable through
-  an inline, content-width touch target of at least 44px.
-- **GIVEN** a prompt has produced no genuine agent event since dispatch,
-  **WHEN** the current five-minute watchdog snapshot is handled, **THEN** Kandev
-  persists a terminal error, moves the session and task to `FAILED`, and does
-  not render a running-only cancel action.
-- **GIVEN** a prompt that has emitted only usage, context-window, or
-  available-commands frames since dispatch, **WHEN** five minutes pass, **THEN**
-  the watchdog still reports the prompt as never started rather than restarting
-  its clock on each metadata frame.
-- **GIVEN** the never-started classification is applied, **WHEN** the session
-  and task settle in `FAILED`, **THEN** the agent execution is stopped and a
-  later stop request for that task does not find a live process.
-- **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
-  threshold passes and the user does not cancel, **THEN** Kandev leaves the
-  turn and process running.
+- An accepted prompt has no output after five minutes: one neutral notice
+  offers Cancel turn; the process remains live. Later same-turn output hides it.
+- A metadata-only prompt reaches the same threshold: metadata does not restart
+  the clock, prove failure, or permit an automatic resend.
+- User cancellation is confirmed: normal settlement follows. If its outcome
+  remains uncertain, recovery controls remain available and delivery stays
+  blocked. Desktop and phone expose the same outcome after reload.
 - **GIVEN** a current-step completion signal is at least ten minutes old and
   the tracked prompt has also been inactive for ten minutes, **WHEN** the
   session is still `RUNNING` or `STARTING`, **THEN** the watchdog settles the
@@ -296,8 +274,8 @@ sanitized diagnostic message for the collapsed technical-details surface.
 
 ## Out of scope
 
-- Automatically timing out, cancelling, or killing a turn that has already
-  produced a turn event, based only on inactivity.
+- Automatically timing out, cancelling, or killing a prompt based only on
+  inactivity, including before its first output.
 - Making the stop path reach an execution for a task; that contract belongs
   to [task stop reachability](../../tasks/requirements/task-stop-reachability.md).
 - Making the inactivity threshold user-configurable.

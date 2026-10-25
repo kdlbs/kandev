@@ -83,6 +83,15 @@ an allocated/launching or unrelated attempt still blocks it. Legacy composer
 uncertainty is cleared only for an exactly retired submission. An explicit null
 propagates that clearing to clients even when no recovery notice existed.
 
+A notice marked `recovered` can outlive its execution after a later readiness
+failure reopens the delivery block. Explicit Resume can reuse the current ready
+native execution and restore that notice through the same authenticated
+retirement transaction. The current execution, native identity, full submission
+inventory, and cursor checks remain mandatory. The notice keeps its historical
+execution ID, submission, payload, and unknown outcome; only its phase, revision,
+and timestamp change. State-only Retry is unchanged.
+Delivery: [Recovered notice resume](../../../plans/resume-delivery-notices/plan.md).
+
 ## Entry points
 
 Startup/runtime replacement and explicit Resume reuse existing restore ownership
@@ -97,11 +106,17 @@ requires a new immutable submission and normal workflow/queue authority.
 
 Legacy prompt bindings may lack original-process identity and prompt generation.
 A successful native load does not supply that missing automatic-retirement proof.
-For an empty generic agent-delivery block without active recovery metadata, the
-composer offers explicit Resume through the existing authenticated retirement
+For an empty generic agent-delivery block or a submission-bound unknown-outcome
+block without active recovery metadata, the composer offers explicit Resume through the existing authenticated retirement
 transaction. Retry remains available for missing-record reconstruction, alongside
 Stop. An open block outranks a historical restored snapshot; changing that block
-invalidates pending UI results. Desktop and phone expose the same guarded actions.
+invalidates pending UI results. A cancellation status or idle session state cannot
+hide an open delivery block when no error card exists. If a current error card
+already owns the bound submission, preserve its recovery choices rather than
+replacing it with the fallback banner. Active uncertain/reconnecting protocol
+metadata retains precedence over that card. Request-local automatic launch failures
+do not displace the open block controls; they do not establish a separate persisted
+agent failure. Desktop and phone expose the same guarded actions.
 
 ## Verification
 
@@ -139,6 +154,15 @@ outcome along with the complete active inventory, current native execution and
 matching recovery fences. Any independent active record or projection gap
 refuses resolution. The same proof permits normal loaded-session reconciliation
 and explicit Resume; neither path dispatches an old prompt.
+
+Native recovery proof uses the shared 10-second wait with 200 ms polling for the
+captured journal high-water mark to reach canonical projection. It rereads proof
+when projection or acknowledgments advance under the same authenticated owner
+after verified lag or sequence progress, including on the first proof attempt.
+A byte-count change alone is not stream progress. Pruning can decrease bytes while retained
+sequence counters advance. Cancellation,
+owner changes, inventory changes, and unresolved work retain the admission
+fence. This wait does not repeat native Resume or dispatch a prompt.
 
 ## Prompt readiness after native boot
 

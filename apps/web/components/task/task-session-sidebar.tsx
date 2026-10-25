@@ -458,7 +458,7 @@ export function useTaskRowActions(
       } catch (error) {
         console.error("Failed to rename task:", error);
       }
-      setRenamingTask(null);
+      setRenamingTask((current) => (current === renamingTask ? null : current));
     },
     [renamingTask, renameTaskById],
   );

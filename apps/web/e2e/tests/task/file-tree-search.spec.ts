@@ -1,3 +1,4 @@
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import { type Page } from "@playwright/test";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
@@ -26,13 +27,15 @@ async function setupTask(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+  await waitForSessionDone(apiClient, task.id, task.session_id!, "File search fixture settled");
   const session = await openTaskSession(testPage, taskTitle);
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }

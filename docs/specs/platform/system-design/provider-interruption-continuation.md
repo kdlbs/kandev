@@ -172,6 +172,9 @@ Reuse `transientRetryEntry`, its notice guard, timer cancellation, and accepted
 execution/generation fencing. Keep one episode with at most five additional
 attempts and nominal waits of 5, 10, 20, 40, and 60 seconds; validated short timing
 hints retain existing handling. This package adds no jitter or new scheduler.
+Eligible model-capacity recovery on a retained runtime instead uses
+[capacity episode timing](transient-turn-runtime-continuity.md#capacity-episode-timing).
+This exception does not extend transport-loss restoration or other error policies.
 
 One attempt owns bounded restoration and at most one continuation dispatch.
 Pre-dispatch transient restore failure consumes an attempt. Accepted continuation

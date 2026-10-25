@@ -44,6 +44,7 @@ No private payloads or live native conversations belong in fixtures.
 6. [Projected terminal delivery recovery](task-06-terminal-delivery-recovery.md).
 7. [Native resume prompt readiness](task-07-native-prompt-readiness.md).
 8. [Native async turn ownership](task-08-native-async-turn-ownership.md).
+9. [Cancellation recovery visibility](task-09-cancel-recovery-visibility.md).
 
 Each work order is executed here sequentially. Native restoration and retirement
 are never prompt authority. Historical labels, hashes, cursors and independent
@@ -78,3 +79,10 @@ Task 05 addresses a legacy session with a loaded native conversation and an empt
 Task 06 merged in PR #4465 as 7c340deb50847c9015e3be73998e78f921e4aec4. All 54 required/executed checks passed; both review threads resolved. The capacity trigger remains unproven. Task 07 follows the separately observed boot-to-first-send readiness gap.
 
 Task 07 merged in PR #4468 as 2f501583ff55b9f64047ae29c99b39c33ee5d2cb; 57 checks passed and 11 skipped, with no unresolved reviews. Task 08 covers a distinct native async completion regression.
+
+PR #4519 follows up Task 02's existing unproven-history contract: SQL dispatching
+can reconcile against matching completed/failed/cancelled journal history that
+lacks terminal proof. Its focused regression matrix preserves historical labels,
+native identity, uncertainty, and all authenticated evidence guards. This scope
+is separate from Task 06's proven terminal recovery and Task 08's async ownership.
+Current-head CI, review disposition, and merge remain delivery gates.

@@ -34,7 +34,7 @@ export function usePendingComments(): Comment[] {
     const pending: Comment[] = [];
     for (const id of pendingForChat) {
       const comment = byId[id];
-      if (comment) pending.push(comment);
+      if (comment?.status === "pending") pending.push(comment);
     }
     return pending.length === 0 ? EMPTY_COMMENTS : pending;
   }, [byId, pendingForChat]);
@@ -101,7 +101,7 @@ export function usePendingWalkthroughComments(sessionId?: string | null): Walkth
     const pending: WalkthroughComment[] = [];
     for (const id of pendingForChat) {
       const comment = byId[id];
-      if (comment && isWalkthroughComment(comment)) {
+      if (comment?.status === "pending" && isWalkthroughComment(comment)) {
         if (sessionId && comment.sessionId !== sessionId) continue;
         pending.push(comment);
       }

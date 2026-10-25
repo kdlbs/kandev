@@ -91,13 +91,13 @@ func startCapacityContinuationEpisode(t *testing.T) (*Service, *mockAgentManager
 
 func TestCapacityContinuationBudgetSurvivesProgress(t *testing.T) {
 	svc, mgr, _, data, entry := startCapacityContinuationEpisode(t)
-	for attempt := 1; attempt <= transientMaxAttempts; attempt++ {
+	for attempt := 1; attempt <= capacityMaxAttempts; attempt++ {
 		require.Equal(t, attempt, entry.attempt)
 		require.True(t, entry.claim())
 		svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
 		require.Equal(t, attempt, entry.started)
 
-		if attempt == transientMaxAttempts {
+		if attempt == capacityMaxAttempts {
 			break
 		}
 		generation := mgr.currentPromptGeneration.Load()
@@ -115,7 +115,7 @@ func TestCapacityContinuationBudgetSurvivesProgress(t *testing.T) {
 	}
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
-	require.Len(t, mgr.capturedPromptCalls, transientMaxAttempts)
+	require.Len(t, mgr.capturedPromptCalls, capacityMaxAttempts)
 	require.Empty(t, mgr.stopAgentWithReasonArgs)
 	require.Empty(t, mgr.stopAgentArgs)
 }
@@ -616,13 +616,13 @@ func TestCapacityContinuationFinalDisposition(t *testing.T) {
 		require.Zero(t, last.metadata["attempts_started"])
 	})
 
-	t.Run("five accepted dispatches exhaust without a sixth", func(t *testing.T) {
+	t.Run("eleven accepted dispatches exhaust without a twelfth", func(t *testing.T) {
 		svc, mgr, messages, data, entry := startCapacityContinuationEpisode(t)
-		for attempt := 1; attempt <= transientMaxAttempts; attempt++ {
+		for attempt := 1; attempt <= capacityMaxAttempts; attempt++ {
 			require.True(t, entry.claim())
 			svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
 			require.Equal(t, attempt, entry.started)
-			if attempt < transientMaxAttempts {
+			if attempt < capacityMaxAttempts {
 				generation := mgr.currentPromptGeneration.Load()
 				data.PromptGeneration = generation
 				data.CapacityContinuation.PromptGeneration = generation
@@ -635,7 +635,7 @@ func TestCapacityContinuationFinalDisposition(t *testing.T) {
 			}
 		}
 		entry.mu.Lock()
-		entry.attempt = transientMaxAttempts
+		entry.attempt = capacityMaxAttempts
 		entry.mu.Unlock()
 		svc.finishRetainedRetryWithoutDispatch(context.Background(), "t1", "s1", entry, recoveryDispositionExhausted)
 		_, owned := svc.transientRetries.Load("s1")
@@ -643,10 +643,10 @@ func TestCapacityContinuationFinalDisposition(t *testing.T) {
 		require.NotEmpty(t, messages.sessionMessages)
 		last := messages.sessionMessages[len(messages.sessionMessages)-1]
 		require.Equal(t, "exhausted", last.metadata["recovery_disposition"])
-		require.Equal(t, transientMaxAttempts, last.metadata["attempts_started"])
+		require.Equal(t, capacityMaxAttempts, last.metadata["attempts_started"])
 		mgr.mu.Lock()
 		defer mgr.mu.Unlock()
-		require.Len(t, mgr.capturedPromptCalls, transientMaxAttempts)
+		require.Len(t, mgr.capturedPromptCalls, capacityMaxAttempts)
 	})
 }
 

@@ -187,5 +187,10 @@
   "providerRecoveryDisabledBody": "A continuação automática está desativada. Retome para tentar novamente ou inicie uma nova sessão.",
   "providerRecoveryUnsafeBody": "A continuação automática parou porque há uma ação pendente ou o seu resultado é incerto. Reveja o trabalho antes de retomar.",
   "providerRecoveryUnsupportedBody": "Este agente não consegue restaurar automaticamente a conversa interrompida. Retome para tentar novamente ou inicie uma nova sessão.",
-  "providerRecoveryEvidenceBody": "A continuação automática parou porque falta a identidade da conversa ou informação de segurança. Reveja o trabalho antes de retomar."
+  "providerRecoveryEvidenceBody": "A continuação automática parou porque falta a identidade da conversa ou informação de segurança. Reveja o trabalho antes de retomar.",
+  "capacityRetryWindowEndsAt": "A recuperação automática termina às {{time}}.",
+  "retainedTurnRecoveryWindowExpiredBody_one": "O período de recuperação automática terminou após {{count}} tentativa. Pode enviar outra mensagem.",
+  "retainedTurnRecoveryWindowExpiredBody_other": "O período de recuperação automática terminou após {{count}} tentativas. Pode enviar outra mensagem.",
+  "retainedTurnRecoveryRestartBody": "A recuperação automática parou após o reinício do Kandev. Pode enviar outra mensagem.",
+  "capacityRetryWindowEnding": "A recuperação termina dentro de {{countdown}}."
 }

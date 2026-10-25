@@ -44,6 +44,7 @@ type TokenClient struct {
 	httpClient    *http.Client
 	username      string // cached after first GetAuthenticatedUser call
 	rateTracker   *RateTracker
+	rateAdmission *RateAdmission
 	principal     TokenPrincipal
 	mergePollWait func(context.Context, time.Duration) error
 }

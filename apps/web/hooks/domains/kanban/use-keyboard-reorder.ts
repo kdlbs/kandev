@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Task } from "@/components/kanban-card";
 import { moveOneStep, type ArrowDirection } from "@/lib/kanban/keyboard-reorder";
@@ -42,6 +42,16 @@ function canPickUp(
   return bandInfo !== null && bandInfo.order.length >= 2 && !isBandPending(stepId, bandInfo.band);
 }
 
+function useKeyboardPickup(tasks: Task[]) {
+  const [pickedUp, setPickedUp] = useState<PickedUp | null>(null);
+  useEffect(() => {
+    if (pickedUp && !tasks.some((task) => task.id === pickedUp.taskId)) {
+      setPickedUp(null);
+    }
+  }, [pickedUp, tasks]);
+  return [pickedUp, setPickedUp] as const;
+}
+
 /**
  * Bespoke keyboard reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.12): Space
  * or Enter picks a focused card up, Up/Down Arrow move it one place among
@@ -54,7 +64,7 @@ function canPickUp(
 export function useKeyboardReorder(workflowId: string, tasks: Task[]) {
   const { reorderBand, isBandPending } = useStepReorder();
   const { t } = useTranslation("kanban");
-  const [pickedUp, setPickedUp] = useState<PickedUp | null>(null);
+  const [pickedUp, setPickedUp] = useKeyboardPickup(tasks);
   const [announcement, setAnnouncement] = useState("");
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;

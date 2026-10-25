@@ -99,7 +99,7 @@ func (m *Manager) stopPersistedSSHBackend(
 	if err != nil {
 		return fmt.Errorf("get SSH runtime: %w", err)
 	}
-	return backend.StopInstance(ctx, instance, force)
+	return m.stopWorkspaceRuntime(ctx, backend, instance, force)
 }
 
 func uniquePersistedSSHExecution(

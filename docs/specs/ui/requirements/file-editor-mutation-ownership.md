@@ -93,6 +93,16 @@ filesystem actions finish.
   shall leave the editor usable and unchanged. Desktop, tablet and phone shall
   retain their existing composition and interaction paths.
 
+- **AC-UI-FILE-EDITOR-MUTATION-001.10:** An owned Dockview save receipt shall
+  preserve a distinct workspace snapshot observed after save admission, including
+  its Reload affordance and hash when local text was retained. It shall record
+  the successful saved baseline without discarding later typing. A matching save
+  echo shall not produce a conflict; a warning already present at save admission
+  may be resolved by that successful save. If a subsequent refresh already
+  accepted newer content as its baseline, the older receipt shall not rewind it.
+  Receipt-before-refresh shall retain the existing clean/dirty reconciliation.
+  Reload preparation shall not replace a newer observed snapshot with an older one.
+
 ## Out of scope
 
 - Cancellation or rollback of a filesystem write/delete already accepted by
@@ -100,7 +110,7 @@ filesystem actions finish.
 - New mutation ordering, deduplication, retry or conflict-resolution policy
   within an unchanged editor lifetime.
 - Workspace read races outside background refresh of already-open Dockview
-  buffers; ordering reads against saves/deletes, transport/authorization
+  buffers; general filesystem transaction ordering, transport/authorization
   redesign, backend APIs, new settings, and responsive presentation changes.
 
 ## System design
@@ -111,3 +121,4 @@ filesystem actions finish.
 
 - [File editor mutation ownership](../../../plans/file-editor-mutation-ownership/plan.md)
 - [Preserve editor workspace refresh](../../../plans/editor-workspace-refresh-ownership/plan.md)
+- [Save and workspace observation reconciliation](../../../plans/editor-save-workspace-reconciliation/plan.md)

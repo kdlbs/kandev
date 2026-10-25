@@ -83,6 +83,7 @@ type Repositories struct {
 }
 
 type Services struct {
+	capacityRetryClock       *e2eCapacityRetryClock
 	DeliveryRetention        *deliveryretention.Worker
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver

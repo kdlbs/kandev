@@ -5,6 +5,10 @@ import type { AppState } from "../../../lib/state/store";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { openConversationUsageTask } from "./conversation-usage-helpers";
+import {
+  COMPOSER_HISTORY_PROMPT,
+  revealTranscriptControls,
+} from "../workflow/composer-action-layout-helpers";
 
 const test = base.extend({
   prCapture: async ({ testPage }, use, testInfo) => {
@@ -13,6 +17,9 @@ const test = base.extend({
     capture.flush();
   },
 });
+
+test.describe.configure({ retries: 0 });
+test.use({ trace: "retain-on-failure" });
 
 let originalAutoScrollControl = true;
 test.beforeEach(async ({ apiClient }) => {
@@ -40,30 +47,253 @@ async function associatePR(api: ApiClient, taskId: string, state = "merged") {
   });
 }
 
+async function sampleTouchGeometry(bar: Locator, bannerId?: string) {
+  return bar.evaluate((element, id) => {
+    const bounds = (target: Element) => {
+      const { x, y, width, height } = target.getBoundingClientRect();
+      return { x, y, width, height };
+    };
+    const banner = id ? element.querySelector(`[data-testid="${id}"]`) : null;
+    return {
+      viewport: { width: innerWidth, height: innerHeight },
+      document: {
+        width: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      },
+      bar: bounds(element),
+      banner: banner ? { ...bounds(banner), order: getComputedStyle(banner).order } : null,
+      controls: Array.from(element.querySelectorAll("button")).map((button) => {
+        const visibility = getComputedStyle(button).visibility;
+        return {
+          testId: button.getAttribute("data-testid"),
+          label: button.getAttribute("aria-label") ?? button.textContent,
+          connected: button.isConnected,
+          rendered:
+            button.getClientRects().length > 0 && !["hidden", "collapse"].includes(visibility),
+          ...bounds(button),
+        };
+      }),
+    };
+  }, bannerId);
+}
+
+type TouchGeometry = Awaited<ReturnType<typeof sampleTouchGeometry>>;
+
+function touchTargetViolations(
+  control: TouchGeometry["controls"][number],
+  bar: TouchGeometry["bar"],
+  leftTolerance: number,
+) {
+  const violations: string[] = [];
+  const label = control.testId ?? control.label;
+  if (!control.connected || control.width < 44 || control.height < 44) {
+    violations.push(`Disconnected or undersized touch target: ${label}`);
+  }
+  if (
+    control.x < bar.x - leftTolerance ||
+    control.x + control.width > bar.x + bar.width + 1 ||
+    control.y < bar.y - 1 ||
+    control.y + control.height > bar.y + bar.height + 1
+  ) {
+    violations.push(`Touch target outside status bar: ${label}`);
+  }
+  return violations;
+}
+
+function noticeGeometryViolations(sample: TouchGeometry, required: string[]) {
+  const violations: string[] = [];
+  if (
+    !sample.banner ||
+    sample.banner.width < sample.bar.width - 1 ||
+    sample.banner.order !== "-9999"
+  ) {
+    violations.push("Notice must span the first status-bar row");
+  }
+  for (const id of required) {
+    const control = sample.controls.find((target) => target.testId === id);
+    if (sample.banner && control && control.y < sample.banner.y + sample.banner.height) {
+      violations.push(`Required control must follow notice: ${id}`);
+    }
+  }
+  return violations;
+}
+
+function touchGeometryViolations(sample: TouchGeometry, withBanner: boolean) {
+  const violations: string[] = [];
+  const required = ["share-task-button", "conversation-usage-trigger", "proceed-next-step"];
+  for (const id of required) {
+    const matches = sample.controls.filter((control) => control.testId === id);
+    if (matches.length !== 1 || !matches[0].rendered) {
+      violations.push(`Required control must be unique and rendered: ${id}`);
+    }
+  }
+  const controls = sample.controls.filter((control) => control.rendered);
+  if (!controls.length) violations.push("No rendered status-bar controls");
+  for (const [index, control] of controls.entries()) {
+    const label = control.testId ?? control.label ?? `button ${index}`;
+    violations.push(...touchTargetViolations(control, sample.bar, withBanner ? 1 : 0));
+    for (const other of controls.slice(index + 1)) {
+      const overlapX =
+        Math.min(control.x + control.width, other.x + other.width) - Math.max(control.x, other.x);
+      const overlapY =
+        Math.min(control.y + control.height, other.y + other.height) - Math.max(control.y, other.y);
+      if (overlapX > 1 && overlapY > 1)
+        violations.push(`Overlapping targets: ${label}, ${other.testId ?? other.label}`);
+    }
+  }
+  if (sample.document.scrollWidth > sample.document.width)
+    violations.push("Horizontal document overflow");
+  if (withBanner) violations.push(...noticeGeometryViolations(sample, required));
+  return violations;
+}
+
+async function expectSettledTouchGeometry(bar: Locator, bannerId?: string) {
+  await expect
+    .poll(async () => {
+      const sample = await sampleTouchGeometry(bar, bannerId);
+      const violations = touchGeometryViolations(sample, bannerId !== undefined);
+      return violations.length ? [{ violations, sample }] : [];
+    })
+    .toEqual([]);
+}
+
+async function expectContainedTouchTargets(bar: Locator) {
+  await expectSettledTouchGeometry(bar);
+}
+
+async function expectSameControlRow(status: Locator, utility: Locator) {
+  await expect
+    .poll(async () => {
+      const left = (await status.boundingBox())!;
+      const right = (await utility.boundingBox())!;
+      return Math.abs(left.y + left.height / 2 - right.y - right.height / 2);
+    })
+    .toBeLessThanOrEqual(1);
+}
+
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.6, .7
+test("shares status and transcript controls when they fit", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  await apiClient.saveUserSettings({ show_transcript_auto_scroll_control: true });
+  const { taskId, session } = await openConversationUsageTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Shared mobile composer row",
+    'e2e:plan([{"content":"Review shared controls","status":"in_progress"}])\ne2e:message("Controls ready.")',
+  );
+  await associatePR(apiClient, taskId, "open");
+  const bar = session.chatStatusBar();
+  const todo = bar.getByTestId("todo-indicator");
+  const ci = bar.getByTestId("pr-status-chip");
+  const usage = bar.getByTestId("conversation-usage-trigger");
+  await expect(todo).toBeVisible();
+  await expect(ci).toBeVisible();
+  await expect(usage).toBeVisible();
+  for (const width of [393, 640, 767]) {
+    await testPage.setViewportSize({ width, height: 851 });
+    await expectSameControlRow(todo, usage);
+    await expectSameControlRow(ci, usage);
+    await expectContainedTouchTargets(bar);
+  }
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await waitForFiniteAnimations(bar);
+  await prCapture.screenshot("mobile-composer-shared-row", {
+    caption: "Status icons and transcript utilities share a phone row",
+  });
+  await bar.getByTestId("proceed-next-step").focus();
+  await testPage.keyboard.press("Tab");
+  await expect(todo).toBeFocused();
+  await testPage.keyboard.press("Tab");
+  await expect(ci).toBeFocused();
+  await todo.tap();
+  await expect(testPage.getByTestId("todo-indicator-popover")).toContainText(
+    "Review shared controls",
+  );
+  await testPage.keyboard.press("Escape");
+  await ci.tap();
+  await expect(testPage.getByTestId("pr-status-chip-drawer")).toBeVisible();
+  await testPage.getByTestId("pr-status-chip-drawer-close").tap();
+  await usage.tap();
+  const drawer = testPage.getByTestId("conversation-usage-drawer");
+  await expect(drawer).toContainText("1,200");
+  await drawer.getByRole("button", { name: "Close" }).first().tap();
+  await expect(usage).toBeFocused();
+});
+
+// @covers AC-UI-COMPOSER-ACTION-WRAP-001.7
+test("wraps status and transcript controls without shrinking targets", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  try {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    const { taskId, session } = await openConversationUsageTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Wrapped mobile composer row",
+      'e2e:plan([{"content":"Review wrapping","status":"in_progress"}])\n' +
+        COMPOSER_HISTORY_PROMPT,
+    );
+    await associatePR(apiClient, taskId, "open");
+    await testPage.setViewportSize({ width: 320, height: 851 });
+    const autoScroll = session.activeChat().getByTestId("auto-scroll-toggle-button");
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "true");
+    await autoScroll.tap();
+    await expect(autoScroll).toHaveAttribute("aria-pressed", "false");
+    await revealTranscriptControls(session.activeChat());
+    const bar = session.chatStatusBar();
+    const todo = bar.getByTestId("todo-indicator");
+    const controls = bar.getByTestId("chat-status-bar-right-controls");
+    await expect(todo).toBeVisible();
+    await expect(bar.getByTestId("pr-status-chip")).toBeVisible();
+    await expect
+      .poll(async () => {
+        const status = (await todo.boundingBox())!;
+        const utilities = (await controls.boundingBox())!;
+        return utilities.y >= status.y + status.height;
+      })
+      .toBe(true);
+    await expectContainedTouchTargets(bar);
+    await waitForFiniteAnimations(bar);
+    await prCapture.screenshot("mobile-composer-wrapped-row", {
+      caption: "Dense phone controls wrap without shrinking touch targets",
+    });
+    await bar.getByTestId("scroll-to-start-button").tap();
+    await expect
+      .poll(() =>
+        session
+          .activeChat()
+          .locator(".chat-message-list")
+          .evaluate((element) => element.scrollTop),
+      )
+      .toBe(0);
+    await bar.getByTestId("jump-to-latest-button").tap();
+    await expect(bar.getByTestId("jump-to-latest-button")).toBeHidden();
+  } finally {
+    await apiClient.saveUserSettings({
+      show_scroll_to_start: settings.show_scroll_to_start === true,
+      show_scroll_to_last_prompt: settings.show_scroll_to_last_prompt === true,
+    });
+  }
+});
+
 async function expectPhoneControls(page: Page, banner: Locator) {
-  const bar = page.getByTestId("chat-status-bar");
-  const barBox = (await bar.boundingBox())!;
-  const bannerBox = (await banner.boundingBox())!;
-  expect(bannerBox.width).toBeGreaterThanOrEqual(barBox.width - 1);
-  await expect(banner).toHaveCSS("order", "-9999");
-  const targets = bar.locator("button:visible");
-  for (const control of await targets.all()) {
-    const box = (await control.boundingBox())!;
-    expect(box.height, await control.getAttribute("data-testid")).toBeGreaterThanOrEqual(44);
-    expect(box.width).toBeGreaterThanOrEqual(44);
-    expect(box.x).toBeGreaterThanOrEqual(barBox.x - 1);
-    expect(box.x + box.width).toBeLessThanOrEqual(barBox.x + barBox.width + 1);
-    expect(box.y + box.height).toBeLessThanOrEqual(barBox.y + barBox.height + 1);
-  }
-  for (const testId of ["share-task-button", "conversation-usage-trigger", "proceed-next-step"]) {
-    const box = (await bar.getByTestId(testId).boundingBox())!;
-    expect(box.y).toBeGreaterThanOrEqual(bannerBox.y + bannerBox.height);
-  }
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-    ),
-  ).toBe(true);
+  const bannerId = await banner.getAttribute("data-testid");
+  expect(bannerId).not.toBeNull();
+  await expectSettledTouchGeometry(page.getByTestId("chat-status-bar"), bannerId!);
 }
 
 async function removeBoardMembership(page: Page, taskId: string) {
@@ -264,6 +494,14 @@ test("retains phone targets on fine pointers and compact desktop controls", asyn
       page,
       caption: "Desktop retains compact inline task controls",
     });
+    await associatePR(apiClient, taskId, "open");
+    await page.setViewportSize({ width: 393, height: 851 });
+    await expect(bar.getByTestId("pr-status-chip")).toBeVisible();
+    await expectSameControlRow(
+      bar.getByTestId("pr-status-chip"),
+      bar.getByTestId("conversation-usage-trigger"),
+    );
+    await expectContainedTouchTargets(bar);
   } finally {
     await context.close();
   }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
@@ -144,6 +144,60 @@ describe("SidebarFilterPopover task-row editor", () => {
     await waitFor(() => expect(document.activeElement).toBe(deleteButton));
     expect(state.deleteSidebarView).not.toHaveBeenCalled();
   });
+});
+
+describe("SidebarFilterPopover keyboard cancellation", () => {
+  it.each(["desktop", "phone"])(
+    "cancels a keyboard reorder before ordinary Escape dismisses the %s editor",
+    async (surface) => {
+      responsive.usesDesktopWorkbench = surface === "desktop";
+      responsive.isMobile = surface === "phone";
+      state.sidebarViews.views = [
+        {
+          ...VIEW,
+          sort: {
+            key: "running",
+            direction: "desc",
+            thenBy: [{ key: "lastActivityAt", direction: "desc" }],
+          },
+        },
+      ];
+      const onOpenChange = vi.fn();
+      render(
+        <SidebarFilterPopover
+          trigger={<button type="button">Open</button>}
+          open
+          onOpenChange={onOpenChange}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+      const handle = screen.getByTestId("sort-rule-handle-0");
+      handle.focus();
+      fireEvent.keyDown(handle, { key: " ", code: "Space" });
+      await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBe("true"));
+      // The keyboard sensor attaches its document listener on the next timer turn.
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+      const bubbleListener = vi.fn();
+      document.addEventListener("keydown", bubbleListener);
+      try {
+        fireEvent.keyDown(handle, { key: "ArrowDown", code: "ArrowDown" });
+        fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBeNull());
+        expect(handle.closest('[data-dragging="true"]')).toBeNull();
+        expect(bubbleListener.mock.calls.some(([event]) => event.key === "Escape")).toBe(true);
+        expect(onOpenChange).not.toHaveBeenCalledWith(false);
+        expect(state.updateSidebarDraft).not.toHaveBeenCalled();
+        expect(handle.isConnected).toBe(true);
+
+        fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+        await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      } finally {
+        document.removeEventListener("keydown", bubbleListener);
+      }
+    },
+  );
 });
 
 describe("SidebarFilterPopover editor state", () => {

@@ -1,6 +1,6 @@
 # SPA Failure Containment and Deployment Recovery
 
-**Status:** accepted (amended 2026-09-03)
+**Status:** accepted (amended 2026-10-25)
 **Date:** 2026-07-27
 **Area:** frontend
 
@@ -59,7 +59,8 @@ The frontend installs a `vite:preloadError` listener before React mounts.
 - It stores `{ attemptedAt, href }` under `kandev.preloadRecovery` in
   `sessionStorage`.
 - When no recent marker exists, it synchronously writes and verifies the
-  marker, prevents Vite's later throw, and hard-reloads the document.
+  marker and hard-reloads the document. It leaves Vite's rejection intact so
+  React never receives an undefined module while navigation is pending.
 - A marker is recent for 60 seconds and permits at most one automatic reload in
   that tab during the window. A repeated failure is not prevented; it reaches
   the route or root boundary and presents recovery UI.

@@ -13,6 +13,7 @@ const (
 	publicGitHubHostname = "github.com"
 	legacyGitHubHostname = "www.github.com"
 	protocolSSH          = "ssh"
+	gitSSHUser           = "git"
 )
 
 // GitHubRepositoryOriginVerifier checks an Enterprise locator against the
@@ -58,12 +59,12 @@ func parseEnterpriseGitHubRemote(parsed *url.URL, parts []string, sshStyle bool)
 	if err != nil || (parsed.Scheme != protocolHTTPS && parsed.Scheme != protocolSSH) || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.RawPath != "" {
 		return "", "", "", "", fmt.Errorf("invalid Enterprise GitHub repository URL")
 	}
-	if parsed.User != nil && (parsed.Scheme != protocolSSH || parsed.User.String() != "git") {
+	if parsed.User != nil && (parsed.Scheme != protocolSSH || parsed.User.String() != gitSSHUser) {
 		return "", "", "", "", fmt.Errorf("invalid Enterprise GitHub repository user")
 	}
 	provider, owner, name, canonical, err := parseGitHubRemote(host.String(), parts, sshStyle)
 	if err == nil && parsed.Scheme == protocolSSH && !sshStyle {
-		canonical = "ssh://git@" + host.String() + "/" + owner + "/" + name + ".git"
+		canonical = "ssh://" + gitSSHUser + "@" + host.String() + "/" + owner + "/" + name + ".git"
 	}
 	return provider, owner, name, canonical, err
 }

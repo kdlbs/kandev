@@ -90,6 +90,7 @@ type idleParkingCandidateKey struct {
 	policyUpdated  int64
 	timeoutMinutes int
 	idleSince      int64
+	focusedAt      int64
 	promptGen      uint64
 	activityEpoch  uint64
 }
@@ -426,7 +427,8 @@ func (s *Service) logWorkspaceIdleSuspensionFailure(sessionID string, suspendErr
 
 func (s *Service) logWorkspaceIdleScan(summary idleParkingScanSummary) {
 	if len(summary.skipped) > 0 {
-		fields := make([]zap.Field, 0, len(idleParkingSkipReasonOrder))
+		fields := make([]zap.Field, 0, len(idleParkingSkipReasonOrder)+1)
+		fields = append(fields, zap.Int("candidates_observed", len(summary.observed)))
 		for _, reason := range idleParkingSkipReasonOrder {
 			if count := summary.skipped[reason]; count > 0 {
 				fields = append(fields, zap.Int("skip_"+string(reason), count))
@@ -466,11 +468,15 @@ func (s *Service) workspaceIdleCandidate(
 	if s.sessionHasKnownIdleWork(ctx, current.SessionID) {
 		return workspaceIdleCandidate{}, idleParkingSkipKnownWork, false
 	}
-	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, workspace, now)
+	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, now)
 	if !ok {
 		return workspaceIdleCandidate{}, reason, false
 	}
-	return buildWorkspaceIdleCandidate(current, task, workspace, executionID, generation, activityEpoch, lastActivityAt), "", true
+	candidate := buildWorkspaceIdleCandidate(current, task, workspace, executionID, generation, activityEpoch, lastActivityAt)
+	if focusedAt := persistedIdleParkingFocusAt(session, executionID, now); !focusedAt.IsZero() {
+		candidate.key.focusedAt = focusedAt.UnixNano()
+	}
+	return candidate, "", true
 }
 
 func (s *Service) currentWorkspaceIdleExecutor(
@@ -536,8 +542,7 @@ func (s *Service) workspaceIdleSession(ctx context.Context, row *models.Executor
 func (s *Service) workspaceIdleActivity(
 	ctx context.Context,
 	row *models.ExecutorRunning,
-	session *models.TaskSession,
-	workspace *models.Workspace,
+	_ *models.TaskSession,
 	now time.Time,
 ) (string, uint64, uint64, time.Time, idleParkingSkipReason, bool) {
 	reader, ok := s.agentManager.(idlePromptActivityReader)
@@ -545,23 +550,16 @@ func (s *Service) workspaceIdleActivity(
 		return "", 0, 0, time.Time{}, idleParkingSkipActivityUnavailable, false
 	}
 	executionID, generation, activityEpoch, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, row.SessionID)
-	if err != nil || executionID != row.AgentExecutionID || activityEpoch == 0 || lastActivityAt.IsZero() || lastActivityAt.After(now) {
+	if err != nil || executionID != row.AgentExecutionID {
 		return "", 0, 0, time.Time{}, idleParkingSkipStaleActivity, false
 	}
-	lastActivityAt = latestIdleActivity(lastActivityAt, session.UpdatedAt, row.UpdatedAt, workspace.UpdatedAt)
+	// Lifecycle restores its own persisted activity clock. Passive row and
+	// transcript metadata updates do not refresh this interval. A missing clock
+	// is observed as a new candidate with a full interval below.
 	if lastActivityAt.After(now) {
 		return "", 0, 0, time.Time{}, idleParkingSkipStaleActivity, false
 	}
 	return executionID, generation, activityEpoch, lastActivityAt, "", true
-}
-
-func latestIdleActivity(activityAt time.Time, activitySources ...time.Time) time.Time {
-	for _, candidate := range activitySources {
-		if candidate.After(activityAt) {
-			activityAt = candidate
-		}
-	}
-	return activityAt
 }
 
 func buildWorkspaceIdleCandidate(
@@ -572,11 +570,15 @@ func buildWorkspaceIdleCandidate(
 	generation, activityEpoch uint64,
 	lastActivityAt time.Time,
 ) workspaceIdleCandidate {
+	idleSince := int64(0)
+	if !lastActivityAt.IsZero() {
+		idleSince = lastActivityAt.UTC().UnixNano()
+	}
 	return workspaceIdleCandidate{
 		key: idleParkingCandidateKey{
 			workspaceID: task.WorkspaceID, sessionID: row.SessionID, executionID: executionID,
 			policyUpdated: workspace.UpdatedAt.UTC().UnixNano(), timeoutMinutes: workspace.ACPIdleTimeoutMinutes,
-			idleSince: lastActivityAt.UTC().UnixNano(), promptGen: generation, activityEpoch: activityEpoch,
+			idleSince: idleSince, promptGen: generation, activityEpoch: activityEpoch,
 		},
 		identity: agentruntime.IdleSuspensionIdentity{
 			ExecutionID: executionID, SessionID: row.SessionID,
@@ -640,8 +642,14 @@ func (s *Service) idleParkingCandidateDue(key idleParkingCandidateKey, now time.
 	started, exists := s.idleParkingCandidates[key]
 	if !exists {
 		started = time.Unix(0, key.idleSince).UTC()
+		if key.idleSince == 0 {
+			started = now
+		}
 		if policyAt := time.Unix(0, key.policyUpdated).UTC(); policyAt.After(started) {
 			started = policyAt
+		}
+		if focusedAt := time.Unix(0, key.focusedAt).UTC(); key.focusedAt != 0 && focusedAt.After(started) {
+			started = focusedAt
 		}
 		if focusedAt := s.idleParkingFocusAt[key.sessionID]; focusedAt.After(started) {
 			started = focusedAt

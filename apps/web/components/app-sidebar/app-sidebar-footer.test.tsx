@@ -173,16 +173,19 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 }));
 
 import { AppSidebarFooter } from "./app-sidebar-footer";
+import { SettingsNavigationProvider } from "@/components/settings/settings-navigation-provider";
 
 function renderFooter(collapsed = false, layoutManaged = false) {
   return render(
-    <TooltipProvider>
-      <AppSidebarFooter
-        collapsed={collapsed}
-        onToggleSettingsMode={mocks.toggleSettingsMode}
-        layoutManaged={layoutManaged}
-      />
-    </TooltipProvider>,
+    <SettingsNavigationProvider>
+      <TooltipProvider>
+        <AppSidebarFooter
+          collapsed={collapsed}
+          onToggleSettingsMode={mocks.toggleSettingsMode}
+          layoutManaged={layoutManaged}
+        />
+      </TooltipProvider>
+    </SettingsNavigationProvider>,
   );
 }
 
@@ -204,7 +207,7 @@ function resetFooterState() {
   state.auth = { mode: "disabled", user: null };
   state.connection.issueSeverity = "none";
   state.userSettings.appStatusBarEnabled = true;
-  mocks.routerPush.mockClear();
+  mocks.routerPush.mockReset();
   mocks.toggleSettingsMode.mockClear();
   insightDestinations = [STATS_DESTINATION];
 }
@@ -295,6 +298,33 @@ describe("AppSidebarFooter", () => {
 describe("AppSidebarFooter settings gear", () => {
   beforeEach(resetFooterState);
   afterEach(() => cleanup());
+
+  // @covers AC-UI-SETTINGS-RETURN-001.1
+  it("returns to the originating task after closing settings", () => {
+    const taskHref = "/t/task-origin?sessionId=selected-session&layout=review#changes";
+    window.history.replaceState({}, "", taskHref);
+    pathname = window.location.pathname;
+    mocks.routerPush.mockImplementation((href: string) => {
+      window.history.pushState({}, "", href);
+    });
+    const footer = renderFooter();
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
+
+    pathname = "/settings/preferences/appearance";
+    window.history.replaceState({}, "", pathname);
+    state.appSidebar.settingsMode = true;
+    footer.rerender(
+      <SettingsNavigationProvider>
+        <TooltipProvider>
+          <AppSidebarFooter collapsed={false} onToggleSettingsMode={mocks.toggleSettingsMode} />
+        </TooltipProvider>
+      </SettingsNavigationProvider>,
+    );
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
+
+    expect(mocks.routerPush).toHaveBeenLastCalledWith(taskHref, expect.anything());
+    mocks.routerPush.mockReset();
+  });
 
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
     pathname = DEFAULT_PATHNAME;

@@ -258,7 +258,8 @@ Implementation verification on 2026-10-14:
   full specification lint and five-work-order documentation preflight passed.
 
 No live GHES or GHE.com environments were supplied. TLS/provider fixtures and
-mock browser flows are not live-provider certification. Changes remain uncommitted.
+mock browser flows are not live-provider certification. These results describe
+the original implementation snapshot, before PR #4517 was opened.
 
 Design-package checks from repository root:
 
@@ -289,6 +290,74 @@ console.log(JSON.stringify({ ok: result.ok, status: result.status, errors: resul
 process.exitCode = result.ok ? 0 : 1;
 JS
 ```
+
+## Integration repair on 2026-10-25
+
+The user authorized preparing PR #4517 against current `main`. The repair merges
+base `62af870aea3556e34ae3878041d2b99bf1c522bc` into original PR head
+`0e009fd3d695f0dc6bb288635efe7faddfaa1010`.
+
+- Preserve authenticated watcher creators alongside persisted Enterprise hosts.
+- Combine host replacement guards with the current workflow-sync scheduler,
+  retry handling, and quota coordination.
+- Pass the resource host through merge-permission requests and cache identity.
+  Reject responses from an earlier host after a context change.
+- Classify absolute pagination URLs by API resource, including the GHES
+  `/api/v3` prefix, so paginated search obeys search-quota admission.
+
+Regression tests reproduced both the missing merge-permission host and the
+pagination admission bypass before their fixes. The full GitHub race run exposed
+one new upstream test that constructed a client without a host. That fixture now
+uses the public-host constructor; its focused rerun passes.
+
+Verification so far:
+
+- Workflow-sync race suite passed. Focused GitHub regression and PostgreSQL
+  suites passed, including watcher creator/host round trips.
+- Full SQLite/PostgreSQL persistence conformance with race detection passed
+  in 322.322 seconds. SQL portability checks passed.
+- Frontend: 62 tests in eight affected suites, type checking, lint, and
+  translations passed.
+- Documentation: 63 tests and 54 public pages passed validation. The catalog
+  validated 404 decisions and 1738 specifications; specification lint passed.
+- Enterprise repository selection race tests passed after replacing the SSH
+  username literal with a dedicated constant. This avoids coupling the parser
+  to an unrelated retirement predicate introduced on `main`.
+- Desktop browser checks: five passed. Mobile browser checks: four passed.
+  Both runs cover Enterprise CLI/PAT/App setup and merge-permission behavior.
+  The production backend/web build passed. The first browser attempt could not
+  reach its test backend because it inherited the running instance configuration;
+  the successful rerun used isolated configuration and an explicit loopback bind.
+- Go lint passed with the CI-pinned golangci-lint 2.9.0. The earlier 2.12.2
+  attempt timed out and reported additional constant checks; it is not the
+  authoritative lint result for this repair.
+
+Public guidance already covers these contracts; this repair does not add a new
+setup step or supported host. Live GHES/GHE.com testing remains unverified.
+
+Focused backend rerun commands from `apps/backend` (PostgreSQL checks use
+`KANDEV_TEST_POSTGRES_DSN` pointing at the disposable test database):
+
+```bash
+GOMAXPROCS=2 go test -race -trimpath -p 1 ./internal/github ./internal/workflowsync -run 'TestCoordinateLegacyClientGatesIdentityProbe|TestEnterprisePaginationUsesSearchAdmission|TestExecutorOwnership|Test.*Postgres' -count=1
+GOMAXPROCS=2 go test -race -trimpath -p 1 ./internal/task/service -run 'Test.*Enterprise.*Repository' -count=1
+GOMAXPROCS=2 go test -race -trimpath -p 1 ./internal/persistence/storeconformance -count=1
+GOMAXPROCS=2 go run -trimpath ./cmd/sqlguard ./internal
+```
+
+Frontend regression command from `apps/web`:
+
+```bash
+pnpm exec vitest run components/github/github-connection-dialog.test.tsx components/github/github-connection-draft.test.tsx components/github/github-app-onboarding-model.test.ts components/github/github-status.test.tsx components/github/pr-merge-button.test.tsx hooks/domains/github/use-repo-merge-access.test.ts hooks/domains/github/use-repo-merge-methods.test.ts lib/api/domains/github-pr-api.test.ts
+```
+
+Managed browser commands from the repository root:
+
+```bash
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/integrations/github-enterprise-hosts.spec.ts e2e/tests/pr/pr-merge-permissions.spec.ts
+scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/integrations/mobile-github-enterprise-hosts.spec.ts e2e/tests/pr/mobile-pr-merge-permissions.spec.ts
+```
+
 
 ## Risks
 

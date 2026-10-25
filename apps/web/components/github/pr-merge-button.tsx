@@ -10,19 +10,23 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
+import { useTaskWorkspaceId } from "@/components/task/task-workspace-context";
 import { useToast } from "@/components/toast-provider";
-import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useRepoMergeAccess } from "@/hooks/domains/github/use-repo-merge-access";
 import { useRepoMergeMethods } from "@/hooks/domains/github/use-repo-merge-methods";
 import { mergePR } from "@/lib/api/domains/github-api";
-import { getGitHubMutationActor } from "@/lib/github-auth";
+import { getGitHubActorLabel } from "@/lib/github-auth";
 import type { MergeMethod, TaskPR } from "@/lib/types/github";
 import { canAttemptPRMerge } from "./pr-task-icon";
+import { PRMergeAccessNotice } from "./pr-merge-access-notice";
 import { useTranslation } from "react-i18next";
 
 function MutationActor({ actor }: { actor: string | null }) {
+  const { t } = useTranslation();
   if (!actor) return null;
-  return <span className="text-[11px] text-muted-foreground">as {actor}</span>;
+  return (
+    <span className="text-[11px] text-muted-foreground">{t("github:mergeAsActor", { actor })}</span>
+  );
 }
 
 function CompactMergeButton({
@@ -71,13 +75,7 @@ function CompactMergeButton({
   );
 }
 
-// Renders nothing unless the PR is fully green (CI success + mergeable +
-// approval or no-review-needed). When `useRepoMergeMethods` hasn't yet
-// returned the repo's allowed methods (loading, failure, or expired cache)
-// the button still renders — clicks fall through to the backend resolver.
-// Shared by the PR detail panel header and the topbar hover popover so a
-// "ready" PR can be merged from either surface. `compact` switches to the
-// smaller pill variant used inside the dense popover.
+// Readiness and the current actor's target-repository access both gate manual merge.
 export function PRMergeButton({
   taskPR,
   onMerged,
@@ -93,28 +91,41 @@ export function PRMergeButton({
   // After GitHub accepts a direct or queued merge, stay hidden until refreshed
   // provider state catches up so a repeat click cannot submit a second request.
   const [acceptedFor, setAcceptedFor] = useState<string | null>(null);
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceId = useTaskWorkspaceId(taskPR.task_id);
   const methods = useRepoMergeMethods(workspaceId, taskPR.owner, taskPR.repo, taskPR.github_host);
-  const { status } = useGitHubStatus(workspaceId);
-  const mutationActor = getGitHubMutationActor(status);
 
   // Reset after switching PRs or after GitHub reports an observable lifecycle
   // or mergeability transition, including a PR ejected from a merge queue.
   const signature = `${taskPR.id}:${taskPR.state}:${taskPR.mergeable_state}`;
   const accepted = acceptedFor === signature;
+  const ready = canAttemptPRMerge(taskPR);
+  const access = useRepoMergeAccess(
+    workspaceId,
+    taskPR.owner,
+    taskPR.repo,
+    ready && !accepted,
+    taskPR.github_host ?? "github.com",
+  );
+  const mutationActor = getGitHubActorLabel(access.actor);
 
-  if (accepted || !canAttemptPRMerge(taskPR)) return null;
-  // `methods` may be null on first render, on lookup failure, or after the
-  // 5-minute cache window. We still render the button — clicking with no
-  // method routes through the backend's GetRepoMergeMethods resolver, so
-  // the merge succeeds either way. The trade-off is a brief label flicker
-  // from "Merge PR" → "Squash and merge" on first load; locking the user
-  // out of merging on a transient fetch failure is the worse alternative.
+  if (accepted || !ready) return null;
+  if (access.state !== "allowed") {
+    return (
+      <PRMergeAccessNotice
+        state={access.state}
+        actor={mutationActor}
+        repository={`${taskPR.owner}/${taskPR.repo}`}
+        onRetry={access.refresh}
+        compact={compact}
+      />
+    );
+  }
+  // After access is confirmed, missing method metadata uses the backend resolver.
   const allowed = allowedMethods(methods);
   const primary = pickPrimaryMethod(allowed);
 
   const runMerge = async (method?: MergeMethod) => {
-    if (!workspaceId) return;
+    if (!workspaceId || merging || access.state !== "allowed") return;
     const submittedSignature = signature;
     setMerging(true);
     try {
@@ -131,6 +142,7 @@ export function PRMergeButton({
       });
       onMerged?.();
     } catch (err) {
+      access.refresh();
       toast({
         title: t("github:failedToMerge"),
         description: err instanceof Error ? err.message : t("github:anErrorOccurred"),

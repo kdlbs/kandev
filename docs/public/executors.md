@@ -108,6 +108,39 @@ including a newer value saved concurrently. Supplying a script replaces it;
 supplying an empty string clears it. The profile editor submits both scripts,
 so a stale full editor draft can still replace newer script values.
 
+### Private executors and profiles
+
+With authentication enabled, use **Profile access** in the profile editor to
+choose **Shared** or **Only me**. Administrators can also choose another active
+user. A new profile is shared unless you choose an owner. Ownership changes use
+the page's Save/Discard controls; on phones the owner selector opens a drawer.
+
+A private profile is visible and usable only by its owner and configuration
+administrators. A non-system executor also has **Executor access**. A private
+executor restricts every profile beneath it, including profiles marked Shared.
+A profile's owner must match its private executor's owner. Built-in executor
+parents stay shared; their individual profiles can be private.
+
+Owners can return their resources to Shared. Administrators can reassign or
+clear ownership, including when an owner has left. Members cannot claim an
+existing shared resource or assign someone else. Existing administrator-only
+connection settings retain their restrictions.
+
+Sharing a workspace or task does not grant access to someone else's private
+compute. Task history remains readable according to workspace permissions, but
+starting, resuming, prompting, and shell access check executor eligibility.
+If a selected profile becomes unavailable, choose an accessible replacement
+before starting. Ownership changes apply to subsequent operations and do not
+terminate work already admitted.
+
+The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
+shared resource. On update, omission preserves ownership; `null` or an empty
+string clears it. Invalid users and conflicting parent/profile owners are
+rejected. Private configuration is filtered from catalogues, boot payloads, and
+live notifications. This is an application access boundary; Local and Worktree
+still use the server's OS account and its on-disk credentials. See
+[Authentication limitations](authentication.md#limitations).
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.
@@ -159,6 +192,14 @@ Remote survival does not depend on the local survival setting. When Kandev
 returns, it verifies the recorded execution and reconnects to the same agent.
 It replays saved output without sending another prompt. **Stop** still stops
 the selected remote agent.
+
+When workspace ACP idle suspension is enabled, a recovered settled session
+continues its recorded idle interval across a backend restart. Replayed output,
+health checks, and saved-message metadata updates do not restart that interval.
+If the earlier activity time is unavailable or invalid, Kandev gives the session
+a full interval after observing it settled. Existing focus and policy changes
+still refresh the interval. An explicit focus interval also survives a backend
+restart for that same execution.
 
 The executor needs usable disk space to retain output during a long outage.
 Provider expiration and external process termination can still stop a remote
@@ -293,6 +334,12 @@ Worktree creates a dedicated host Git worktree and runs the standalone `agentctl
 
 Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry error produces a credential-safe warning and the host worktree uses the verified local base. The warning states that remote changes may be missing. For a numbered GitHub PR, the current PR base is used when available. A proven deleted remote base can use a separately refreshed configured fallback branch, often the repository default, and produces a warning; authentication, network, timeout, and other unproven PR refresh failures remain fatal. If no usable local base exists, or if the executor must materialize the repository remotely, refresh and checkout remain required and a failure stops the launch. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
 
+Worktree tasks normally start inside their first repository. In **Advanced settings**, a task with one
+initial repository can opt into a parent workspace folder so later repositories are siblings and the
+agent starts above the repositories. Multiple initial repositories select this layout
+automatically. The initial layout is stored with the task and reused after relaunch or reset.
+Git actions and worktree cleanup use each repository checkout inside that parent folder.
+
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 
 If a managed repository clone changes while a task worktree has local changes, Kandev offers a confirmed recovery action to move those files into worktrees from the current clone and resume the same session. The recovery card reports the current repository, phase, and last update. That progress survives page reloads and reconnects, and it blocks another transfer while the recovery runner is live. If Kandev cannot confirm the recovery status, use **Check status** before choosing another recovery action.
@@ -318,11 +365,18 @@ Use Local for an intentionally shared checkout, a controlled single task, or a r
 
 ## Workspace sources
 
-An idle, non-archived repository-backed task can add sources from its **Files** panel. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, Kubernetes, SSH, and Sprites clone local Git sources and therefore require a cloneable origin; Worktree and Local/Local PC can use the host repository directly.
+An idle, non-archived task with a prepared workspace can add sources from **Files > + > Add repositories or folders**. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **Kubernetes**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, Kubernetes, SSH, and Sprites clone repository sources inside the current executor workspace and require a cloneable origin for local Git rows; Worktree and Local/Local PC can use host repositories directly. This flow also works for Local folder and scratch tasks when their workspace is prepared.
 
 Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
 
-Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker rejects folders for the same reason as the other remote executors: the daemon cannot read the Kandev host's filesystem. It does **not** yet reject a local Git repository source. The host checkout is never sent to the remote daemon, so nothing wrong is mounted, but the task is created and then fails while running its prepare script. Give the repository a reachable origin, or choose a local executor. The same gap applies to SSH, Kubernetes, and Sprites; see [kdlbs/kandev#3778](https://github.com/kdlbs/kandev/issues/3778).
+For a single-repository Worktree task, the Add sources dialog offers two nested destinations for a
+repository, folder, or mixed batch: `kandev/` below the current repository or a directory beside the current
+repository's files. Both keep the agent CWD and running processes unchanged. Kandev previews and
+stores the relative destination and excludes the nested worktree from the outer repository's normal
+staging. Parent-rooted tasks add repository siblings directly. Workspace-root expansion remains
+unavailable until explicit idle session recovery is supported.
+
+Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into the established task workspace and never copies, moves, or deletes their contents. Local folder and scratch workspaces keep their current root, CWD, and running processes while sources are added. Docker and remote executors do not offer folders and reject a forged folder request. **Upload folder** is a separate copy flow when uploads are supported. Remote Docker rejects folders for the same reason as the other remote executors: the daemon cannot read the Kandev host's filesystem. At task creation, it does **not** yet reject a local Git repository source without a cloneable origin. The host checkout is never sent to the remote daemon, so nothing wrong is mounted, but the task is created and then fails while running its prepare script. Give the repository a reachable origin, or choose a local executor. The same gap applies to SSH, Kubernetes, and Sprites; see [kdlbs/kandev#3778](https://github.com/kdlbs/kandev/issues/3778).
 
 Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
@@ -520,6 +574,37 @@ These transfers write sensitive material under the remote user's home and are be
 
 </details>
 
+### CLI passthrough
+
+Enable **CLI passthrough** on the selected agent profile to use its terminal UI
+on the SSH target. The CLI runs in the remote task workspace. Install and
+authenticate that CLI on the target before starting the session. A custom
+prepare script is not required. Environment variables follow the same SSH
+credential forwarding policy as ACP sessions.
+
+The agent terminal sends input, resize, and interrupt actions to the remote
+PTY. Closing a browser tab preserves the process. Reconnecting restores recent
+output and keeps the same process. Desktop and phone use their existing agent
+terminal controls.
+
+Kandev prepares MCP files on the target and uses the remote controller's
+loopback address. It preserves existing user configuration and files claimed
+by another session. It does not write global agent configuration.
+
+Cursor and Pi use workspace MCP files. If another session claims a different
+controller URL in that file, preparation fails. Stop that session before
+retrying, or use a separate task.
+
+When you reset an SSH agent, Kandev stops its CLI before applying changed MCP
+settings. If preparation then fails, the CLI stays stopped. Resolve the
+configuration conflict before you resume the session.
+
+After a backend interruption, **Resume** reconnects to a verified live remote
+CLI. If that process is absent, Resume uses the preserved workspace and the
+agent's conversation resume options. Missing authentication or uncertain
+ownership blocks replacement. If the retained helper lacks passthrough
+support, update Kandev and start a fresh session.
+
 ### Repository sources and cleanup
 
 > **Cleanup:** SSH task directories, session-runtime data, and cached helpers may remain after disconnect. Audit remote processes and paths before deleting anything.
@@ -532,6 +617,8 @@ SSH materializes the primary attached repository at the remote task-workspace ro
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+
+If a settled session’s remote controller dies while its SSH connection still answers, idle reclaim can release its runtime reservation after confirming the recorded process is absent. An unreachable SSH connection or inconclusive process check leaves the reservation unchanged; idle reclaim does not reconnect to establish absence.
 
 Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
 Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
