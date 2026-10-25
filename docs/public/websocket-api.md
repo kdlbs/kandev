@@ -512,6 +512,13 @@ last committed value. This does not extend ordinary metadata replacement or late
 full-snapshot writes into per-key merges, and nested/null behavior keeps the current
 pending-title database semantics.
 
+`PATCH /api/v1/tasks/:id/session-auto-provisioning` accepts a JSON body with one
+required boolean, `suppressed`. It requires task-write access and merges only the
+`bulk_session_removal_suppress_ensure` metadata key. While the value is `true`,
+passive task-open `session.ensure` leaves an empty task without creating a session.
+Remove All sets the value before deletion and attempts to clear it if deletion
+fails. An explicit new-session launch clears it after a session ID is created.
+
 GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
 including concurrent port-forwarding preference changes. A link replaces the complete
 issue identity together; unlink removes its five issue keys. Legacy issue-watch metadata
