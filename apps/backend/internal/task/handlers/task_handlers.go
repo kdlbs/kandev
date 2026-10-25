@@ -249,6 +249,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
+	api.PATCH("/tasks/:id/session-auto-provisioning", h.httpUpdateTaskSessionAutoProvisioning)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)

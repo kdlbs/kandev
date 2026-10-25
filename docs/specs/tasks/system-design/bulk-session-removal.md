@@ -63,17 +63,15 @@ prevents re-entry. The backend remains authoritative for authorization,
 runtime quiescence, refusal of active sessions, primary promotion, and task
 workspace retention.
 
-Remove All first records a task metadata marker through the existing task
-update contract, then deletes sessions. Passive `session.ensure` reads that
+Remove All first records a task metadata marker through a narrow, authorized
+task metadata update, then deletes sessions. Passive `session.ensure` reads that
 marker after finding no existing session and leaves the task empty, including
 when another browser opens it. If the marker write fails, deletion does not
 begin. A failed bulk deletion clears the durable marker; a successful explicit
 new-session launch clears it after a session ID exists, restoring ordinary
-single-session deletion behavior. The per-task browser storage entry remains
-a local fence while session-list events settle. Storage failures retain the
-current tab's state, while the durable marker protects other browsers. A
-successful launch clears the local fence even if task-switch navigation was
-superseded while the request was pending.
+single-session deletion behavior in every browser. The server marker is the
+single authority for passive session creation, so a stale browser-local value
+cannot prevent later recreation.
 
 ## Desktop presentation
 

@@ -1913,6 +1913,26 @@ type httpUpdateTaskPortForwardingRequest struct {
 	Enabled *bool `json:"enabled"`
 }
 
+type httpUpdateTaskSessionAutoProvisioningRequest struct {
+	Suppressed *bool `json:"suppressed"`
+}
+
+func (h *TaskHandlers) httpUpdateTaskSessionAutoProvisioning(c *gin.Context) {
+	var body httpUpdateTaskSessionAutoProvisioningRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Suppressed == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "suppressed must be a boolean"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid trailing JSON"})
+		return
+	}
+
+	h.updateTaskBooleanMetadata(c, models.MetaKeyBulkSessionRemovalSuppressEnsure, *body.Suppressed)
+}
+
 func (h *TaskHandlers) httpUpdateTaskPortForwarding(c *gin.Context) {
 	var body httpUpdateTaskPortForwardingRequest
 	decoder := json.NewDecoder(c.Request.Body)
@@ -1926,8 +1946,12 @@ func (h *TaskHandlers) httpUpdateTaskPortForwarding(c *gin.Context) {
 		return
 	}
 
+	h.updateTaskBooleanMetadata(c, models.MetaKeyPortForwardingEnabled, *body.Enabled)
+}
+
+func (h *TaskHandlers) updateTaskBooleanMetadata(c *gin.Context, key string, value bool) {
 	task, err := h.service.UpdateTaskMetadata(c.Request.Context(), c.Param("id"), map[string]interface{}{
-		models.MetaKeyPortForwardingEnabled: *body.Enabled,
+		key: value,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")

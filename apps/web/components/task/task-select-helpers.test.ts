@@ -77,9 +77,6 @@ vi.mock("@/lib/services/session-launch-service", () => ({
 vi.mock("@/lib/services/session-launch-helpers", () => ({
   buildPrepareRequest: vi.fn(() => ({ request: { taskId: "task-new" } })),
 }));
-vi.mock("@/lib/session/session-auto-provisioning-fence", () => ({
-  clearTaskSessionAutoProvisioningSuppression: vi.fn(),
-}));
 vi.mock("@/lib/state/dockview-store", () => ({
   performLayoutSwitch: vi.fn(),
   releaseLayoutToDefault: vi.fn(),
@@ -92,7 +89,6 @@ vi.mock("@/lib/links", () => ({
 import { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
 import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
-import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
@@ -457,7 +453,6 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     const result = await promise;
 
     expect(result).toBe(true);
-    expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(NEW_TASK_ID);
     expect(switchToSession).toHaveBeenCalledTimes(1);
     expect(switchToSession).toHaveBeenCalledWith(NEW_TASK_ID, NEW_SESSION_ID, null);
     expect(setPreparingTaskId).toHaveBeenLastCalledWith(null);
@@ -499,7 +494,6 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
       () => false,
     );
 
-    expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(NEW_TASK_ID);
     expect(switchToSession).not.toHaveBeenCalled();
   });
 

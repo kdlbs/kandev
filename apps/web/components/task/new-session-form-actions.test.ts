@@ -4,11 +4,6 @@ import type { FormEvent } from "react";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { FileAttachment } from "./chat/file-attachment";
-import {
-  clearTaskSessionAutoProvisioningSuppression,
-  isTaskSessionAutoProvisioningSuppressed,
-  suppressTaskSessionAutoProvisioning,
-} from "@/lib/session/session-auto-provisioning-fence";
 
 const mockLaunchSession = vi.fn();
 const mockBuildStartRequest = vi.fn();
@@ -262,7 +257,6 @@ describe("useSessionContextChange", () => {
 describe("useSessionLaunchSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearTaskSessionAutoProvisioningSuppression(TASK_ID);
     mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockBuildStartRequest.mockReturnValue({
       request: {
@@ -339,7 +333,6 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.5 restores normal ensuring after a new session", async () => {
-    suppressTaskSessionAutoProvisioning(TASK_ID);
     const { result } = renderHook(() =>
       useSessionLaunchSubmit({
         promptRef: createPromptRef("new conversation"),
@@ -361,8 +354,6 @@ describe("useSessionLaunchSubmit", () => {
     await act(async () => {
       await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
     });
-
-    expect(isTaskSessionAutoProvisioningSuppressed(TASK_ID)).toBe(false);
   });
 
   it("passes session MCP additions to the launch request", async () => {
@@ -577,7 +568,6 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("shows a toast when launching fails", async () => {
-    suppressTaskSessionAutoProvisioning(TASK_ID);
     mockLaunchSession.mockRejectedValueOnce(new Error("launch failed"));
     const promptRef = createPromptRef("hello", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
@@ -618,6 +608,5 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockRecordRecentUse).not.toHaveBeenCalled();
     expect(mockActivateSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
-    expect(isTaskSessionAutoProvisioningSuppressed(TASK_ID)).toBe(true);
   });
 });

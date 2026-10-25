@@ -2,12 +2,8 @@ import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { updateTask } from "@/lib/api";
+import { updateTaskSessionAutoProvisioning } from "@/lib/api";
 import type { TaskSession } from "@/lib/types/http";
-import {
-  clearTaskSessionAutoProvisioningSuppression,
-  suppressTaskSessionAutoProvisioning,
-} from "@/lib/session/session-auto-provisioning-fence";
 import {
   useBulkSessionRemoval,
   type BulkSessionRemovalReason,
@@ -64,13 +60,8 @@ export function useTaskBulkRemovalController({
     getLatestSnapshot,
     onRemoveAllConfirmed: async () => {
       if (!taskId) return;
-      await updateTask(taskId, { metadata: { bulk_session_removal_suppress_ensure: true } });
+      await updateTaskSessionAutoProvisioning(taskId, true);
       suppressedTaskIdRef.current = taskId;
-      try {
-        suppressTaskSessionAutoProvisioning(taskId);
-      } catch {
-        // The durable task marker still protects other tabs when browser storage fails.
-      }
     },
     onInvalidSnapshot: (reason) =>
       reason ? reportIneligible(reason) : toast({ title: t("task:sessionsChangedReviewAgain") }),
@@ -83,10 +74,7 @@ export function useTaskBulkRemovalController({
         const suppressedTaskId = suppressedTaskIdRef.current;
         if (suppressedTaskId) {
           try {
-            await updateTask(suppressedTaskId, {
-              metadata: { bulk_session_removal_suppress_ensure: false },
-            });
-            clearTaskSessionAutoProvisioningSuppression(suppressedTaskId);
+            await updateTaskSessionAutoProvisioning(suppressedTaskId, false);
           } catch {
             toast({ title: t("task:bulkRemovalUnavailable_error"), variant: "error" });
           }

@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/services/session-launch-service", () => ({ launchSession: vi.fn() }));
-vi.mock("@/lib/session/session-auto-provisioning-fence", () => ({
-  clearTaskSessionAutoProvisioningSuppression: vi.fn(),
-}));
 
 import { launchSession, type LaunchSessionResponse } from "@/lib/services/session-launch-service";
-import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 import {
   createTaskSheetSelectionController,
   selectTaskFromSheet,
@@ -40,7 +36,6 @@ describe("selectTaskFromSheet", () => {
 
     await flushSelection();
 
-    expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(PREPARED_TASK_ID);
     expect(setActiveSession).toHaveBeenCalledWith(PREPARED_TASK_ID, "prepared-session");
   });
 
@@ -72,7 +67,6 @@ describe("selectTaskFromSheet", () => {
     });
     await flushSelection();
 
-    expect(clearTaskSessionAutoProvisioningSuppression).toHaveBeenCalledWith(PREPARED_TASK_ID);
     expect(setActiveSession).not.toHaveBeenCalled();
   });
 });

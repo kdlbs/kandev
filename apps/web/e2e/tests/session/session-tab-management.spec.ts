@@ -781,6 +781,33 @@ test.describe("Session tab management — bulk removal", () => {
         },
       )
       .toBe(false);
+    const recreatedSessionId = (await apiClient.listTaskSessions(task.id)).sessions[0].id;
+    await expect
+      .poll(
+        async () => {
+          const current = (await apiClient.listTaskSessions(task.id)).sessions[0];
+          return current?.id === recreatedSessionId && DONE_STATES.includes(current.state);
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(recreatedSessionId)).toBeVisible();
+    await session.sessionTabBySessionId(recreatedSessionId).click({ button: "right" });
+    await session.contextMenuItem("Delete").click();
+    await testPage
+      .getByTestId("session-delete-confirm-popover")
+      .getByTestId("session-delete-confirm")
+      .click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    expect((await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure).toBe(
+      false,
+    );
     await otherContext.close();
   });
 });

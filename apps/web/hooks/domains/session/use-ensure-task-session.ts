@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureTaskSession } from "@/lib/services/session-launch-service";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { isTaskSessionAutoProvisioningSuppressed } from "@/lib/session/session-auto-provisioning-fence";
 import { useAppStore } from "@/components/state-provider";
 import { taskRemovalCoversTask } from "@/lib/state/task-removal";
 
@@ -206,7 +205,6 @@ export function useEnsureTaskSession(
   useEffect(() => {
     if (!canEnsure || !taskId || !isLoaded) return;
     if (sessions.length > 0) return;
-    if (isTaskSessionAutoProvisioningSuppressed(taskId)) return;
     // Wait for the workflow steps to resolve before deciding the gate. This
     // branch does NOT latch, so a later steps hydration re-runs the effect
     // with the correct isFinalStep value (fixes late-hydration auto-start).

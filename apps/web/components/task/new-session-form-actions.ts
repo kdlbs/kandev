@@ -13,7 +13,6 @@ import { applySummarizeSessionResult, type SummaryToastFn } from "./session-cont
 import { t } from "@/lib/i18n";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseRecord } from "@/lib/agent-profile-recent-use";
-import { clearTaskSessionAutoProvisioningSuppression } from "@/lib/session/session-auto-provisioning-fence";
 
 type SessionContextChangeOpts = {
   promptRef: RefObject<TaskFormInputsHandle | null>;
@@ -117,7 +116,6 @@ async function launchAndActivateSession({
   );
   const response = await launchSession(request);
   const sessionId = requireSessionId(response.session_id);
-  clearTaskSessionAutoProvisioningSuppression(taskId);
   const effectiveProfileId = response.agent_profile_id ?? selectedProfileId;
   recordTaskSessionProfileUse(effectiveProfileId, applyAgentProfileRecentUse);
   const profile = agentProfiles.find((item) => item.id === effectiveProfileId);
