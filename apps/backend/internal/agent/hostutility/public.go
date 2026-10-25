@@ -17,6 +17,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // ExecuteProfilePrompt resolves a complete profile snapshot at call start
@@ -44,11 +45,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			return nil, err
 		}
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
+	if err != nil {
+		return nil, err
 	}
 	var gatewayAuth *acpprovider.GatewayAuth
 	var providerKeyEnvVar, providerKey string
@@ -85,7 +84,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
 			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
-			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, LaunchWrapper: launchwrapper.Profile(prefix),
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	}

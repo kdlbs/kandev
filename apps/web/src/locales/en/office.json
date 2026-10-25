@@ -569,7 +569,7 @@
   "overrideTheWorkspaceTierOrProvider": "Override the workspace tier or provider order for this agent.",
   "overrideWakeReasonTiers": "Override wake-reason tiers",
   "overrideWakeReasonTiersHelp": "This is rare. Override only if this agent specifically needs different behaviour for its background work; for example, a security-critical agent that must use Frontier even for routine checks. Most agents should inherit the workspace policy.",
-  "overrideWhichModelTierRunsFor": "Override which model tier runs for specific kinds of agent work. Most users leave this on the workspace defaults; Economy for background tasks, Balanced for normal runs. Heartbeats, scheduled routines, and budget alerts run constantly in the background, so using a cheaper tier here can dramatically reduce cost without affecting the work that matters.",
+  "overrideWhichModelTierRunsFor": "Use the workspace default or choose a model tier for each type of agent work. Lower-cost models may produce different results.",
   "overrideWorkspacePolicyForThisAgent": "Override workspace policy for this agent",
   "overrideWorkspaceProviderOrder": "Override workspace provider order",
   "overrideWorkspaceTier": "Override workspace tier",

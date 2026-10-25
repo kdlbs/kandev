@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -118,7 +120,7 @@ func seedOfficeTaskWithMetadata(t *testing.T, repo *officesqlite.Repository, tas
 	}
 }
 
-func carrierMetadataLiteral(run *models.Run) map[string]interface{} {
+func carrierMetadataLiteral(run *runsmodels.Run) map[string]interface{} {
 	return carrierMetadataFromRun(run)
 }
 
@@ -209,7 +211,7 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 
 	// The creating run: what the task-boundary carrier will point back to.
 	if _, err := svc.QueueRunWithActor(ctx, creator.ID, "spawn_agent_run", `{}`, "",
-		models.ActorKindAgent, creator.ID, ""); err != nil {
+		runsmodels.ActorKindAgent, creator.ID, ""); err != nil {
 		t.Fatalf("queue creating run: %v", err)
 	}
 	runs, err := repo.ListRuns(ctx, "ws-1")
@@ -228,7 +230,7 @@ func TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var assignedRun *models.Run
+	var assignedRun *runsmodels.Run
 	for _, r := range all {
 		if r.ID != creatingRun.ID {
 			assignedRun = r
@@ -294,11 +296,11 @@ func TestReplayDeferredAssignment_PreservesAssignmentActor(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("run count = %d, want 1", len(runs))
 	}
-	if runs[0].ActorKind != models.ActorKindUser {
-		t.Fatalf("replayed actor kind = %q, want %q", runs[0].ActorKind, models.ActorKindUser)
+	if runs[0].ActorKind != runsmodels.ActorKindUser {
+		t.Fatalf("replayed actor kind = %q, want %q", runs[0].ActorKind, runsmodels.ActorKindUser)
 	}
-	if runs[0].PriorityClass != models.PriorityClassHuman {
-		t.Fatalf("replayed priority class = %v, want %v", runs[0].PriorityClass, models.PriorityClassHuman)
+	if runs[0].PriorityClass != runsmodels.PriorityClassHuman {
+		t.Fatalf("replayed priority class = %v, want %v", runs[0].PriorityClass, runsmodels.PriorityClassHuman)
 	}
 }
 
@@ -327,8 +329,8 @@ func TestQueueTaskAssignedRun_NoCarrierRootsAsSystemActor(t *testing.T) {
 		t.Fatalf("list runs: %v (got %d)", err, len(runs))
 	}
 	run := runs[0]
-	if run.ActorKind != models.ActorKindSystem {
-		t.Errorf("actor_kind = %q, want %q (no carrier to inherit)", run.ActorKind, models.ActorKindSystem)
+	if run.ActorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want %q (no carrier to inherit)", run.ActorKind, runsmodels.ActorKindSystem)
 	}
 	if run.ChainCausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
 		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root",
@@ -361,7 +363,7 @@ func TestQueueTaskAssignedRun_InheritsRoutineFireCarrier(t *testing.T) {
 		taskmodels.MetaKeyOfficeCarrierCreatingRunID:  "",
 		taskmodels.MetaKeyOfficeCarrierHumanRooted:    false,
 		taskmodels.MetaKeyOfficeCarrierRoutineID:      "routine-fire-1",
-		taskmodels.MetaKeyOfficeCarrierActorKind:      string(models.ActorKindSystem),
+		taskmodels.MetaKeyOfficeCarrierActorKind:      string(runsmodels.ActorKindSystem),
 		taskmodels.MetaKeyOfficeCarrierActorID:        "",
 	})
 
@@ -381,8 +383,8 @@ func TestQueueTaskAssignedRun_InheritsRoutineFireCarrier(t *testing.T) {
 	if run.RoutineID != "routine-fire-1" {
 		t.Errorf("routine_id = %q, want carried %q", run.RoutineID, "routine-fire-1")
 	}
-	if run.ActorKind != models.ActorKindSystem {
-		t.Errorf("actor_kind = %q, want carried %q", run.ActorKind, models.ActorKindSystem)
+	if run.ActorKind != runsmodels.ActorKindSystem {
+		t.Errorf("actor_kind = %q, want carried %q", run.ActorKind, runsmodels.ActorKindSystem)
 	}
 	if run.HumanRooted {
 		t.Error("human_rooted = true, want false (carried)")

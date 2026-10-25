@@ -2,6 +2,16 @@
 
 Scoped guidance for `apps/backend/internal/agentctl/server/api/`. Covers patterns that aren't obvious from reading the code in isolation.
 
+## Control credentials at application proxies
+
+Successful control-auth middleware marks Authorization as consumed in trusted Gin
+state. Port and editor handlers use `credentialScopedRequest` to remove it from
+an outbound clone before forwarding to the application. Keep the original control
+request intact; disabled-auth and exempt requests preserve application Authorization.
+Keep stream fencing bound to the invalidation channel captured by authentication,
+never a later credential-source lookup. The gateway must still authenticate its
+upstream agentctl hop.
+
 ## Reverse-proxy body rewriting (`port_proxy.go`)
 
 The port proxy's `ModifyResponse` hook scans HTML responses to inject the inspector script (`html_injector.go`). For that scan to work, the body must arrive uncompressed.

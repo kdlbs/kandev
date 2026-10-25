@@ -4,6 +4,7 @@ import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import {
   approveRuntimeUpdateInOtherTab,
   createProfileWithCatalog,
+  expectWrapperRetry,
   installProfileRuntimeObservationFixture,
   mockProfileProbeRequiresAuth,
   observeProfileDiscoveryRequests,
@@ -27,6 +28,7 @@ async function expectMobileModelSettings(page: Page, capture: PrAssetCapture) {
 
 async function editRuntimeDraft(page: Page): Promise<string> {
   const selector = page.getByRole("button", { name: "Profile start model settings" });
+  await expect(selector).toHaveText("Mock Fast");
   const selectedBefore = (await selector.textContent()) ?? "";
   await page.getByTestId("env-var-row-0").locator("input").nth(1).fill("mobile-runtime-draft");
   await expect(page.getByTestId("profile-capability-status")).toHaveAttribute(
@@ -240,7 +242,7 @@ test.describe("Mobile profile capability discovery", () => {
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((item) => item.name === "mock-agent");
     if (!agent) throw new Error("mock-agent is required for profile discovery E2E");
-    const { profile, evidencePath } = await createProfileWithCatalog(
+    const { profile, evidencePath, commandPrefix } = await createProfileWithCatalog(
       apiClient,
       backend,
       agent.id,
@@ -290,7 +292,7 @@ test.describe("Mobile profile capability discovery", () => {
 
       await testPage.getByTestId("cli-flag-flag-0").fill("--profile-catalog=mobile-draft-cli");
       await testPage.getByTestId("profile-advanced-options-trigger").tap();
-      await testPage.getByTestId("command-prefix-input").fill("mock-agent --profile-probe-wrapper");
+      await testPage.getByTestId("command-prefix-input").fill(commandPrefix);
       await refresh.tap();
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
         "data-status",
@@ -333,8 +335,15 @@ test.describe("Mobile profile capability discovery", () => {
             enabled: true,
           },
         ],
-        command_prefix: "mock-agent --profile-probe-wrapper",
+        command_prefix: commandPrefix,
       });
+      await expectWrapperRetry(
+        testPage,
+        commandPrefix,
+        { id: "profile-env-mobile-draft", label: "Profile env mobile-draft" },
+        evidencePath,
+      );
+
       const evidence = readProfileProbeEvidence(evidencePath);
       expect(evidence.some((item) => item.wrapper && item.command === "mock-agent")).toBe(true);
       expect(

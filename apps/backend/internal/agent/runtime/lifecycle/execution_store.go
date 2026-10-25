@@ -369,6 +369,9 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if current.promptSettlementGeneration != 0 {
 		return 0, ErrPromptSettlementPending
 	}
+	if current.turnChangeCaptureGeneration != 0 {
+		return 0, ErrPromptSettlementPending
+	}
 	return beginExecutionPromptLocked(current), nil
 }
 
@@ -406,6 +409,7 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	execution.ProviderError = nil
 	execution.Status = v1.AgentStatusRunning
 	execution.resetActiveTool()
+	execution.armPromptActivity()
 	return execution.promptGeneration
 }
 
@@ -422,11 +426,12 @@ func (s *ExecutionStore) MarkPromptDispatched(executionID string, generation uin
 	if !exists {
 		return
 	}
-	if execution.promptGeneration != generation || execution.promptCompletionGeneration == generation {
+	if execution.promptGeneration != generation || execution.promptCompletionGeneration == generation ||
+		execution.dispatchedPromptGeneration == generation {
 		return
 	}
 	execution.dispatchedPromptGeneration = generation
-	execution.armPromptActivity()
+	execution.armAcceptedPromptActivity()
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

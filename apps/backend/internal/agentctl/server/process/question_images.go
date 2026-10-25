@@ -105,6 +105,15 @@ func questionImageFileError(err error) error {
 	return imagepreview.Unavailable
 }
 
+// setWorkspaceWorkDirLocked keeps image reads and trackers in the same workspace.
+// The caller holds repoTrackersMu. An unchanged root retains its original scope.
+func (m *Manager) setWorkspaceWorkDirLocked(workDir string) {
+	if workDir != m.cfg.WorkDir {
+		m.questionImageWorkDir, _ = filepath.EvalSymlinks(workDir)
+	}
+	m.cfg.WorkDir = workDir
+}
+
 // openQuestionImageRoot selects a manifest-authorized root, then opens through
 // directory handles. A replacement symlink can never redirect the root open.
 // The caller holds repoTrackersMu while using the returned handle.

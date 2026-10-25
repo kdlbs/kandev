@@ -36,6 +36,8 @@ type WorkspaceReadersResolver func(ctx context.Context, workspaceID string) ([]s
 
 // AuthPolicy groups the gateway's auth hooks.
 type AuthPolicy struct {
+	// ExecutorConfiguration authorizes a current executor/profile projection.
+	ExecutorConfiguration func(ctx context.Context, executorID, profileID string) error
 	// Enforced reports whether authentication is currently required
 	// (auth mode != disabled). Consulted per connection attempt.
 	Enforced func() bool

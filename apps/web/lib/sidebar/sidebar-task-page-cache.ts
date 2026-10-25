@@ -1,3 +1,4 @@
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
@@ -260,6 +261,13 @@ export class SidebarTaskPageCache {
       const reconciled = reconcileSidebarPage(state, raw, query, request.readId);
       if (!reconciled) throw new DOMException("", "AbortError");
       state.retainTaskOverviews(request.owner, reconciled.tasks, request.readId);
+      const admittedIds = new Set(reconciled.tasks.map((task) => task.id));
+      state.finishTaskOverviewRead(
+        request.readId,
+        raw.entries.flatMap((entry) =>
+          entry.task && admittedIds.has(entry.task.id) ? [toKanbanTask(entry.task)] : [],
+        ),
+      );
       page = { ...reconciled.page, provisional: reconciled.provisional || epoch !== this.epoch };
     } else if (epoch !== this.epoch) page = { ...page, provisional: true };
     if (!page.provisional && epoch === this.epoch) this.retain(key, page);

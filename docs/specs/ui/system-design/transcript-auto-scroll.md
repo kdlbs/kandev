@@ -185,10 +185,12 @@ owner, including ordinary visits without an environment-switch token.
 
 The existing bottom-follow lifecycle also handles content-size changes. A
 content ResizeObserver can wake the guarded controller when asynchronous rows
-change size. It preserves previously established bottom-follow intent, rather
-than interpreting content growth as user navigation. It stops automatic writes
-on reader interaction, disabled auto-scroll, explicit navigation, hidden panels,
-or session replacement. It disconnects on cleanup. Initial placement stays
+change size. The follow-intent observer also records geometry on content resize,
+including changes that emit no scroll event. Content growth preserves follow for
+native restoration in either direction within the size change. Content shrinkage
+preserves follow only for matching upward anchoring within the size change.
+Automatic writes stop on reader interaction, disabled auto-scroll, explicit
+navigation, hidden panels, or session replacement. It disconnects on cleanup. Initial placement stays
 immediate. Normal append commits retain the write-only path and chat-motion
 contract. No unbounded frame retry loop is introduced.
 

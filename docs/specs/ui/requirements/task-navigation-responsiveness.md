@@ -101,7 +101,12 @@ without redundant reads or data from another navigation context.
   request coalescing. Current-session success, empty and failed reads, and
   optimistic mark, unmark and reset behavior SHALL retain their existing
   semantics. Desktop and phone SHALL receive the same session-owned review
-  state through their existing surfaces and result interface.
+  state through their existing surfaces and result interface. An initial review
+  snapshot SHALL NOT replace intervening local mark/unmark intent for affected
+  files, whether the action is pending or acknowledged; unrelated snapshot rows
+  SHALL still load. Reset SHALL keep the session clear against that older
+  snapshot. A failed mark SHALL retain the existing local rollback behavior;
+  ignoring older read data SHALL NOT turn an accepted action into a failure.
 
 - **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.15:** When a multiple-selection
   file move settles with some accepted renames and some failed outcomes, the
@@ -120,6 +125,19 @@ without redundant reads or data from another navigation context.
   A retained tree for the same valid context SHALL show the reconciled outcome
   before a later refresh completes. Desktop and phone SHALL retain their
   existing composition and interaction paths.
+
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.17:** Dev-server Start/Stop
+  pending state SHALL belong to the originating session. Both desktop controls
+  SHALL show the same pending command. Switching sessions or clearing selection
+  SHALL NOT inherit another session's pending indication; returning to a session
+  with an outstanding command SHALL still indicate pending. Late success or
+  failure SHALL NOT clear a different session's command.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.18:** The desktop controls SHALL admit only
+  one dev-server command per session while its request is outstanding, including same-tick
+  calls and multiple consumers. Additional calls SHALL await that command
+  without queuing another Start or Stop. Commands SHALL survive consumer unmount
+  and settle independently between sessions and app stores. Settlement SHALL
+  retain existing failure and process-status reconciliation semantics.
 
 ## Compatibility
 
@@ -144,3 +162,6 @@ Comparable isolated measurements assess actual navigation improvement.
 - [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)
 - [Session file-review reader ownership](../../../plans/session-file-review-reader-ownership/plan.md)
 - [Preserve successful file moves](../../../plans/preserve-successful-file-moves/plan.md)
+- [Dev-server command ownership](../../../plans/dev-server-command-ownership/plan.md)
+
+- [Session file-review snapshot reconciliation](../../../plans/session-file-review-snapshot-reconciliation/plan.md)

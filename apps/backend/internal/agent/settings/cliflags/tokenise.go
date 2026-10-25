@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // Tokenise returns the argv tokens for a single CLIFlag entry. An empty or
@@ -47,7 +48,7 @@ func ValidateCommandPrefix(prefix string) error {
 	if err != nil {
 		return err
 	}
-	if err := ValidateCommandArgs(tokens); err != nil {
+	if err := launchwrapper.ValidateTokens(tokens); err != nil {
 		return err
 	}
 	return nil

@@ -13,7 +13,7 @@ Kandev has several mechanisms that can act without repeated manual setup. Their 
 | Workspace automations       | Create task-backed work from a schedule, GitHub pull request, webhook, or manual trigger.                      |
 | Task MCP                    | Give an active Kandev session task, plan, conversation, and coordination tools.                                |
 | Office MCP and runtime CLI  | Give an Office run a restricted coordination surface and permission-checked commands for Office state changes. |
-| Profile MCP                 | Add third-party MCP servers to one agent profile, subject to executor policy.                                  |
+| Workspace MCP              | Configure reusable MCP definitions and select them for repositories, profiles, tasks, and sessions.           |
 | External MCP                | Let a client outside a task configure Kandev and create or manage work through the backend.                    |
 
 Use workflow events for predictable transitions on existing work. Use a workspace automation when an external signal must create new work. MCP is a tool interface, not a scheduler.
@@ -72,7 +72,7 @@ Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP 
 - Use a **workflow event** for predictable transitions on existing tasks.
 - Use a **workspace automation** when a schedule or external signal should create work.
 - Use **task MCP** for tools inside an active agent session.
-- Use **profile MCP** to add servers to an agent profile.
+- Use **workspace MCP** to configure reusable servers and select their scope.
 - Use **external MCP** to expose Kandev tools to third-party clients.
 - Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
 
@@ -136,6 +136,22 @@ the schedule does not delete the shared conversation. Portable automation export
 stores the plugin ID and instance key, not a private conversation ID; import
 requires an explicit binding to an available conversation in the destination
 workspace.
+
+### Private executor access
+
+Automations and provider watches retain the Kandev user who created them.
+Background dispatch, retries, and deferred launches check that user's current
+executor access. Editing or manually triggering a source also checks the
+caller's access, so another workspace member cannot borrow its creator's
+private compute. A disabled or missing creator cannot authorize private
+compute. Legacy sources without a recorded creator continue to use shared
+executors; recreate the source as the intended user before choosing a private
+executor.
+
+The same executor checks cover workflow execution and existing task sessions.
+A task's MCP principal uses its recorded execution actor for executor access;
+workspace ownership does not supply another user's private authority. See
+[Private executors and profiles](executors.md#private-executors-and-profiles).
 
 ## Trigger behavior
 
@@ -209,7 +225,7 @@ The GitHub evaluator polls every 60 seconds and requires a working GitHub integr
 - exact author-login filters;
 - draft exclusion.
 
-Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, but the evaluator currently ignores the saved event list: clearing that checkbox does not stop polling or firing. Disable the automation/trigger instead. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
+Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, which must be selected for PR polling and firing. Clearing that checkbox stops PR polling and firing; a missing, null, or empty event selection also stays inactive. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
 
 The current evaluator does not apply label filters, and the current form does not offer them.
 
@@ -321,6 +337,36 @@ The automation's own hidden task and every session on it are invalid targets for
 The automations settings page (**Settings > Workspaces > _Workspace_ > Automations**) has an **Export** control next to **New Automation**. It downloads every automation in the workspace as a zip, one YAML file per automation at `.kandev/automations/<slug>.yml`, ready to read, diff, or check into a repository. A workspace with no automations still downloads a (empty) zip rather than showing an error.
 
 The same data is available directly over REST for scripting: `GET /api/v1/workspaces/:workspaceId/automations/export` returns one YAML document (`application/yaml`) listing every automation, and `GET /api/v1/workspaces/:workspaceId/automations/export/zip` returns the same per-file zip the UI control downloads (`application/zip`). Both are read-only and deterministic: exporting an unchanged workspace twice produces byte-identical output. A workspace you cannot access and a workspace that does not exist both return `404` with no distinguishing detail; any other failure returns `500`.
+
+## Workspace MCP
+
+Workspace MCP definitions are reusable, workspace-owned server configurations. Open **Settings > Workspaces > _workspace_ > MCP servers** to use the **Configured** and **Marketplace** views. This page manages MCP servers that Kandev delivers to agents. **External MCP** is separate and exposes Kandev's own MCP endpoint to outside clients.
+
+Add a custom definition as a remote endpoint, an exact-version managed npm package, or an existing executable. Bind secrets by workspace-secret reference. Saving a definition does not download, connect to, or start a server. Managed npm packages are materialized lazily in a Kandev-owned task-executor cache and do not change repository files or lockfiles.
+
+For an executable, each **Arguments** row is one argument, including spaces or an empty value. Configure non-secret environment values or HTTP headers in the editor. Use **Secret bindings** to choose a workspace or global secret reference for a credential. Only the reference is saved in the definition; the task executor receives the bound value when the server is prepared.
+
+Marketplace review shows the inputs requested by the selected setup. Complete required values and secret references before adding it. Choices that require unsupported variable substitution are unavailable.
+
+Marketplace entries come from Kandev-curated templates or cached public Registry metadata. Registry metadata is publisher supplied, not a Kandev security review. Review the publisher, selected remote or exact package version, transport, requested configuration, and secret bindings before adding an entry. A Registry outage shows the last successful cache with a stale or degraded status. Deprecated and deleted entries are not offered for new installation.
+
+Select configured definitions at the profile, repository, task, or task-session scope. Repository selection is collapsed by default. Task creation keeps its selector inside collapsed **Advanced** settings. The effective set is additive across every task repository, the workspace-contextual profile, task, and session. Duplicate definitions are delivered once with all contributing origins; inherited definitions cannot be removed at a narrower scope.
+
+Selection lists show each server's runtime name, supplied description, setup
+mode, transport and known catalog source. Repository settings reveals these
+choices directly when you expand **MCP servers**.
+
+In a session's **Customize** view, populated sections show servers selected for
+the task, inherited from repositories, or inherited from the agent profile.
+Each server appears once: task selections group first, then repositories, then
+the profile. This display order does not override another source. Rows list any
+other contributing sources under **Also selected by**. **Additional servers**
+contains choices from the workspace catalog for this session, with descriptions
+and setup mode, transport and catalog-source labels. A label such as **Custom**
+describes how the definition entered the catalog, not which scope selected it.
+
+
+An active turn keeps its current MCP list. Existing task sessions save a desired revision and apply it after the turn becomes idle. Providers that advertise safe ACP reconnection reuse the same session. Unsupported reconnection defers the change until the next start, and a failed reconnect keeps the previous applied revision active until retry.
 
 ## Task MCP
 
@@ -655,7 +701,14 @@ change the accepted chart or table.
 
 File bytes do not persist. Image file cards expand and load automatically when
 they appear in the conversation. Select **Hide preview** to collapse an image
-and **Preview** to reopen it. Other files load only after you select
+and **Preview** to reopen it. Click or tap the image to inspect it in a larger
+dialog, as with image attachments. Close the dialog to return to the preview.
+To start image cards collapsed, turn off **Show image previews by default** in
+**Settings > Preferences > Appearance** and select **Save changes**. This
+preference is saved on this device and applies when a card has no retained
+Show/Hide choice. You can always select **Preview**, then click or tap the
+visible image to open the larger dialog.
+Other files load only after you select
 **Preview**. **Open file** uses the native desktop or mobile viewer. If the
 workspace disappears, the report remains and the file preview reports that it
 is unavailable.
@@ -791,6 +844,23 @@ Every create response from both the MCP tool result and the REST response body a
 
 Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation; update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
 
+For normal deletion when workspace inspection fails, `delete_task_kandev`
+requires both `discard_worktree_changes: true` and
+`allow_unverified_workspace_changes: true`. These flags acknowledge possible
+loss of local changes. They do not bypass ownership checks for file removal.
+The response reports `cleanup_operation_ids`, `workspace_cleanup_pending`, and
+`runtime_stop_pending`. A successful task deletion can have pending cleanup.
+
+For an authorized task deletion, `delete_task_kandev` accepts the optional
+`workspace_cleanup` value `delete` (default) or `retain`. Use `retain` to delete
+the task and conversation while keeping workspace files and branches, including
+when workspace inspection fails. Existing task scope and authorization rules
+still apply. The response includes `workspace_cleanup`,
+`retention_operation_ids`, and `runtime_stop_pending`. A pending runtime stop
+does not mean the task deletion failed. Retained resources remain excluded from
+automatic cleanup and can continue to consume disk space or provider capacity.
+See [task deletion recovery](tasks-and-workflows.md#delete-a-task-when-its-workspace-cannot-be-checked).
+
 A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
@@ -823,6 +893,10 @@ If one managed repository cannot be renamed or its snapshot cannot be persisted,
 accepted and the response reports the successful, preserved, and failed branch outcomes separately.
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
+
+GitHub rate coordination is internal to Kandev. The MCP surface does not expose
+a standalone rate snapshot tool. Workflow Sync documents the operation-local
+details returned when a sync fails because of a GitHub rate limit.
 
 ### Provider-scoped review automation tools
 
@@ -871,11 +945,37 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 - The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
 - Use `add_workspace_sources_kandev` for mixed source batches on an idle task. `update_repository_base_branch_kandev` changes Kandev's diff base, not a pull request's target.
 
+For eligible Local and Worktree tasks, source attachment can recreate a missing
+provider clone at its exact current workspace-managed destination. Live branch
+attachment supports this recovery on Worktree tasks. A valid managed clone is
+reused. Explicit local repositories retain their own paths, including when they
+carry provider metadata; a missing local folder is not replaced by a clone.
+
+A missing older managed clone requires explicit re-import. For a built-in
+provider, an authorized caller can create a separate registration with
+`POST /api/v1/workspaces/:id/repositories`: give it a new display name,
+`source_type: "provider"`, the same provider/host/owner/name, and no `local_path`.
+Select the returned repository ID for the new attachment. Keep the old
+registration for its existing tasks; this operation does not migrate their
+worktrees or recreate the old clone path. Invalid origins, foreign paths,
+unverifiable Git metadata and failed verified-path persistence reject the
+attachment. A verified shared clone may remain after a later task attachment
+failure so a retry can reuse it.
+
+A backend hosted in Docker uses its server filesystem for Local/Worktree tasks.
+That is different from a task using a Docker executor, which retains executor-side
+repository materialization. This recovery does not change remote executor routes.
+
+
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session, and in Office sessions per ADR 0015. Kandev includes its completion instruction, and acts on its signal, only on steps whose auto-advance action explicitly requires that signal: on Kanban boards this is opt-in per step, while office-default's `work` step ships with the requirement on. A user message arriving before transition can cancel that automatic move.
 
-When the response says that the workflow step changed, the calling turn is stale. The error identifies the launch and current steps, and a retry in that turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+If an agent resumes itself after background work finishes, its new output turn can signal completion for the workflow entry in which that turn started. An older turn stays tied to its original entry, including when the task leaves and returns to the same step.
+
+When the response says that the workflow step or entry changed, the calling turn is stale. A step-change error identifies the launch and current steps. Retrying the same stale turn cannot recover. End the turn and have the user resume the session, then complete the current step and call the tool from the fresh turn. A normal manual workflow move remains available to an operator after verifying the work and destination. This recovery path does not grant an agent automatic move authority.
+
+Older turns or pending completion signals created without workflow-entry evidence are not backfilled. If completion cannot resolve the calling turn, have the user start a fresh turn in the current step before signaling again.
 
 When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
@@ -911,7 +1011,7 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `transfer_task_kandev` is available only to a server-attested Office CEO session. It applies the atomic, audited transfer contract above.
 - `step_complete_kandev`, per ADR 0015: Kandev includes its completion instruction, and acts on its signal, only on Office steps whose auto-advance action explicitly requires that signal (office-default's `work` step is one such step).
 
-These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
+These tools cover human questions, the current task plan, plan edits and recovery, related-task discovery, task documents, the restricted transfer operation, and the step-completion signal. GitHub rate coordination stays internal, with operation-local details documented by features such as [Workflow Sync](workflow-sync.md). Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools are task-mode only and are not registered in Office mode.
 
 ### Runtime credentials
 
@@ -1061,6 +1161,14 @@ The `/mcp` endpoint supports protocol negotiation for modern and legacy clients.
 - SSE remains a legacy transport. Use `/mcp` when the client supports `2026-07-28`.
 
 Automatic client negotiation depends on the client SDK. Some clients need an explicit option to enable discovery. Kandev does not enable modern protocol use for every client by default.
+
+For valid notifications with no `id` and no `params._meta`, Kandev can use a supported
+modern protocol header to supply the missing version metadata. Accepted
+notifications return HTTP 202 with no body. This accommodates roots-change
+notifications sent when a client restores a conversation.
+
+Tool requests still require their normal metadata. Explicitly supplied metadata,
+duplicate JSON members, and noncanonical field spellings retain SDK validation.
 
 Agent-attached MCP servers keep `/mcp`, `/sse`, and `/message` on the agentctl port. The external server keeps `/mcp`, `/mcp/sse`, and `/mcp/message`.
 

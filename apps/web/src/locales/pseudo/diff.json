@@ -52,5 +52,14 @@
   "fileStatusModified": "Ḿōďĩƒĩēď",
   "fileStatusMoved": "Ḿōvēď",
   "fileStatusMovedFrom": "Ḿōvēď ƒŕōḿ {{oldPath}}",
-  "fileStatusUntracked": "Ũńţŕàćķēď"
+  "fileStatusUntracked": "Ũńţŕàćķēď",
+  "walkthroughComment": "Ćōḿḿēńţ",
+  "walkthroughPending": "Ƥēńďĩńĝ",
+  "walkthroughSubmitted": "Śũƀḿĩţţēď",
+  "walkthroughCommentCount_one": "{{count}} ćōḿḿēńţ",
+  "walkthroughCommentCount_other": "{{count}} ćōḿḿēńţś",
+  "walkthroughSelectStep": "Ĝō ţō śţēƥ",
+  "walkthroughUntitledStep": "Śţēƥ {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}} ({{count}} ćōḿḿēńţ)",
+  "walkthroughStepOption_other": "{{number}}. {{title}} ({{count}} ćōḿḿēńţś)"
 }

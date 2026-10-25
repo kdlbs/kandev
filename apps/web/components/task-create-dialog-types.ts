@@ -9,6 +9,7 @@ import type {
   Executor,
   Task,
   TaskPriority,
+  InitialWorkspaceLayout,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -19,6 +20,7 @@ import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generato
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskEditDialogDependenciesState } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import type { MCPInheritedSelection, MCPServerDefinition } from "@/lib/types/http-mcp";
 import type {
   KanbanMultiState,
   WorkflowSnapshotData,
@@ -83,6 +85,7 @@ export interface TaskCreateDialogProps {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -220,6 +223,11 @@ export type TaskCreateDialogInitialValues = {
   prNumber?: number;
   prBaseBranch?: string;
 };
+
+export type InitialWorkspaceLayoutMode =
+  | "unavailable"
+  | "single-repository"
+  | "multiple-repositories";
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
@@ -396,6 +404,11 @@ export type DialogFormState = {
   /** Predecessor task IDs chosen in the dialog's "Depends on" selector. */
   blockedBy: string[];
   setBlockedBy: (v: string[]) => void;
+  /** Task-level MCP additions. Empty means no additions at this scope. */
+  mcpServerIds: string[];
+  setMcpServerIds: (v: string[]) => void;
+  mcpServerIdsDirty: boolean;
+  setMcpServerIdsDirty: (dirty: boolean) => void;
   taskName: string;
   setTaskName: (v: string) => void;
   hasTitle: boolean;
@@ -518,6 +531,9 @@ export type DialogFormState = {
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
   setPriority: (v: TaskPriority) => void;
+  /** Initial working-directory layout for a newly created task. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
+  setInitialWorkspaceLayout?: (v: InitialWorkspaceLayout) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -565,6 +581,7 @@ export type SubmitHandlersDeps = {
     prompt: string;
     agentProfileId: string;
     executorId: string;
+    mcpServerIds?: string[];
     attachments?: ReturnType<
       typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
     >;
@@ -587,8 +604,11 @@ export type SubmitHandlersDeps = {
   setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
+  setMcpServerIds: (v: string[]) => void;
+  setMcpServerIdsDirty: (v: boolean) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
+  setInitialWorkspaceLayout: (v: InitialWorkspaceLayout) => void;
   clearDraft: () => void;
   freshBranchEnabled: boolean;
   isLocalExecutor: boolean;
@@ -600,6 +620,11 @@ export type SubmitHandlersDeps = {
   blockedBy?: string[];
   /** Edit-mode dependency draft and persistence state. */
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
+  /** Task-level MCP additions selected in the Advanced section. */
+  mcpServerIds?: string[];
+  mcpServerIdsDirty: boolean;
+  /** Persists task-level selections when editing an existing task. */
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
@@ -608,6 +633,8 @@ export type SubmitHandlersDeps = {
   workflowAgentOverrides: Record<string, string>;
   /** Create-mode validation shared by the footer and every submit entry point. */
   workflowAgentOverridesBlockedReason?: string;
+  /** Initial working-directory layout after capability validation. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -728,6 +755,10 @@ export type DialogFormBodyProps = {
   onWorkflowAgentOverrideChange: (sourceProfileId: string, replacementProfileId: string) => void;
   onResetWorkflowAgentOverrides: () => void;
   onRetryWorkflowAgentOverrides: () => void;
+  /** Workspace MCP definitions available to the task selector. */
+  mcpDefinitions: MCPServerDefinition[];
+  mcpDefinitionsLoading: boolean;
+  mcpInheritedSelections: MCPInheritedSelection[];
   /**
    * Called by a plugin composer action after it inserted text into the
    * description and wants the form submitted the native way. The dialog
@@ -739,4 +770,6 @@ export type DialogFormBodyProps = {
   runnerEditable: boolean;
   /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
   runnerIneligibleReason: string;
+  /** Whether the parent workspace layout control is available for this form. */
+  initialWorkspaceLayoutMode: InitialWorkspaceLayoutMode;
 };

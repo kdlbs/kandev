@@ -31,8 +31,8 @@ const sshOrphanSweepDialTimeout = 30 * time.Second
 // every later trigger for that executor — including the next reachability
 // event — is silently coalesced away, and Stop blocks on the same hang.
 // Sized well above the worst realistic sweep: sshAgentctlStopPollAttempts
-// (50 * 100ms = 5s) grace per stopped process, times a generously large
-// orphan count, plus per-command round trips.
+// (50 * 100ms = 5s) for each of TERM grace and KILL delivery per stopped
+// process, times a generously large orphan count, plus command round trips.
 const sshOrphanSweepRunTimeout = 10 * time.Minute
 
 // sshOrphanSweepExecutorStore is the narrow executor-read surface the

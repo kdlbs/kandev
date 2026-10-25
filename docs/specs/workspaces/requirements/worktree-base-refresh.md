@@ -147,6 +147,16 @@ These criteria cover only the two checkout choices in request-driven settings
 saves. They do not promise partial preservation for every repository field,
 global event ordering, or freshness at the time a response is received.
 
+#### Required refresh verification cause
+
+- **AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.24:** When a required refresh of an
+  existing checkout branch cannot verify the refreshed ref, Kandev shall
+  preserve the verification cause in the returned error and in a structured
+  warning log, using the refresh warning detail when present and the warning
+  summary otherwise. The preserved cause shall not include credentials, remote
+  URLs, or raw command output. A verified refreshed ref and every existing
+  fallback decision shall keep their current behavior.
+
 ## Compatibility
 
 This requirement replaces the universal fail-closed refresh behavior from

@@ -83,6 +83,15 @@ an allocated/launching or unrelated attempt still blocks it. Legacy composer
 uncertainty is cleared only for an exactly retired submission. An explicit null
 propagates that clearing to clients even when no recovery notice existed.
 
+A notice marked `recovered` can outlive its execution after a later readiness
+failure reopens the delivery block. Explicit Resume can reuse the current ready
+native execution and restore that notice through the same authenticated
+retirement transaction. The current execution, native identity, full submission
+inventory, and cursor checks remain mandatory. The notice keeps its historical
+execution ID, submission, payload, and unknown outcome; only its phase, revision,
+and timestamp change. State-only Retry is unchanged.
+Delivery: [Recovered notice resume](../../../plans/resume-delivery-notices/plan.md).
+
 ## Entry points
 
 Startup/runtime replacement and explicit Resume reuse existing restore ownership
@@ -145,6 +154,15 @@ outcome along with the complete active inventory, current native execution and
 matching recovery fences. Any independent active record or projection gap
 refuses resolution. The same proof permits normal loaded-session reconciliation
 and explicit Resume; neither path dispatches an old prompt.
+
+Native recovery proof uses the shared 10-second wait with 200 ms polling for the
+captured journal high-water mark to reach canonical projection. It rereads proof
+when projection or acknowledgments advance under the same authenticated owner
+after verified lag or sequence progress, including on the first proof attempt.
+A byte-count change alone is not stream progress. Pruning can decrease bytes while retained
+sequence counters advance. Cancellation,
+owner changes, inventory changes, and unresolved work retain the admission
+fence. This wait does not repeat native Resume or dispatch a prompt.
 
 ## Prompt readiness after native boot
 

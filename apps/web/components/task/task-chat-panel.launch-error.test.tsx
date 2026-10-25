@@ -37,6 +37,7 @@ const appStoreState = {
     showScrollToLastPrompt: false,
     showScrollToStart: false,
   },
+  workspaces: { activeId: null },
   taskSessions: {
     items: {
       [SESSION_ID]: { name: null, agent_profile_id: null, last_read_message_id: null },

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 function taskRow(sidebar: import("@playwright/test").Locator, taskId: string) {
   return sidebar.locator(`[data-task-row-id="${taskId}"]`);
@@ -361,6 +362,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
 
     if (width < 768) {
+      await waitForFiniteAnimations(testPage.locator("body"));
       const relativeTime = row.getByTestId("sidebar-task-trailing-time");
       const action = row.locator("button.mobile-task-actions-button");
       const [rowBox, timeBox, actionBox] = await Promise.all([

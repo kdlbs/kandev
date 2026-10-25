@@ -31,6 +31,16 @@ test("mobile idle recovery preserves transcript scroll without a loading row", a
   await expect.poll(() => gap.recoveryResponseReceived, { timeout: 20_000 }).toBe(true);
 
   const transcript = session.activeChat().locator(".chat-message-list");
+  // Stop following the live turn before measuring preservation of the reader's position.
+  const autoScroll = session
+    .activeChat()
+    .getByRole("button", { name: "Turn off transcript auto-scroll", exact: true });
+  await autoScroll.tap();
+  await expect(
+    session
+      .activeChat()
+      .getByRole("button", { name: "Turn on transcript auto-scroll", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
   const scrollTopBeforeApply = await transcript.evaluate((element) => element.scrollTop);
   gap.releaseRecoveryResponse();
   await expect.poll(() => gap.recovered, { timeout: 5_000 }).toBe(true);

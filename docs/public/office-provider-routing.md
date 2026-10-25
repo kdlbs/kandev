@@ -1,6 +1,7 @@
 ---
 title: "Office Provider Routing"
 description: "Route persistent Office agent identities through interchangeable provider execution profiles."
+status: experimental
 ---
 
 # Office Provider Routing
@@ -8,6 +9,8 @@ description: "Route persistent Office agent identities through interchangeable p
 Office provider routing separates an agent's persistent role from the CLI profile used to run it. This lets a CTO, reviewer, or other custom Office agent keep the same instructions, skills, permissions, budget, task ownership, and history while Kandev selects a Codex, Claude Code, or another configured execution profile for each launch. Lightweight routine runs use the same routing choices without inventing a task: each fire has its own run-owned session and attempt identity.
 
 Office mode is currently feature-flagged. The routing settings appear under **Office > Routing** when Office is enabled.
+
+Start with [Get started with Office](office-getting-started.md) to enable Office and create a workspace. Use [Configure an Office agent team](office-agents.md) for roles, instructions, skills, and permissions, and [Office operations](office-operations.md) for blocked or failed runs.
 
 ## Configure Routes
 

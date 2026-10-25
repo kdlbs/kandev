@@ -3,6 +3,7 @@ package toolretention
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
@@ -211,6 +212,12 @@ func (s *Service) reduceRow(ctx context.Context, q sqlx.QueryerContext, r *recor
 		}
 		if n != 1 {
 			return "", errors.New("message_conflict")
+		}
+		var metadata map[string]any
+		if json.Unmarshal([]byte(raw), &metadata) == nil && models.HasIncrementalShellOutput(metadata) {
+			if err := tasksqlite.RemoveMessageShellOutputTx(ctx, tx, row.ID); err != nil {
+				return "", err
+			}
 		}
 		r.Operation.RemovedMessages++
 		r.FirstMutation = true

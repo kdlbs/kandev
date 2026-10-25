@@ -146,6 +146,11 @@ Use existing task freshness and summary revision rules to reject older field upd
 Track per-entity changes since request start so a delayed HTTP response cannot replace a newer live value or known deletion.
 Do not infer task freshness from summary freshness or compare unrelated revision domains.
 
+Task-navigation identity reads register an overview read ticket before HTTP.
+They reconcile active-detail records through that ticket and release it on every outcome.
+This repairs workflow controls when movement events occurred before the socket opened.
+Aborted or replaced workspace scopes cannot commit those overview results.
+
 `recordTaskOverviewChange` coalesces each read's repeated partial patches with the
 same merge rules as `mergeTaskOverview`, including when no `byId` record exists.
 Task fields compare strict RFC3339Nano instants through

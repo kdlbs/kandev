@@ -167,8 +167,13 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await expect(session.chat.getByText(/attempt 1 of 5/i)).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat.getByText(/attempt 2 of 5/i)).toBeVisible({ timeout: 30_000 });
+    if (!task.session_id) throw new Error("Initial launch did not create a session");
+    // Navigation can finish after the first backoff. A persisted second attempt
+    // proves that the cached launch prompt was submitted again.
+    const advancedNotice = await waitForRetryNotice(apiClient, task.session_id, 2);
+    expect(advancedNotice.metadata?.attempt).toBeGreaterThanOrEqual(2);
+    await expect(session.transientRetryCard()).toHaveCount(1);
+    await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
 
     await session.recoveryCancelRetryButton().click();
     await expect(session.recoveryResumeButton()).toBeVisible();

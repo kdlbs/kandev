@@ -63,6 +63,7 @@ func TestMessageTaskReadiness_PreparedBusySession(t *testing.T) {
 		session,
 		"prepared branch",
 		map[string]interface{}{"sender_task_id": "sender"},
+		false,
 	)
 
 	require.NoError(t, err)

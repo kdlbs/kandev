@@ -196,7 +196,7 @@ export const test = backendFixture.extend<
   // Worker-scoped API client
   apiClient: [
     async ({ backend }, use) => {
-      const client = new ApiClient(backend.baseUrl);
+      const client = new ApiClient(backend.baseUrl, backend.ensureReady);
       // Confirm the E2E mock routes mounted. They are gated by KANDEV_E2E_MOCK
       // in fixtures/backend.ts; if the env var isn't propagating, /api/v1/_test
       // returns 404 and every session-driven test would fail with a confusing
@@ -367,7 +367,24 @@ export const test = backendFixture.extend<
       // Refresh tracking refs after reset has stopped the previous tasks.
       restoreSeedRepositoryOrigin(seedData);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-      await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      const keepProfileIds = [seedData.agentProfileId];
+      const { agents } = await apiClient.listAgents();
+      const hasDynamicProfilesToClean = agents.some(
+        (agent) =>
+          agent.id === "dynamic" &&
+          agent.profiles?.some((profile) => {
+            const workspaceId = (profile as unknown as { workspace_id?: string }).workspace_id;
+            return !workspaceId && !keepProfileIds.includes(profile.id);
+          }),
+      );
+      const releaseDynamicRouting = hasDynamicProfilesToClean
+        ? await backend.useEnv({ KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true" })
+        : undefined;
+      try {
+        await apiClient.cleanupTestProfiles(keepProfileIds, agents);
+      } finally {
+        await releaseDynamicRouting?.();
+      }
       await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
       const { settings } = await apiClient.getUserSettings();
@@ -410,6 +427,9 @@ export const test = backendFixture.extend<
         // test renders cards with data-testid="pipeline-task-<id>" instead of
         // "task-card-<id>", breaking taskCardByTitle locators.
         kanban_view_mode: "",
+        // Column visibility belongs to each test, including the seeded workflow
+        // that survives reset. Hidden columns must not conceal later tasks.
+        kanban_hidden_step_ids: {},
         // Keep startup routing deterministic for tests that open bare home.
         startup_page: "task_overview",
         // Reset to the default (off). Prevent-auto-start tests flip this via

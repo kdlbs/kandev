@@ -551,5 +551,17 @@
   "sidebarYearsMax": "99+y",
   "integrationSettings": "Integration settings",
   "pageNavigation": "On this page",
-  "viewOptions": "View options"
+  "viewOptions": "View options",
+  "commandGoToArchivedTasks": "Go to archived tasks",
+  "commandGoToArchivedTasksKeywords": "archived tasks, archive, history",
+  "conversationSearch_open": "Search tasks",
+  "conversationSearch_match": "Conversation match",
+  "conversationSearch_searching": "Searching conversations…",
+  "conversationSearch_indexing": "Conversation indexing is in progress.",
+  "conversationSearch_limited": "Some conversation matches are omitted. Refine your search.",
+  "conversationSearch_unavailable": "Conversation search is unavailable.",
+  "conversationSearch_query_too_short": "Use at least 3 characters to search conversations.",
+  "conversationSearch_query_too_long": "Use at most 200 characters to search conversations.",
+  "conversationSearch_query_too_broad": "Use at least 3 consecutive letters or digits.",
+  "conversationSearch_title": "Command Palette"
 }

@@ -108,9 +108,9 @@ Terminal state and its terminal event commit together.
 
 The producer queue has a 4 MiB byte bound.
 An event has a 1 MiB serialized limit.
-Larger text output uses ordered chunks with stable message identity.
-Oversized unsupported payloads stop durable admission with a typed error.
-They cannot disappear silently.
+Text uses ordered chunks. [Bounded tool delivery](bounded-tool-delivery.md)
+defines marked tool-display reduction before acceptance. Accepted data stays
+immutable; unsupported control payloads fail explicitly.
 
 The writer does not hold the ACP receive lock during storage work.
 Cancellation responses and permission responses cannot wait for the event-consumer lock.

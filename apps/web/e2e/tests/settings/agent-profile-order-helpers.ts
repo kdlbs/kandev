@@ -42,7 +42,9 @@ export async function pointerDragProfile(page: Page, source: Locator, target: Lo
   const handle = source.getByTestId("agent-profile-drag-handle");
   await expect(handle).toBeVisible({ timeout: 15_000 });
   await expect(target).toBeVisible({ timeout: 15_000 });
-  await target.scrollIntoViewIfNeeded();
+  // Agent discovery can replace the row while the browser scrolls it into view.
+  // Retry preparation before pressing the pointer, never the drag itself.
+  await expect(async () => target.scrollIntoViewIfNeeded()).toPass({ timeout: 5_000 });
   const from = await settledBoundingBox(handle);
   await expect(handle).toBeInViewport();
   await expect(target).toBeInViewport();

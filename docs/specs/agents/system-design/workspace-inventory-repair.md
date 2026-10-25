@@ -164,8 +164,8 @@ blocked by, if already negative) the same durable attestation a same-session
 retry already requires, before it is ever handed back as an admitted launch.
 Before accepting that row-scoped receipt, admission also binds it back to the
 environment owner's task, workspace, environment, owner task-repository,
-repository, branch slot,
-worktree ID, canonical path hash, and observed branch/ref identity. A recorded
+repository, branch slot, worktree ID, and canonical path hash. Observed branch/ref
+identity follows the completed-repair lifecycle below. A recorded
 positive result is launchable only when its durable post-repair evidence exists
 and exactly matches the receipt's pre-repair checkout evidence; incomplete or
 divergent positive records are conflicts rather than deduplicated successes.
@@ -175,6 +175,79 @@ end-to-end, through the real `LaunchPreparedSession` and resume call sites
 session ID than the one whose repair crashed: a fresh/additional-session
 launch retried by a different session, and a resume of a different session
 after an earlier launch's repair committed but crashed before attestation.
+
+## Branch continuity after completed repair
+
+This extension implements AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.11 and
+008.12. Its delivery status is tracked in the
+[fix package](../../../plans/attested-worktree-branch-continuity/plan.md).
+The [branch continuity decision](../../../decisions/2026-10-23-attested-worktree-branch-continuity.md)
+distinguishes repair evidence from current checkout identity.
+
+`workspaceInventoryReceiptCheckoutMatches` checks physical checkout identity
+and the internal consistency of the historical branch/ref. The branch continuity
+helper requires the original branch while a repair lacks completed positive
+attestation. After repair succeeds, the current checkout proof permits a later
+branch change. Live Git branch observations use
+`UpdateTaskSessionWorktreeBranch`, `UpdateTaskSessionWorktreeBranchByRepository`,
+or `UpdateTaskSessionWorktreeBranchByWorktree` to update the current inventory.
+These operations must not rewrite historical repair receipts.
+
+Keep two separate proofs at the row-scoped admission boundary:
+
+1. Historical repair proof: the original receipt has a verification timestamp,
+   a positive result, and complete post-repair evidence matching its original
+   preservation evidence. Validate this proof before considering branch drift.
+2. Current checkout proof: the environment owner's task, workspace, environment,
+   task-repository slot, repository, branch slot, worktree ID, and canonical path
+   still match. Prove the current branch/ref against the actual checkout and
+   reciprocal Git registration, including when the row still names the original
+   branch. A matching historical branch cannot substitute for current proof.
+
+Only a completed positive receipt can use the changed-branch path. Retain the
+full preservation attestation and strict historical comparisons for unfinished
+attestation. Negative or inconsistent receipts never use current observations
+to replace their historical result. Explicit same-key repair retries retain
+the original request-hash contract; a changed derived repair request still
+conflicts. Ordinary Resume and additional-session admission are separate from
+replaying an explicit repair request.
+
+The completed-repair checkout proof uses a narrow executor helper beside
+`executor_workspace_inventory_recovery.go`. Reuse existing session launch
+serialization, canonical inventory validation, and normal runtime admission.
+This path only reads the completed receipt and current checkout. It does not
+repair metadata or complete attestation, so it adds no environment-wide claim
+and does not prohibit an otherwise valid shared session. Existing claims still
+protect actual repair and incomplete attestation.
+
+Use `validateWorkspaceInventoryRepairCandidate` and
+`worktree.InspectCheckoutIdentity` for the selected current row. This inspector
+reuses the callback-safe reciprocal Git identity checks from full preservation
+inspection. It does not scan checkout content, status, or the staged index.
+Full preservation inspection remains required for repair and unfinished
+attestation.
+Compare its current worktree ID and path hash with the historical physical
+identity, and its branch/ref with the current canonical row. Do not compare
+current HEAD, content, index, or status hashes with the repair-time values:
+normal work after a completed repair can change them. Preserve all existing
+root ownership, source common-directory, repository, explicit branch selection,
+and runtime admission checks. Unsupported proof shapes fail closed.
+
+All required rows must pass. The shared row gate covers
+`admitResumeWorkspaceInventory` and `admitLaunchWorkspaceInventory`, including
+prepared-workspace launches and inherited borrowers. A historical receipt is
+returned unchanged after successful admission. Do not persist a synthetic
+receipt, delete an old receipt, mutate the workspace, or clear delivery blocks.
+No schema migration or offline metadata edit is needed for existing positive
+receipts. A second, independent delivery failure can still block Resume.
+
+Regression coverage must exercise actual branch switches and renames, current
+branch disagreement (including a stale original branch), unreadable ignored
+content, unchanged receipt bytes, dirty/staged/untracked files,
+missing and negative attestations, owner/borrower scope, competing consumers,
+and a mixed multi-repository inventory. Exercise Resume and
+`LaunchPreparedSession` through real Git and SQLite fixtures with a stubbed
+agent launcher. A predicate-only unit test is insufficient.
 
 ## Fresh and additional-session launch integration
 

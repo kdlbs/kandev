@@ -12,6 +12,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -43,7 +45,7 @@ func TestTaskBoundaryCarrierMetadata_PrefersLiveClaimedRunOverStaleTaskCarrier(t
 
 	// A run is now actually executing parent-task's turn.
 	if _, err := svc.QueueRunWithActor(ctx, agent.ID, "task_assigned", `{"task_id":"parent-task"}`, "",
-		models.ActorKindAgent, "agent-9", ""); err != nil {
+		runsmodels.ActorKindAgent, "agent-9", ""); err != nil {
 		t.Fatalf("queue live run: %v", err)
 	}
 	liveRun, err := svc.ClaimNextRun(ctx)
@@ -92,7 +94,7 @@ func TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaims
 	// most-recently-claimed lookup would pick agentB's run regardless of
 	// which agent is actually causing this resolution.
 	if _, err := svc.QueueRunWithActor(ctx, agentA.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
-		models.ActorKindAgent, "agent-a-actor", ""); err != nil {
+		runsmodels.ActorKindAgent, "agent-a-actor", ""); err != nil {
 		t.Fatalf("queue agentA's run: %v", err)
 	}
 	runA, err := svc.ClaimNextRun(ctx)
@@ -100,7 +102,7 @@ func TestTaskBoundaryCarrierMetadata_ScopesToCausingAgentWhenTwoAgentsHoldClaims
 		t.Fatalf("claim agentA's run: %v (run=%v)", err, runA)
 	}
 	if _, err := svc.QueueRunWithActor(ctx, agentB.ID, "task_assigned", `{"task_id":"shared-task"}`, "",
-		models.ActorKindAgent, "agent-b-actor", ""); err != nil {
+		runsmodels.ActorKindAgent, "agent-b-actor", ""); err != nil {
 		t.Fatalf("queue agentB's run: %v", err)
 	}
 	runB, err := svc.ClaimNextRun(ctx)

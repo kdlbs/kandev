@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -178,6 +179,15 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		return existing
 	}
 	code := models.AgentErrorCauseCodeUnknown
+	if errors.Is(err, agentctl.ErrPassthroughCLIUnavailable) {
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: agentctl.ErrPassthroughCLIUnavailable.Error(), Cause: err}
+	}
+	if errors.Is(err, errRemoteInitialPromptUncertain) {
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: code, Detail: errRemoteInitialPromptUncertain.Error(), Cause: err}
+	}
+	if errors.Is(err, agentctl.ErrPassthroughUnsupported) {
+		return &BootstrapFailure{Operation: bootstrapOperation(execution), Code: models.AgentErrorCauseCodeTransportUnavailable, Detail: agentctl.ErrPassthroughUnsupported.Error(), Cause: err}
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		code = models.AgentErrorCauseCodeTimeout
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,7 +18,9 @@ import (
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/steptelemetry"
 )
 
 // Run reason constants. Aliases of shared's canonical declarations
@@ -88,7 +91,7 @@ func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (shared.QueueOutcome, error) {
-	outcome, err := s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "", "")
+	outcome, err := s.QueueRunWithActor(ctx, agentInstanceID, reason, payload, idempotencyKey, runsmodels.ActorKindSystem, "", "")
 	return outcome, err
 }
 
@@ -107,7 +110,7 @@ func (s *Service) QueueRun(
 func (s *Service) QueueRunWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 	causingRunID string,
 ) (runsservice.QueueOutcome, error) {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
@@ -152,7 +155,7 @@ func (s *Service) QueueRunFromTaskBoundary(
 func (s *Service) QueueRunFromTaskBoundaryWithActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 ) error {
 	return s.queueRunFromTaskBoundary(ctx, agentInstanceID, reason, payload, idempotencyKey, taskID, &actorKind, actorID)
 }
@@ -160,7 +163,7 @@ func (s *Service) QueueRunFromTaskBoundaryWithActor(
 func (s *Service) queueRunFromTaskBoundary(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, taskID string,
-	actorKindOverride *models.ActorKind, actorIDOverride string,
+	actorKindOverride *runsmodels.ActorKind, actorIDOverride string,
 ) error {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
@@ -193,7 +196,7 @@ func (s *Service) queueRunFromTaskBoundary(
 		})
 		return err
 	}
-	actorKind := models.ActorKindSystem
+	actorKind := runsmodels.ActorKindSystem
 	actorID := ""
 	if actorKindOverride != nil && actorKindOverride.Valid() {
 		actorKind = *actorKindOverride
@@ -252,7 +255,7 @@ func (s *Service) QueueRunFromWakeup(
 	outcome, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
 		Reason:          reason,
 		Payload:         PayloadWithAgent("{}", agentProfileID),
-		ActorKind:       models.ActorKindSystem,
+		ActorKind:       runsmodels.ActorKindSystem,
 		RoutineID:       routineID,
 		ContextSnapshot: contextSnapshot,
 		SkipCoalesce:    true,
@@ -329,6 +332,57 @@ func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID, ca
 	return s.TaskBoundaryCarrier(ctx, taskID)
 }
 
+// TaskBoundaryCarrierForStepTransition resolves the causation carrier a run
+// queued because of a workflow step-entry wake should carry
+// (AC-OFFICE-RUN-CAUSATION-001.25). A step-entry action has no claimed-run
+// scope to key off (unlike TaskBoundaryCarrierForRunQueue's
+// causingAgentProfileID): the only identity available is the
+// task_step_transitions ledger row whose own id the engine forwarded as
+// transitionID.
+//
+//   - actor_kind=agent: the wake was produced by an agent's turn completing.
+//     New rows carry the immutable causing run ID from the lifecycle event.
+//     Older rows use their session and occurrence time to find the run that
+//     was active when the transition occurred.
+//   - actor_kind=human: the wake was produced by a human moving the task.
+//     The move itself is the causing event, so this roots a fresh,
+//     human-rooted chain rather than attributing it to any run.
+//   - anything else (system, integration, unknown, or an unresolvable
+//     ledger id): falls back to taskID's own already-resolved carrier,
+//     unchanged from pre-existing behavior.
+func (s *Service) TaskBoundaryCarrierForStepTransition(ctx context.Context, taskID, transitionID string) TaskBoundaryCarrier {
+	id, err := strconv.ParseInt(transitionID, 10, 64)
+	if err != nil || id == 0 {
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
+	actor, err := s.repo.GetStepTransitionActor(ctx, id)
+	if err != nil || actor == nil {
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
+	switch actor.ActorKind {
+	case steptelemetry.ActorHuman:
+		return TaskBoundaryCarrier{ActorKind: runsmodels.ActorKindUser, ActorID: actor.ActorID, HumanRooted: true}
+	case steptelemetry.ActorAgent:
+		if actor.CausingRunID != "" {
+			if run, err := s.repo.GetRun(ctx, actor.CausingRunID); err == nil && run != nil {
+				return carrierFromRunWithActor(run, runsmodels.ActorKindAgent, run.AgentProfileID)
+			}
+			return s.TaskBoundaryCarrier(ctx, taskID)
+		}
+		// Older ledger rows do not contain a causing run ID. Keep their
+		// session/time lookup as a compatibility path; new transitions use the
+		// immutable ID carried by their lifecycle event.
+		if actor.SessionID != "" {
+			if run, err := s.repo.GetRunBySessionAt(ctx, actor.SessionID, actor.OccurredAt); err == nil && run != nil {
+				return carrierFromRunWithActor(run, runsmodels.ActorKindAgent, run.AgentProfileID)
+			}
+		}
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	default:
+		return s.TaskBoundaryCarrier(ctx, taskID)
+	}
+}
+
 // queueRunInline performs the legacy in-office insert path used when
 // no runs service is wired (older tests, transitional deployments).
 // Behaviour matches the pre-Phase-3 implementation.
@@ -336,13 +390,13 @@ func (s *Service) queueRunInline(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (runsservice.QueueOutcome, error) {
-	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, models.ActorKindSystem, "")
+	return s.queueRunInlineAsActor(ctx, agentInstanceID, reason, payload, idempotencyKey, runsmodels.ActorKindSystem, "")
 }
 
 func (s *Service) queueRunInlineAsActor(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-	actorKind models.ActorKind, actorID string,
+	actorKind runsmodels.ActorKind, actorID string,
 ) (runsservice.QueueOutcome, error) {
 	if idempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
@@ -369,7 +423,7 @@ func (s *Service) queueRunInlineAsActor(
 	if idempotencyKey != "" {
 		idemKeyPtr = &idempotencyKey
 	}
-	req := &models.Run{
+	req := &runsmodels.Run{
 		ID:             uuid.New().String(),
 		AgentProfileID: agentInstanceID,
 		Reason:         reason,
@@ -428,7 +482,7 @@ func PayloadWithAgent(payload, agentInstanceID string) map[string]any {
 // the bus is not configured. Publish errors are logged at debug and
 // swallowed — the queue write already succeeded by the time we get
 // here.
-func (s *Service) publishRunQueued(ctx context.Context, req *models.Run, idempotencyKey string) {
+func (s *Service) publishRunQueued(ctx context.Context, req *runsmodels.Run, idempotencyKey string) {
 	if s.eb == nil {
 		return
 	}

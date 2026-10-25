@@ -162,6 +162,8 @@ func (s *Service) processOnTurnCompleteWithCause(
 		return false
 	}
 
+	ctx = s.withStepCompletionEntryGuard(ctx, taskID, session, currentStep, cause)
+
 	// Process side-effect actions first, then find the first transition action
 	transitionAction := s.processTurnCompleteActions(ctx, session, currentStep)
 
@@ -247,8 +249,8 @@ func (s *Service) shouldRunLegacyTurnCompletion(
 		return false
 	}
 	if cause != turnCompletionCauseUserCancellation && currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != currentStep.ID {
+		_, has := s.matchingStepCompletionSignal(ctx, task.ID, currentStep.ID, session)
+		if !has {
 			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
 				zap.String("step_id", currentStep.ID))
 			s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
@@ -533,8 +535,8 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.logger.Warn("failed to load session for step handoff carry",
 			zap.String("session_id", sessionID), zap.Error(signalErr))
 	} else if triggerOnEnter && signalSession != nil {
-		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID {
-			consumedSignal = &signal
+		if signal, has := s.matchingStepCompletionSignal(ctx, taskID, fromStep.ID, signalSession); has {
+			consumedSignal = signal
 		}
 		setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
 	}
@@ -560,6 +562,12 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		return
 	}
 	if !applied {
+		if models.WorkflowStepCompletionOwnsHandoff(transitionCtx, taskID, fromStepID) {
+			if signalSession != nil && consumedSignal != nil {
+				s.clearConsumedStepSignal(ctx, signalSession)
+			}
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		}
 		return
 	}
 	queued := task.QueuedForStepID != ""
@@ -609,7 +617,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
 	if queued {
 		if triggerOnEnter {
-			s.clearPendingStepSignalByID(ctx, sessionID)
+			if signalSession != nil {
+				s.clearConsumedStepSignal(ctx, signalSession)
+			}
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		} else {
 			s.reportWorkflowTurnStartPreparationError(
@@ -631,7 +641,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		// not left). The session struct isn't used after this point,
 		// so skip the extra GetTaskSession round-trip and write
 		// straight to the DB by session_id.
-		s.clearPendingStepSignalByID(ctx, sessionID)
+		if signalSession != nil {
+			s.clearConsumedStepSignal(ctx, signalSession)
+		}
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent. Match the engine path's
@@ -711,6 +723,10 @@ func (s *Service) updateTransitionTaskWithCapacityAndEffect(
 	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) (bool, error) {
+	if _, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, task.ID, fromStepID); guarded {
+		return guardedStepCompletionMove(ctx, s.repo, task, fromStepID, targetStep)
+	}
+
 	if targetStep == nil {
 		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}
@@ -1873,7 +1889,10 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
+	// A step move decides about the deferred start only after it knows the
+	// destination step (see autoStartTaskForLoadedStep). Other events keep
+	// consuming it before the step read.
+	if eventName != events.TaskMoved && s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
 		return
 	}
 
@@ -1884,6 +1903,11 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID),
 			zap.Error(err))
+		// A failed read is no evidence that the destination cannot run an
+		// agent, so a step move still gets its deferred start attempt.
+		if eventName == events.TaskMoved && s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
+			return
+		}
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
@@ -2105,7 +2129,11 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
+	// A deferred start is task-level intent. A move into an agentless step
+	// preserves the record for the next agent step. Other events retain their
+	// existing deferred-launch eligibility.
+	retainDeferredStart := eventName == events.TaskMoved && !workflowmove.ShouldAutoStartAgent(step, nil)
+	if !retainDeferredStart && s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
 		return
 	}
 	if !workflowmove.ShouldAutoStartAgent(step, nil) {
@@ -2362,14 +2390,19 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 	if moveOptions != nil && moveOptions.Instructions != "" {
 		payload[officeRunPayloadOneTimeInstructionsKey] = moveOptions.Instructions
 	}
-	return s.engineRunQueue.QueueRun(ctx, engine.QueueRunRequest{
+	req := engine.QueueRunRequest{
 		AgentProfileID: agentProfileID,
 		TaskID:         task.ID,
+		CausingTaskID:  task.ID,
 		WorkflowStepID: step.ID,
 		Reason:         officeAutoStartRunReason,
 		IdempotencyKey: officeAutoStartIdempotencyKey(task, agentProfileID, step.ID, stepTransitionID),
 		Payload:        payload,
-	})
+	}
+	if stepTransitionID != 0 {
+		req.CausingStepTransitionID = strconv.FormatInt(stepTransitionID, 10)
+	}
+	return s.engineRunQueue.QueueRun(ctx, req)
 }
 
 // officeAutoStartIdempotencyKey uses the immutable workflow-step transition
@@ -2475,7 +2508,8 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		}
 		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
-			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
+			reusePreparedPrimary: launchIntent == IntentStart && models.HasStartWhenUnblockedIntent(task),
+			ExecutorID:           intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})
@@ -4941,9 +4975,10 @@ func (s *Service) queueMoveInstructionsForSession(ctx context.Context, taskID, s
 // unlike the pre-convergence marker dispatcher this needs no
 // engine.CompileOnEnterAction step of its own.
 func (s *Service) ExecuteMarkerBearingStepEntryAction(
-	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, markerEntryID int64,
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int,
+	stepTransitionID string, markerEntryID int64,
 ) (abandon bool, err error) {
-	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, markerEntryID)
+	abandon, failed, cause := s.dispatchEngineOwnedOnEnterAction(ctx, taskID, step, action, position, stepTransitionID, markerEntryID)
 	if failed {
 		if cause == "" {
 			cause = "step entry marker-bearing action failed"
@@ -4956,7 +4991,8 @@ func (s *Service) ExecuteMarkerBearingStepEntryAction(
 // dispatchEngineOwnedOnEnterAction executes a marker-bearing on_enter action
 // once for this step-entry. The marker CAS prevents duplicate execution.
 func (s *Service) dispatchEngineOwnedOnEnterAction(
-	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int, entryID int64,
+	ctx context.Context, taskID string, step engine.StepSpec, action engine.Action, position int,
+	stepTransitionID string, entryID int64,
 ) (abandon, failed bool, cause string) {
 	callback := s.engineOnEnterCallback(action.Kind)
 	if callback == nil {
@@ -4992,11 +5028,12 @@ func (s *Service) dispatchEngineOwnedOnEnterAction(
 	}
 
 	in := engine.ActionInput{
-		Trigger:     engine.TriggerOnEnter,
-		State:       engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
-		Step:        step,
-		Action:      action,
-		OperationID: operationID,
+		Trigger:                 engine.TriggerOnEnter,
+		State:                   engine.MachineState{TaskID: taskID, CurrentStepID: step.ID, WorkflowID: step.WorkflowID},
+		Step:                    step,
+		Action:                  action,
+		OperationID:             operationID,
+		CausingStepTransitionID: stepTransitionID,
 	}
 	state, execCause := stepentry.MarkerDone, ""
 	if _, execErr := callback.Execute(ctx, in); execErr != nil {
@@ -5628,7 +5665,9 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Context, sessionID string) queueDrainOutcome {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return queueDrainSkipped
+	}
 	defer lock.Unlock()
 	if s.isCancelInFlight(sessionID) {
 		s.logger.Debug("skipping drain while cancellation is in progress",
@@ -5897,9 +5936,9 @@ func (s *Service) dispatchTakenQueuedMessageForSession(
 	// Send Now before it performs any visible prompt side effects.
 	var reservation *queuedDispatchReservation
 	if identity.SessionIncarnationID != "" {
-		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(identity, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, identity, queuedMsg.ID, queuedMsg)
 	} else {
-		reservation = s.markQueuedDispatchInFlightWithSourceLocked(identity.SessionID, queuedMsg.ID, queuedMsg)
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, identity.SessionID, queuedMsg.ID, queuedMsg)
 	}
 	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
 		go s.executeQueuedPassthroughMessageWithReservation(identity, queuedMsg, reservation)
@@ -5945,7 +5984,7 @@ func (s *Service) dispatchTakenQueuedMessage(
 		}
 		return false
 	}
-	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, queuedMsg.ID, queuedMsg)
 	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }
@@ -6900,10 +6939,14 @@ func (s *Service) persistAutoStartPrompt(
 	snapshot := s.workflowStartPromptInputSnapshot(
 		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
 	)
+	var identity *messagequeue.QueueSessionIdentity
+	if admission := workflowAutoStartAdmissionFromContext(ctx, taskID, sessionID); admission != nil {
+		identity = &admission.identity
+	}
 	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
 		userMessageRecorded, references, handoffText,
-		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), identity, nil,
 	)
 }
 
@@ -6970,6 +7013,8 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 			ctx, *identity, *entry, prompt, "", messagequeue.QueuedByWorkflow,
 			planMode, toQueuedAttachments(attachments), meta,
 		)
+	} else if identity != nil {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSession(ctx, *identity, prompt, "", messagequeue.QueuedByWorkflow, planMode, toQueuedAttachments(attachments), meta)
 	} else {
 		queued, err = s.messageQueue.QueueMessageWithMetadata(
 			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
@@ -7765,6 +7810,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		}
 		return false
 	}
+	ctx = s.withStepCompletionEntryGuard(ctx, taskID, session, currentStep, cause)
 	evaluationCtx := withWorkflowPolicy(ctx, task, currentStep.UpdatedAt)
 
 	state := s.buildMachineState(evaluationCtx, task, session)
@@ -7997,8 +8043,8 @@ func (s *Service) allowEngineSignalCompletion(
 	if cause == turnCompletionCauseUserCancellation || !currentStep.AutoAdvanceRequiresSignal {
 		return true
 	}
-	signal, has := models.LoadPendingStepSignal(session.Metadata)
-	if !has || signal.StepID != currentStep.ID {
+	signal, has := s.matchingStepCompletionSignal(ctx, taskID, currentStep.ID, session)
+	if !has {
 		s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8141,6 +8187,7 @@ func (s *Service) applyGuardedTransitionLifecycle(
 
 	casAttempted := false
 	casApplied := false
+	var commitErr error
 	lifecycleApplied := s.applyEngineTransitionWithCommitMode(
 		ctx,
 		taskID,
@@ -8155,11 +8202,12 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			if !steptelemetry.HasTrigger(transitionCtx) {
 				transitionCtx = engineTransitionAttribution(transitionCtx, sessionID, trigger)
 			}
-			committedTask, oldWorkflowID, applied, commitErr := s.workflowStore.applyTransitionIfAtStepRaw(
+			committedTask, oldWorkflowID, applied, err := s.workflowStore.applyTransitionIfAtStepRaw(
 				transitionCtx, taskID, fromStepID, toStepID,
 			)
-			if commitErr != nil {
-				return false, commitErr
+			if err != nil {
+				commitErr = err
+				return false, err
 			}
 			if !applied {
 				return false, nil
@@ -8172,6 +8220,9 @@ func (s *Service) applyGuardedTransitionLifecycle(
 			return true, nil
 		},
 	)
+	if commitErr != nil {
+		return false, fmt.Errorf("commit guarded transition: %w", commitErr)
+	}
 	if lifecycleApplied || casApplied {
 		return true, nil
 	}
@@ -8222,10 +8273,9 @@ func (s *Service) applyEngineTransitionWithMode(
 ) bool {
 	return s.applyEngineTransitionWithCommitMode(ctx, taskID, session, result, trigger, taskDescription, mode,
 		func(commitCtx context.Context) (bool, error) {
-			if err := s.workflowStore.ApplyTransition(commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger); err != nil {
-				return false, err
-			}
-			return true, nil
+			return s.workflowStore.applyTransitionReportingApplied(
+				commitCtx, taskID, session.ID, result.FromStepID, result.ToStepID, trigger,
+			)
 		})
 }
 
@@ -8355,6 +8405,12 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		stepEntry = &stepentry.AllocationResult{}
 		applyCtx = stepentry.WithResultHolder(applyCtx, stepEntry)
 	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		if signal, has := s.matchingStepCompletionSignal(ctx, taskID, result.FromStepID, session); has {
+			consumedSignal = signal
+		}
+	}
 	applied, err := commit(applyCtx)
 	if err != nil {
 		recordWorkflowTransitionError(ctx, err)
@@ -8373,12 +8429,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
+
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -8387,6 +8438,10 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		historyTrigger = wfmodels.StepTransitionTriggerChildrenCompleted
 	case engine.TriggerOnAgentError:
 		historyTrigger = wfmodels.StepTransitionTriggerAgentError
+	case engine.TriggerOnPRMerged:
+		historyTrigger = wfmodels.StepTransitionTriggerPRMerged
+	case engine.TriggerOnPRClosed:
+		historyTrigger = wfmodels.StepTransitionTriggerPRClosed
 	}
 	s.recordAutoStepTransition(ctx, session.ID, result.FromStepID, result.ToStepID, consumedSignal, historyTrigger)
 
@@ -8395,7 +8450,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// cleared so the next step's gating starts from a clean slate. A guarded
 	// decision must leave the decider session untouched.
 	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		s.clearPendingStepSignal(ctx, session)
+		s.clearConsumedStepSignal(ctx, session)
 	}
 
 	if len(result.DataPatch) > 0 && sessionLifecycle {

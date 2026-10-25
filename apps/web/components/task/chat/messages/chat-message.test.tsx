@@ -846,7 +846,7 @@ describe("ChatMessage image attachments", () => {
     expect(openSpy).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog");
     const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
-    expect(dialog.className).toContain("w-fit");
+    expect(dialog.className).toContain("w-[min(96vw,1126px)]");
     expect(dialog.className).toContain("max-w-[calc(100vw-1rem)]");
     expect(preview.className).toContain("w-[min(92vw,1100px)]");
     expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");

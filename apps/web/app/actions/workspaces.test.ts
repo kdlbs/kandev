@@ -5,6 +5,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  cloneWorkspaceAction,
   createWorkflowStepAction,
   deleteWorkspaceAction,
   exportAllWorkflowsAction,
@@ -15,6 +16,32 @@ import {
 const REVIEW_STEP_NAME = "Review";
 const STEP_COLOR = "bg-blue-500";
 const WORKSPACE_NAME = "My Workspace";
+
+describe("cloneWorkspaceAction", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("posts only the name and preserves access metadata", async () => {
+    const created = {
+      id: "copy",
+      name: "Copy",
+      scopes: ["workspace.manage"],
+      viewer_role: "owner",
+    };
+    const request = vi.fn(async () => new Response(JSON.stringify(created), { status: 201 }));
+    vi.stubGlobal("fetch", request);
+    expect(await cloneWorkspaceAction("source/id", { name: "Copy" })).toEqual(created);
+    expect(request).toHaveBeenCalledOnce();
+    const [url, options] = request.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://backend.test/api/v1/workspaces/source%2Fid/clone");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({ name: "Copy" });
+  });
+  it("does not retry an uncertain mutation", async () => {
+    const request = vi.fn().mockRejectedValue(new TypeError("Network error"));
+    vi.stubGlobal("fetch", request);
+    await expect(cloneWorkspaceAction("source", { name: "Copy" })).rejects.toThrow();
+    expect(request).toHaveBeenCalledOnce();
+  });
+});
 
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {

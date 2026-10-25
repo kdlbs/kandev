@@ -512,5 +512,12 @@
   "user": "使用者",
   "usesTheLocalDockerDaemonOn": "使用本機上的本地 Docker 守護處理程序。",
   "value": "值",
-  "verifyingConnection": "正在驗證連線…"
+  "verifyingConnection": "正在驗證連線…",
+  "ownershipProfile": "設定存取權限",
+  "ownershipExecutor": "執行器存取權限",
+  "ownershipShared": "共享",
+  "ownershipMe": "僅自己",
+  "ownershipDescription": "只有所有者和管理員可以檢視或使用私有計算資源。共享存取保留現有權限。",
+  "ownershipInherited": "執行器為私有。即使此設定設為共享，仍只有執行器所有者和管理員可以存取。",
+  "ownershipUnavailable": "此執行器設定檔不可用。請先選擇可存取的設定再啟動。"
 }

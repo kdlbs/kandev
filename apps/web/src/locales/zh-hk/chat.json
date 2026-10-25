@@ -187,5 +187,10 @@
   "providerRecoveryDisabledBody": "自動繼續已停用。恢復以重試，或啓動新工作階段。",
   "providerRecoveryUnsafeBody": "自動繼續已停止，因為某項操作尚未完成或其結果不確定。請先檢查工作，再恢復工作階段。",
   "providerRecoveryUnsupportedBody": "此代理無法自動恢復中斷的對話。恢復以重試，或啓動新工作階段。",
-  "providerRecoveryEvidenceBody": "自動繼續已停止，因為缺少對話標識或安全資訊。請先檢查工作，再恢復工作階段。"
+  "providerRecoveryEvidenceBody": "自動繼續已停止，因為缺少對話標識或安全資訊。請先檢查工作，再恢復工作階段。",
+  "capacityRetryWindowEndsAt": "自動恢復將於 {{time}} 結束。",
+  "retainedTurnRecoveryWindowExpiredBody_other": "自動恢復已在嘗試 {{count}} 次後結束。你可以傳送另一條訊息。",
+  "retainedTurnRecoveryRestartBody": "Kandev 重啓後，自動恢復已停止。你可以傳送另一條訊息。",
+  "capacityRetryWindowEnding": "自動恢復將在 {{countdown}} 後結束。",
+  "retainedTurnRecoveryWindowExpiredBody_one": "自動恢復已在嘗試 {{count}} 次後結束。你可以傳送另一條訊息。"
 }

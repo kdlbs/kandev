@@ -167,3 +167,6 @@ apps/web/e2e/.restart-screenshots/
 
 # Manual dev-environment scratch repos (apps/web/e2e/manual-seed-*.ts)
 apps/backend/.manual-env/
+
+# Disposable release-upgrade rehearsal assets
+/.cache/upgrade/

@@ -92,6 +92,7 @@ type WatchDependencyValidator interface {
 
 // Service coordinates GitLab integration operations.
 type Service struct {
+	executorContext          func(context.Context, string, string) (context.Context, error)
 	mu                       sync.RWMutex
 	configMutationMu         sync.Mutex
 	host                     string

@@ -21,7 +21,7 @@ verification are complete under the linked work order.
 ## Default disclosure
 
 In `apps/web/components/task/chat/messages/kandev/rich-output/file-preview-block.tsx`,
-`FilePreview` supplies `getFileCategory(file.path) === "image"` as the initial
+`FilePreview` supplies `getFileCategory(file.path) === "image" && imagePreviewsExpandedByDefault` as the initial
 value to `useRichOutputViewState`. Reuse the existing classifier, including its
 case-insensitive extensions. Do not add a second MIME/extension registry or read
 the file to determine the initial disclosure.
@@ -35,14 +35,14 @@ existing content renderer and transport hook, including response encoding.
 Automatic expansion runs when a completed presentation's card mounts, including
 history and remounts. It is not a background prefetch of unmounted transcript
 items. A collapsed retained image choice causes no read on remount. A fresh page
-or expired report-state entry uses the default; bytes remain workspace-owned.
+or expired report-state entry uses the saved device preference; bytes remain workspace-owned.
 
 ## Target lifetime
 
 Keep the registry's `(sessionId, repo, path)` component key and element identity.
 Replacement mounts a new card and the workspace hook invalidates old pending
 settlements. The new card uses its target-scoped retained state if present,
-otherwise the classifier default. Keep report/message/authentication view-store
+otherwise the classifier and saved device preference determine the default. Keep report/message/authentication view-store
 scoping and duplicate-element independence. Do not reset the whole presentation
 or modify `useRichOutputViewState` for this change.
 
@@ -61,7 +61,8 @@ At widths below 420px the header actions remain on a second row. The image keeps
 `max-h-64 max-w-full object-contain`. Phone/coarse-pointer actions keep their
 existing 48px nominal sizing; desktop uses existing button defaults. Preserve
 the transcript scroll owner and safe-area handling of the existing viewer.
-No overlay, breakpoint tree, new copy, or new motion is required.
+The preference reuses the existing Appearance switch row. No new overlay,
+breakpoint tree, or motion is required.
 
 ## Compatibility and documentation
 

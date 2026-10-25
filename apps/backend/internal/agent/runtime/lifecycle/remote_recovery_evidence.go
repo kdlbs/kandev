@@ -90,13 +90,13 @@ func (m *Manager) captureRemoteDeliveryEvidence(
 		return errors.New("authenticated remote delivery stream changed")
 	}
 	if status.Durable {
-		if status.Version != journal.CurrentVersion || status.StreamID == "" {
+		if !journal.SupportsDeliveryVersion(status.Version) || status.StreamID == "" {
 			return errors.New("remote agent advertises an unsupported durable delivery stream")
 		}
 		instance.DeliveryStatus = status
 		return nil
 	}
-	if status.Version != journal.CurrentVersion || status.Reason != "storage_not_durable" {
+	if !journal.SupportsDeliveryVersion(status.Version) || status.Reason != durableDeliveryStorageNotDurable {
 		return fmt.Errorf("remote retained delivery is unavailable: %s", status.Reason)
 	}
 	return m.acceptLegacyRemoteDelivery(ctx, instance, association)

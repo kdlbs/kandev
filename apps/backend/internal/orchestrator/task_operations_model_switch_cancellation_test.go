@@ -146,7 +146,7 @@ func newQueuedModelSwitchPauseFixture(
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}

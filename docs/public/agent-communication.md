@@ -54,7 +54,8 @@ Delivery behaviour depends on the target session's state at the moment of the ca
 |---|---|---|
 | Running or starting | Message is queued; delivered when the current turn ends | `"queued"` |
 | Running or starting, direct parent uses `delivery_mode="interrupt"` | Kandev queues the message, then tries to interrupt the current turn and deliver it immediately | `"sent"` if interrupted and delivered immediately; otherwise `"queued"` |
-| Idle (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
+| Waiting on a live clarification, default or queued delivery | Message waits behind the question and is delivered after its turn finishes or the question detaches | `"queued"` |
+| Idle with no live clarification (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
 | Created (agent not yet started) | Agent is started with this message as its first prompt | `"started"` |
 | Failed or cancelled | Error is returned | N/A |
 
@@ -127,6 +128,24 @@ when the user must select one of the offered options. If omitted, the user can
 also provide a free-text answer. Native Codex questions use the same setting
 that Codex provides for an "Other" answer.
 
+The tool returns answers keyed by question ID. An option selection includes
+`selected_option` (the option ID) and `selected_label` (the exact displayed label):
+
+```json
+{
+  "flow": {
+    "selected_option": "q1_opt1",
+    "selected_label": "A"
+  }
+}
+```
+
+Read the label to understand the user's choice. Keep the ID when you need to
+distinguish options with identical labels. If the ID cannot identify exactly
+one offered option with a nonempty label, `selected_label` is omitted.
+Free-text-only answers return `custom_text` without a selected label.
+Selections can also retain accompanying `custom_text`.
+
 ## Show an image with an operator question
 
 Add `images` to a question when the operator needs to inspect a screenshot or
@@ -167,7 +186,7 @@ For example, pass this payload to `ask_user_question_kandev`:
 
 Each question has its own answer. Kandev returns the completed bundle with answers
 keyed by question ID. The image does not add a field to the answer. For example,
-an approved layout can return `"layout": {"selected_option": "q1_opt1"}`. Generated
+an approved layout can return `"layout": {"selected_option": "q1_opt1", "selected_label": "Approve"}`. Generated
 option IDs use one-based question and option positions. Read the offered choices
 to interpret these IDs. A custom answer uses `custom_text`.
 
@@ -219,7 +238,7 @@ control opens inspection without selecting, advancing, or submitting an answer.
 ```
 
 Selecting **Compact layout** returns the existing option identifier, such as
-`"layout": {"selected_option": "q1_opt2"}`. The image ID does not replace that
+`"layout": {"selected_option": "q1_opt2", "selected_label": "Compact layout"}`. The image ID does not replace that
 identifier. A missing preview leaves its choice selectable. In history, each
 illustrated choice retains its label and a **Show images** control.
 

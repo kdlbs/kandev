@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -68,7 +70,7 @@ const providerFallbackPromptMarker = "[Kandev provider fallback]"
 // routed launches behave identically to the legacy concrete-profile path
 // for everything except the provider/model/mode selection.
 func (ss *SchedulerService) DispatchWithRouting(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	launch LaunchContext,
 ) (bool, bool, error) {
 	if ss.resolver == nil || (ss.taskStarter == nil && ss.runSessionLauncher == nil) {
@@ -151,7 +153,7 @@ func excludedFromAttempts(prior []models.RouteAttempt, baseline int) []routing.P
 // another retry. Operators clear the parked status manually (Retry now
 // in the UI) once the underlying cause is fixed.
 func (ss *SchedulerService) parkRunMaxAttempts(
-	ctx context.Context, run *models.Run, workspaceID string,
+	ctx context.Context, run *runsmodels.Run, workspaceID string,
 ) error {
 	seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
 	if err != nil {
@@ -185,7 +187,7 @@ func (ss *SchedulerService) parkRunMaxAttempts(
 // onto the run row on first dispatch. Subsequent post-start fallbacks
 // keep the original snapshot (idempotent overwrite is safe).
 func (ss *SchedulerService) persistRoutingDecision(
-	ctx context.Context, run *models.Run, res *routing.Resolution,
+	ctx context.Context, run *runsmodels.Run, res *routing.Resolution,
 ) error {
 	if run.LogicalProviderOrder != nil && *run.LogicalProviderOrder != "" {
 		return nil
@@ -208,7 +210,7 @@ func (ss *SchedulerService) persistRoutingDecision(
 // parkRunBlocked records skip attempts and parks the run with the
 // resolver's block reason. Called when len(Candidates)==0.
 func (ss *SchedulerService) parkRunBlocked(
-	ctx context.Context, run *models.Run, workspaceID string, res *routing.Resolution,
+	ctx context.Context, run *runsmodels.Run, workspaceID string, res *routing.Resolution,
 ) (bool, *routing.BlockReason, error) {
 	br := res.BlockReason
 	for _, sk := range res.SkippedDegraded {
@@ -261,7 +263,7 @@ func skipOutcome(reason string) models.RouteAttemptOutcome {
 // candidates exhaust with fallback-allowed errors, the run is parked
 // using the same block-reason aggregation as parkRunBlocked.
 func (ss *SchedulerService) tryCandidates(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, res *routing.Resolution,
 	launch LaunchContext, prior []models.RouteAttempt,
 ) (bool, *routing.BlockReason, error) {
@@ -380,7 +382,7 @@ func latestFailedExecutionProfile(
 // scope, rather than re-derived here (AC-20d names effectiveTier as
 // the sole producer).
 func (ss *SchedulerService) recordAttemptStart(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	candidate routing.Candidate, tier routing.Tier, tierSource string,
 ) (int, error) {
 	seq, err := ss.repo.IncrementRouteAttemptSeq(ctx, run.ID)
@@ -421,7 +423,7 @@ func (ss *SchedulerService) recordAttemptStart(
 // everything except provider/model selection. Without this, the routed
 // path would fall back to task.Description and lose role framing.
 func (ss *SchedulerService) launchCandidate(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	candidate routing.Candidate, launch LaunchContext,
 ) (string, error) {
 	taskID := extractRunTaskID(run.Payload)
@@ -482,7 +484,7 @@ func (ss *SchedulerService) launchCandidate(
 // must not undo them or cause a caller to retry-launch an agent that
 // is already running.
 func (ss *SchedulerService) handleLaunchSuccess(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, candidate routing.Candidate, sessionID string,
 ) (bool, *routing.BlockReason, error) {
 	service.IncLoopLaunch(agent.WorkspaceID)
@@ -511,7 +513,7 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // so the run stays parked until an operator finds it and clears the
 // routing block by hand.
 func (ss *SchedulerService) handleLaunchDeferred(
-	ctx context.Context, run *models.Run, workspaceID string, seq int,
+	ctx context.Context, run *runsmodels.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {
 	now := time.Now().UTC()
 	attempt := models.RouteAttempt{
@@ -604,7 +606,7 @@ func (ss *SchedulerService) markHealthScopes(
 // the candidate as failed-with-fallback (continue loop) or as
 // failed-other (fatal, escalate to caller). Returns (fatal, err).
 func (ss *SchedulerService) handleLaunchFailure(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, candidate routing.Candidate,
 	seq int, launchErr error,
 ) (bool, error) {
@@ -743,7 +745,7 @@ func (ss *SchedulerService) hydrateAttempt(
 // fallback-allowed errors. The block reason is rebuilt from the just-
 // recorded health rows so the surfaced earliest-retry is current.
 func (ss *SchedulerService) exhaustedCandidates(
-	ctx context.Context, run *models.Run,
+	ctx context.Context, run *runsmodels.Run,
 	agent *models.AgentInstance, tier routing.Tier,
 ) (bool, *routing.BlockReason, error) {
 	rows, err := ss.repo.ListProviderHealth(ctx, agent.WorkspaceID)

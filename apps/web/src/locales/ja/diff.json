@@ -52,5 +52,14 @@
   "fileStatusModified": "変更済み",
   "fileStatusMoved": "移動済み",
   "fileStatusMovedFrom": "{{oldPath}} から移動",
-  "fileStatusUntracked": "追跡外"
+  "fileStatusUntracked": "追跡外",
+  "walkthroughComment": "コメント",
+  "walkthroughPending": "未送信",
+  "walkthroughSubmitted": "送信済み",
+  "walkthroughCommentCount_one": "コメント {{count}} 件",
+  "walkthroughCommentCount_other": "コメント {{count}} 件",
+  "walkthroughSelectStep": "ステップに移動",
+  "walkthroughUntitledStep": "ステップ {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}}（コメント {{count}} 件）",
+  "walkthroughStepOption_other": "{{number}}. {{title}}（コメント {{count}} 件）"
 }

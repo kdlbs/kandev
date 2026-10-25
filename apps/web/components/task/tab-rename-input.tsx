@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useInlineEditFocus } from "@/hooks/use-inline-edit-focus";
 
 /**
  * Inline rename input rendered in place of a dockview tab body.
@@ -14,6 +15,7 @@ export function TabRenameInput({
   onCancel,
   testId = "tab-rename-input",
   maxLength,
+  limitValue,
 }: {
   initial: string;
   seqBadge: number | null;
@@ -22,6 +24,8 @@ export function TabRenameInput({
   testId?: string;
   /** Hard cap typed input to match a server-side name length limit. */
   maxLength?: number;
+  /** Domain-owned draft limit when native UTF-16 maxLength is unsuitable. */
+  limitValue?: (value: string, insertionEnd: number | null) => string;
 }) {
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +33,16 @@ export function TabRenameInput({
   // also fires the input's blur — guard so Escape can't be followed by a
   // stale onCommit (and Enter can't commit twice).
   const doneRef = useRef(false);
+
+  const { onBlur, cancelPendingBlur } = useInlineEditFocus({
+    active: true,
+    inputRef,
+    onLeave: () => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      onCommit(value);
+    },
+  });
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -51,24 +65,28 @@ export function TabRenameInput({
       <input
         ref={inputRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) =>
+          setValue(
+            limitValue ? limitValue(e.target.value, e.target.selectionStart) : e.target.value,
+          )
+        }
         onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
+          if (doneRef.current) return;
           if (e.key === "Enter") {
             e.preventDefault();
+            cancelPendingBlur();
             doneRef.current = true;
             onCommit(value);
           } else if (e.key === "Escape") {
             e.preventDefault();
+            cancelPendingBlur();
             doneRef.current = true;
             onCancel();
           }
-          // Don't let dockview see typed keys as shortcuts.
-          e.stopPropagation();
         }}
-        onBlur={() => {
-          if (doneRef.current) return;
-          onCommit(value);
-        }}
+        onBlur={onBlur}
         maxLength={maxLength}
         data-testid={testId}
         className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"

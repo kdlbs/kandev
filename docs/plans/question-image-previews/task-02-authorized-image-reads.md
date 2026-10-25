@@ -104,6 +104,8 @@ OS to Results. Do not mark platform safety proven by a Linux-only test.
 - New `apps/backend/internal/agent/runtime/agentctl/client_question_images.go` and tests
 - New `apps/backend/internal/agentctl/server/api/question_images.go` and tests, `server.go`
 - New `apps/backend/internal/agentctl/server/process/question_images.go` and tests
+- `apps/backend/internal/agentctl/server/process/manager_submodules.go`
+- `apps/backend/internal/agentctl/server/process/manager_rescan.go`
 - Shared internal image request/response types only if needed by those boundaries
 
 ## Dependencies
@@ -160,3 +162,25 @@ normal architecture hook. The adapter and its tests now use the existing
 `internal/agent/runtime.AgentExecution` alias. The behavior is unchanged.
 `go test ./internal/backendapp -run 'TestQuestionImage|TestClarification.*Image' -count=1 -timeout=3m`
 passed after that correction.
+
+
+PR review correction: workspace changes now update the image root with the tracker
+root under the existing lock. Rebind, failed rebind, rollback, and rescan tests use
+different image bytes at the same relative path. Both new tests failed before the
+fix by returning bytes from the old root. After the fix, this command passed:
+
+```bash
+go test -trimpath -race ./internal/agentctl/server/process -run 'TestQuestionImage|TestRebindWorkspace|TestRescanRepositories' -count=1 -timeout=3m
+```
+
+Merge validation preserved upstream answer labels, process-manager state, and all
+translation keys. The focused Go image tests passed across seven packages. The
+five focused UI files passed (nine tests), as did typecheck, localization, catalog,
+specification, and harness checks. Desktop browser validation passed (four tests); phone validation passed (two tests).
+Remote CI and review results remain pending.
+
+```bash
+source /tmp/question-images-browser-env.sh
+E2E_PORT_OFFSET=23 pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/chat/question-image-previews.spec.ts tests/chat/clarification-choice-only.spec.ts
+E2E_PORT_OFFSET=23 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-question-image-previews.spec.ts
+```

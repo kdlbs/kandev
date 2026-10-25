@@ -3,9 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 func (s *Service) focusTaskSession(
@@ -113,5 +115,29 @@ func (s *Service) refreshFocusedLiveSession(ctx context.Context, taskID, session
 	if !ok || live == nil || !s.agentManager.IsAgentReadyForPrompt(ctx, sessionID) {
 		return
 	}
+	now := time.Now().UTC()
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, idleParkingFocusMetadataKey, map[string]interface{}{
+		"execution_id": running.AgentExecutionID, "focused_at": now.Format(time.RFC3339Nano),
+	}); err != nil {
+		s.logger.Warn("failed to persist explicit idle-parking focus", zap.String("session_id", sessionID), zap.Error(err))
+	}
 	s.resetIdleParkingCandidates(sessionID)
+}
+
+const idleParkingFocusMetadataKey = "idle_parking_focus"
+
+func persistedIdleParkingFocusAt(session *models.TaskSession, executionID string, now time.Time) time.Time {
+	if session == nil || executionID == "" {
+		return time.Time{}
+	}
+	snapshot, ok := session.Metadata[idleParkingFocusMetadataKey].(map[string]interface{})
+	if !ok || snapshot["execution_id"] != executionID {
+		return time.Time{}
+	}
+	encoded, _ := snapshot["focused_at"].(string)
+	at, err := time.Parse(time.RFC3339Nano, encoded)
+	if err != nil || at.IsZero() || at.After(now) {
+		return time.Time{}
+	}
+	return at
 }

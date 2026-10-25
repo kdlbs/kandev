@@ -20,7 +20,7 @@ export type TaskOverviewState = {
 
 export type TaskOverviewActions = {
   beginTaskOverviewRead: () => string;
-  finishTaskOverviewRead: (readId: string) => void;
+  finishTaskOverviewRead: (readId: string, acceptedTasks?: TaskOverview[]) => void;
   retainTaskOverviews: (owner: string, tasks: TaskOverview[], readId?: string) => boolean;
   releaseTaskOverviews: (owner: string) => void;
   denyTaskOverviewAccess: () => void;

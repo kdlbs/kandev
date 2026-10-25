@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,4 +126,32 @@ func TestHTTPTaskDeletePreflightReturnsServiceUnavailableWhenInspectionUnavailab
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+}
+
+// @covers AC-TASKS-DELETE-RECOVERY-001.1
+func TestHTTPTaskDeletePreflightRetainSkipsBrokenWorkspace(t *testing.T) {
+	router := newTaskDeletePreflightRouter(t, taskDeletePreflightHTTPCleanup{inspectErr: errors.New("decode workspace ownership marker: unexpected end of JSON input")})
+	for _, mode := range []string{"delete", "retain"} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/delete-preflight", strings.NewReader(`{"task_ids":["task-1"],"workspace_cleanup":"`+mode+`"}`))
+		router.ServeHTTP(recorder, withTaskDeleteTestIdentity(request))
+		if mode == "delete" {
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		} else {
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			var result service.TaskDeletePreflightResult
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+			require.NotEmpty(t, result.ConfirmationID)
+			require.False(t, result.RequiresDiscardConsent)
+		}
+	}
+}
+
+func TestHTTPDeleteUnavailablePreflight(t *testing.T) {
+	router := newTaskDeletePreflightRouter(t, taskDeletePreflightHTTPCleanup{inspectErr: &worktree.CleanupInspectionError{Stage: worktree.CleanupInspectionStageStatus, Reason: worktree.CleanupInspectionReasonCommandFailed, Err: errors.New("bad object")}})
+	rec := httptest.NewRecorder()
+	req := withTaskDeleteTestIdentity(httptest.NewRequest(http.MethodPost, "/api/v1/tasks/delete-preflight", strings.NewReader(`{"task_ids":["task-1"],"discard_worktree_changes":true,"allow_unverified_workspace_changes":true}`)))
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `"workspace_inspection":"unknown"`)
 }

@@ -565,7 +565,7 @@
   "overrideTheWorkspaceTierOrProvider": "このエージェントのワークスペースティアまたはプロバイダー順序を上書きします。",
   "overrideWakeReasonTiers": "ウェイク理由ティアを上書き",
   "overrideWakeReasonTiersHelp": "これはまれです。バックグラウンド作業にこのエージェント専用の異なる動作が必要な場合にのみ上書きしてください。たとえば、定常的なチェックでも Frontier を使う必要があるセキュリティ重視のエージェントなどです。ほとんどのエージェントはワークスペースポリシーを継承すべきです。",
-  "overrideWhichModelTierRunsFor": "特定の種類のエージェント作業に対して、どのモデルティアを実行するかを上書きします。多くのユーザーはこれをワークスペースの既定値のままにします。バックグラウンドタスクは Economy、通常の実行は Balanced です。ハートビート、定期実行、予算アラートは常にバックグラウンドで動作するため、ここでより安価なティアを使うと、重要な作業に影響を与えずにコストを大幅に削減できます。",
+  "overrideWhichModelTierRunsFor": "ワークスペースの既定値を使うか、エージェントの作業の種類ごとにモデル階層を選択します。低コストのモデルでは結果が異なる場合があります。",
   "overrideWorkspacePolicyForThisAgent": "このエージェントのワークスペースポリシーを上書き",
   "overrideWorkspaceProviderOrder": "ワークスペースのプロバイダー順序を上書き",
   "overrideWorkspaceTier": "ワークスペースティアを上書き",

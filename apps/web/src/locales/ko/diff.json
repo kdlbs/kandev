@@ -52,5 +52,14 @@
   "fileStatusModified": "수정됨",
   "fileStatusMoved": "이동됨",
   "fileStatusMovedFrom": "{{oldPath}}에서 이동",
-  "fileStatusUntracked": "추적되지 않음"
+  "fileStatusUntracked": "추적되지 않음",
+  "walkthroughComment": "댓글 작성",
+  "walkthroughPending": "전송 대기",
+  "walkthroughSubmitted": "제출됨",
+  "walkthroughCommentCount_one": "댓글 {{count}}개",
+  "walkthroughCommentCount_other": "댓글 {{count}}개",
+  "walkthroughSelectStep": "단계로 이동",
+  "walkthroughUntitledStep": "단계 {{number}}",
+  "walkthroughStepOption_one": "{{number}}. {{title}} (댓글 {{count}}개)",
+  "walkthroughStepOption_other": "{{number}}. {{title}} (댓글 {{count}}개)"
 }

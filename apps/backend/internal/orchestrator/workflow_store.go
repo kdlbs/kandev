@@ -318,6 +318,16 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	return err
 }
 
+// applyTransitionReportingApplied is ApplyTransition for callers that run the
+// target step's lifecycle after the commit. applied=false means the task row
+// was not written, so the caller must not treat the move as done.
+func (s *workflowStore) applyTransitionReportingApplied(
+	ctx context.Context, taskID, sessionID, fromStepID, toStepID string, trigger engine.Trigger,
+) (bool, error) {
+	_, applied, err := s.applyTransitionWithResult(ctx, taskID, sessionID, fromStepID, toStepID, trigger, "", nil)
+	return applied, err
+}
+
 func (s *workflowStore) ApplyDeferredMoveTransition(
 	ctx context.Context,
 	taskID, sessionID, fromStepID, toStepID, moveID string,
@@ -374,13 +384,24 @@ func (s *workflowStore) applyTransition(
 	moveID string,
 	deferredMove *messagequeue.PendingMoveRecord,
 ) (int64, error) {
+	transitionID, _, err := s.applyTransitionWithResult(ctx, taskID, sessionID, fromStepID, toStepID, trigger, moveID, deferredMove)
+	return transitionID, err
+}
+
+func (s *workflowStore) applyTransitionWithResult(
+	ctx context.Context,
+	taskID, sessionID, fromStepID, toStepID string,
+	trigger engine.Trigger,
+	moveID string,
+	deferredMove *messagequeue.PendingMoveRecord,
+) (int64, bool, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return 0, fmt.Errorf("load task for transition: %w", err)
+		return 0, false, fmt.Errorf("load task for transition: %w", err)
 	}
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
-		return 0, fmt.Errorf("load target step for transition: %w", err)
+		return 0, false, fmt.Errorf("load target step for transition: %w", err)
 	}
 	// Keep WorkflowID in sync with the target step's owning workflow. Most
 	// callers transition within the same workflow (targetStep.WorkflowID ==
@@ -388,7 +409,7 @@ func (s *workflowStore) applyTransition(
 	// cross-workflow move_task_kandev hand-offs too — without this, the task
 	// would end up with a step ID from a workflow its WorkflowID doesn't match.
 	if err := markDeferredMoveApplied(task, moveID); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	oldWorkflowID := task.WorkflowID
@@ -416,12 +437,12 @@ func (s *workflowStore) applyTransition(
 		if err := s.updateDeferredTransitionTask(
 			transitionCtx, task, fromStepID, targetStep, *deferredMove,
 		); err != nil {
-			return 0, fmt.Errorf("update task workflow step: %w", err)
+			return 0, false, fmt.Errorf("update task workflow step: %w", err)
 		}
 	} else if applied, err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
-		return 0, fmt.Errorf("update task workflow step: %w", err)
+		return 0, false, fmt.Errorf("update task workflow step: %w", err)
 	} else if !applied {
-		return 0, nil
+		return 0, false, nil
 	}
 
 	// Pass the pre-move workflow ID through so cross-workflow transitions
@@ -446,7 +467,7 @@ func (s *workflowStore) applyTransition(
 
 	s.pullNextTaskOnVacate(ctx, fromStepID, taskID)
 
-	return task.WorkflowStepTransitionID, nil
+	return task.WorkflowStepTransitionID, true, nil
 }
 
 func (s *workflowStore) carryStepHandoffForTransition(
@@ -468,8 +489,8 @@ func (s *workflowStore) carryStepHandoffForTransition(
 		return
 	}
 	var consumedSignal *models.PendingStepCompletionSignal
-	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
-		consumedSignal = &signal
+	if signal, has := matchingWorkflowSignal(ctx, s.repo, task.ID, fromStepID, session); has {
+		consumedSignal = signal
 	}
 	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
 }
@@ -651,6 +672,10 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 }
 
 func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) (bool, error) {
+	if _, guarded := models.WorkflowStepTransitionGuardFromContext(ctx, task.ID, fromStepID); guarded {
+		return guardedStepCompletionMove(ctx, s.repo, task, fromStepID, targetStep)
+	}
+
 	if targetStep == nil {
 		return true, s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}

@@ -19,7 +19,7 @@ import (
 func TestLSPStreamTerminatesWhenCredentialRotates(t *testing.T) {
 	binDir := t.TempDir()
 	serverPath := filepath.Join(binDir, "kotlin-lsp")
-	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec /bin/cat\n"), 0o755); err != nil {
+	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec cat\n"), 0o755); err != nil {
 		t.Fatalf("write fake language server: %v", err)
 	}
 	t.Setenv("HOME", t.TempDir())

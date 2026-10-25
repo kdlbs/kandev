@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/models"
 
 	"go.uber.org/zap"
 
@@ -232,4 +233,19 @@ func (s *Service) dispatchWatcherEvent(ctx context.Context, src WatcherSource, e
 		defer release()
 		coord.Dispatch(context.WithoutCancel(ctx), src, evt)
 	}()
+}
+
+func (s *Service) dispatchOwnedWatcherEvent(ctx context.Context, src WatcherSource, evt any, creator string, fields ...zap.Field) {
+	request, err := src.BuildTaskRequest(evt)
+	if err != nil {
+		s.logger.Warn("invalid watcher task", zap.Error(err))
+		return
+	}
+	profileID, _ := request.Metadata[models.MetaKeyExecutorProfileID].(string)
+	ctx, err = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, request.WorkspaceID), creator, profileID)
+	if err != nil {
+		s.logger.Warn("watcher executor access denied", zap.Error(err))
+		return
+	}
+	s.dispatchWatcherEvent(ctx, src, evt, fields...)
 }

@@ -238,6 +238,11 @@ Do not reuse the HTML publisher, create a preview server, or accept its permissi
 content types. Existing prompt attachments are uploads with separate ownership
 and retention. Do not create synthetic uploads for workspace references.
 
+Workspace rebind, rescan, and rollback update the image root together with the
+tracker root under `repoTrackersMu`. Failed changes retain the previous root.
+An unchanged workspace path retains its original resolved image scope, so a
+rescan cannot authorize a replacement symlink.
+
 The new reader must enforce all of these conditions:
 
 - Select only the source execution's task root or a currently attached source.

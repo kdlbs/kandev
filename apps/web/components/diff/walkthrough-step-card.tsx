@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { IconX, IconFileCode } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -20,43 +20,60 @@ import {
 } from "@/components/shared/markdown-components";
 import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
-import { CommentForm } from "./comment-form";
+import { WalkthroughCommentList, WalkthroughStepFeedback } from "./walkthrough-step-feedback";
+import { WalkthroughStepPicker } from "./walkthrough-step-picker";
+import { useWalkthroughTap } from "./use-walkthrough-tap";
+import { getWalkthroughComments } from "@/lib/walkthrough-comments";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
 
 export const WALKTHROUGH_STEP_BODY_CLASS =
   "prose prose-sm dark:prose-invert max-w-none text-left text-sm leading-6 [overflow-wrap:anywhere] [text-align:left] [&_li]:text-left [&_p]:my-2 [&_p]:text-left";
 
-function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () => void }) {
+function StepBody({
+  step,
+  comments,
+  onOpenFile,
+}: {
+  step: WalkthroughStep;
+  comments: WalkthroughComment[];
+  onOpenFile: () => void;
+}) {
   const { t } = useTranslation();
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
   const fileName = step.file.split("/").pop() || step.file;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-      {step.title ? (
-        <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
-          {step.title}
-        </h4>
-      ) : null}
-      <button
-        type="button"
-        onClick={onOpenFile}
-        title={t("diff:openFileAtLine", { file: step.file, line: step.line })}
-        data-testid="walkthrough-step-file"
-        className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
-      >
-        <IconFileCode className="size-3.5 shrink-0 text-primary" />
-        <span className="truncate font-mono">{fileName}</span>
-        <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
-      </button>
-      <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
-        <ReactMarkdown
-          remarkPlugins={remarkPlugins}
-          rehypePlugins={rehypePlugins}
-          components={markdownComponents}
+    <div
+      className="min-h-0 flex-auto overflow-y-auto overscroll-contain"
+      data-testid="walkthrough-step-content"
+    >
+      <div className="px-4 py-3">
+        {step.title ? (
+          <h4 className="text-sm font-semibold mb-1.5" data-testid="walkthrough-step-title">
+            {step.title}
+          </h4>
+        ) : null}
+        <button
+          type="button"
+          onClick={onOpenFile}
+          title={t("diff:openFileAtLine", { file: step.file, line: step.line })}
+          data-testid="walkthrough-step-file"
+          className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
         >
-          {normalizeMarkdown(step.text)}
-        </ReactMarkdown>
+          <IconFileCode className="size-3.5 shrink-0 text-primary" />
+          <span className="truncate font-mono">{fileName}</span>
+          <span className="shrink-0 text-muted-foreground">:{lineLabel}</span>
+        </button>
+        <div className={WALKTHROUGH_STEP_BODY_CLASS} data-testid="walkthrough-step-body">
+          <ReactMarkdown
+            remarkPlugins={remarkPlugins}
+            rehypePlugins={rehypePlugins}
+            components={markdownComponents}
+          >
+            {normalizeMarkdown(step.text)}
+          </ReactMarkdown>
+        </div>
+        <WalkthroughCommentList comments={comments} />
       </div>
     </div>
   );
@@ -76,7 +93,7 @@ function StepHeader({
   const { t } = useTranslation();
   return (
     <div
-      className="flex cursor-move touch-none items-center gap-2 border-b border-border px-3 pt-2 pb-1.5"
+      className="flex shrink-0 cursor-move touch-none items-center gap-2 border-b border-border px-3 pt-2 pb-1.5"
       data-testid="walkthrough-drag-handle"
       data-walkthrough-drag-handle
     >
@@ -89,7 +106,7 @@ function StepHeader({
       <Button
         variant="ghost"
         size="icon"
-        className="ml-auto size-6 cursor-pointer"
+        className="ml-auto size-7 shrink-0 cursor-pointer max-md:size-11 pointer-coarse:size-11"
         aria-label={t("diff:closeWalkthrough")}
         data-testid="walkthrough-close"
         onClick={onClose}
@@ -112,6 +129,7 @@ function StepNavigation({
   onNext: () => void;
 }) {
   const { t } = useTranslation();
+  const tapHandlers = useWalkthroughTap();
   return (
     <div
       className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2"
@@ -120,19 +138,21 @@ function StepNavigation({
       <Button
         variant="outline"
         size="sm"
-        className="cursor-pointer"
+        className="h-7 cursor-pointer max-md:h-11 pointer-coarse:h-11"
         disabled={activeStep <= 0}
         data-testid="walkthrough-prev"
         onClick={onPrevious}
+        {...(activeStep > 0 ? tapHandlers(onPrevious) : {})}
       >
         {t("diff:previous")}
       </Button>
       <Button
         size="sm"
-        className="cursor-pointer"
+        className="h-7 cursor-pointer max-md:h-11 pointer-coarse:h-11"
         disabled={activeStep >= stepCount - 1}
         data-testid="walkthrough-next"
         onClick={onNext}
+        {...(activeStep < stepCount - 1 ? tapHandlers(onNext) : {})}
       >
         {t("diff:next")}
       </Button>
@@ -183,16 +203,17 @@ function useWalkthroughStepFeedback(params: {
     const comment = buildComment(text);
     if (!comment) {
       showMissingSessionError();
-      return;
+      return false;
     }
     addComment(comment);
     toast({ title: t("diff:walkthroughNoteAdded"), variant: "success" });
+    return true;
   };
   const runWalkthroughFeedback = (text: string) => {
     const comment = buildComment(text);
     if (!comment) {
       showMissingSessionError();
-      return;
+      return false;
     }
     addComment(comment);
     void runComment(comment)
@@ -205,6 +226,7 @@ function useWalkthroughStepFeedback(params: {
       .catch(() => {
         toast({ title: t("diff:failedToSendWalkthroughNote"), variant: "error" });
       });
+    return true;
   };
   return { addWalkthroughFeedback, runWalkthroughFeedback };
 }
@@ -212,8 +234,8 @@ function useWalkthroughStepFeedback(params: {
 /**
  * The shared inner card body (header, markdown, Prev/Next, ask box) used by both
  * the inline diff-anchored card and the editor-mode floating window. Reads all
- * state from the store; renders nothing when there is no active step. The note
- * box mirrors other agent feedback surfaces: "Add" creates a pending
+ * state from the store; renders nothing when there is no active step. Feedback
+ * follows other agent feedback surfaces: "Add" creates a pending
  * walkthrough context item, and "Run" sends the same context to the agent.
  */
 export function WalkthroughStepInner({
@@ -248,11 +270,24 @@ export function WalkthroughStepInner({
     stepCount,
     walkthrough,
   });
+  const byId = useCommentsStore((s) => s.byId);
+  const hydrateSession = useCommentsStore((s) => s.hydrateSession);
+  const commentsByStep = useMemo(
+    () =>
+      walkthrough && sessionId
+        ? walkthrough.steps.map((_, index) =>
+            getWalkthroughComments(Object.values(byId), walkthrough, sessionId, index),
+          )
+        : [],
+    [byId, walkthrough, sessionId],
+  );
+  useEffect(() => {
+    if (sessionId) hydrateSession(sessionId);
+  }, [sessionId, hydrateSession]);
   useEffect(() => {
     if (activeTaskId && walkthrough) markSeen(activeTaskId);
   }, [activeTaskId, walkthrough, markSeen]);
-  if (!activeTaskId || !walkthrough) return null;
-  if (!step) return null;
+  if (!activeTaskId || !walkthrough || !step) return null;
   const isFloating = layout === "floating";
   // Two keys rather than one plural: a range and a single line are structurally
   // different messages, not two counts of the same one. Left English, this fed
@@ -272,9 +307,9 @@ export function WalkthroughStepInner({
   return (
     <div
       className={cn(
-        "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg sm:max-h-[min(78vh,720px)]",
+        "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg md:max-h-[min(78vh,720px)]",
         isFloating &&
-          "h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden sm:h-[min(78vh,720px)]",
+          "max-h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden md:max-h-[min(78dvh,720px)]",
       )}
     >
       <StepHeader
@@ -283,20 +318,27 @@ export function WalkthroughStepInner({
         lineLabel={lineLabel}
         onClose={onClose}
       />
+      <WalkthroughStepPicker
+        walkthrough={walkthrough}
+        activeStep={activeStep}
+        counts={commentsByStep.map((comments) => comments.length)}
+        onSelect={(index) => setActiveStep(activeTaskId, index)}
+      />
       <StepBody
         step={step}
+        comments={commentsByStep[activeStep] ?? []}
         onOpenFile={() => revealFileAtLine(openFile, step.file, step.line, step.repo)}
       />
-      {!isFloating ? navigation : null}
-      <div className="shrink-0 px-4 pb-3 pt-1">
-        <CommentForm
-          key={`${walkthrough.id}:${activeStep}`}
-          onSubmit={addWalkthroughFeedback}
-          onSubmitAndRun={runWalkthroughFeedback}
-          autoFocus={false}
-        />
-      </div>
-      {isFloating ? navigation : null}
+      <WalkthroughStepFeedback
+        key={`${activeTaskId}:${sessionId}:${walkthrough.id}:${walkthrough.updated_at}`}
+        walkthrough={walkthrough}
+        sessionId={sessionId ?? null}
+        activeStep={activeStep}
+        commentCount={commentsByStep[activeStep]?.length ?? 0}
+        onSubmit={addWalkthroughFeedback}
+        onRun={runWalkthroughFeedback}
+      />
+      {navigation}
     </div>
   );
 }
@@ -320,6 +362,7 @@ function buildWalkthroughComment(params: {
     taskId,
     walkthroughId: walkthrough.id,
     walkthroughTitle: walkthrough.title,
+    walkthroughUpdatedAt: walkthrough.updated_at,
     stepIndex: activeStep,
     stepCount,
     repo: step.repo,

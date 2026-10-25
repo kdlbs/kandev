@@ -12,6 +12,7 @@ import { defaultState } from "@/lib/state/default-state";
 import type { HydrationState } from "@/lib/state/store";
 import { repositoryId, workflowId, workspaceId } from "@/lib/types/ids";
 import type { Repository } from "@/lib/types/http";
+import type { MCPServerDefinition } from "@/lib/types/http-mcp";
 
 const TASK_ID = "retry-task";
 const WORKSPACE_ID = workspaceId("retry-workspace");
@@ -180,12 +181,46 @@ function patchResponse(outcome: PatchOutcome | undefined, payload: PatchPayload)
   }
 }
 
-function readResponses(agentEnabled: boolean): Map<string, () => Response> {
+function readResponses(
+  agentEnabled: boolean,
+  servers: MCPServerDefinition[],
+): Map<string, () => Response> {
   const branches = () =>
     jsonResponse({ branches: [{ name: "main", type: "local" }], total: 1, current_branch: "main" });
   const noConfig = () => new Response(null, { status: 204 });
   return new Map([
     ["/api/v1/user/agent-profile-recent-use", () => jsonResponse([])],
+    [`/api/v1/workspaces/${WORKSPACE_ID}/mcp-servers`, () => jsonResponse({ servers })],
+    [
+      `/api/v1/tasks/${TASK_ID}/mcp-selections`,
+      () =>
+        jsonResponse({
+          workspace_id: WORKSPACE_ID,
+          scope: "task",
+          owner_id: TASK_ID,
+          definition_ids: [],
+        }),
+    ],
+    [
+      `/api/v1/repositories/${REPOSITORY_ID}/mcp-selections`,
+      () =>
+        jsonResponse({
+          workspace_id: WORKSPACE_ID,
+          scope: "repository",
+          owner_id: REPOSITORY_ID,
+          definition_ids: [],
+        }),
+    ],
+    [
+      "/api/v1/agent-profiles/retry-profile/mcp-selections",
+      () =>
+        jsonResponse({
+          workspace_id: WORKSPACE_ID,
+          scope: "profile",
+          owner_id: "retry-profile",
+          definition_ids: [],
+        }),
+    ],
     [
       `/api/v1/workspaces/${WORKSPACE_ID}/repository-sets`,
       () => jsonResponse({ repository_sets: [], total: 0 }),
@@ -241,9 +276,24 @@ function readResponses(agentEnabled: boolean): Map<string, () => Response> {
   ]);
 }
 
-function mockTransport(outcomes: PatchOutcome[], agentEnabled = false) {
+function selectionResponse(outcome: "failure" | "success" | undefined, ids: string[]) {
+  if (outcome === "failure") return jsonResponse({ error: "MCP selection rejected" }, 500);
+  return jsonResponse({
+    workspace_id: WORKSPACE_ID,
+    scope: "task",
+    owner_id: TASK_ID,
+    definition_ids: ids,
+  });
+}
+
+function mockTransport(
+  outcomes: PatchOutcome[],
+  agentEnabled = false,
+  mcp?: { servers: MCPServerDefinition[]; outcomes: ("failure" | "success")[] },
+) {
   const patches: PatchPayload[] = [];
-  const reads = readResponses(agentEnabled);
+  const selections: string[][] = [];
+  const reads = readResponses(agentEnabled, mcp?.servers ?? []);
   let policyReads = 0;
   let errorReports = 0;
   vi.stubGlobal(
@@ -255,6 +305,11 @@ function mockTransport(outcomes: PatchOutcome[], agentEnabled = false) {
         const payload = JSON.parse(String(init?.body)) as PatchPayload;
         patches.push(payload);
         return patchResponse(outcomes.shift(), payload);
+      }
+      if (mcp && path === `${TASK_PATH}/mcp-selections` && method === "PUT") {
+        const payload = JSON.parse(String(init?.body));
+        selections.push(payload.definition_ids);
+        return selectionResponse(mcp.outcomes.shift(), payload.definition_ids);
       }
       if (path === "/api/v1/system/logs/frontend-errors" && method === "POST") {
         errorReports += 1;
@@ -274,6 +329,7 @@ function mockTransport(outcomes: PatchOutcome[], agentEnabled = false) {
   );
   return {
     patches,
+    selections,
     get policyReads() {
       return policyReads;
     },
@@ -342,6 +398,52 @@ afterEach(async () => {
   else Reflect.deleteProperty(Element.prototype, "getAnimations");
   vi.unstubAllGlobals();
   expect(unexpectedRequests.splice(0)).toEqual([]);
+});
+
+describe("current task edit MCP save retry", () => {
+  it("retains MCP choices after a failed selection save and retries the current choice", async () => {
+    const server: MCPServerDefinition = {
+      id: "retry-mcp",
+      workspace_id: WORKSPACE_ID,
+      runtime_name: "retry-mcp",
+      normalized_runtime_name: "retry-mcp",
+      display_name: "Retry MCP",
+      enabled: true,
+      execution_mode: "remote",
+      transport: "streamable_http",
+      configuration: { url: "https://mcp.example.test/retry" },
+      source: "custom",
+      revision: 1,
+      created_at: TIMESTAMP,
+      updated_at: TIMESTAMP,
+    };
+    const transport = mockTransport(["success", "success"], false, {
+      servers: [server],
+      outcomes: ["failure", "success"],
+    });
+    await openEditor();
+    enterDraft();
+    fireEvent.click(screen.getByTestId("task-create-advanced-settings-trigger"));
+    const picker = await screen.findByTestId("task-create-mcp-select");
+    await waitFor(() => expect((picker as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Retry MCP" }));
+    fireEvent.keyDown(screen.getByRole("checkbox", { name: "Retry MCP" }), { key: "Escape" });
+    await submit();
+    expect(screen.queryByTestId(SELECTORS.dialog)).toBeTruthy();
+    expect(screen.getByText("MCP selection rejected")).toBeTruthy();
+    expect((screen.getByTestId(SELECTORS.title) as HTMLInputElement).value).toBe(DRAFT.title);
+    expect(transport.patches).toEqual([WIRE_DRAFT]);
+    expect(transport.selections).toEqual([[server.id]]);
+    fireEvent.click(picker);
+    const choice = await screen.findByRole("checkbox", { name: "Retry MCP" });
+    expect(choice.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(choice);
+    fireEvent.keyDown(choice, { key: "Escape" });
+    await submit();
+    expect(transport.selections).toEqual([[server.id], []]);
+    expect(screen.queryByTestId(SELECTORS.dialog)).toBeNull();
+  });
 });
 
 describe("current task edit save retry", () => {

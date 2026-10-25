@@ -29,6 +29,10 @@ func TestManagerProfileProbeAndModelResolutionUseScopedLaunchContext(t *testing.
 	var mu sync.Mutex
 	var requests []agentctlutil.ProbeRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity" {
+			_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+			return
+		}
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -120,7 +124,7 @@ func TestManagerProfileProbeAndModelResolutionUseScopedLaunchContext(t *testing.
 		if !request.ProfileContext || request.InferenceConfig.Env["CODEX_PATH"] != "/profile/codex" ||
 			request.InferenceConfig.Env["TOKEN"] != wantToken ||
 			!slices.Equal(request.InferenceConfig.CLIFlags, profileContext.CLIFlags) ||
-			!slices.Equal(request.InferenceConfig.CommandPrefix, profileContext.CommandPrefix) {
+			!slices.Equal(request.InferenceConfig.LaunchWrapper.Argv, profileContext.CommandPrefix) || request.InferenceConfig.LaunchWrapper.Version != 1 || len(request.InferenceConfig.CommandPrefix) != 0 {
 			t.Fatalf("request %d omitted profile launch context: %#v", i, request)
 		}
 	}
@@ -323,6 +327,10 @@ func newProfileProbeTestManager(
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/identity" {
+			_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+			return
+		}
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
 			return

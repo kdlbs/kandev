@@ -1,6 +1,8 @@
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
+import { waitForTaskSessionsSettled } from "../../helpers/session-store";
+import { FOREGROUND_EVENT_COALESCE_MS } from "../../../hooks/use-foreground-refresh";
 
 test.describe("Mobile task transient read recovery", () => {
   test("shows and recovers the initial temporary task-read failure", async ({
@@ -136,8 +138,17 @@ test.describe("Mobile task transient read recovery", () => {
     );
     if (!task.session_id) throw new Error("Task fixture has no session");
 
+    const foregroundTime = Date.now();
+    await testPage.clock.setFixedTime(new Date(foregroundTime));
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    await waitForTaskSessionsSettled(testPage, task.id);
+    await dwell(
+      testPage,
+      FOREGROUND_EVENT_COALESCE_MS,
+      "product-timer",
+      "Start a new foreground episode after route hydration and initial focus coalescing.",
+    );
 
     const workspaceLayout = testPage.getByTestId("mobile-task-layout");
     const beforeRefresh = await workspaceLayout.boundingBox();
@@ -164,6 +175,8 @@ test.describe("Mobile task transient read recovery", () => {
     };
     await testPage.route(taskPath, temporaryFailure);
     try {
+      // Start a new foreground episode after the initial connection refresh.
+      await testPage.clock.setFixedTime(new Date(foregroundTime + 1_000));
       const firstTaskRead = waitForHttp(testPage, "GET", taskPath);
       await testPage.evaluate(() => window.dispatchEvent(new Event("online")));
       const firstFailure = await firstTaskRead;

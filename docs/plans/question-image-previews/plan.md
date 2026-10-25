@@ -29,6 +29,10 @@ not verified in this environment. See each work order’s Results section.
 The user authorized a commit, push, and ready pull request on 2026-10-25.
 Delivery includes the validation limits recorded in Task 04.
 
+[PR #4766](https://github.com/kdlbs/kandev/pull/4766) is open for review.
+PR follow-up reconciles the current base and corrects preview roots after workspace
+rebind, rescan, and rollback. See Task 02 for regression and merge validation.
+
 Task 05 is complete. Optional choice images preserve selection semantics, source
 authorization, reloads, history, and drafts. Its focused backend, unit, desktop,
 phone, and static checks passed. Task 04 remains incomplete for the reasons above.

@@ -187,5 +187,10 @@
   "providerRecoveryDisabledBody": "자동 계속 기능이 비활성화되어 있습니다. 재개하여 다시 시도하거나 새 세션을 시작하세요.",
   "providerRecoveryUnsafeBody": "보류 중인 작업이 있거나 결과가 불확실하여 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요.",
   "providerRecoveryUnsupportedBody": "이 에이전트는 중단된 대화를 자동으로 복원할 수 없습니다. 재개하여 다시 시도하거나 새 세션을 시작하세요.",
-  "providerRecoveryEvidenceBody": "대화 식별 정보 또는 안전성 정보가 없어 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요."
+  "providerRecoveryEvidenceBody": "대화 식별 정보 또는 안전성 정보가 없어 자동 계속을 중단했습니다. 재개하기 전에 작업을 확인하세요.",
+  "capacityRetryWindowEndsAt": "자동 복구는 {{time}}에 종료됩니다.",
+  "retainedTurnRecoveryWindowExpiredBody_other": "자동 복구 시간이 {{count}}회 시도 후 종료되었습니다. 새 메시지를 보낼 수 있습니다.",
+  "retainedTurnRecoveryRestartBody": "Kandev가 다시 시작되어 자동 복구가 중지되었습니다. 새 메시지를 보낼 수 있습니다.",
+  "capacityRetryWindowEnding": "자동 복구가 {{countdown}} 후 종료됩니다.",
+  "retainedTurnRecoveryWindowExpiredBody_one": "자동 복구 시간이 {{count}}회 시도 후 종료되었습니다. 새 메시지를 보낼 수 있습니다."
 }

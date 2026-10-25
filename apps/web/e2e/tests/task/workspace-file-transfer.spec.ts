@@ -88,6 +88,9 @@ test.describe("Workspace file transfer", () => {
     });
     await uploaded;
 
+    // Default layout surfaces the new Git change before the user returns to Files.
+    await expect(session.changesFileRow("fixture.json")).toBeVisible();
+    await session.clickTab("Files");
     await expect(session.fileTreeNode("fixture.json")).toBeVisible();
   });
 
@@ -210,6 +213,11 @@ test.describe("Workspace file transfer", () => {
     await testPage.setInputFiles(FOLDER_INPUT, bundleDir);
     await uploaded;
 
+    // Uploading creates a Git change, which activates Changes in the default layout.
+    await expect(
+      session.changes.getByRole("button", { name: "leaf.txt", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+    await session.clickTab("Files");
     await expect(session.fileTreeNode("upload-bundle")).toBeVisible({ timeout: 15_000 });
   });
 

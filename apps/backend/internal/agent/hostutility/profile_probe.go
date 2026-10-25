@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 var errProfileContextChanged = errors.New("profile discovery context changed during probe; retry")
@@ -89,7 +90,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 	probeReq.ProfileContext = true
 	probeReq.InferenceConfig.Env = cloneStringMap(req.Context.Env)
 	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.Context.CLIFlags...)
-	probeReq.InferenceConfig.CommandPrefix = append([]string(nil), req.Context.CommandPrefix...)
+	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.Context.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)
@@ -213,7 +214,7 @@ func (m *Manager) resolveProfileModelConfigFlight(
 	probeReq.ConfigOptions = cloneStringMap(req.ConfigOptions)
 	probeReq.InferenceConfig.Env = cloneStringMap(req.ProfileContext.Env)
 	probeReq.InferenceConfig.CLIFlags = append([]string(nil), req.ProfileContext.CLIFlags...)
-	probeReq.InferenceConfig.CommandPrefix = append([]string(nil), req.ProfileContext.CommandPrefix...)
+	probeReq.InferenceConfig.LaunchWrapper = launchwrapper.Profile(req.ProfileContext.CommandPrefix)
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	release, err := inst.acquireOperation(probeCtx, false)

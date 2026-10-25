@@ -82,8 +82,9 @@ beforeEach(() => {
 afterEach(cleanup);
 
 // @covers AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.1, AC-AGENTS-IMAGE-PREVIEW-DEFAULTS-001.5
+// @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.1, AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.3
 it.each([1, 2])(
-  "automatically loads an image in version %i and reuses its content",
+  "loads and expands an image in version %i without another read or file navigation",
   async (version) => {
     const target = { ...initial, path: "screenshot.PNG" };
     const props = propsFor(target);
@@ -105,9 +106,12 @@ it.each([1, 2])(
       };
     }
     transport.read.mockResolvedValue({ content: "aW1hZ2U=", is_binary: true });
-    render(<RendererHarness {...props} />);
+    const onOpenFile = vi.fn();
+    render(<RendererHarness {...props} onOpenFile={onOpenFile} />);
     expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
-    const image = await screen.findByRole("img");
+    const triggerName = version === 1 ? "Open Report" : "Open screenshot.PNG";
+    const trigger = await screen.findByRole("button", { name: triggerName });
+    const image = within(trigger).getByRole("presentation");
     expect(image.getAttribute("src")).toBe("data:image/png;base64,aW1hZ2U=");
     expect(transport.read).toHaveBeenCalledWith(
       transport.client,
@@ -115,11 +119,24 @@ it.each([1, 2])(
       target.path,
       target.repo,
     );
+    await act(async () => fireEvent.click(trigger));
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("img").getAttribute("src")).toBe(image.getAttribute("src"));
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Close" })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toggle().getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+    expect(onOpenFile).not.toHaveBeenCalled();
     await togglePreview();
-    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("button", { name: triggerName })).toBeNull();
     await togglePreview();
-    expect(screen.getByRole("img").getAttribute("src")).toBe(image.getAttribute("src"));
+    expect(
+      within(screen.getByRole("button", { name: triggerName }))
+        .getByRole("presentation")
+        .getAttribute("src"),
+    ).toBe(image.getAttribute("src"));
     expect(transport.read).toHaveBeenCalledOnce();
+    await act(async () => fireEvent.click(screen.getByTestId("rich-output-file-open")));
+    expect(onOpenFile).toHaveBeenCalledExactlyOnceWith(target.path, target.repo);
   },
 );
 
@@ -389,4 +406,29 @@ it("keeps duplicate-target cards independent when only the first is replaced", a
   expect(within(second).getByText(contentFor(initial))).toBeTruthy();
   expect(within(second).getByTestId(PREVIEW_TOGGLE).getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
   expect(transport.read).toHaveBeenCalledTimes(3);
+});
+
+// @covers AC-AGENTS-IMAGE-PREVIEW-EXPANSION-001.4
+it.each([
+  { field: "path", target: { ...initial, path: "new.png" } },
+  { field: "repository", target: { ...initial, path: "old.png", repo: "beta" } },
+  { field: "session", target: { ...initial, path: "old.png", sessionId: "session-b" } },
+])("dismisses an open image when its $field changes", async ({ target }) => {
+  transport.read.mockResolvedValueOnce({ content: "b2xk", is_binary: true });
+  transport.read.mockResolvedValue({ content: "bmV3", is_binary: true });
+  const view = render(<RendererHarness {...propsFor({ ...initial, path: "old.png" })} />);
+  const trigger = await screen.findByRole("button", { name: "Open Report" });
+  await act(async () => fireEvent.click(trigger));
+  expect(within(screen.getByRole("dialog")).getByRole("img").getAttribute("src")).toBe(
+    "data:image/png;base64,b2xk",
+  );
+  view.rerender(<RendererHarness {...propsFor(target)} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  const nextTrigger = await screen.findByRole("button", { name: "Open Report" });
+  await act(async () => fireEvent.click(nextTrigger));
+  expect(within(screen.getByRole("dialog")).getByRole("img").getAttribute("src")).toBe(
+    "data:image/png;base64,bmV3",
+  );
+  view.unmount();
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

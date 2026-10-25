@@ -103,8 +103,10 @@ test.describe("Plugin Action compatibility", () => {
       leftId,
     ]);
     await testPage.reload();
+    await expect(standardAction).toBeVisible();
+    await expect(testPage.locator(`[data-status-item-id="${rightId}"]`)).toBeVisible();
+    await expect(testPage.locator(`[data-status-item-id="${leftId}"]`)).toBeVisible();
     await expect.poll(readStatusOrder).toEqual(expectedStatusOrder);
-    await expect(testPage.getByTestId("e2e-main-topbar-action")).toBeVisible();
 
     await testPage.goto("/settings/plugins");
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);

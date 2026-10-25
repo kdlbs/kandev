@@ -995,19 +995,6 @@ func (s *Service) cancelAgentSilentExpectedWithGuard(
 	return waitErr
 }
 
-func (s *Service) cancelAgentSilentWithGuardAction(
-	ctx context.Context,
-	taskID string,
-	sessionID string,
-	unlockGuard func(),
-	relockGuard func(context.Context) error,
-	action func(context.Context) (bool, error),
-) (bool, error) {
-	return s.cancelAgentSilentWithGuardActionKind(
-		ctx, taskID, sessionID, unlockGuard, relockGuard, action, cancellationKindSilent,
-	)
-}
-
 func (s *Service) cancelAgentSilentWithGuardActionKind(
 	ctx context.Context,
 	taskID string,
@@ -1084,23 +1071,6 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
 		}
 	}
 	return operation, dispatched, waitErr
-}
-
-func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {
-	if errors.Is(err, lifecycle.ErrCancelEscalated) {
-		s.logger.Warn("agent did not acknowledge silent clarification cancel; reconciling session state",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return
-	}
-	// Agent crashed or exited mid-turn — clarification recovery cannot signal a cancel,
-	// but we still reconcile state below so a fresh prompt can run. Error level so this
-	// surfaces for root-cause investigation of the crash.
-	s.logger.Error("agent process appears to have crashed during clarification recovery",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.Error(err))
 }
 
 func (s *Service) cancelClarificationWatchdogsForSession(

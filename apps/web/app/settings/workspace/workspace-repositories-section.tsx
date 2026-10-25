@@ -21,6 +21,7 @@ type WorkspaceRepositoriesSectionProps = {
     | "handleUpdateRepositoryScript"
     | "handleDeleteRepositoryScript"
     | "handleSaveRepository"
+    | "handleDiscardRepository"
     | "handleDeleteRepository"
     | "openDialog"
     | "setRemoteRepoDialogOpen"
@@ -41,6 +42,7 @@ export function WorkspaceRepositoriesSection({
     handleUpdateRepositoryScript,
     handleDeleteRepositoryScript,
     handleSaveRepository,
+    handleDiscardRepository,
     handleDeleteRepository,
     openDialog,
     setRemoteRepoDialogOpen,
@@ -81,6 +83,7 @@ export function WorkspaceRepositoriesSection({
             onUpdateScript={handleUpdateRepositoryScript}
             onDeleteScript={handleDeleteRepositoryScript}
             onSave={handleSaveRepository}
+            onDiscard={handleDiscardRepository}
             onDelete={handleDeleteRepository}
           />
         ))}

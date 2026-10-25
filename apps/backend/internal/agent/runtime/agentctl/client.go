@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
@@ -78,6 +79,14 @@ type Client struct {
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
 
+	// Session capabilities are populated by the ACP initialize response and
+	// used by idle-session MCP reconfiguration to choose resume versus load.
+	supportsSessionResume bool
+	supportsSessionLoad   bool
+
+	// lastAttachmentAttemptID is returned by session/load and session/resume
+	// after the backend starts its evidence timeline.
+	lastAttachmentAttemptID string
 	// durableDelivery records the agentctl transport capability returned during
 	// initialize. It is separate from ACP capabilities because it describes the
 	// retained agentctl-to-backend journal rather than the native harness.
@@ -123,6 +132,46 @@ func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+// SupportsSessionResume reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionResume() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionResume
+}
+
+// SupportsSessionLoad reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionLoad() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionLoad
+}
+
+// GetLastAttachmentAttemptID returns the most recent backend-owned MCP
+// attachment attempt returned by an agentctl session operation.
+func (c *Client) GetLastAttachmentAttemptID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastAttachmentAttemptID
+}
+
+func (c *Client) setSessionCapabilities(info *AgentInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if info == nil {
+		c.supportsSessionResume = false
+		c.supportsSessionLoad = false
+		return
+	}
+	c.supportsSessionResume = info.SupportsSessionResume
+	c.supportsSessionLoad = info.SupportsSessionLoad
+}
+
+func (c *Client) setLastAttachmentAttemptID(attemptID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastAttachmentAttemptID = attemptID
 }
 
 func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {
@@ -538,10 +587,8 @@ func (t *instanceIDTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 // wsAuthHeaders returns HTTP headers for WebSocket dial calls.
 func (c *Client) wsAuthHeaders() http.Header {
-	if c.authToken == "" && c.executionID == "" {
-		return nil
-	}
 	h := http.Header{}
+	h.Set("X-Kandev-Delivery-Version", "2")
 	if c.authToken != "" {
 		h.Set("Authorization", "Bearer "+c.authToken)
 	}
@@ -612,30 +659,39 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 
 // ConfigureAgent configures the agent command. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string) error {
-	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false)
+func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false, wrapper...)
 }
 
 // ConfigureAgentWithEnvironment configures the agent with a complete effective
 // environment. The agentctl instance replaces its indexed Git configuration
 // block while preserving ordinary instance variables. Use this when the
 // caller has already composed inherited and generated environment sources.
-func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string) error {
-	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true)
+func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, wrapper ...launchwrapper.Spec) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true, wrapper...)
 }
 
-func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool) error {
+func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
+	spec := launchwrapper.Spec{}
+	if len(wrapper) > 0 {
+		spec = wrapper[0]
+	}
+	if err := c.requireLaunchWrapper(ctx, spec); err != nil {
+		return err
+	}
 	payload := struct {
-		Command         string            `json:"command"`
-		AgentArgs       *[]string         `json:"agent_args,omitempty"`
-		ContinueCommand string            `json:"continue_command,omitempty"`
-		ContinueArgs    *[]string         `json:"continue_args,omitempty"`
-		Env             map[string]string `json:"env,omitempty"`
-		ReplaceEnv      bool              `json:"replace_env,omitempty"`
+		LaunchWrapper   launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+		Command         string             `json:"command"`
+		AgentArgs       *[]string          `json:"agent_args,omitempty"`
+		ContinueCommand string             `json:"continue_command,omitempty"`
+		ContinueArgs    *[]string          `json:"continue_args,omitempty"`
+		Env             map[string]string  `json:"env,omitempty"`
+		ReplaceEnv      bool               `json:"replace_env,omitempty"`
 	}{
+		LaunchWrapper:   spec,
 		Command:         command,
 		ContinueCommand: continueCommand,
 		Env:             env,

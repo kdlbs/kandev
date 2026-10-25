@@ -2,16 +2,18 @@ package mcpconfig
 
 import (
 	"encoding/json"
-	"fmt"
+	"path"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/passthroughconfig"
 )
 
 // PassthroughPaths carries filesystem locations a strategy may use to
 // materialize MCP config for a passthrough (raw CLI) launch without writing to
 // the user's global config.
 type PassthroughPaths struct {
+	Unix bool
 	// TempConfigPath is a kandev-owned temp file path a strategy may write a
 	// config file to (used by Claude and OpenCode). Empty when unavailable.
 	TempConfigPath string
@@ -19,6 +21,14 @@ type PassthroughPaths struct {
 	// strategies that write a project-local config file (Cursor). Empty when
 	// unavailable.
 	WorkspaceDir string
+}
+
+func (p PassthroughPaths) projectPath(parts ...string) string {
+	parts = append([]string{p.WorkspaceDir}, parts...)
+	if p.Unix {
+		return path.Join(parts...)
+	}
+	return filepath.Join(parts...)
 }
 
 // PassthroughConfigFile is a config file a strategy wants materialized on disk.
@@ -75,9 +85,9 @@ func marshalMCPFile(v any) ([]byte, error) {
 
 // --- Claude ------------------------------------------------------------------
 
-// claudeReservedServerName is skipped by Claude Code at load time (it warns and
+// ClaudeReservedServerName is skipped by Claude Code at load time (it warns and
 // ignores it), so we never emit it.
-const claudeReservedServerName = "workspace"
+const ClaudeReservedServerName = "workspace"
 
 // claudeStreamableHTTPType is Claude Code's spelling of streamable HTTP (hyphen,
 // not underscore); Claude treats it as an alias of "http".
@@ -110,7 +120,7 @@ func (s ClaudeStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Pas
 	}
 	entries := make(map[string]claudeServerEntry, len(servers))
 	for _, srv := range servers {
-		if srv.Name == "" || srv.Name == claudeReservedServerName {
+		if srv.Name == "" || srv.Name == ClaudeReservedServerName {
 			continue
 		}
 		entries[srv.Name] = claudeServerEntryFromServer(srv)
@@ -318,7 +328,7 @@ func (CursorStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passt
 	}
 	return PassthroughArtifacts{
 		Files: []PassthroughConfigFile{{
-			Path:     filepath.Join(paths.WorkspaceDir, ".cursor", "mcp.json"),
+			Path:     paths.projectPath(".cursor", "mcp.json"),
 			Content:  content,
 			MergeKey: "mcpServers",
 		}},
@@ -377,7 +387,7 @@ func (PiStrategy) BuildPassthroughMCP(servers []types.McpServer, paths Passthrou
 	}
 	return PassthroughArtifacts{
 		Files: []PassthroughConfigFile{{
-			Path:     filepath.Join(paths.WorkspaceDir, ".pi", "mcp.json"),
+			Path:     paths.projectPath(".pi", "mcp.json"),
 			Content:  content,
 			MergeKey: "mcpServers",
 		}},
@@ -471,35 +481,5 @@ func (OpenCodeStrategy) Describe() string {
 // than clobber malformed content. Output is pretty-printed with a trailing
 // newline to match the other writers.
 func MergeJSONUnderKey(existing, ours []byte, key string) ([]byte, error) {
-	existingDoc := map[string]json.RawMessage{}
-	if err := json.Unmarshal(existing, &existingDoc); err != nil {
-		return nil, fmt.Errorf("existing config is not a JSON object: %w", err)
-	}
-	oursDoc := map[string]json.RawMessage{}
-	if err := json.Unmarshal(ours, &oursDoc); err != nil {
-		return nil, fmt.Errorf("generated config is not a JSON object: %w", err)
-	}
-
-	entries := map[string]json.RawMessage{}
-	if raw, ok := existingDoc[key]; ok {
-		if err := json.Unmarshal(raw, &entries); err != nil {
-			return nil, fmt.Errorf("existing %q is not an object: %w", key, err)
-		}
-	}
-	ourEntries := map[string]json.RawMessage{}
-	if raw, ok := oursDoc[key]; ok {
-		if err := json.Unmarshal(raw, &ourEntries); err != nil {
-			return nil, fmt.Errorf("generated %q is not an object: %w", key, err)
-		}
-	}
-	for name, entry := range ourEntries {
-		entries[name] = entry
-	}
-
-	mergedKey, err := json.Marshal(entries)
-	if err != nil {
-		return nil, err
-	}
-	existingDoc[key] = mergedKey
-	return marshalMCPFile(existingDoc)
+	return passthroughconfig.MergeJSONUnderKey(existing, ours, key)
 }

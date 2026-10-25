@@ -714,6 +714,16 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.setClauseTextValue(0, "foo");
     await filters.saveAs("My View");
     await filters.expectActiveViewChip("My View");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        const saved = settings.sidebar_views_by_workspace[seedData.workspaceId];
+        return (
+          saved.views.some((view) => view.name === "My View" && view.id === saved.active_view_id) &&
+          (saved.draft ?? null) === null
+        );
+      })
+      .toBe(true);
 
     await testPage.reload();
     const session2 = new SessionPage(testPage);

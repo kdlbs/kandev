@@ -356,6 +356,43 @@ function configureSession(
 }
 
 describe("cached session entry history readiness", () => {
+  it("retires a deleted retry notice after subscription refresh without losing an in-flight row", async () => {
+    const readiness = deferred<void>();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.taskSessions.items["sess-1"] = { state: "WAITING_FOR_INPUT" };
+    const original = makeMessage({ id: "original", created_at: "2024-01-01T00:00:00Z" });
+    const retired = makeMessage({
+      id: "retired-retry",
+      author_type: "agent",
+      type: "status",
+      metadata: { retrying: true },
+      created_at: "2024-01-01T00:00:01Z",
+    });
+    const reply = makeMessage({ id: "reply", created_at: "2024-01-01T00:00:02Z" });
+    const live = makeMessage({ id: "live", created_at: "2024-01-01T00:00:03Z" });
+    mockState.messages.bySession["sess-1"] = [original, retired];
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalled());
+    mockState.messages.bySession["sess-1"] = [original, retired, live];
+    await act(async () => {
+      response.resolve({ messages: [reply, original], has_more: false });
+      await response.promise;
+    });
+    const merged = mockState.mergeMessages.mock.calls.at(-1)?.[1] as Message[];
+    expect(merged.map(({ id }) => id)).toEqual(["original", "reply", "live"]);
+    unmount();
+  });
+
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.11
   it("keeps cached-entry history placement pending until its background refresh settles", async () => {
     const readiness = deferred<void>();

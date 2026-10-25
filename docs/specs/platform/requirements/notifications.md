@@ -29,6 +29,9 @@ Kandev currently treats every transition to a session's generic `WAITING_FOR_INP
 - **AC-PLATFORM-NOTIFICATIONS-001.8:** Fresh default Local and System providers subscribe to update availability. On upgrade, existing Local and System providers receive that subscription once; a migration marker prevents later startup from re-enabling a choice the user removed. Existing Apprise providers are never opted in automatically.
 - **AC-PLATFORM-NOTIFICATIONS-001.9:** Provider creation and update shall save provider fields and selected event subscriptions as one atomic configuration. Invalid input or a confirmed persistence abort shall leave all existing provider fields and subscriptions unchanged; an aborted creation shall leave no provider or subscription rows. A connection error during commit may have an unknown outcome; the saved configuration must be reloaded before retrying.
 - **AC-PLATFORM-NOTIFICATIONS-001.10:** An update that omits event selection shall preserve existing subscriptions. An explicitly empty selection shall remove all subscriptions. An update of a missing provider or a provider owned by another user shall fail without changing any provider or subscription rows.
+- **AC-PLATFORM-NOTIFICATIONS-001.11:** For a task-scoped Local notification, Kandev shall suppress sound and browser/native notification dispatch for current-task attention only when its document is visible, has focus, and shows that task. A visible but unfocused window, a hidden document, or a different active task shall remain eligible for existing Local delivery, subject to the existing event selection, sound preference, transport availability, and notification permission. The attention decision shall use the current state for each occurrence, including when focus changes between occurrences in the same session.
+
+- **AC-PLATFORM-NOTIFICATIONS-001.12:** When a notification settings Save succeeds, the accepted baseline and shared saved-provider snapshot advance to the acknowledged canonical configuration. Any later provider/event, Apprise name/URL, create-form, or deletion draft remains current and dirty wherever it differs from that baseline. A subsequent explicit Save persists those choices; Reset restores the acknowledged baseline. A confirmed failed Save preserves the draft and existing error behavior. This applies to the existing desktop and phone controls without changing their composition.
 
 ## Migrated source detail
 
@@ -258,6 +261,8 @@ Notification bodies contain the task title but not the question text.
 
 ## Implementation Plan
 
+- [Notification window focus](../../../plans/notification-window-focus/plan.md), with the focused [Local notification attention design](../system-design/local-notification-attention.md).
+- [Notification Save draft preservation](../../../plans/notification-save-drafts/plan.md)
 - [Notification settings atomicity](../../../plans/notification-settings-atomicity/plan.md)
 - [Semantic notification implementation](../../../plans/semantic-notifications/plan.md)
 - [Update notification reliability remediation](../../../plans/update-notification-reliability/plan.md)

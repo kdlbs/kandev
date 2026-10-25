@@ -498,6 +498,7 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
+      E2E_FAIL_ON_FLAKY: "1"
       KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
@@ -604,7 +605,7 @@ jobs:
           retention-days: 3
 
       - name: Upload test results
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results-${{ matrix.shard }}
@@ -672,6 +673,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
+      E2E_FAIL_ON_FLAKY: "1"
       KANDEV_E2E_CATALOG_PRODUCER_ATTEMPT: ${{ needs.build.outputs.catalog_attempt }}
     strategy:
       fail-fast: false
@@ -812,6 +814,10 @@ jobs:
             -v /tmp/ms-playwright:/dest \
             "$PLAYWRIGHT_RUNTIME_REF" \
             cp -a /ms-playwright/. /dest/
+          # The browsers are now on disk; the host-side E2E tests do not use
+          # this multi-gigabyte image, so release its layers before building
+          # their Docker fixtures.
+          docker image rm "$PLAYWRIGHT_RUNTIME_REF"
 
       # Browser binaries come from the verified cache or the image above.
       # GitHub's Ubuntu runners usually already have the shared libs Chromium
@@ -1029,7 +1035,7 @@ jobs:
           retention-days: 3
 
       - name: Upload containers E2E results
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: containers-e2e-test-results-${{ matrix.shard }}
@@ -1185,7 +1191,7 @@ jobs:
           rm -f -- "$ownership_marker"
 
       - name: Upload Kubernetes compatibility results
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kubernetes-compatibility-results-${{ matrix.id }}

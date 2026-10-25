@@ -1,3 +1,4 @@
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
@@ -509,6 +510,7 @@ test("767px fine-pointer phone uses the drawer and touch-sized actions", async (
   await session.mobilePanels.click();
   await session.mobilePortForwardingOpen.click();
   await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "drawer");
+  await waitForFiniteAnimations(session.portForwardDialog);
   const close = session.portForwardDialog.getByRole("button", { name: "Close", exact: true });
   const box = await close.boundingBox();
   expect(box!.width).toBeGreaterThanOrEqual(44);

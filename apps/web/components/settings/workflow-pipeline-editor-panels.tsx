@@ -16,13 +16,14 @@ import {
   STEP_COLORS,
   hasOnEnterAction,
   hasOnExitAction,
+  type TransitionEventKey,
 } from "./workflow-pipeline-editor-helpers";
 import {
   useStepActions,
   CompleteTaskOnEnterToggle,
   TurnStartSelect,
   TurnCompleteSelect,
-  ChildrenCompletedSelect,
+  EventTransitionSelect,
 } from "./workflow-pipeline-editor-step-actions";
 import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
 import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
@@ -367,6 +368,50 @@ function StepBehaviorSection({
   );
 }
 
+// --- EventTransitionSelects ---
+
+type EventTransitionSelectsProps = {
+  step: WorkflowStep;
+  savedStep?: WorkflowStep;
+  otherSteps: WorkflowStep[];
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  setEventTransition: (eventKey: TransitionEventKey, type: string, targetStepId?: string) => void;
+  readOnly: boolean;
+};
+
+/** Transition selectors for events raised outside agent turns. */
+function EventTransitionSelects(props: EventTransitionSelectsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <EventTransitionSelect
+        {...props}
+        eventKey="on_children_completed"
+        testIdSegment="children-completed"
+        label={t("workflows:whenChildTasksComplete")}
+        help={t("workflows:childrenCompletedHelp")}
+        helpAria={t("workflows:childrenCompletedHelpAria")}
+      />
+      <EventTransitionSelect
+        {...props}
+        eventKey="on_pr_merged"
+        testIdSegment="pr-merged"
+        label={t("workflows:whenPRMerged")}
+        help={t("workflows:prMergedHelp")}
+        helpAria={t("workflows:prMergedHelpAria")}
+      />
+      <EventTransitionSelect
+        {...props}
+        eventKey="on_pr_closed"
+        testIdSegment="pr-closed"
+        label={t("workflows:whenPRClosed")}
+        help={t("workflows:prClosedHelp")}
+        helpAria={t("workflows:prClosedHelpAria")}
+      />
+    </>
+  );
+}
+
 // --- StepTransitionsSection ---
 
 type StepTransitionsSectionProps = {
@@ -376,7 +421,7 @@ type StepTransitionsSectionProps = {
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   setTransition: (type: string) => void;
   setOnTurnStartTransition: (type: string) => void;
-  setChildrenCompletedTransition: (type: string) => void;
+  setEventTransition: (eventKey: TransitionEventKey, type: string, targetStepId?: string) => void;
   toggleDisablePlanMode: () => void;
   toggleOnExitAction: (type: string) => void;
   readOnly: boolean;
@@ -389,7 +434,7 @@ function StepTransitionsSection({
   onUpdate,
   setTransition,
   setOnTurnStartTransition,
-  setChildrenCompletedTransition,
+  setEventTransition,
   toggleDisablePlanMode,
   toggleOnExitAction,
   readOnly,
@@ -424,12 +469,12 @@ function StepTransitionsSection({
           planModeEnabled={planModeEnabled}
           readOnly={readOnly}
         />
-        <ChildrenCompletedSelect
+        <EventTransitionSelects
           step={step}
           savedStep={savedStep}
           otherSteps={otherSteps}
           onUpdate={onUpdate}
-          setChildrenCompletedTransition={setChildrenCompletedTransition}
+          setEventTransition={setEventTransition}
           readOnly={readOnly}
         />
       </div>
@@ -543,7 +588,7 @@ export function StepConfigPanel({
           onUpdate={onUpdate}
           setTransition={actions.setTransition}
           setOnTurnStartTransition={actions.setOnTurnStartTransition}
-          setChildrenCompletedTransition={actions.setChildrenCompletedTransition}
+          setEventTransition={actions.setEventTransition}
           toggleDisablePlanMode={actions.toggleDisablePlanMode}
           toggleOnExitAction={actions.toggleOnExitAction}
           readOnly={readOnly}

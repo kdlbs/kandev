@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-10-13
+updated: 2026-10-22
 owners:
   - tbd
 ---
@@ -20,7 +20,50 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | --- | --- |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .11-.15) | [Discussion reply draft settlement](#discussion-reply-draft-settlement) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .20-.23) | [Watch dialog ownership](#watch-dialog-ownership) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .16-.19) | [Pipeline job summary classification](#pipeline-job-summary-classification) |
+
+## Watch dialog ownership
+
+AC .20-.23 use the existing `GitLabWatchSettings` actions, review/issue wrappers,
+shared `GitLabWatchDialog`, domain hooks, API and store. The shared dialog owns
+only draft, inline error, busy state and dismissal. Domain actions continue
+publishing accepted writes and their truthful parent feedback after dismissal.
+
+Render one form lifetime only while open, keyed by workspace, kind and selected
+watch ID (including create mode). Initialize local form state once from the
+selected watch/defaults. Same-ID object replacement is data hydration, not a new
+opening. Closing and reopening unmounts and creates a fresh lifetime even when
+all identity values are equal; keys alone do not represent an opening counter.
+Use a local ref activated in layout-effect setup and revoked in cleanup, plus
+synchronous revocation when the user dismisses. StrictMode setup restores the
+ref after its simulated cleanup. Do not mutate ownership during render.
+
+Capture the existing normalized payload and callbacks at Save. Await the real
+create/update unconditionally. Gate only dialog-local success dismissal, catch
+inline error and finally busy release by that form's liveness. This keeps old
+requests authoritative for their original accepted writes without granting them
+ownership of a newer form. A new form has independent busy state. No shared
+revision framework, API changes, cache rewrites or ADR are necessary: the local
+component boundary preserves the complete ownership rule.
+
+The existing watch dialog is the nearest shipped phone surface. Preserve its
+single vertical scroller, dynamic viewport bounds, stacked phone fields/actions
+and desktop paired fields. Entry is the workspace GitLab settings New watch or
+row Edit action on its existing phone card. The focused edit surface
+supports a multi-field task rather than adding a picker drawer. Desktop and
+native phone taps exercise the same domain actions; existing primitives own
+safe-area/touch sizing. No geometry or navigation redesign is included.
+
+Verification uses real parent/settings/provider/domain/API/store integration
+with controlled fetch settlement; only the unrelated Monaco renderer may be
+stubbed in jsdom while its loader exports and ScriptEditor wrapper remain real.
+Keep ordinary owned success/failure controls, old success and rejection,
+create/update and review/issue, same/different reopening, scope replacement,
+unmount/StrictMode, hydration, retry, raw focus/caret and newer busy ownership.
+Production-build desktop and mobile E2E hold only the causal HTTP response
+through a disposable mock-GitLab backend, preserving actual persistence.
+See the [one work order](../../../plans/gitlab-watch-dialog-ownership/task-01-preserve-current-watch.md).
 
 ## Pipeline job summary classification
 

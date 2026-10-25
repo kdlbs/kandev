@@ -551,5 +551,17 @@
   "sidebarYearsMax": "99年以上",
   "integrationSettings": "統合設定",
   "pageNavigation": "このページ",
-  "viewOptions": "表示オプション"
+  "viewOptions": "表示オプション",
+  "commandGoToArchivedTasks": "アーカイブ済みタスクへ移動",
+  "commandGoToArchivedTasksKeywords": "アーカイブ済みタスク, アーカイブ, 履歴",
+  "conversationSearch_open": "タスクを検索",
+  "conversationSearch_match": "会話の一致",
+  "conversationSearch_searching": "会話を検索中…",
+  "conversationSearch_indexing": "会話のインデックスを作成中です。",
+  "conversationSearch_limited": "一部の一致を省略しました。検索条件を絞ってください。",
+  "conversationSearch_unavailable": "会話の検索は利用できません。",
+  "conversationSearch_query_too_short": "会話の検索には3文字以上を入力してください。",
+  "conversationSearch_query_too_long": "会話の検索は200文字以内で入力してください。",
+  "conversationSearch_query_too_broad": "文字または数字を3つ以上連続して入力してください。",
+  "conversationSearch_title": "コマンドパレット"
 }

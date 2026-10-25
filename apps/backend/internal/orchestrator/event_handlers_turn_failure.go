@@ -133,7 +133,7 @@ func (s *Service) settleRetainedTurnFailure(
 	data watcher.AgentEventData,
 	session *models.TaskSession,
 ) bool {
-	priorRetry, priorAttempt, priorStarted := s.retainedRetryProgress(data.SessionID)
+	priorRetry, priorAttempt, priorStarted, priorStop := s.retainedRetryProgress(data.SessionID, classifyKanbanFailure(data).Code)
 	if s.handleTransientFailure(ctx, data) {
 		// handleTransientFailure has already accepted durable ownership of this
 		// generation. Its timer can finish and retire the entry before this call
@@ -143,10 +143,9 @@ func (s *Service) settleRetainedTurnFailure(
 	}
 	if priorRetry {
 		data.RecoveryAttemptsStarted = priorStarted
-		if priorStarted >= transientMaxAttempts {
-			data.RecoveryDisposition = recoveryDispositionExhausted
-		} else {
-			data.RecoveryDisposition = "refused"
+		data.RecoveryDisposition = recoveryDispositionRefused
+		if priorStop != "" {
+			data.RecoveryDisposition = priorStop
 		}
 		if priorAttempt > 0 {
 			s.resetTransientRetry(data.SessionID)
@@ -156,7 +155,7 @@ func (s *Service) settleRetainedTurnFailure(
 		classifyKanbanFailure(data),
 		time.Now().UTC(),
 	) == routingerr.DecisionShortRetry {
-		data.RecoveryDisposition = "refused"
+		data.RecoveryDisposition = recoveryDispositionRefused
 	}
 
 	failedTurnID, err := s.markRetainedFailureTurn(ctx, data)
@@ -225,19 +224,23 @@ func retainedFailureManagedInputDisposition(
 	return messagequeue.ManagedInputStateUncertain, "execution_failed_effects_unknown"
 }
 
-func (s *Service) retainedRetryProgress(sessionID string) (bool, int, int) {
+func (s *Service) retainedRetryProgress(sessionID string, code routingerr.Code) (bool, int, int, string) {
 	value, ok := s.transientRetries.Load(sessionID)
 	if !ok {
-		return false, 0, 0
+		return false, 0, 0, ""
 	}
 	entry, ok := value.(*transientRetryEntry)
 	if !ok || entry.retainedRuntime == nil {
-		return false, 0, 0
+		return false, 0, 0, ""
 	}
 	entry.mu.Lock()
 	attempt, started := entry.attempt, entry.started
 	entry.mu.Unlock()
-	return true, attempt, started
+	disposition := entry.stopDisposition(s.transientRetryNow())
+	if !entry.policy.windowEndsAt.IsZero() && code != routingerr.CodeModelCapacity {
+		disposition = ""
+	}
+	return true, attempt, started, disposition
 }
 
 func (s *Service) currentRetainedTurnFailureAttempt(sessionID, executionID string, generation uint64) bool {

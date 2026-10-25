@@ -166,15 +166,18 @@ func (s *Service) retryRetainedRuntimePrompt(
 		if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
 			return ErrResumeAttemptCancelled
 		}
-		if !started {
-			entry.mu.Lock()
-			entry.started++
-			entry.mu.Unlock()
-			started = true
+		if entry.stopDisposition(s.transientRetryNow()) != "" {
+			return ErrResumeAttemptCancelled
 		}
 		return nil
 	}
 	onAccepted := func(turnID string) {
+		entry.mu.Lock()
+		if !started {
+			entry.started++
+			started = true
+		}
+		entry.mu.Unlock()
 		if prompt.onAccepted != nil {
 			prompt.onAccepted(turnID)
 		}
@@ -191,7 +194,13 @@ func (s *Service) retryRetainedRuntimePrompt(
 	}
 	_, err := s.promptTask(ctx, taskID, sessionID, prompt.text, prompt.model, prompt.planMode, prompt.attachments,
 		false, launchOriginAutomatic, promptTaskOptions{
-			onAccepted:     onAccepted,
+			onAccepted: onAccepted,
+			beforeProviderAdmission: func() error {
+				if current, ok := s.transientRetries.Load(sessionID); !ok || current != entry || entry.policy.expired(s.transientRetryNow()) {
+					return ErrResumeAttemptCancelled
+				}
+				return nil
+			},
 			beforeDispatch: beforeDispatch,
 		})
 	if err == nil || ctx.Err() != nil {
@@ -206,7 +215,11 @@ func (s *Service) retryRetainedRuntimePrompt(
 	}
 	s.logger.Warn("retained-runtime transient replay could not dispatch",
 		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-	s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+	disposition := entry.stopDisposition(s.transientRetryNow())
+	if disposition == "" {
+		disposition = recoveryDispositionRefused
+	}
+	s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, disposition)
 }
 
 func (s *Service) finishRetainedRetryWithoutDispatch(

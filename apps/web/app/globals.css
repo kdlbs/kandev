@@ -2305,6 +2305,12 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-slot="drawer-content"]:has([data-walkthrough-step-options]),
+  [data-slot="drawer-overlay"]:has(+ [data-slot="drawer-content"] [data-walkthrough-step-options]) {
+    animation: none !important;
+    transition: none !important;
+  }
+
   [data-chat-text-motion],
   [data-chat-motion-item] {
     opacity: 1 !important;

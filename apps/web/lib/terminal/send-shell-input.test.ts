@@ -10,7 +10,7 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 // Imported after the mock so it picks up the mocked module.
-const { sendShellInput } = await import("./send-shell-input");
+const { sendShellInput, sendActiveTerminalInput } = await import("./send-shell-input");
 
 const SESSION = "sess-1";
 
@@ -111,5 +111,35 @@ describe("sendShellInput", () => {
         payload: { session_id: SESSION, data: "ls" },
       });
     });
+  });
+});
+
+describe("agent terminal input", () => {
+  it("never falls back to shell input when the agent socket is absent", () => {
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(false);
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+  });
+  it("preserves modifiers when a disconnected sender refuses input", () => {
+    const sender = vi.fn(() => false);
+    setActiveTerminalSender(sender, SESSION);
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(false);
+    expect(sender).toHaveBeenCalledWith("\x03");
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+  });
+  it("applies modifiers once and keeps input in the active agent session", () => {
+    const sender = vi.fn(() => true);
+    setActiveTerminalSender(sender, SESSION);
+    useShellModifiersStore.getState().toggleCtrl();
+    expect(sendActiveTerminalInput("another-session", "c")).toBe(false);
+    expect(sender).not.toHaveBeenCalled();
+    expect(sendActiveTerminalInput(SESSION, "c")).toBe(true);
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(sender).toHaveBeenCalledWith("\x03");
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
   });
 });

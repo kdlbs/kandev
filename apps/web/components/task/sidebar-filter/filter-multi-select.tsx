@@ -71,8 +71,9 @@ export function FilterMultiSelect({
         </button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[14rem] p-0"
+        className="w-[14rem] max-w-[calc(100vw-1rem)] p-0"
         align="start"
+        collisionPadding={8}
         data-testid="filter-value-multi-popover"
       >
         <Command>

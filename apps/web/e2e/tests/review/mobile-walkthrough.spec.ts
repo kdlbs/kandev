@@ -1,3 +1,5 @@
+import { exerciseWalkthroughFeedback, checkFeedbackReload } from "./walkthrough-feedback";
+import { watchWs } from "../../helpers/causal-waits";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
@@ -42,20 +44,17 @@ test.describe("Mobile code walkthrough", () => {
     seedData,
     prCapture,
   }) => {
+    const ws = watchWs(testPage);
     await seedWalkthroughTask(testPage, apiClient, seedData);
 
     await testPage.getByTestId("walkthrough-launcher").click();
     const card = testPage.getByTestId("walkthrough-floating");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAttribute("data-mobile-variant", "bottom-sheet");
-    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
-    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeVisible();
-    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeVisible();
-    await card.getByRole("textbox").fill("Why does this line exist?");
-    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeEnabled();
-    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+    await exerciseWalkthroughFeedback(testPage, card, ws);
+    await checkFeedbackReload(testPage, card);
     await prCapture.screenshot("mobile-walkthrough-feedback-controls", {
-      caption: "Mobile walkthrough keeps Add and Run without an inert Cancel action",
+      caption: "Touch-accessible step feedback and shared step picker",
     });
 
     const box = await card.boundingBox();
@@ -86,6 +85,239 @@ test.describe("Mobile code walkthrough", () => {
       caption: "Mobile Review stays isolated from the task walkthrough",
     });
   });
+
+  // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-003.4
+  test("selects a step with one touch after the viewport height changes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData);
+    await testPage.getByTestId("walkthrough-launcher").tap();
+    const card = testPage.getByTestId("walkthrough-floating");
+    const picker = card.getByTestId("walkthrough-step-picker");
+    const viewport = testPage.viewportSize()!;
+    for (const index of [1, 4, 0]) {
+      await picker.tap();
+      const sheet = testPage.getByRole("dialog", { name: "Go to step" });
+      await expect(sheet).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+      expect(await sheet.evaluate((element) => getComputedStyle(element).animationName)).not.toBe(
+        "none",
+      );
+      await expect(sheet.locator('[data-slot="command"]')).toHaveCSS(
+        "background-color",
+        "rgba(0, 0, 0, 0)",
+      );
+      await expect(testPage.getByRole("option").nth(index)).toBeVisible();
+      await testPage.setViewportSize({
+        width: viewport.width,
+        height: viewport.height - (index ? 64 : 0),
+      });
+      await expect(testPage.getByRole("option").nth(index)).toBeVisible();
+      await testPage.getByRole("option").nth(index).tap();
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText(
+        `Step ${index + 1} / 5`,
+      );
+      await expect(picker).toHaveAttribute("aria-expanded", "false");
+    }
+    await picker.focus();
+    await picker.press("ArrowDown");
+    await expect(testPage.locator('[data-slot="command"]')).toBeFocused();
+    await testPage.keyboard.press("ArrowDown");
+    await testPage.keyboard.press("Enter");
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+    await expect(picker).toHaveAttribute("aria-expanded", "false");
+    await expect(testPage.getByRole("dialog", { name: "Go to step" })).toBeHidden();
+    await testPage.emulateMedia({ reducedMotion: "reduce" });
+    await picker.tap();
+    await expect(testPage.getByRole("dialog", { name: "Go to step" })).toHaveCSS(
+      "animation-name",
+      "none",
+    );
+    await expect(testPage.locator('[data-slot="drawer-overlay"]')).toHaveCSS(
+      "animation-name",
+      "none",
+    );
+  });
+
+  // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-003.4
+  for (const withoutClicks of [false, true]) {
+    test(
+      withoutClicks
+        ? "selects touch steps without browser click events"
+        : "selects steps with consecutive first taps",
+      async ({ testPage, apiClient, seedData }) => {
+        await seedWalkthroughTask(testPage, apiClient, seedData);
+        await testPage.getByTestId("walkthrough-launcher").tap();
+        const card = testPage.getByTestId("walkthrough-floating");
+        const picker = card.getByTestId("walkthrough-step-picker");
+        if (withoutClicks) {
+          // Reproduce the physical iPhone trace: completed touches without a click.
+          await testPage.evaluate(() => {
+            document.addEventListener(
+              "click",
+              (event) => {
+                if (event.detail === 0) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+              },
+              true,
+            );
+          });
+        }
+        for (const index of [4, 0, 3, 1, 2, 0]) {
+          const triggerBox = (await picker.boundingBox())!;
+          // Wait for sheet motion explicitly; send each touch only once.
+          await testPage.touchscreen.tap(
+            triggerBox.x + triggerBox.width / 2,
+            triggerBox.y + triggerBox.height / 2,
+          );
+          const option = testPage.getByRole("option").nth(index);
+          await expect(option).toBeVisible();
+          const sheet = testPage.getByRole("dialog", { name: "Go to step" });
+          await sheet.evaluate(async (element) => {
+            await Promise.all(element.getAnimations().map((animation) => animation.finished));
+          });
+          const optionBox = (await option.boundingBox())!;
+          await testPage.touchscreen.tap(
+            optionBox.x + optionBox.width / 2,
+            optionBox.y + optionBox.height / 2,
+          );
+          await expect(card.getByTestId("walkthrough-step-header")).toContainText(
+            `Step ${index + 1} / 5`,
+          );
+          await expect(picker).toHaveAttribute("aria-expanded", "false");
+          await expect(sheet).toBeHidden();
+        }
+      },
+    );
+  }
+
+  // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-002.4
+  test("keeps composer navigation reachable on landscape phones", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedWalkthroughTask(testPage, apiClient, seedData);
+    await testPage.getByTestId("walkthrough-launcher").tap();
+    const card = testPage.getByTestId("walkthrough-floating");
+    await card.getByTestId("walkthrough-comment-trigger").tap();
+    await card.getByRole("textbox").fill("Keep this landscape draft.\n".repeat(20));
+    const next = card.getByTestId("walkthrough-next");
+    for (const { width, height } of [
+      { width: 639, height: 375 },
+      { width: 640, height: 375 },
+      { width: 667, height: 375 },
+      { width: 767, height: 375 },
+      { width: 667, height: 320 },
+    ]) {
+      await testPage.setViewportSize({ width, height });
+      await expect
+        .poll(() =>
+          next.evaluate((button) => {
+            const rect = button.getBoundingClientRect();
+            const card = button
+              .closest('[data-testid="walkthrough-floating"]')!
+              .getBoundingClientRect();
+            return (
+              rect.height >= 44 &&
+              rect.top >= card.top &&
+              rect.bottom <= Math.min(card.bottom, innerHeight) &&
+              button.contains(
+                document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+              )
+            );
+          }),
+        )
+        .toBe(true);
+      await expect
+        .poll(async () => {
+          const actions = (await card.locator("[data-comment-actions]").boundingBox())!;
+          const navigation = (await card.getByTestId("walkthrough-navigation").boundingBox())!;
+          return actions.y + actions.height <= navigation.y;
+        })
+        .toBe(true);
+      await expect
+        .poll(() =>
+          card.getByRole("textbox").evaluate((input) => {
+            const actions = input.parentElement!.querySelector("[data-comment-actions]")!;
+            const bounds = input.getBoundingClientRect();
+            return bounds.height >= 44 && bounds.bottom <= actions.getBoundingClientRect().top;
+          }),
+        )
+        .toBe(true);
+    }
+    await next.tap();
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+    await card.getByTestId("walkthrough-prev").tap();
+    await card.getByTestId("walkthrough-comment-trigger").tap();
+    await expect(card.getByRole("textbox")).toHaveValue("Keep this landscape draft.\n".repeat(20));
+  });
+
+  // @covers AC-UI-WALKTHROUGH-STEP-FEEDBACK-002.4
+  for (const withoutClicks of [false, true]) {
+    test(`navigates Previous and Next with single taps${withoutClicks ? " without click events" : ""}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      await seedWalkthroughTask(testPage, apiClient, seedData);
+      await testPage.getByTestId("walkthrough-launcher").tap();
+      const card = testPage.getByTestId("walkthrough-floating");
+      const previous = card.getByTestId("walkthrough-prev");
+      const next = card.getByTestId("walkthrough-next");
+      if (withoutClicks) {
+        await testPage.evaluate(() => {
+          document.addEventListener(
+            "click",
+            (event) => {
+              if (event.detail === 0) return;
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            },
+            true,
+          );
+        });
+      }
+      await expect(previous).toBeDisabled();
+      for (const { button, steps } of [
+        { button: next, steps: [2, 3, 4, 5] },
+        { button: previous, steps: [4, 3, 2, 1] },
+      ]) {
+        for (const step of steps) {
+          const box = (await button.boundingBox())!;
+          expect(box.height).toBeGreaterThanOrEqual(44);
+          await testPage.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+          await expect(card.getByTestId("walkthrough-step-header")).toContainText(
+            `Step ${step} / 5`,
+          );
+        }
+        await expect(button).toBeDisabled();
+        const boundaryBox = (await button.boundingBox())!;
+        const boundaryPointer = {
+          pointerType: "touch",
+          pointerId: 1,
+          isPrimary: true,
+          button: 0,
+          clientX: boundaryBox.x + boundaryBox.width / 2,
+          clientY: boundaryBox.y + boundaryBox.height / 2,
+        };
+        await button.dispatchEvent("pointerdown", boundaryPointer);
+        await button.dispatchEvent("pointerup", boundaryPointer);
+        await expect(card.getByTestId("walkthrough-step-header")).toContainText(
+          `Step ${steps.at(-1)} / 5`,
+        );
+      }
+      await expect(previous).toBeDisabled();
+      await next.focus();
+      await testPage.keyboard.press("Enter");
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 2 / 5");
+      await previous.focus();
+      await testPage.keyboard.press("Space");
+      await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 5");
+    });
+  }
 
   test("requests a walkthrough from Changes and opens the generated bottom sheet", async ({
     testPage,

@@ -1,6 +1,7 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskCreateDialogProps } from "./task-create-dialog";
+import type { MCPSelectionResponse, MCPSelectionScope } from "@/lib/types/http-mcp";
 
 const mocks = vi.hoisted(() => ({
   blocked: false,
@@ -9,10 +10,28 @@ const mocks = vi.hoisted(() => ({
   creating: vi.fn(),
   clearDraft: vi.fn(),
   createTask: vi.fn(),
+  setMcpServerIds: vi.fn(),
+  setMcpServerIdsDirty: vi.fn(),
 }));
 const TITLE = "Composed title";
 const PROMPT = "Entered composition draft";
 
+vi.mock("@/lib/api/domains/mcp-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/mcp-api")>()),
+  listMCPServers: vi.fn(async () => []),
+  getMCPSelections: vi.fn(
+    async (
+      scope: MCPSelectionScope,
+      ownerId: string,
+      workspaceId: string,
+    ): Promise<MCPSelectionResponse> => ({
+      scope,
+      owner_id: ownerId,
+      workspace_id: workspaceId,
+      definition_ids: [],
+    }),
+  ),
+}));
 vi.mock("@/hooks/use-is-utility-configured", () => ({ useIsUtilityConfigured: () => false }));
 vi.mock("@/hooks/use-utility-agent-generator", () => ({
   useUtilityAgentGenerator: () => ({ enhancePrompt: vi.fn(), isEnhancingPrompt: false }),
@@ -71,6 +90,10 @@ vi.mock("@/components/task-create-dialog-state", () => ({
     seededExecutorProfileId: null,
     freshBranchEnabled: false,
     priority: "medium",
+    mcpServerIds: [],
+    mcpServerIdsDirty: false,
+    setMcpServerIds: mocks.setMcpServerIds,
+    setMcpServerIdsDirty: mocks.setMcpServerIdsDirty,
     workflowAgentOverrides: {},
     blockedBy: [],
     setIsCreatingTask: mocks.creating,
@@ -81,7 +104,13 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useTaskCreateDialogData: () => ({
     workflows: [],
     agentProfiles: [],
-    executors: [],
+    executors: [
+      {
+        id: "executor-1",
+        type: "local",
+        profiles: [{ id: "executor-profile-1", executor_id: "executor-1" }],
+      },
+    ],
     snapshots: {},
     workspaceSnapshotRead: {},
     repositories: [],

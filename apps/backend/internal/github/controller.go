@@ -126,6 +126,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/repos/search", c.httpSearchRepos)
 	api.GET("/repos/:owner/:repo/branches", c.httpListRepoBranches)
 	api.GET("/repos/:owner/:repo/merge-methods", c.httpGetRepoMergeMethods)
+	api.GET("/repos/:owner/:repo/merge-access", c.httpGetRepoMergeAccess)
 
 	api.GET("/user/prs", c.httpSearchUserPRs)
 	api.GET("/user/issues", c.httpSearchUserIssues)

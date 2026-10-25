@@ -5,7 +5,7 @@
     {
       "engine": "sqlite3",
       "file": "sqlite.sql",
-      "sha256": "b7c763f6c3f1f6000e8a8f90a123ee3b114582bdd3a0aabf162eedae18cf57a3",
+      "sha256": "e802d742bfbac7f19d75f029d606d30454376afb5397438d3196ee6314d0dc3d",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-sqlite-sentinel"
       },
@@ -15,14 +15,28 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": { "allow_agent_edits": "0" }
+          "values": {"allow_agent_edits": "0"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": { "sort_order": "0" }
+          "values": {"sort_order": "0"}
+        },
+        {
+          "owner": "task",
+          "table": "executors",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor",
+          "values": {"owner_user_id": "<nil>"}
+        },
+        {
+          "owner": "task",
+          "table": "executor_profiles",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor-profile",
+          "values": {"owner_user_id": "<nil>"}
         }
       ],
       "owner_rows": [
@@ -31,214 +45,175 @@
           "table": "kandev_meta",
           "key_column": "key",
           "key_value": "fixture.sentinel",
-          "values": { "value": "v0.93.0-sqlite-sentinel" }
+          "values": {"value": "v0.93.0-sqlite-sentinel"}
         },
         {
           "owner": "task",
           "table": "workspaces",
           "key_column": "id",
           "key_value": "fixture-v0930-task-workspace",
-          "values": { "description": "preserved task workspace", "name": "Fixture Task Workspace" }
+          "values": {"description": "preserved task workspace", "name": "Fixture Task Workspace"}
         },
         {
           "owner": "task",
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-task",
-          "values": {
-            "description": "preserved task row",
-            "title": "Fixture Task",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved task row", "title": "Fixture Task", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "analytics",
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-analytics-task",
-          "values": {
-            "description": "preserved analytics row",
-            "title": "Fixture Analytics Task",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved analytics row", "title": "Fixture Analytics Task", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "workflow",
           "table": "workflow_templates",
           "key_column": "id",
           "key_value": "fixture-v0930-workflow-template",
-          "values": {
-            "description": "preserved workflow template",
-            "name": "Fixture Workflow Template",
-            "steps": "[]"
-          }
+          "values": {"description": "preserved workflow template", "name": "Fixture Workflow Template", "steps": "[]"}
         },
         {
           "owner": "workflow",
           "table": "workflow_steps",
           "key_column": "id",
           "key_value": "fixture-v0930-workflow-step",
-          "values": { "name": "Fixture Workflow Step", "workflow_id": "fixture-v0930-workflow" }
+          "values": {"name": "Fixture Workflow Step", "workflow_id": "fixture-v0930-workflow"}
         },
         {
           "owner": "agent-settings",
           "table": "agents",
           "key_column": "id",
           "key_value": "fixture-v0930-agent",
-          "values": { "name": "Fixture Agent" }
+          "values": {"name": "Fixture Agent"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {
-            "agent_display_name": "Fixture Agent Profile",
-            "agent_id": "fixture-v0930-agent",
-            "name": "fixture-profile"
-          }
+          "values": {"agent_display_name": "Fixture Agent Profile", "agent_id": "fixture-v0930-agent", "name": "fixture-profile"}
         },
         {
           "owner": "user",
           "table": "users",
           "key_column": "id",
           "key_value": "fixture-v0930-user",
-          "values": {
-            "display_name": "Fixture User",
-            "email": "fixture-v0930@example.test",
-            "role": "admin",
-            "status": "active"
-          }
+          "values": {"display_name": "Fixture User", "email": "fixture-v0930@example.test", "role": "admin", "status": "active"}
         },
         {
           "owner": "notification",
           "table": "notification_providers",
           "key_column": "id",
           "key_value": "fixture-v0930-notification-provider",
-          "values": {
-            "enabled": "1",
-            "name": "Fixture Notification Provider",
-            "type": "webhook",
-            "user_id": "fixture-v0930-user"
-          }
+          "values": {"enabled": "1", "name": "Fixture Notification Provider", "type": "webhook", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "editor",
           "table": "editors",
           "key_column": "id",
           "key_value": "fixture-v0930-editor",
-          "values": {
-            "command": "fixture-editor",
-            "name": "Fixture Editor",
-            "scheme": "fixture",
-            "type": "fixture-editor"
-          }
+          "values": {"command": "fixture-editor", "name": "Fixture Editor", "scheme": "fixture", "type": "fixture-editor"}
         },
         {
           "owner": "prompts",
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": { "content": "preserved prompt content", "name": "Fixture Prompt" }
+          "values": {"content": "preserved prompt content", "name": "Fixture Prompt"}
         },
         {
           "owner": "utility",
           "table": "utility_agents",
           "key_column": "id",
           "key_value": "fixture-v0930-utility",
-          "values": { "name": "Fixture Utility", "prompt": "preserved utility prompt" }
+          "values": {"name": "Fixture Utility", "prompt": "preserved utility prompt"}
         },
         {
           "owner": "office",
           "table": "office_projects",
           "key_column": "id",
           "key_value": "fixture-v0930-office-project",
-          "values": {
-            "description": "preserved office project",
-            "name": "Fixture Office Project",
-            "status": "active",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved office project", "name": "Fixture Office Project", "status": "active", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "office",
           "table": "runs",
           "key_column": "id",
           "key_value": "fixture-v0930-run",
-          "values": {
-            "agent_profile_id": "fixture-v0930-agent-profile",
-            "reason": "fixture run",
-            "status": "queued"
-          }
+          "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}
         },
         {
           "owner": "terminal",
           "table": "user_terminals",
           "key_column": "id",
           "key_value": "fixture-v0930-terminal",
-          "values": {
-            "custom_name": "Fixture Terminal",
-            "environment_id": "fixture-v0930-environment",
-            "state": "open",
-            "task_id": "fixture-v0930-task"
-          }
+          "values": {"custom_name": "Fixture Terminal", "environment_id": "fixture-v0930-environment", "state": "open", "task_id": "fixture-v0930-task"}
         },
         {
           "owner": "quick-terminal",
           "table": "quick_terminal_tabs",
           "key_column": "tab_id",
           "key_value": "fixture-v0930-quick-terminal",
-          "values": {
-            "status": "connecting",
-            "user_id": "fixture-v0930-user",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"status": "connecting", "user_id": "fixture-v0930-user", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "runtime-flags",
           "table": "runtime_flag_overrides",
           "key_column": "key",
           "key_value": "fixture.v0930.flag",
-          "values": { "value": "1" }
+          "values": {"value": "1"}
         },
         {
           "owner": "auth",
           "table": "auth_identities",
           "key_column": "id",
           "key_value": "fixture-v0930-identity",
-          "values": {
-            "provider": "local",
-            "subject": "fixture-v0930-subject",
-            "user_id": "fixture-v0930-user"
-          }
+          "values": {"provider": "local", "subject": "fixture-v0930-subject", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "auth",
           "table": "auth_sessions",
           "key_column": "id",
           "key_value": "fixture-v0930-session",
-          "values": { "token_sha256": "fixture-v0930-token-hash", "user_id": "fixture-v0930-user" }
+          "values": {"token_sha256": "fixture-v0930-token-hash", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "secrets",
           "table": "secrets",
           "key_column": "id",
           "key_value": "fixture-v0930-secret",
-          "values": { "name": "Fixture Secret", "scope": "global", "workspace_id": "" }
+          "values": {"name": "Fixture Secret", "scope": "global", "workspace_id": ""}
         },
         {
           "owner": "telemetry-contract",
           "table": "telemetry_activations",
           "key_column": "contract_key",
           "key_value": "fixture.v0930.contract",
-          "values": { "contract_version": "7" }
+          "values": {"contract_version": "7"}
+        },
+        {
+          "owner": "task",
+          "table": "executors",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor",
+          "values": {"name": "Legacy shared executor"}
+        },
+        {
+          "owner": "task",
+          "table": "executor_profiles",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor-profile",
+          "values": {"name": "Legacy shared profile"}
         }
       ]
     },
     {
       "engine": "pgx",
       "file": "postgres.sql",
-      "sha256": "8dd108b73d1daaf9cd35ee2255f06f2800f90a7101ba3337c9ee4b0951a51de6",
+      "sha256": "96c1b4f800ed4c2ea359a92234bfa9002b1120c0d91cf0d20be9e4207b4ba3a3",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
@@ -248,14 +223,28 @@
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": { "allow_agent_edits": "0" }
+          "values": {"allow_agent_edits": "0"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": { "sort_order": "0" }
+          "values": {"sort_order": "0"}
+        },
+        {
+          "owner": "task",
+          "table": "executors",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor",
+          "values": {"owner_user_id": "<nil>"}
+        },
+        {
+          "owner": "task",
+          "table": "executor_profiles",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor-profile",
+          "values": {"owner_user_id": "<nil>"}
         }
       ],
       "owner_rows": [
@@ -264,207 +253,168 @@
           "table": "kandev_meta",
           "key_column": "key",
           "key_value": "fixture.sentinel",
-          "values": { "value": "v0.93.0-postgres-sentinel" }
+          "values": {"value": "v0.93.0-postgres-sentinel"}
         },
         {
           "owner": "task",
           "table": "workspaces",
           "key_column": "id",
           "key_value": "fixture-v0930-task-workspace",
-          "values": { "description": "preserved task workspace", "name": "Fixture Task Workspace" }
+          "values": {"description": "preserved task workspace", "name": "Fixture Task Workspace"}
         },
         {
           "owner": "task",
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-task",
-          "values": {
-            "description": "preserved task row",
-            "title": "Fixture Task",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved task row", "title": "Fixture Task", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "analytics",
           "table": "tasks",
           "key_column": "id",
           "key_value": "fixture-v0930-analytics-task",
-          "values": {
-            "description": "preserved analytics row",
-            "title": "Fixture Analytics Task",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved analytics row", "title": "Fixture Analytics Task", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "workflow",
           "table": "workflow_templates",
           "key_column": "id",
           "key_value": "fixture-v0930-workflow-template",
-          "values": {
-            "description": "preserved workflow template",
-            "name": "Fixture Workflow Template",
-            "steps": "[]"
-          }
+          "values": {"description": "preserved workflow template", "name": "Fixture Workflow Template", "steps": "[]"}
         },
         {
           "owner": "workflow",
           "table": "workflow_steps",
           "key_column": "id",
           "key_value": "fixture-v0930-workflow-step",
-          "values": { "name": "Fixture Workflow Step", "workflow_id": "fixture-v0930-workflow" }
+          "values": {"name": "Fixture Workflow Step", "workflow_id": "fixture-v0930-workflow"}
         },
         {
           "owner": "agent-settings",
           "table": "agents",
           "key_column": "id",
           "key_value": "fixture-v0930-agent",
-          "values": { "name": "Fixture Agent" }
+          "values": {"name": "Fixture Agent"}
         },
         {
           "owner": "agent-settings",
           "table": "agent_profiles",
           "key_column": "id",
           "key_value": "fixture-v0930-agent-profile",
-          "values": {
-            "agent_display_name": "Fixture Agent Profile",
-            "agent_id": "fixture-v0930-agent",
-            "name": "fixture-profile"
-          }
+          "values": {"agent_display_name": "Fixture Agent Profile", "agent_id": "fixture-v0930-agent", "name": "fixture-profile"}
         },
         {
           "owner": "user",
           "table": "users",
           "key_column": "id",
           "key_value": "fixture-v0930-user",
-          "values": {
-            "display_name": "Fixture User",
-            "email": "fixture-v0930@example.test",
-            "role": "admin",
-            "status": "active"
-          }
+          "values": {"display_name": "Fixture User", "email": "fixture-v0930@example.test", "role": "admin", "status": "active"}
         },
         {
           "owner": "notification",
           "table": "notification_providers",
           "key_column": "id",
           "key_value": "fixture-v0930-notification-provider",
-          "values": {
-            "enabled": "1",
-            "name": "Fixture Notification Provider",
-            "type": "webhook",
-            "user_id": "fixture-v0930-user"
-          }
+          "values": {"enabled": "1", "name": "Fixture Notification Provider", "type": "webhook", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "editor",
           "table": "editors",
           "key_column": "id",
           "key_value": "fixture-v0930-editor",
-          "values": {
-            "command": "fixture-editor",
-            "name": "Fixture Editor",
-            "scheme": "fixture",
-            "type": "fixture-editor"
-          }
+          "values": {"command": "fixture-editor", "name": "Fixture Editor", "scheme": "fixture", "type": "fixture-editor"}
         },
         {
           "owner": "prompts",
           "table": "custom_prompts",
           "key_column": "id",
           "key_value": "fixture-v0930-prompt",
-          "values": { "content": "preserved prompt content", "name": "Fixture Prompt" }
+          "values": {"content": "preserved prompt content", "name": "Fixture Prompt"}
         },
         {
           "owner": "utility",
           "table": "utility_agents",
           "key_column": "id",
           "key_value": "fixture-v0930-utility",
-          "values": { "name": "Fixture Utility", "prompt": "preserved utility prompt" }
+          "values": {"name": "Fixture Utility", "prompt": "preserved utility prompt"}
         },
         {
           "owner": "office",
           "table": "office_projects",
           "key_column": "id",
           "key_value": "fixture-v0930-office-project",
-          "values": {
-            "description": "preserved office project",
-            "name": "Fixture Office Project",
-            "status": "active",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"description": "preserved office project", "name": "Fixture Office Project", "status": "active", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "office",
           "table": "runs",
           "key_column": "id",
           "key_value": "fixture-v0930-run",
-          "values": {
-            "agent_profile_id": "fixture-v0930-agent-profile",
-            "reason": "fixture run",
-            "status": "queued"
-          }
+          "values": {"agent_profile_id": "fixture-v0930-agent-profile", "reason": "fixture run", "status": "queued"}
         },
         {
           "owner": "terminal",
           "table": "user_terminals",
           "key_column": "id",
           "key_value": "fixture-v0930-terminal",
-          "values": {
-            "custom_name": "Fixture Terminal",
-            "environment_id": "fixture-v0930-environment",
-            "state": "open",
-            "task_id": "fixture-v0930-task"
-          }
+          "values": {"custom_name": "Fixture Terminal", "environment_id": "fixture-v0930-environment", "state": "open", "task_id": "fixture-v0930-task"}
         },
         {
           "owner": "quick-terminal",
           "table": "quick_terminal_tabs",
           "key_column": "tab_id",
           "key_value": "fixture-v0930-quick-terminal",
-          "values": {
-            "status": "connecting",
-            "user_id": "fixture-v0930-user",
-            "workspace_id": "fixture-v0930-task-workspace"
-          }
+          "values": {"status": "connecting", "user_id": "fixture-v0930-user", "workspace_id": "fixture-v0930-task-workspace"}
         },
         {
           "owner": "runtime-flags",
           "table": "runtime_flag_overrides",
           "key_column": "key",
           "key_value": "fixture.v0930.flag",
-          "values": { "value": "1" }
+          "values": {"value": "1"}
         },
         {
           "owner": "auth",
           "table": "auth_identities",
           "key_column": "id",
           "key_value": "fixture-v0930-identity",
-          "values": {
-            "provider": "local",
-            "subject": "fixture-v0930-subject",
-            "user_id": "fixture-v0930-user"
-          }
+          "values": {"provider": "local", "subject": "fixture-v0930-subject", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "auth",
           "table": "auth_sessions",
           "key_column": "id",
           "key_value": "fixture-v0930-session",
-          "values": { "token_sha256": "fixture-v0930-token-hash", "user_id": "fixture-v0930-user" }
+          "values": {"token_sha256": "fixture-v0930-token-hash", "user_id": "fixture-v0930-user"}
         },
         {
           "owner": "secrets",
           "table": "secrets",
           "key_column": "id",
           "key_value": "fixture-v0930-secret",
-          "values": { "name": "Fixture Secret", "scope": "global", "workspace_id": "" }
+          "values": {"name": "Fixture Secret", "scope": "global", "workspace_id": ""}
         },
         {
           "owner": "telemetry-contract",
           "table": "telemetry_activations",
           "key_column": "contract_key",
           "key_value": "fixture.v0930.contract",
-          "values": { "contract_version": "7" }
+          "values": {"contract_version": "7"}
+        },
+        {
+          "owner": "task",
+          "table": "executors",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor",
+          "values": {"name": "Legacy shared executor"}
+        },
+        {
+          "owner": "task",
+          "table": "executor_profiles",
+          "key_column": "id",
+          "key_value": "fixture-v0930-executor-profile",
+          "values": {"name": "Legacy shared profile"}
         }
       ]
     }
@@ -512,7 +462,15 @@
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
-      "task_workflow_session_bindings"
+      "task_workflow_session_bindings",
+      "task_message_shell_output",
+      "task_message_shell_output_chunks",
+      "turn_change_content_leases",
+      "turn_change_content_links",
+      "turn_change_contents",
+      "turn_change_sets",
+      "turn_file_changes",
+      "turn_repository_changes"
     ]
   }
 }

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -384,7 +385,9 @@ func (m *Manager) startManagedRuntimeRetry(
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 ) (managedRuntimeRetryFailurePhase, error) {
-	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
+	setup, revision, captured := capturedMCPSetup(ctx)
+	operation := &preparedMCPOperation{servers: mcpServers, metadata: streams.MCPResolutionFromContext(ctx), setup: setup, revision: revision, captured: captured}
+	if _, err := m.configureAndStartAgentWithMCP(ctx, execution, agentConfig, operation); err != nil {
 		return managedRuntimeRetryFailureProcessSetup, err
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
@@ -504,9 +507,11 @@ func (m *Manager) retryManagedRuntimeStartupWithProgress(
 			initErr,
 		)
 	}
-	recoveryCtx, cancelRecovery := managedRuntimeStartupRecoveryContext(ctx)
-	defer cancelRecovery()
-	retryGeneration, ok := execution.beginStartupRecovery()
+	recoveryParentCtx, cancelRecovery := context.WithCancelCause(ctx)
+	defer cancelRecovery(context.Canceled)
+	recoveryCtx, cancelRecoveryTimeout := managedRuntimeStartupRecoveryContext(recoveryParentCtx)
+	defer cancelRecoveryTimeout()
+	retryGeneration, ok := execution.beginStartupRecoveryWithCancel(cancelRecovery)
 	if !ok {
 		return false, initErr
 	}

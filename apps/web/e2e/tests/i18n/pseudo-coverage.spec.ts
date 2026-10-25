@@ -1,5 +1,6 @@
 import { type Page } from "@playwright/test";
 
+import pseudoSettings from "../../../src/locales/pseudo/settings.json";
 import { test, expect } from "../../fixtures/test-base";
 
 /**
@@ -636,9 +637,10 @@ const COPY_ATTRIBUTES = ["aria-label", "aria-description", "title", "placeholder
 async function findUnlocalizedCopy(
   page: Page,
   allowed: string[],
+  secretRecords: Array<{ id: string; name: string }> = [],
 ): Promise<{ leftovers: string[]; localizedAttributes: string[]; inspectedAttributes: number }> {
   return page.evaluate(
-    ({ allowedList, copyAttributes }) => {
+    ({ allowedList, copyAttributes, secretRecords, namedSecretLabels }) => {
       const skipTags = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "CODE", "PRE", "SVG"]);
       // A narrower set for attributes. `skipTags` above encodes "this element's
       // CONTENT is not prose", which is a different question from whether its
@@ -673,16 +675,36 @@ async function findUnlocalizedCopy(
       // side" would leave "side by side" behind and report it as a leftover.
       const tokens = [...allowedList, ...workspaceNames].sort((a, b) => b.length - a.length);
 
-      /** Still word-like ASCII once allowlisted tokens are removed. */
-      const hasUnmigratedAscii = (text: string) => {
+      // Only the matching record row can exempt its stored name. Labels around
+      // that value and identical text elsewhere still pass through the oracle.
+      const secretNames = new Map(secretRecords.map(({ id, name }) => [`secret-row-${id}`, name]));
+
+      /** Still word-like ASCII once allowlisted tokens and scoped data are removed. */
+      const hasUnmigratedAscii = (text: string, element: Element, attribute = false) => {
         if (!text || !wordlike.test(text)) return false;
         let residue = text;
+        const owner = element.closest('[data-testid^="secret-row-"]');
+        const name = secretNames.get(owner?.getAttribute("data-testid") ?? "");
+        if (name && owner) {
+          // The name is the first header's data div, never an action control.
+          const nameElement = owner.querySelector(":scope > div > div > div");
+          if (!attribute && element === nameElement && text === name) residue = "";
+          // Only a recognized translated frame can identify interpolated data.
+          // Bare labels and words ending with the record name remain copy.
+          if (attribute) {
+            const template = namedSecretLabels.find(
+              (label) => label.replace("{{name}}", () => name) === text,
+            );
+            if (template) residue = template.replace("{{name}}", " ");
+          }
+        }
         for (const token of tokens) residue = residue.split(token).join(" ");
         return wordlike.test(residue);
       };
 
       /** The text pass's rule, unchanged: any accented character clears a node. */
-      const looksUnlocalized = (text: string) => !accented.test(text) && hasUnmigratedAscii(text);
+      const looksUnlocalized = (text: string, element: Element) =>
+        !accented.test(text) && hasUnmigratedAscii(text, element);
 
       // The text pass drops zero-size nodes because nothing is on screen to read.
       // That test is WRONG for an attribute: a visually hidden control with an
@@ -703,10 +725,8 @@ async function findUnlocalizedCopy(
         let node: Node | null;
         while ((node = walker.nextNode())) {
           const text = (node.textContent ?? "").trim();
-          if (!looksUnlocalized(text)) continue;
-
           const el = node.parentElement;
-          if (!el || skipTags.has(el.tagName)) continue;
+          if (!el || skipTags.has(el.tagName) || !looksUnlocalized(text, el)) continue;
           // Same rendered-or-not test the attribute pass uses, rather than the
           // zero-size rect this used to apply. The rect check kept `sr-only`
           // text ONLY because that utility measures 1px rather than 0 — so
@@ -762,7 +782,7 @@ async function findUnlocalizedCopy(
         // what separates it from the legitimate case, where the ASCII fragment is
         // the allowlisted DATA rather than the frame ("Àćţĩōńś ƒōŕ Agent" on the
         // layouts screen strips to nothing).
-        if (!hasUnmigratedAscii(value)) {
+        if (!hasUnmigratedAscii(value, el, true)) {
           // Fully accented, nothing ASCII left: a migrated attribute, and the
           // positive control.
           if (accented.test(value)) {
@@ -807,20 +827,85 @@ async function findUnlocalizedCopy(
         inspectedAttributes: attributes.inspected,
       };
     },
-    { allowedList: allowed, copyAttributes: COPY_ATTRIBUTES },
+    {
+      allowedList: allowed,
+      copyAttributes: COPY_ATTRIBUTES,
+      secretRecords,
+      namedSecretLabels: [
+        pseudoSettings.copyMoveSecretNamed,
+        pseudoSettings.hideSecretNamed,
+        pseudoSettings.revealSecretNamed,
+        pseudoSettings.editSecretNamed,
+        pseudoSettings.deleteSecretNamed,
+      ],
+    },
   );
 }
 
 test.describe("i18n pseudo-locale coverage", () => {
+  for (const name of ["Untranslated action", "elete"]) {
+    test(`distinguishes stored secret name ${name} from untranslated action labels`, async ({
+      testPage,
+      apiClient,
+    }) => {
+      const screen = SCREENS.find((item) => item.url === "/settings/secrets");
+      if (!screen) throw new Error("The secrets screen is missing");
+      const secret = await apiClient.createSecret(name, "synthetic-pseudo-test-value");
+      try {
+        await activatePseudo(testPage, screen.url);
+        await waitForScreen(testPage, screen);
+        await waitForTransientLoadingToFinish(testPage);
+        const row = testPage.getByTestId(`secret-row-${secret.id}`);
+        await expect(row).toBeVisible();
+        const records = await apiClient.listSecrets({ scope: "global" });
+        const clean = await findUnlocalizedCopy(testPage, ALLOWED, records);
+        expect(clean.leftovers).toEqual([]);
+        await row.evaluate((element, name) => {
+          const button = document.createElement("button");
+          button.setAttribute("aria-label", `Untranslated action ${name}`);
+          element.append(button);
+          const bare = document.createElement("button");
+          bare.setAttribute("aria-label", name);
+          bare.textContent = name;
+          element.append(bare);
+          const suffixCollision = document.createElement("button");
+          suffixCollision.setAttribute("aria-label", "Delete");
+          element.append(suffixCollision);
+          const outside = document.createElement("p");
+          outside.textContent = name;
+          document.body.append(outside);
+        }, secret.name);
+        const broken = await findUnlocalizedCopy(testPage, ALLOWED, records);
+        expect(broken.leftovers).toContain(secret.name);
+        expect(
+          broken.leftovers.some((text) => text.includes(`Untranslated action ${secret.name}`)),
+        ).toBe(true);
+        expect(
+          broken.leftovers.some((text) => text.includes(`aria-label on button: "${secret.name}"`)),
+        ).toBe(true);
+        expect(
+          broken.leftovers.some((text) => text.includes('aria-label on button: "Delete"')),
+        ).toBe(true);
+      } finally {
+        await apiClient.deleteSecretIfPresent(secret.id);
+      }
+    });
+  }
+
   for (const screen of SCREENS) {
-    test(`no un-externalized copy on ${screen.name}`, async ({ testPage }) => {
+    test(`no un-externalized copy on ${screen.name}`, async ({ testPage, apiClient }) => {
       await activatePseudo(testPage, screen.url);
       await waitForScreen(testPage, screen);
       await waitForTransientLoadingToFinish(testPage);
 
+      const secretRecords =
+        screen.url === "/settings/secrets"
+          ? (await apiClient.listSecrets({ scope: "global" })).map(({ id, name }) => ({ id, name }))
+          : [];
       const { leftovers, localizedAttributes, inspectedAttributes } = await findUnlocalizedCopy(
         testPage,
         [...ALLOWED, ...(screen.allow ?? [])],
+        secretRecords,
       );
 
       // Control FIRST. A migrated attribute renders accented and so is invisible

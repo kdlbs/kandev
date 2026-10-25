@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // AC-OFFICE-LOOP-LIVENESS-002.7/.8/.10: SetRunSessionID persists the
@@ -14,7 +14,7 @@ import (
 // is "last non-empty wins".
 func TestSetRunSessionID_PersistsNonEmptyID(t *testing.T) {
 	repo := newTestRepo(t)
-	run := &models.Run{ID: "run-session-1", AgentProfileID: "agent-1", Status: "claimed"}
+	run := &runsmodels.Run{ID: "run-session-1", AgentProfileID: "agent-1", Status: "claimed"}
 	mustCreateRun(t, repo, run)
 
 	wrote, err := repo.SetRunSessionID(context.Background(), run.ID, "sess-abc")
@@ -33,7 +33,7 @@ func TestSetRunSessionID_PersistsNonEmptyID(t *testing.T) {
 
 func TestSetRunSessionID_EmptyIDIsNoop(t *testing.T) {
 	repo := newTestRepo(t)
-	run := &models.Run{ID: "run-session-2", AgentProfileID: "agent-1", Status: "claimed", SessionID: "sess-existing"}
+	run := &runsmodels.Run{ID: "run-session-2", AgentProfileID: "agent-1", Status: "claimed", SessionID: "sess-existing"}
 	mustCreateRun(t, repo, run)
 
 	wrote, err := repo.SetRunSessionID(context.Background(), run.ID, "")
@@ -68,7 +68,7 @@ func TestSetRunSessionID_UnknownRunIsNoop(t *testing.T) {
 // classification that was already counted for it.
 func TestSetRunSessionID_LostRaceAgainstConcurrentCancelIsNoop(t *testing.T) {
 	repo := newTestRepo(t)
-	run := &models.Run{ID: "run-session-4", AgentProfileID: "agent-1", Status: "claimed"}
+	run := &runsmodels.Run{ID: "run-session-4", AgentProfileID: "agent-1", Status: "claimed"}
 	mustCreateRun(t, repo, run)
 
 	cancelled, err := repo.CancelRun(context.Background(), run.ID, "lost_race")
@@ -100,7 +100,7 @@ func TestSetRunSessionID_LostRaceAgainstConcurrentCancelIsNoop(t *testing.T) {
 // earlier one — "last non-empty wins" for the relaunch-keeps-latest case.
 func TestSetRunSessionID_LaterWriteOverwritesEarlier(t *testing.T) {
 	repo := newTestRepo(t)
-	run := &models.Run{ID: "run-session-3", AgentProfileID: "agent-1", Status: "claimed"}
+	run := &runsmodels.Run{ID: "run-session-3", AgentProfileID: "agent-1", Status: "claimed"}
 	mustCreateRun(t, repo, run)
 
 	if _, err := repo.SetRunSessionID(context.Background(), run.ID, "sess-first"); err != nil {

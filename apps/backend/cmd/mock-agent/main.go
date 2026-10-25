@@ -478,7 +478,13 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
 		}
 		<-cancelHold
-		time.Sleep(mockCancelHoldDuration())
+		if release := os.Getenv("E2E_MOCK_AGENT_CANCEL_RELEASE_FILE"); release != "" {
+			if err := waitForCancelHoldRelease(release); err != nil {
+				return acp.PromptResponse{}, err
+			}
+		} else {
+			time.Sleep(mockCancelHoldDuration())
+		}
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	// Dynamic unclassified fallback scenarios must return a terminal ACP
@@ -945,4 +951,12 @@ func mockCancelHoldDuration() time.Duration {
 		}
 	}
 	return 8 * time.Second
+}
+
+func waitForCancelHoldRelease(release string) error {
+	// ACP cancels the request context before acknowledgement. The fixture keeps
+	// that boundary pending until explicit release, bounded by the browser test budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return waitForScriptFile(ctx, release)
 }

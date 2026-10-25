@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -715,7 +717,7 @@ type BuildAgentPromptResult struct {
 // summary that was prepended (empty when no summary applied). The
 // caller persists both onto the run row.
 func (s *Service) BuildAgentPrompt(
-	_ *models.Run,
+	_ *runsmodels.Run,
 	_ *models.AgentInstance,
 	_, agentsMD string,
 	isResume bool,

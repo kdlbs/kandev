@@ -89,6 +89,10 @@ jobs:
             apps/web/lib/settings-discovery/profile-contract.generated.json
             scripts/settings-contract-ci.test.mjs
             scripts/check-agentctl-deps.sh
+            scripts/*.ps1
+            scripts/*.psm1
+            scripts/tests/isolated-*
+            .gitattributes
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -157,6 +161,7 @@ jobs:
     # Checkout receives the short-lived job token. Keep this credential-bearing
     # path on GitHub-hosted capacity during the external-runner pilot.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
     # Skips the per-run setup-go / golangci-lint download steps below.
@@ -245,6 +250,8 @@ jobs:
           #
           # A merge_group run has no pull request behind it, so the queue branch
           # is cut from `merge_group.base_sha`, which is the equivalent base.
+          # A manual run has no push before-SHA; compare it with the checked-out
+          # main branch so incremental lint does not scan historical findings.
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
             BASE_SHA="$(git merge-base HEAD "origin/${BASE_REF}")"
           elif [[ "${EVENT_NAME}" == "merge_group" ]]; then
@@ -288,10 +295,11 @@ jobs:
       - name: Run golangci-lint
         # golangci-lint is preinstalled in the kandev-ci image; invoke it
         # directly instead of going through `golangci/golangci-lint-action`,
-        # which would re-download its own binary on every run. Ten minutes
-        # leaves headroom for cold caches while still bounding analysis time.
+        # which would re-download its own binary on every run. `--timeout=5m`
+        # was too short for a cold cache; keep the explicit budget finite while
+        # allowing the full repository analysis to finish reliably.
         shell: bash
-        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=10m
+        run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=15m
 
   test_shards:
     name: Backend Tests (${{ matrix.shard }}/4)
@@ -909,23 +917,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run PostgreSQL 18 materialization and history gates
+      - name: Run PostgreSQL 18 repository contract gates
         run: |
           set -euo pipefail
           output_file="$(mktemp)"
           go test -v -race \
             ./internal/task/repository/sqlite ./internal/office/repository/sqlite \
-            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership|TestPostgresQuickChatHistoryCAS)$' \
+            -run '^(TestPostgresMaterializationSerializesAndRechecksOwner|TestPostgresWorkspaceGroupOwnershipRoundTrip|TestWorkspaceBindingRetryOwnership|TestPostgresQuickChatHistoryCAS|TestPostgresPrimaryPromotionAndStaleWrite|TestPostgresTurnEntryStampAcrossRevisit|TestPostgresTurnEntryReceiptStampAcrossRevisit|TestPostgresStateRepairRequiresCurrentEntry)$' \
             2>&1 | tee "${output_file}"
 
           for test_name in \
             TestPostgresMaterializationSerializesAndRechecksOwner \
             TestPostgresWorkspaceGroupOwnershipRoundTrip \
             TestWorkspaceBindingRetryOwnership \
-            TestPostgresQuickChatHistoryCAS; do
+            TestPostgresQuickChatHistoryCAS \
+            TestPostgresPrimaryPromotionAndStaleWrite \
+            TestPostgresTurnEntryStampAcrossRevisit \
+            TestPostgresTurnEntryReceiptStampAcrossRevisit \
+            TestPostgresStateRepairRequiresCurrentEntry; do
             if ! grep -q "^=== RUN   ${test_name}$" "${output_file}" || \
                ! grep -q "^--- PASS: ${test_name} " "${output_file}"; then
-              echo "::error::PostgreSQL 18 materialization gate did not run and pass ${test_name}"
+              echo "::error::PostgreSQL 18 repository gate did not run and pass ${test_name}"
               exit 1
             fi
           done
@@ -1082,7 +1094,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/... ./cmd/winjob/...
 
       - name: Test Windows recovery mode preservation
         if: matrix.suite == 'native'
@@ -1112,6 +1124,10 @@ jobs:
       - name: Test Windows runtime observation command shims
         if: matrix.suite == 'native'
         run: go test -race -v ./internal/agentctl/server/utility -run '^TestRuntimeObservationRunsWindowsCommandShimWithSpaces$'
+
+      - name: Test Windows generic wrapper preparation
+        if: matrix.suite == 'native'
+        run: go test -race -v ./internal/common/launchwrapper ./internal/common/managednpm
 
       - name: Test Windows managed runtime cache repair
         if: matrix.suite == 'native'

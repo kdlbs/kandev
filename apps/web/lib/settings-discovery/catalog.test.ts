@@ -371,3 +371,17 @@ describe("resolveSettingsDiscovery visibility", () => {
     expect(connection?.breadcrumb[1]).toBe("Main");
   });
 });
+
+it("orders appearance motion and image defaults to match the settings page", () => {
+  const ids = [
+    "appearance-rich-output-motion",
+    "appearance-chat-motion",
+    "appearance-image-preview-defaults",
+    "appearance-settings-menu",
+  ];
+  const controls = SETTINGS_DISCOVERY_DEFINITIONS.filter((entry) => ids.includes(entry.id)).sort(
+    (a, b) => a.order - b.order,
+  );
+  expect(controls.map((entry) => entry.id)).toEqual(ids);
+  expect(new Set(controls.map((entry) => entry.order)).size).toBe(controls.length);
+});

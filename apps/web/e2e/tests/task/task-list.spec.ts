@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 async function selectListOption(page: Page, testId: string, optionLabel: string) {
   await page.getByTestId(testId).click();
@@ -59,7 +60,7 @@ test.describe("Task List", () => {
     await expect(
       testPage.getByTestId("tasks-list").getByText("Direct Navigate Task"),
     ).toBeVisible();
-    await expect(testPage.getByTestId("kanban-header-search")).toBeVisible();
+    await expect(testPage.getByTestId("tasks-list-search")).toBeVisible();
     // The bar names the page through the shared title crumb.
     await expect(testPage.locator('[data-slot="breadcrumb-page"]')).toHaveText("Tasks");
     await expect(testPage.locator("main").getByRole("button", { name: "New Task" })).toHaveCount(0);
@@ -116,10 +117,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Hierarchy");
+    await testPage.getByTestId("tasks-list-search").fill("Hierarchy");
 
     const taskList = testPage.getByTestId("tasks-list");
     const parentRow = taskList
@@ -159,10 +157,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_desc&group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("sort task");
+    await testPage.getByTestId("tasks-list-search").fill("sort task");
 
     await expect(testPage.getByTestId("tasks-list-sort")).toContainText("Title Z-A");
     await expect(testPage.getByTestId("tasks-list-group")).toContainText("None");
@@ -214,10 +209,7 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=workflow");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Duplicate group");
+    await testPage.getByTestId("tasks-list-search").fill("Duplicate group");
 
     const sections = testPage.getByTestId("tasks-list-section");
     await expect(sections).toHaveCount(2);
@@ -353,10 +345,16 @@ test.describe("Task List", () => {
 
     await testPage.goto("/tasks?sort=title_asc&group=none");
     await testPage.waitForLoadState("networkidle");
-    await testPage
-      .getByTestId("kanban-header-search")
-      .getByPlaceholder("Search tasks...")
-      .fill("Paged list task");
+    const searchApplied = waitForHttp(testPage, "GET", /\/api\/v1\/workspaces\/[^/]+\/tasks$/, {
+      predicate: (response) => {
+        const params = new URL(response.url()).searchParams;
+        return (
+          response.ok() && params.get("query") === "Paged list task" && params.get("page") === "1"
+        );
+      },
+    });
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task");
+    await searchApplied;
 
     const pagination = testPage.getByTestId("tasks-pagination");
     await expect(pagination).toContainText("Showing 1 to 25 of 26 results");
@@ -374,5 +372,86 @@ test.describe("Task List", () => {
     await testPage.getByRole("listbox").getByRole("option", { name: "10" }).click();
     await expect(pagination).toContainText("Showing 1 to 10 of 26 results");
     await expect(testPage.getByTestId("tasks-pagination-page-size")).toContainText("10");
+
+    await testPage.getByTestId("tasks-list-search").fill("Paged list task 26");
+    await expect(pagination).toContainText("Showing 1 to 1 of 1 result");
+    await expect.poll(() => taskRowTitles(testPage)).toEqual(["Paged list task 26"]);
+  });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.15
+  test("search resets the page and clear retains selected filters", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { settings } = await apiClient.getUserSettings();
+    try {
+      for (let i = 0; i < 26; i++) {
+        await apiClient.createTask(
+          seedData.workspaceId,
+          `Scoped search ${String(i).padStart(2, "0")}`,
+          {
+            workflow_id: seedData.workflowId,
+            workflow_step_id: seedData.startStepId,
+            repository_ids: [seedData.repositoryId],
+          },
+        );
+      }
+      await testPage.goto("/tasks?sort=title_asc&group=none");
+      const workflowName = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )!.name;
+      await selectListOption(testPage, "tasks-list-workflow-filter", workflowName);
+      await selectListOption(testPage, "tasks-list-repository-filter", "E2E Repo");
+      await testPage.getByTestId("tasks-list-archive-all").click();
+      const input = testPage.getByTestId("tasks-list-search");
+      const listPath = /\/api\/v1\/workspaces\/[^/]+\/tasks$/;
+      const loaded = waitForHttp(testPage, "GET", listPath, {
+        predicate: (r) => new URL(r.url()).searchParams.get("query") === "Scoped search",
+      });
+      await input.fill("Scoped search");
+      await loaded;
+      const pagination = testPage.getByTestId("tasks-pagination");
+      await expect(pagination).toContainText("1 to 25 of 26");
+      const next = waitForHttp(testPage, "GET", listPath, {
+        predicate: (r) => new URL(r.url()).searchParams.get("page") === "2",
+      });
+      await pagination.getByRole("button", { name: "Go to next page" }).click();
+      await next;
+      await expect(pagination).toContainText("26 to 26 of 26");
+      const narrowed = waitForHttp(testPage, "GET", listPath, {
+        predicate: (r) => {
+          const p = new URL(r.url()).searchParams;
+          return p.get("query") === "Scoped search 00" && p.get("page") === "1";
+        },
+      });
+      await input.fill("Scoped search 00");
+      const response = await narrowed;
+      const params = new URL(response.url()).searchParams;
+      expect(params.get("workflow_id")).toBe(seedData.workflowId);
+      expect(params.get("repository_id")).toBe(seedData.repositoryId);
+      expect(params.get("sort")).toBe("title_asc");
+      expect(params.get("include_archived")).toBe("true");
+      await expect(testPage.getByTestId("tasks-list-row-title")).toHaveText(["Scoped search 00"]);
+      await expect(pagination.getByRole("button", { name: "1", exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      const cleared = waitForHttp(testPage, "GET", listPath, {
+        predicate: (r) => !new URL(r.url()).searchParams.has("query"),
+      });
+      await testPage.getByRole("button", { name: "Clear search", exact: true }).click();
+      const emptyParams = new URL((await cleared).url()).searchParams;
+      expect(emptyParams.get("repository_id")).toBe(seedData.repositoryId);
+      expect(emptyParams.get("workflow_id")).toBe(seedData.workflowId);
+      expect(emptyParams.get("include_archived")).toBe("true");
+      await expect(input).toHaveValue("");
+      await expect(pagination).toContainText("1 to 25 of");
+    } finally {
+      await apiClient.saveUserSettings({
+        repository_ids: settings.repository_ids as string[],
+        tasks_list_sort: settings.tasks_list_sort as string,
+      });
+    }
   });
 });

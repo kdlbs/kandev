@@ -55,6 +55,18 @@ func TestValidateRejectsInvalidGenericStepPositions(t *testing.T) {
 				events.OnApprovalResolved = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
 			},
 		},
+		{
+			name: "on_pr_merged",
+			set: func(events *StepEvents) {
+				events.OnPRMerged = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
+			},
+		},
+		{
+			name: "on_pr_closed",
+			set: func(events *StepEvents) {
+				events.OnPRClosed = []GenericAction{{Type: GenericActionMoveToStep, Config: map[string]any{"step_position": 99}}}
+			},
+		},
 	}
 
 	for _, trigger := range triggers {

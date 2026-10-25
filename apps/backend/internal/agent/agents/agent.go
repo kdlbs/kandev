@@ -262,6 +262,7 @@ type CommandOptions struct {
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
 type PassthroughOptions struct {
+	Runtime          agentruntime.Runtime
 	Model            string
 	SessionID        string          // ACP session ID; resumes a specific session via --resume <id>
 	Prompt           string          // initial prompt for new sessions

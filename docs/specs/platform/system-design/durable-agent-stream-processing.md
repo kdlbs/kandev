@@ -111,8 +111,12 @@ Keep metric labels bounded; session/stream identifiers belong in structured diag
 Use the existing recovery card for a localized delivery-storage explanation and Retry connection/Stop, with desktop and phone parity.
 Raw SQL cursors and internal storage paths are diagnostic details, not required user decisions.
 
-Oversized text must use the existing bounded chunk representation. Add coverage for cumulative tool-output snapshots that can multiply retained bytes.
-Do not silently truncate authoritative output. Any representation change requires the existing version and rollback compatibility checks.
+Oversized assistant/reasoning text uses the existing chunk representation.
+[Bounded tool delivery](bounded-tool-delivery.md) defines marked presentation
+reduction before acceptance, including generic nested results and duplicate
+carriers. Accepted output must not be truncated during replay or projection.
+Representation changes require the existing version and rollback checks.
+Keep coverage for cumulative snapshots that can multiply retained bytes.
 
 Idle rollover changes transport stream identity without creating a new harness conversation.
 It requires settled submissions and completed projection/acknowledgment evidence for the old stream.
@@ -152,3 +156,29 @@ receipts, retired sessions and changed owners; checkpoint creation accompanies
 the real receipt.
 Preflight performs no projection, acknowledgment, prompt dispatch or block resolution.
 Subsequent replay projects retained events through the normal idempotent pipeline.
+
+An initialized silent-restore successor can reconnect before its generation
+commit after a failed SQL write. Preflight permits replay from zero only when
+the authenticated stream retains the complete prefix from sequence one, has
+no acknowledgments or submissions, and SQL still identifies the pinned native
+predecessor. This path creates no checkpoint or receipt. Normal event admission
+continues to wait for the successor commit under the new bounded restore owner.
+
+## Explicit fresh start
+
+An explicit Start fresh launch is a replacement native conversation. When the
+session already has a committed harness generation, the launch uses the next
+generation and its own stream, never the predecessor's stream. Before the first
+prompt, the peer retires the predecessor's unresolved submissions as
+interrupted-unknown without dispatch. The ACP session-created event marks the
+replacement. Token acceptance is a prerequisite. The generation transaction
+revalidates the task, session incarnation, execution and native token under the
+same SQL locks used by executor rotation, then commits the adjacent successor
+with compare-and-set on the predecessor and creation reason `native_replaced`.
+A rotation after token acceptance therefore cannot commit an obsolete event. Until that commit, the
+replacement's events wait under the same bounded wait as other successor
+generations; a failed or stale commit leaves them unadmitted and fails startup.
+The predecessor's retained stream, submissions and recovery block stay as
+history; current-generation admission no longer consults them. Fresh start never
+receives, projects, or acknowledges the predecessor stream.
+Delivery: [Fresh-start delivery generation](../../../plans/fresh-start-delivery-generation/plan.md).

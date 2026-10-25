@@ -43,6 +43,18 @@ func (wt *WorkspaceTracker) enrichSymlinkMetadata(ctx context.Context, update *t
 		default:
 			file.IsSymlink = symlinkModeValue(unstaged, path)
 		}
+		// When the working-tree entry still exists, its Lstat result is the
+		// authoritative type for the unstaged facet. This also handles Git
+		// implementations that retain the index symlink mode in a mixed-type
+		// raw diff. For deletions, keep the raw mode because there is no live
+		// entry to inspect.
+		if file.UnstagedChange != nil && filepath.IsLocal(path) {
+			if info, err := os.Lstat(filepath.Join(wt.workDir, path)); err == nil {
+				value := info.Mode()&os.ModeSymlink != 0
+				file.UnstagedChange.IsSymlink = &value
+				file.IsSymlink = &value
+			}
+		}
 		update.Files[path] = file
 	}
 }

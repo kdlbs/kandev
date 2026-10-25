@@ -11,7 +11,8 @@ owners:
 
 ## Purpose and boundaries
 
-This design record preserves the technical source for the capability mapped to REQ-TASKS-TASK-DEPENDENCIES-001 while the task system completes its migration.
+Technical source for REQ-TASKS-TASK-DEPENDENCIES-001.
+Prepared-session reuse: [deferred start](deferred-start-step-entry.md#prepared-primary-on-deferred-start).
 
 ## Requirement mapping
 
@@ -440,7 +441,7 @@ Auto-start and chaining:
 
 - **GIVEN** B depends on A, B has a start-when-unblocked intent, and B is
   WIP-admitted, **WHEN** A completes successfully, **THEN** exactly one session
-  is created for B using the intent's recorded agent profile, executor,
+  starts for B using the intent's recorded agent profile, executor,
   executor profile, prompt, and plan-mode choice.
 - **GIVEN** A → B → C each with a start-when-unblocked intent, **WHEN** A
   completes, **THEN** B starts; **WHEN** B completes, **THEN** C starts, and A
