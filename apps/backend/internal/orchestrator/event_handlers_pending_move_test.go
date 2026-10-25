@@ -143,7 +143,17 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 }
 
 func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
-	sc := buildPendingMoveScenario(t)
+	t.Run("in_memory", func(t *testing.T) {
+		assertStaleExactProfilePendingMoveDiscarded(t, false)
+	})
+	t.Run("sqlite", func(t *testing.T) {
+		assertStaleExactProfilePendingMoveDiscarded(t, true)
+	})
+}
+
+func assertStaleExactProfilePendingMoveDiscarded(t *testing.T, useSQLiteQueue bool) {
+	t.Helper()
+	sc := buildPendingMoveScenarioWithQueue(t, useSQLiteQueue)
 	const moveID = "move-stale-exact-profile"
 	now := time.Now().UTC()
 	_, err := sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
