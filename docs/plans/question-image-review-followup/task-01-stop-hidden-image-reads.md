@@ -94,3 +94,10 @@ specification lint, documentation catalog, and PR work-order coverage.
 - Public docs review: existing image inspection, errors, and reload instructions
   remain correct. This restores the existing loading contract without a new API,
   control, or user procedure. Only internal design and implementation records change.
+
+## PR review refinement
+
+CodeRabbit requested causal synchronization for the new E2E Skip cleanup. Both
+viewport tests now arm the clarification-response wait before Skip, require a
+successful response, and then assert the idle input with the default timeout.
+The updated desktop and phone collapse cases each passed with retries disabled.

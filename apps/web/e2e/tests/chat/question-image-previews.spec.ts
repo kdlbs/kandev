@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { exerciseChoiceImageQuestion } from "./choice-image-helpers";
 import {
@@ -181,6 +182,10 @@ test("desktop collapse releases previews and preserves the answer draft", async 
   await prCapture.screenshot("desktop-question-images-reopened", {
     caption: "Reopened clarification reloads its image and keeps the answer draft",
   });
+  const skipped = waitForHttp(testPage, "POST", /\/api\/v1\/clarification\/[^/]+\/respond$/, {
+    predicate: (response) => response.ok(),
+  });
   await session.clarificationSkip().click();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await skipped;
+  await expect(session.idleInput()).toBeVisible();
 });

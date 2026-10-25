@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { exerciseChoiceImageQuestion } from "./choice-image-helpers";
 import {
   exerciseImageCollapse,
@@ -66,6 +67,10 @@ test("phone collapse releases previews and preserves the answer draft", async ({
   await prCapture.screenshot("phone-question-images-reopened", {
     caption: "Reopened clarification reloads its image and keeps the answer draft",
   });
+  const skipped = waitForHttp(testPage, "POST", /\/api\/v1\/clarification\/[^/]+\/respond$/, {
+    predicate: (response) => response.ok(),
+  });
   await session.clarificationSkip().click();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await skipped;
+  await expect(session.idleInput()).toBeVisible();
 });
