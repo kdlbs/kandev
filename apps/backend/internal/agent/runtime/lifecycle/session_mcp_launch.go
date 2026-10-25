@@ -17,6 +17,10 @@ import (
 // instance MCP token was derived from.
 const MetadataKeyMCPTokenNonce = "mcp_token_nonce"
 
+// MetadataKeyBrokerFingerprint holds the fingerprint of the broker upstream an
+// instance was created to relay to; empty when it relays nothing.
+const MetadataKeyBrokerFingerprint = "mcp_broker_fingerprint"
+
 // Launch refusal codes surfaced at the start of the launch failure text.
 const (
 	CodeMCPTokenCarrierUnavailable = "mcp_token_carrier_unavailable"
@@ -133,6 +137,8 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 		req.Metadata = make(map[string]interface{})
 	}
 	req.Metadata[MetadataKeyMCPTokenNonce] = nonce
+	brokerFP := sessionmcp.BrokerFingerprint(req.BrokerUpstreamURL)
+	req.Metadata[MetadataKeyBrokerFingerprint] = brokerFP
 
 	inst, err := rt.CreateInstance(ctx, req)
 	if err != nil {
@@ -143,6 +149,7 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 		inst.Metadata = make(map[string]interface{})
 	}
 	inst.Metadata[MetadataKeyMCPTokenNonce] = nonce
+	inst.Metadata[MetadataKeyBrokerFingerprint] = brokerFP
 	if inst.Client == nil {
 		return inst, false, nil
 	}
@@ -151,6 +158,9 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 	case err != nil || !identity.HasCapability(agentctlSessionMCPCapability):
 		m.rollbackCreate(ctx, rt, inst, minted)
 		return nil, false, &LaunchRefusal{Code: CodeMCPTokenUnsupported, Err: err}
+	case identity.BrokerUpstreamFingerprint != brokerFP:
+		m.rollbackCreate(ctx, rt, inst, identity.MCPTokenFingerprint)
+		return nil, false, fmt.Errorf("instance %s relays a different broker after create", req.InstanceID)
 	case identity.MCPTokenFingerprint != minted:
 		m.rollbackCreate(ctx, rt, inst, identity.MCPTokenFingerprint)
 		return nil, true, fmt.Errorf("instance %s holds a different token after create", req.InstanceID)

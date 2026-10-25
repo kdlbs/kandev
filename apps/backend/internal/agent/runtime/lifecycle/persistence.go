@@ -154,7 +154,8 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 			running.Metadata = make(map[string]interface{})
 		}
 		for k, v := range prior.Metadata {
-			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey || k == MetadataKeyMCPTokenNonce {
+			if k == metadataKeyPassthroughMCPClaims || k == idleActivityMetadataKey ||
+				k == MetadataKeyMCPTokenNonce || k == MetadataKeyBrokerFingerprint {
 				// Current execution metadata owns claim state. Copying an absent
 				// claim or clock from a prior row would undo its removal. The
 				// token nonce likewise belongs to the execution that minted it.

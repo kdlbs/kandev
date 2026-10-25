@@ -67,16 +67,17 @@ func (m *Manager) verifyRetainedSessionToken(ctx context.Context, record *models
 		return &LaunchRefusal{Code: CodeMCPTokenUnsupported, Cause: CauseRetainedInstanceDeferred, Err: errRetainedTokenUnverified}
 	}
 	v := tokenVerifier{
-		InstanceID: ri.InstanceID,
-		Nonce:      getMetadataString(record.Metadata, MetadataKeyMCPTokenNonce),
-		ReadKey:    func() ([]byte, error) { return keys.SessionMCPKey(ctx) },
-		Control:    control,
-		Log:        m.logger,
-		Timeout:    remoteTokenTimeout,
-		Attempts:   remoteTokenAttempts,
-		Gap:        remoteTokenGap,
-		Revokes:    tokenRevokeAttempts,
-		RevokeGap:  tokenRevokeGap,
+		InstanceID:        ri.InstanceID,
+		Nonce:             getMetadataString(record.Metadata, MetadataKeyMCPTokenNonce),
+		BrokerFingerprint: getMetadataString(record.Metadata, MetadataKeyBrokerFingerprint),
+		ReadKey:           func() ([]byte, error) { return keys.SessionMCPKey(ctx) },
+		Control:           control,
+		Log:               m.logger,
+		Timeout:           remoteTokenTimeout,
+		Attempts:          remoteTokenAttempts,
+		Gap:               remoteTokenGap,
+		Revokes:           tokenRevokeAttempts,
+		RevokeGap:         tokenRevokeGap,
 	}
 	if ri.Client == nil {
 		return fmt.Errorf("%w: no instance client", errRetainedTokenUnverified)

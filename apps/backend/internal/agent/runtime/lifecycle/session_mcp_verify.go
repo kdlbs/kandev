@@ -40,6 +40,8 @@ type mcpTokenControl interface {
 type tokenVerifier struct {
 	InstanceID string
 	Nonce      string
+	// BrokerFingerprint is the broker upstream fingerprint recorded at create.
+	BrokerFingerprint string
 	// ReadKey reads the signing key without creating or replacing it.
 	ReadKey  func() ([]byte, error)
 	Identity func(ctx context.Context) (*agentctl.InstanceIdentity, error)
@@ -78,7 +80,7 @@ func (v tokenVerifier) Verify(ctx context.Context) tokenVerdict {
 	}
 
 	expected := sessionmcp.Fingerprint(sessionmcp.Token(key, v.InstanceID, v.Nonce))
-	if v.Nonce != "" && expected != "" && observed == expected {
+	if v.Nonce != "" && expected != "" && observed == expected && identity.BrokerUpstreamFingerprint == v.BrokerFingerprint {
 		return verdictAdopt
 	}
 	return v.deleteMismatched(ctx, observed)

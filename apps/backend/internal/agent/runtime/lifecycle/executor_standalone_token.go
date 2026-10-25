@@ -86,21 +86,23 @@ func (r *StandaloneExecutor) tokenVerifierFor(
 			agentctl.WithExecutionID(inst.ID), agentctl.WithSessionID(sessionID),
 			agentctl.WithAuthToken(r.authToken))
 	}
-	var nonce string
+	var nonce, brokerFP string
 	if record != nil {
 		nonce = getMetadataString(record.Metadata, MetadataKeyMCPTokenNonce)
+		brokerFP = getMetadataString(record.Metadata, MetadataKeyBrokerFingerprint)
 	}
 	v := tokenVerifier{
-		InstanceID: inst.ID,
-		Nonce:      nonce,
-		ReadKey:    r.readSessionKey,
-		Identity:   client.GetInstanceIdentity,
-		Log:        r.logger,
-		Timeout:    standaloneTokenTimeout,
-		Attempts:   standaloneTokenAttempts,
-		Gap:        standaloneTokenGap,
-		Revokes:    tokenRevokeAttempts,
-		RevokeGap:  tokenRevokeGap,
+		InstanceID:        inst.ID,
+		Nonce:             nonce,
+		BrokerFingerprint: brokerFP,
+		ReadKey:           r.readSessionKey,
+		Identity:          client.GetInstanceIdentity,
+		Log:               r.logger,
+		Timeout:           standaloneTokenTimeout,
+		Attempts:          standaloneTokenAttempts,
+		Gap:               standaloneTokenGap,
+		Revokes:           tokenRevokeAttempts,
+		RevokeGap:         tokenRevokeGap,
 	}
 	if control != nil {
 		v.Control = control
