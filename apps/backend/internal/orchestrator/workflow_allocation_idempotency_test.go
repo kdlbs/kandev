@@ -167,16 +167,16 @@ func TestWorkflowAllocationSameAcceptedEntryDoesNotAllocateTwice(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Log("replay remains pending; release original owner before final assertions")
 	}
-	held, afterRoute := h.snapshot(t, "same-entry replay while owner held")
+	h.snapshot(t, "same-entry replay while owner held")
 	h.unblock()
 	require.Error(t, allocationReceive(t, first))
 	if second != nil {
 		require.Error(t, allocationReceive(t, second))
 	}
-	h.snapshot(t, "all fake attach attempts joined")
-	require.Equal(t, route.OperationID, afterRoute.OperationID)
-	require.Len(t, held, 2, "same accepted operation allocated another durable destination")
-	require.Equal(t, firstID, afterRoute.DestinationID, "recorded exact destination was overwritten")
+	joined, finalRoute := h.snapshot(t, "all fake attach attempts joined")
+	require.Equal(t, route.OperationID, finalRoute.OperationID)
+	require.Len(t, joined, 2, "same accepted operation allocated another durable destination")
+	require.Equal(t, firstID, finalRoute.DestinationID, "recorded exact destination was overwritten")
 }
 
 func TestWorkflowAllocationConcurrentFirstAdmissionCreatesOneDestination(t *testing.T) {
@@ -204,13 +204,13 @@ func TestWorkflowAllocationConcurrentFirstAdmissionCreatesOneDestination(t *test
 	case <-time.After(10 * time.Second):
 		t.Fatal("competing admission neither refused nor reached attach")
 	}
-	rows, _ := h.snapshot(t, "concurrent first admission before release")
+	h.snapshot(t, "concurrent first admission before release")
 	h.unblock()
 	for ; completed < 2; completed++ {
 		require.Error(t, allocationReceive(t, results))
 	}
-	h.snapshot(t, "concurrent attempts joined")
-	require.Len(t, rows, 2, "one accepted operation must insert one destination across competing admissions")
+	joined, _ := h.snapshot(t, "concurrent attempts joined")
+	require.Len(t, joined, 2, "one accepted operation must insert one destination across competing admissions")
 }
 
 func TestWorkflowAllocationFailedAndLaunchErrorRefusalControls(t *testing.T) {

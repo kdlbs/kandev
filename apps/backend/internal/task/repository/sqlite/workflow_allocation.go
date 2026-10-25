@@ -55,14 +55,16 @@ func (r *Repository) workflowAllocationOwnerTx(ctx context.Context, tx *sqlx.Tx,
 	if stepID != route.DestinationStepID {
 		return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 	}
+	var entryID int64
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(MAX(id), 0) FROM task_step_transitions WHERE task_id = ?`), taskID).Scan(&entryID); err != nil {
+		return nil, fmt.Errorf("read workflow allocation entry: %w", err)
+	}
 	if strings.HasPrefix(route.EntryIdentity, "entry:") {
-		var entryID int64
-		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(MAX(id), 0) FROM task_step_transitions WHERE task_id = ?`), taskID).Scan(&entryID); err != nil {
-			return nil, fmt.Errorf("read workflow allocation entry: %w", err)
-		}
 		if route.EntryIdentity != fmt.Sprintf("entry:%020d", entryID) {
 			return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 		}
+	} else if entryID > 0 {
+		return nil, repoerrors.ErrWorkflowAllocationStaleEntry
 	}
 	var metadata map[string]interface{}
 	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {

@@ -7,12 +7,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // terminalizeAfterPromotionRepo pauses the prompt claim after the session has
@@ -759,6 +763,10 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
 	svc.repo = barrierRepo
 	svc.promptExpander = promptService
+	core, logs := observer.New(zapcore.InfoLevel)
+	observed, err := logger.NewFromZap(zap.New(core))
+	requireNoError(t, err)
+	svc.logger = observed
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 	type launchedPrompt struct {
@@ -790,11 +798,13 @@ func testProcessOnEnterImplicitProfileSwitchTerminalizedGuard(
 	close(barrierRepo.allowPrompt)
 
 	<-done
-
-	require.Never(t, func() bool {
-		sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
-		return err == nil && len(sessions) > 2
-	}, 300*time.Millisecond, 20*time.Millisecond, "recorded entry must not allocate a replacement")
+	completionMessage := "failed to create replacement after terminalized profile switch"
+	if terminalState == models.TaskSessionStateCancelled {
+		completionMessage = "implicit profile switch cancelled before dispatch; not creating replacement"
+	}
+	require.Eventually(t, func() bool {
+		return logs.FilterMessage(completionMessage).Len() == 1
+	}, 10*time.Second, 10*time.Millisecond, "implicit replacement attempt did not finish")
 	sessions, err := repo.ListTaskSessions(assertCtx, source.TaskID)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
