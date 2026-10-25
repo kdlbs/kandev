@@ -101,23 +101,24 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	if req.CallerTaskID == "" || req.CallerSessionID == "" {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || principal.CallerTaskID != req.CallerTaskID ||
+		principal.CallerSessionID != req.CallerSessionID ||
+		string(principal.Surface) != req.MCPSurface || principal.WorkspaceID == "" ||
+		!relatedReadScopeAuthorized(principal, service.RelatedReadScope(req.RelatedReadScope)) {
 		err := &service.RelatedReadAccessError{
 			Reason:         service.RelatedReadDenialScopeRequired,
-			InternalReason: "caller task or session identity missing",
+			InternalReason: "caller principal or related read scope mismatch",
 		}
 		h.logRelatedReadDecision(req, req.CallerTaskID, "denied", err)
 		return mapRelatedReadError(msg, err)
 	}
 	caller := req.CallerTaskID
 	related, err := svc.ListRelatedForRequest(ctx, service.RelatedReadRequest{
-		CallerTaskID: caller,
+		CallerTaskID: caller, CallerWorkspaceID: principal.WorkspaceID,
 		TargetTaskID: req.TaskID,
-		// related_read_scope is attested by the agentctl MCP server from its
-		// backend-resolved profile; browser clients are blocked from mcp.*
-		// actions before they can reach this handler.
-		Scope:   service.RelatedReadScope(req.RelatedReadScope),
-		Verbose: req.Verbose,
+		Scope:        service.RelatedReadScope(req.RelatedReadScope),
+		Verbose:      req.Verbose,
 	})
 	if err != nil {
 		outcome := "error"
@@ -132,6 +133,17 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	h.enrichRelatedTasksWithPRs(ctx, related)
 	h.logRelatedReadDecision(req, caller, "allowed", nil)
 	return ws.NewResponse(msg.ID, msg.Action, related)
+}
+
+func relatedReadScopeAuthorized(principal mcpscope.Principal, readScope service.RelatedReadScope) bool {
+	switch readScope {
+	case "", service.RelatedReadScopeRelation:
+		return true
+	case service.RelatedReadScopeWorkspaceTaskTree:
+		return principal.Surface == mcpprofile.SurfaceOfficeTask && principal.WorkspaceTaskTreeRead
+	default:
+		return false
+	}
 }
 
 func (h *Handlers) logRelatedReadDecision(req relatedReadPayload, callerTaskID, outcome string, err error) {

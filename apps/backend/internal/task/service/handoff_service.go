@@ -790,8 +790,8 @@ func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedRe
 	if caller == nil || target == nil {
 		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller or target task missing")
 	}
-	if caller.WorkspaceID != target.WorkspaceID {
-		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "target belongs to another workspace")
+	if err := authorizeRelatedReadWorkspace(caller, target, req.CallerWorkspaceID); err != nil {
+		return err
 	}
 	relationReadable, err := canReadDocuments(ctx, repoTaskLookupAdapter{r: s.tasks}, blockerLookupAdapter{repo: s.blockers}, req.CallerTaskID, req.TargetTaskID)
 	if err != nil {
@@ -805,6 +805,16 @@ func (s *HandoffService) authorizeRelatedRead(ctx context.Context, req RelatedRe
 	}
 	if !relationReadable && req.Scope != RelatedReadScopeWorkspaceTaskTree {
 		return relatedReadDenied(RelatedReadDenialScopeRequired, "target is not relation-readable")
+	}
+	return nil
+}
+
+func authorizeRelatedReadWorkspace(caller, target *models.Task, attestedWorkspaceID string) error {
+	if attestedWorkspaceID != "" && caller.WorkspaceID != attestedWorkspaceID {
+		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "caller workspace changed")
+	}
+	if caller.WorkspaceID != target.WorkspaceID {
+		return relatedReadDenied(RelatedReadDenialTargetUnavailable, "target belongs to another workspace")
 	}
 	return nil
 }

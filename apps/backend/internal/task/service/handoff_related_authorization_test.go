@@ -100,6 +100,14 @@ func TestListRelatedForRequest_ProtectsUnrelatedVerboseAndUnavailableTargets(t *
 			reason: RelatedReadDenialTargetUnavailable,
 		},
 		{
+			name: "caller moved from attested workspace",
+			req: RelatedReadRequest{
+				CallerTaskID: "caller", CallerWorkspaceID: "workspace-b", TargetTaskID: "unrelated",
+				Scope: RelatedReadScopeWorkspaceTaskTree,
+			},
+			reason: RelatedReadDenialTargetUnavailable,
+		},
+		{
 			name: "unknown target is unavailable",
 			req: RelatedReadRequest{
 				CallerTaskID: "caller", TargetTaskID: "missing", Scope: RelatedReadScopeWorkspaceTaskTree,
