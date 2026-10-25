@@ -10,13 +10,13 @@ Exact task-profile assignments must reject a profile that changed after assignme
 
 ## Decision
 
-The database owns a persistent, monotonic revision for each profile ID. Insert and update triggers advance a separate `agent_profile_revisions` row, including writes from services outside the settings store and updates that leave the visible values unchanged. The row survives profile deletion so reusing an ID cannot reuse a revision. Profile reads obtain the revision in the same query as the profile fields. A missing revision is a failed read, not an unchanged profile.
+The database owns a persistent, monotonic revision for each profile ID. Insert and update triggers advance a separate `agent_profile_revisions` row, including writes from services outside the settings store. An update advances the revision when an identity or configuration column changes, including a change that later returns to an earlier value. Operational-only updates to status, run identifiers, timestamps, sort order, failure counters, or pause reason do not advance it. The row survives profile deletion so reusing an ID cannot reuse a revision. Profile reads obtain the revision in the same query as the profile fields. A missing revision is a failed read, not an unchanged profile.
 
 SQLite and PostgreSQL install equivalent triggers after legacy table-recreation migrations. Existing profiles start at revision one only when no revision row exists. Consumers of an exact assignment compare this token with the assignment's captured token and must reject missing or mismatched state before launch. A future migration changing this token contract must invalidate or transform existing assignments explicitly.
 
 ## Consequences
 
-All profile writers advance the token without remembering a per-service convention. Every profile update adds a small write to the revision table. The token represents mutation history, not a content hash or wall-clock time. Exact assignment code must use the persisted revision from the resolved profile snapshot and keep assignment and launch checks consistent.
+All profile writers advance the token for identity and configuration changes without remembering a per-service convention. Operational-only updates leave it unchanged. The token represents relevant mutation history, not a content hash or wall-clock time. Exact assignment code must use the persisted revision from the resolved profile snapshot and keep assignment and launch checks consistent.
 
 ## Alternatives Considered
 

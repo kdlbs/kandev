@@ -144,6 +144,7 @@ func TestPendingMove_OutOfTerminalStepReopensCompletedTask(t *testing.T) {
 
 func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
+	const moveID = "move-stale-exact-profile"
 	now := time.Now().UTC()
 	_, err := sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
 		TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview, Generation: 1, ProfileRevision: now.UnixNano(),
@@ -162,9 +163,24 @@ func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID: "task-1", WorkflowID: "wf1", WorkflowStepID: stepInProgressID, ExactProfileGeneration: 1,
-	})
+	move := &messagequeue.PendingMove{
+		MoveID: moveID, TaskID: "task-1", WorkflowID: "wf1",
+		WorkflowStepID: stepInProgressID, ExactProfileGeneration: 1,
+	}
+	if _, ok := sc.svc.messageQueue.TakeQueued(sc.ctx, sc.reviewSessionID); !ok {
+		t.Fatal("remove scenario handoff prompt")
+	}
+	if _, err := sc.svc.messageQueue.QueueMessageWithMetadata(
+		sc.ctx, sc.reviewSessionID, "task-1", "stale exact-profile handoff", "",
+		messagequeue.QueuedByMoveTask, false, nil,
+		map[string]interface{}{messagequeue.MetadataDeferredMoveID: moveID},
+	); err != nil {
+		t.Fatalf("queue correlated handoff prompt: %v", err)
+	}
+	if err := sc.svc.messageQueue.SetPendingMove(sc.ctx, sc.reviewSessionID, move); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, move)
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
 	if err != nil {
@@ -172,6 +188,16 @@ func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
 	}
 	if task.WorkflowStepID != stepInReviewID {
 		t.Fatalf("stale exact generation moved task to %q, want %q", task.WorkflowStepID, stepInReviewID)
+	}
+	storedMove, exists, err := sc.svc.messageQueue.GetPendingMoveWithError(sc.ctx, sc.reviewSessionID)
+	if err != nil {
+		t.Fatalf("load pending move after stale generation: %v", err)
+	}
+	if exists || storedMove != nil {
+		t.Fatalf("pending move = %#v, exists = %t, want discarded", storedMove, exists)
+	}
+	if status := sc.svc.messageQueue.GetStatus(sc.ctx, sc.reviewSessionID); status.Count != 0 {
+		t.Fatalf("queued handoff prompt = %#v, want discarded with move", status.Entries)
 	}
 }
 

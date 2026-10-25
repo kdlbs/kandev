@@ -5160,11 +5160,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Warn("discarding stale exact-profile pending move",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String("move_id", move.MoveID), zap.Int64("exact_profile_generation", move.ExactProfileGeneration))
-		s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID)
 		if s.messageQueue != nil {
-			if _, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, ""); err != nil {
-				s.logger.Warn("failed to discard stale exact-profile pending move", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			}
+			s.discardPendingMove(ctx, taskID, sessionID, move, record, "exact_profile_generation_stale")
 		}
 		return
 	}
