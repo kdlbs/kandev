@@ -676,6 +676,9 @@ func startAgentInfrastructure(
 	if services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
 	}
+	if services.Sandbox != nil {
+		mcpScopeResolver.SetGuardSource(services.Sandbox)
+	}
 	// ============================================
 	// AGENT MANAGER
 	// ============================================

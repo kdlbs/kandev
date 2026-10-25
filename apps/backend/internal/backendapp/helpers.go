@@ -383,7 +383,11 @@ func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) boo
 }
 
 const sessionIDPayloadKey = "session_id"
+
+// queueIncarnationPayloadKey names the queue incarnation field in session event payloads.
+const queueIncarnationPayloadKey = "queue_incarnation_id"
 const taskIDPayloadKey = "task_id"
+const workspaceIDPayloadKey = "workspace_id"
 const newStatePayloadKey = "new_state"
 const sessionUpdatedAtPayloadKey = "updated_at"
 
@@ -2714,6 +2718,9 @@ func registerMCPAndDebugRoutes(
 	)
 	if p.services != nil && p.services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
+	if p.services != nil && p.services.Sandbox != nil {
+		mcpScopeResolver.SetGuardSource(p.services.Sandbox)
 	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {

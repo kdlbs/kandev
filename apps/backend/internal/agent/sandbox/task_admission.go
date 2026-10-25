@@ -141,3 +141,26 @@ func noBroader(candidate, limit *Resolved) bool {
 	a, b := candidate.Revision.Policy, limit.Revision.Policy
 	return a.InstallationID == b.InstallationID && a.ProviderKey == b.ProviderKey && contract.WithinCeiling(a.Grants, b.Grants) == nil
 }
+
+// TaskGuarded reports whether the task holds a guard recorded for the
+// workspace. A malformed or foreign-workspace record is an error, never
+// "unguarded".
+func (s *Service) TaskGuarded(ctx context.Context, workspaceID, taskID string) (bool, error) {
+	if workspaceID == "" || taskID == "" {
+		return false, ErrIneligible
+	}
+	var raws []string
+	if err := s.db.SelectContext(ctx, &raws, s.db.Rebind(`SELECT content_json FROM sandbox_task_guards WHERE task_id=?`), taskID); err != nil {
+		return false, err
+	}
+	for _, raw := range raws {
+		var guard taskGuard
+		if err := json.Unmarshal([]byte(raw), &guard); err != nil {
+			return false, err
+		}
+		if guard.WorkspaceID != workspaceID || guard.Resolved == nil {
+			return false, ErrIneligible
+		}
+	}
+	return len(raws) > 0, nil
+}

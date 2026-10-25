@@ -19,6 +19,17 @@ type Principal struct {
 	CallerSessionID string
 	Surface         mcpprofile.Surface
 	CoordinatorID   string
+	// Guarded is set when the caller's task holds a sandbox task guard.
+	Guarded bool
+}
+
+// IsGuarded reports whether the principal is a Kanban or Office task session
+// whose task holds a sandbox task guard.
+func (p Principal) IsGuarded() bool {
+	if p.Surface != mcpprofile.SurfaceKanbanTask && p.Surface != mcpprofile.SurfaceOfficeTask {
+		return false
+	}
+	return p.Guarded
 }
 
 func (p Principal) IsAutomation() bool {
@@ -80,14 +91,20 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 			return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 		}
 	}
-	return WithPrincipal(ctx, Principal{
+	principal := Principal{
 		AutomationID:    automationID,
 		WorkspaceID:     workspaceID,
 		CallerTaskID:    taskID,
 		CallerSessionID: sessionID,
 		Surface:         surface,
 		CoordinatorID:   coordinatorID,
-	}), nil
+	}
+	if surface == mcpprofile.SurfaceKanbanTask || surface == mcpprofile.SurfaceOfficeTask {
+		if err := r.resolveGuard(ctx, &principal); err != nil {
+			return nil, err
+		}
+	}
+	return WithPrincipal(ctx, principal), nil
 }
 
 func (r *Resolver) resolvePrincipalTask(ctx context.Context, taskID string) (*models.Task, error) {

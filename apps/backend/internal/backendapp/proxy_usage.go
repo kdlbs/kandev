@@ -68,7 +68,7 @@ func teamClaudeStatusURL(profile *settingsmodels.AgentProfile) (string, bool) {
 			continue
 		}
 		base, err := url.Parse(strings.TrimSpace(env.Value))
-		if err != nil || base.Scheme != "http" || base.Host == "" || base.User != nil || !isLoopbackHost(base.Hostname()) {
+		if err != nil || base.Scheme != managedHTTPScheme || base.Host == "" || base.User != nil || !isLoopbackHost(base.Hostname()) {
 			return "", false
 		}
 		// TeamClaude always serves its control-plane status at

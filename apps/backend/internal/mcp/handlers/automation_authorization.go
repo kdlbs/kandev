@@ -32,6 +32,11 @@ func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFun
 			d.handlers.recordCoordinatorCall(ctx, msg, false)
 			return guarded, err
 		}
+		guarded, replacement, err = d.handlers.authorizeGuardedRequest(ctx, replacement)
+		if guarded != nil {
+			d.handlers.recordCoordinatorCall(ctx, msg, false)
+			return guarded, err
+		}
 		d.handlers.recordCoordinatorCall(ctx, msg, true)
 		return handler(ctx, replacement)
 	})

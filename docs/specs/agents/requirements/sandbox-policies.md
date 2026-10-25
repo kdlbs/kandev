@@ -139,9 +139,41 @@ Tasks retains launch failure, recovery, queue, and error-history ownership.
 - **AC-AGENTS-SANDBOX-008.8:** Previews, indicators, and detail responses shall omit credentials, callback secrets, and unfiltered provider output.
   Legacy attempts without recorded execution evidence shall show unknown history. Current profile settings shall not reconstruct that history.
 
+### REQ-AGENTS-SANDBOX-009: Server-enforced MCP surface for guarded sessions
+
+**Intent:** An agent under a task guard cannot widen its authority through Kandev's own MCP tools. The catalogue agentctl serves is not the only gate.
+
+- **Guarded session:** a Kanban or Office task session whose task holds a task guard in the session's workspace. Coordinator, automation, configuration, and managed-conversation principals are not guarded sessions and keep their own guards.
+- **Direct child:** a task in the caller's workspace whose parent is the caller's task.
+
+- **AC-AGENTS-SANDBOX-009.1:** The MCP dispatcher shall derive guarded status from the server-resolved caller task, never from payload fields. It reads the task guard once per call. A guard that cannot be read, is malformed, or belongs to another workspace shall refuse the call as an unavailable principal, never treat the session as unguarded.
+- **AC-AGENTS-SANDBOX-009.2:** A guarded session shall reach only actions the classification table lists as `read`, `self`, `child_write`, or `internal`. Any other action, including an unlisted one, is refused as an unknown action even when a catalogue lists it. The table is keyed by bare tool name, so shared actions follow their table class.
+- **AC-AGENTS-SANDBOX-009.3:** Class `denied` shall contain configuration and settings mutations (agents, agent profiles, executors, executor profiles, workflows and steps, settings, MCP config, prompts, automations), `transfer_task`, `resolve_agent_permission`, `answer_question`, plugin tool listing and invocation, canvas publication, and `archive_task` and `delete_task`, which cascade beyond the writable set.
+- **AC-AGENTS-SANDBOX-009.4:** A `self` action shall name no task or the caller's task. A `child_write` action shall name only the caller's task or its direct children. Referenced fields are `task_id`, the task of `session_id`, `parent_id`, `depends_on_task_id`, and `blocked_by` in array order. A missing, null, or empty field references nothing.
+- **AC-AGENTS-SANDBOX-009.5:** A missing task, a foreign-workspace task, an unrelated task, a missing session, and a malformed or wrongly typed reference shall all return the same Forbidden refusal with reason `guarded_session_scope`. A repository read failure shall return Unavailable with reason `guard_lookup_failed`.
+- **AC-AGENTS-SANDBOX-009.6:** Payload keys shall match reference and attribution fields case-insensitively with Unicode simple folding. Two keys folding to one field, including duplicate identical keys, shall refuse the call. The handler shall receive only canonical key names. A null or empty payload is `{}`; any other non-object is refused.
+- **AC-AGENTS-SANDBOX-009.7:** Attribution fields (`source_task_id`, `sender_task_id`, `caller_task_id`, caller or source session) shall be overwritten with the principal's values.
+- **AC-AGENTS-SANDBOX-009.8:** For `create_task` the workspace is the caller's (a different non-empty string or a wrong type is refused). An empty, `self`, or own-task `parent_id` resolves to the caller's task, and any other `parent_id` is refused. A caller whose depth or ephemeral rules forbid children is refused as `guarded_session_scope`. Guard inheritance and executor admission remain owned by task creation admission.
+- **AC-AGENTS-SANDBOX-009.9:** A `message_task` to the caller's parent shall be refused. Parent-reporting routes (`step_complete_kandev`, `ask_parent_question_kandev`, `ask_user_question_kandev`) are unchanged.
+- **AC-AGENTS-SANDBOX-009.10:** A tool in the task-session catalogue without a table entry shall fail a parity test enumerating the assembled catalogue for the Kanban and Office surfaces. Plugin tools are reached only through `invoke_plugin_tool`, class `denied`.
+- **AC-AGENTS-SANDBOX-009.11:** Coordinator and automation principals are evaluated only by their existing guards. Sessions without a task guard are unchanged; extending this surface to them is a follow-up.
+- **AC-AGENTS-SANDBOX-009.12:** Every criterion shall hold with `KANDEV_FEATURES_AUTH=false` and with authentication enabled, because it depends on no user identity.
+
+### REQ-AGENTS-SANDBOX-010: No silent approval of mutating Kandev tools
+
+**Intent:** A human sees a mutating Kandev tool call before a sandboxed session runs it.
+
+- **AC-AGENTS-SANDBOX-010.1:** agentctl shall treat an instance as guarded when its launch carries a sandbox (`Sandbox` set or `SandboxRequired`), a value the backend supplies, never the agent.
+- **AC-AGENTS-SANDBOX-010.2:** In a guarded instance a permission request resolving to the injected Kandev server shall be approved only for tools classed `read` or `self`. Neither the blanket flag nor the generic injected-server approval approves any other tool of that server.
+- **AC-AGENTS-SANDBOX-010.3:** The lookup shall parse the qualified name, require the `_kandev` suffix, strip it, and compare the whole action to table keys by exact equality. A name with no suffix, an unlisted key, or a non-terminal suffix is not approved and uses the normal prompt.
+- **AC-AGENTS-SANDBOX-010.4:** A request that does not resolve to the injected Kandev server keeps its existing behavior, including the blanket flag. The adapter-level auto-approve flag shall be off for a guarded instance.
+- **AC-AGENTS-SANDBOX-010.5:** Coordinator, managed-conversation, and unguarded-session approval are unchanged.
+- **AC-AGENTS-SANDBOX-010.6:** The classification table is the single source for REQ-AGENTS-SANDBOX-009 and this requirement.
+
 ## Exclusions
 
 Remote sandbox execution, Windows Nono support, universal confinement against host administrators, automatic learning, and automatic upgrades are excluded.
+Out of scope for the guarded surface: the table is not applied to sessions without a task guard; own-task launch policy, REST and external MCP paths, and mixed-version agentctl keep their existing contracts.
 Installation, login, repository setup, user shells, and external MCP servers remain separate execution contracts.
 Nono runtime approval support outside the verified Linux capability path remains conditional on dedicated evidence.
 

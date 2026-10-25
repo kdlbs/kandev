@@ -61,3 +61,29 @@ func testTaskGuardStore(t *testing.T, database *sqlx.DB) {
 	_, err = reloaded.AdmitTask(t.Context(), selection, "")
 	require.ErrorIs(t, err, ErrIneligible)
 }
+
+func TestTaskGuardedReportsRecordedGuardPerWorkspace(t *testing.T) {
+	s, err := NewService(sqlitePolicyDB(t), true, nil)
+	require.NoError(t, err)
+	selected := &Resolved{Revision: &Revision{OrgID: "org"}, ExecutorID: "executor"}
+	selection := SelectionContext{OrgID: "org", WorkspaceID: "workspace", TaskID: "task", ExecutorID: "executor"}
+	require.NoError(t, s.saveTaskGuard(t.Context(), selection, selected, 0))
+
+	guarded, err := s.TaskGuarded(t.Context(), "workspace", "task")
+	require.NoError(t, err)
+	require.True(t, guarded)
+
+	guarded, err = s.TaskGuarded(t.Context(), "workspace", "unguarded-task")
+	require.NoError(t, err)
+	require.False(t, guarded)
+
+	_, err = s.TaskGuarded(t.Context(), "other-workspace", "task")
+	require.ErrorIs(t, err, ErrIneligible)
+	_, err = s.TaskGuarded(t.Context(), "", "task")
+	require.ErrorIs(t, err, ErrIneligible)
+
+	_, err = s.db.ExecContext(t.Context(), `UPDATE sandbox_task_guards SET content_json='not json' WHERE task_id='task'`)
+	require.NoError(t, err)
+	_, err = s.TaskGuarded(t.Context(), "workspace", "task")
+	require.Error(t, err)
+}

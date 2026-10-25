@@ -10,6 +10,8 @@ requirements:
   - REQ-AGENTS-SANDBOX-006
   - REQ-AGENTS-SANDBOX-007
   - REQ-AGENTS-SANDBOX-008
+  - REQ-AGENTS-SANDBOX-009
+  - REQ-AGENTS-SANDBOX-010
   - REQ-PLUGINS-SANDBOX-001
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005
 system_design:
@@ -168,6 +170,7 @@ No broad suite or generic review work order is added.
 - [ ] [Task 06: Connect verified approvals to operator decisions](task-06-approval-channel.md)
 - [ ] [Task 07: Permit only the current Kandev MCP route](task-07-mcp-connectivity.md)
 - [ ] [Task 10: Deliver Execution settings and session visibility](task-10-execution-surfaces.md)
+- [ ] [Task 11: Enforce the MCP surface for guarded sessions](task-11-guarded-session-surface.md)
 - [ ] [Task 08: Deliver denial review and explicit learning](task-08-operator-policy-learning.md)
 - [ ] [Task 09: Prove real Nono acceptance and prepare the follow-up PR](task-09-acceptance-delivery.md)
 

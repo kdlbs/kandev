@@ -30,7 +30,7 @@ func reportIntegrity(value string) int {
 }
 
 func validReportEnvelope(data ReportData) bool {
-	if !slices.Contains([]string{"available", "unavailable", "unsupported"}, data.Status) ||
+	if !slices.Contains([]string{reportStatusAvailable, "unavailable", "unsupported"}, data.Status) ||
 		reportIntegrity(data.Integrity) < 0 || len(data.Sources) > 32 || len(data.Records) > 1000 || len(data.SupportedClasses) > 3 {
 		return false
 	}
@@ -82,7 +82,7 @@ func validReportCompleteness(data ReportData) bool {
 	if !data.Complete {
 		return true
 	}
-	if data.Status != "available" || data.Integrity != reportIntegrityComplete || len(data.Sources) == 0 {
+	if data.Status != reportStatusAvailable || data.Integrity != reportIntegrityComplete || len(data.Sources) == 0 {
 		return false
 	}
 	for _, source := range data.Sources {

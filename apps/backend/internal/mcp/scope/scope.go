@@ -84,6 +84,10 @@ type Resolver struct {
 	// (fail closed), set via SetCoordinatorLookup rather than a NewResolver
 	// parameter so existing callers are unaffected.
 	coordinators CoordinatorLookup
+
+	// guards reports whether a task holds a sandbox task guard; nil leaves
+	// every principal unguarded.
+	guards GuardSource
 }
 
 // SetCoordinatorLookup wires the coordinator lookup used by principalSurface.
