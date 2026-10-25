@@ -168,6 +168,16 @@ func TestGitCredentialRelayUpstreamFailures(t *testing.T) {
 			t.Fatalf("code=%d len=%d", rec.Code, rec.Body.Len())
 		}
 	})
+	t.Run("deadline expiry answers 504", func(t *testing.T) {
+		old := gitCredentialRelayTimeout
+		gitCredentialRelayTimeout = 50 * time.Millisecond
+		t.Cleanup(func() { gitCredentialRelayTimeout = old })
+		up := newRelayUpstream(t, func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+		rec := doRelay(relayServer(t, up.URL+"/x/resolve"), http.MethodPost, "/git-credentials/resolve", "{}", nil)
+		if rec.Code != http.StatusGatewayTimeout || strings.Contains(rec.Body.String(), "127.0.0.1") {
+			t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+		}
+	})
 	t.Run("redirect is returned unchanged and not followed", func(t *testing.T) {
 		up := newRelayUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/elsewhere", http.StatusFound)

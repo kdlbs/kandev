@@ -19,12 +19,15 @@ const (
 	// and the upstream broker validates it.
 	GitCredentialRelayPrefix = "/git-credentials/"
 
-	gitCredentialResolvePath  = GitCredentialRelayPrefix + "resolve"
-	gitCredentialReissuePath  = GitCredentialRelayPrefix + "reissue"
-	gitCredentialRelayTimeout = 15 * time.Second
-	gitCredentialMaxRequest   = 64 << 10
-	gitCredentialMaxResponse  = 1 << 20
+	gitCredentialResolvePath = GitCredentialRelayPrefix + "resolve"
+	gitCredentialReissuePath = GitCredentialRelayPrefix + "reissue"
+	gitCredentialMaxRequest  = 64 << 10
+	gitCredentialMaxResponse = 1 << 20
 )
+
+// gitCredentialRelayTimeout bounds one upstream round trip; a variable so a
+// test can shorten it.
+var gitCredentialRelayTimeout = 15 * time.Second
 
 var gitCredentialRelayClient = &http.Client{
 	Transport: &http.Transport{DisableKeepAlives: true},
