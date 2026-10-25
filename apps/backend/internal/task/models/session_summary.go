@@ -33,6 +33,7 @@ type TaskSessionSummaryObservation struct {
 	Metadata           map[string]interface{}
 	StartedAt          time.Time
 	CompletedAt        *time.Time
+	ArchivedAt         *time.Time
 	UpdatedAt          time.Time
 	IsPrimary          bool
 	IsPassthrough      bool
@@ -57,7 +58,7 @@ func (o *TaskSessionSummaryObservation) ToTaskSession() *TaskSession {
 		EnvironmentID: o.EnvironmentID, RepositoryID: o.RepositoryID,
 		BaseBranch: o.BaseBranch, BaseCommitSHA: o.BaseCommitSHA, WorkspacePath: o.WorkspacePath,
 		State: o.State, ErrorMessage: o.ErrorMessage, Metadata: o.Metadata,
-		StartedAt: o.StartedAt, CompletedAt: o.CompletedAt, UpdatedAt: o.UpdatedAt,
+		StartedAt: o.StartedAt, CompletedAt: o.CompletedAt, ArchivedAt: o.ArchivedAt, UpdatedAt: o.UpdatedAt,
 		IsPrimary: o.IsPrimary, IsPassthrough: o.IsPassthrough, ReviewStatus: o.ReviewStatus,
 		TaskEnvironmentID: o.TaskEnvironmentID, LastReadMessageID: o.LastReadMessageID,
 		Worktrees: o.Worktrees,

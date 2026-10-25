@@ -8,6 +8,7 @@
 
 ## QA fixes worth reviewer attention
 - Mobile history capture waits for the sheet to settle, and the deletion confirmation has a rendered capture. A kanban-preview E2E journey verifies hidden and revealed terminal helpers.
+- The task-session summary and full DTO now expose `archived_at`, including the bounded SQLite summary projection. An end-to-end journey archives a mounted helper conversation, verifies the archive state in the API, then reopens its retained transcript.
 
 ## Follow-up tasks created
 - None.
