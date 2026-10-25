@@ -675,3 +675,30 @@ two CPUs, and one worker, using the same commands above. Logs:
 Changed-file lint, specification lint, documentation catalog, and work-order
 coverage also passed. The terminal PR snapshot reported only these two leaf
 failures and their E2E aggregate, with no unresolved review threads.
+
+### Await task selection after workspace preparation
+
+Workflow [40218658108](https://github.com/kdlbs/kandev/actions/runs/40218658108)
+passed the preceding motion and mobile corrections. Its only failing case was
+`workflow-automation.spec.ts`'s non-auto-start task-open check. The original
+snapshot showed an empty chat, no selected workspace panel, and a connecting
+terminal. The backend already had one `CREATED` session. The test therefore
+asserted the start button before the prepared session became active in the UI.
+
+`prepareAndSwitchTask` awaits preparation before selecting the returned session.
+The test now uses `waitForActiveTaskSession` with the exact task and session IDs
+before asserting the button. It retains the one-session count, `CREATED` state,
+start-button visibility, and unchanged workflow-step checks. It adds no reload,
+fixed delay, or retry. No product behavior or public documentation changes.
+
+The original case passed three local checks with retries disabled under two CPUs
+and one worker (`--project chromium tests/workflow/workflow-automation.spec.ts
+--grep 'non-auto-start step blocks' --retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.BAydP0IH.log`. The complete 118-report
+CI audit found 4,245 first-attempt passes, this one flaky case, 40 skips, and no
+parse errors. The current PR snapshot had no unresolved review threads or hidden
+threads, and the grouped-comment refresh found no new suggestions.
+
+The corrected case passed all three repeated checks under the same constraints:
+`/tmp/question-images-checks/kandev-run.e2e.HrpzRdcC.log`. Changed-file lint,
+specification lint, documentation catalog, and work-order coverage passed.
