@@ -15,6 +15,7 @@ import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 import { ApiError } from "@/lib/api/client";
+import { SandboxUpdateError } from "@/lib/sandbox-messages";
 import { getTaskDependencyCycle } from "@/lib/api/domains/task-dependencies-api";
 import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
@@ -203,6 +204,7 @@ function runnerSwitchErrorMessage(error: unknown): string {
 }
 
 export function taskSubmitErrorMessage(error: unknown): string {
+  if (error instanceof SandboxUpdateError) return t(error.messageKey);
   if (isTaskDependencyUpdateFailure(error)) {
     const cycle = getTaskDependencyCycle(error.cause);
     if (cycle?.length) return t("task:dependencyCycleError", { cycle: cycle.join(" -> ") });
@@ -221,6 +223,7 @@ export function taskSubmitErrorMessage(error: unknown): string {
 
 type EditDependencySaveArgs = {
   editDependencies?: SubmitHandlersDeps["editDependencies"];
+  editSandbox?: SubmitHandlersDeps["editSandbox"];
   updatedTask: Awaited<ReturnType<typeof updateTask>>;
   isStartedEdit: boolean;
   descriptionInputRef: SubmitHandlersDeps["descriptionInputRef"];
@@ -230,15 +233,16 @@ type EditDependencySaveArgs = {
 
 async function saveEditedTaskDependencies({
   editDependencies,
+  editSandbox,
   updatedTask,
   isStartedEdit,
   descriptionInputRef,
   setTaskName,
   setHasDescription,
 }: EditDependencySaveArgs): Promise<void> {
-  if (!editDependencies?.isDirty) return;
   try {
-    await editDependencies.save();
+    if (editDependencies?.isDirty) await editDependencies.save();
+    if (editSandbox?.isDirty) await editSandbox.save();
   } catch (error) {
     setTaskName(updatedTask.title);
     if (!isStartedEdit) {
@@ -253,8 +257,9 @@ async function saveEditedTaskDependencies({
 function areEditDependenciesReady(
   isEditMode: boolean,
   editDependencies: SubmitHandlersDeps["editDependencies"],
+  editSandbox?: SubmitHandlersDeps["editSandbox"],
 ): boolean {
-  return !isEditMode || editDependencies?.ready !== false;
+  return !isEditMode || (editDependencies?.ready !== false && editSandbox?.ready !== false);
 }
 
 // Only a final selection that differs from the last confirmed stored runner
@@ -404,6 +409,7 @@ export function useTaskSubmitHandlers({
   saveTaskMCPSelections,
   mcpServerIdsDirty,
   editDependencies,
+  editSandbox,
   transformDescriptionBeforeSubmit,
   recovery,
 }: SubmitHandlersDeps) {
@@ -653,7 +659,7 @@ export function useTaskSubmitHandlers({
 
   const performTaskUpdate = useCallback(async () => {
     if (!editingTask) return null;
-    if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
+    if (!areEditDependenciesReady(isEditMode, editDependencies, editSandbox)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
 
@@ -687,6 +693,7 @@ export function useTaskSubmitHandlers({
       mcpServerIdsDirty,
       saveTaskMCPSelections,
       editDependencies,
+      editSandbox,
       isStartedEdit,
       descriptionInputRef,
       setTaskName,
@@ -703,6 +710,7 @@ export function useTaskSubmitHandlers({
     mcpServerIdsDirty,
     saveTaskMCPSelections,
     editDependencies,
+    editSandbox,
     isEditMode,
     setTaskName,
     setHasDescription,
@@ -711,7 +719,7 @@ export function useTaskSubmitHandlers({
   ]);
 
   const handleEditSubmit = useCallback(async () => {
-    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
+    if (!areEditDependenciesReady(isEditMode, editDependencies, editSandbox)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     let closeDialog = true;
@@ -774,11 +782,12 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask,
     applyAgentProfileRecentUse,
     editDependencies,
+    editSandbox,
     isEditMode,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
-    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
+    if (!areEditDependenciesReady(isEditMode, editDependencies, editSandbox)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     let closeDialog = true;
@@ -809,6 +818,7 @@ export function useTaskSubmitHandlers({
     toast,
     setIsCreatingTask,
     editDependencies,
+    editSandbox,
     isEditMode,
   ]);
 
@@ -1119,7 +1129,7 @@ export function useTaskSubmitHandlers({
 
   const handleCreateWithPlanMode = useCallback(async () => {
     if (isEditMode) {
-      if (editDependencies && !editDependencies.ready) return;
+      if (!areEditDependenciesReady(isEditMode, editDependencies, editSandbox)) return;
       setIsCreatingTask(true);
       try {
         await performEditWithPlanMode();
@@ -1144,6 +1154,8 @@ export function useTaskSubmitHandlers({
     toast,
     setIsCreatingTask,
     editDependencies,
+    editSandbox,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const submitCreateTask = useCallback(

@@ -117,3 +117,20 @@ No macOS, signed-platform enrollment, command approval, or endpoint approval sup
 Task 01 creates the permanent opt-in acceptance harness with these probe cases and ownership checks.
 Later work orders prove Kandev integration, callback isolation, MCP routing, policy composition, and both positive and negative enforcement.
 The successful replacement sales run cannot satisfy any same-session recovery criterion.
+
+
+## Compiler cross-checks during implementation
+
+Pinned Nono 0.80.0 merges the built-in default profile's groups into a custom profile in `merge_implicit_default_groups`. The default includes filesystem grants from system-read/write, user-tools, and Homebrew groups. Its required denial groups cannot be excluded. The provider must explicitly remove implicit grant groups or include their complete effective grants in the reviewed canonical policy. Returning only the user's explicit paths would understate access.
+
+The pinned profile schema also supports `environment.allow_vars`, `deny_vars`, and `set_vars`. Values in `set_vars` and filesystem paths can expand variables. Compilation must reject or safely represent paths whose meaning changes during expansion. Core must keep provider search roots private and treat approved provider credentials as explicit child-environment grants. These are implementation checks, not additional acceptance claims.
+
+Source: [pinned profile implementation](https://github.com/nolabs-ai/nono/blob/8bb041356d48f771a221e58c98d9b1ff442e76fe/crates/nono-cli/src/profile/mod.rs) and [embedded policy](https://github.com/nolabs-ai/nono/blob/8bb041356d48f771a221e58c98d9b1ff442e76fe/crates/nono-cli/data/policy.json).
+
+## Exact destination correction (implementation)
+
+The same-host/different-port callback probe disproved the earlier exact-port inference. Pinned Nono 0.80.0 strips ports from plain `allow_domain` entries in `network_policy::expand_proxy_allow`. Its lower-level proxy filter accepts ports, but the profile compiler does not preserve them. The earlier denied destination check did not establish this boundary.
+
+The dedicated provider now requires the generic `egress_proxy` capability for TCP grants. Core owns a per-attempt CONNECT relay that accepts only captured host/port pairs. The plugin binds its private `network.upstream_proxy` field to that relay. No allow-all rule, provider-specific path in core, or change to the pinned runtime is required. The pinned external-proxy path carries both CONNECT and ordinary HTTP forwarding through the upstream relay. Operator file approvals remain a separate private listener whose port cannot match any approved network port.
+
+The negative test remains the release gate: permitted destination succeeds, direct callback access fails, and a proxy tunnel to the callback fails even when another port on the same loopback host is permitted. The initial failing evidence is `/tmp/kandev-nono-runtime-private-boundary.log`. This finding invalidates earlier claims that Nono's plain host/port syntax alone enforces exact ports.

@@ -1,7 +1,7 @@
 ---
 id: "06-approval-channel"
 title: "Connect verified approvals to operator decisions"
-status: pending
+status: in_progress
 wave: 6
 depends_on:
   - "05-nono-provider-lifecycle"
@@ -95,4 +95,13 @@ Unsigned webhook requests require a protected bearer capability. Failure to prov
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Implementation is authorized. Component checks are recorded below; full product acceptance is pending.
+
+Approval persistence and private HTTP transport are implemented as components. SQLite and PostgreSQL tests cover operator authority, immutable requests, single delivery, and refusal after callback loss or process stop. HTTP tests cover duplicates, replay, bounds, cancellation, and failed response flush. The operator API exposes bounded approval views without private runtime identities or callback data.
+
+A packaged Nono integration check now exercises a real file request, an operator allow-once response, a second denied read, and unchanged policy content. Extending that test to a permitted loopback network destination exposed Nono's port-stripping behavior. Exact egress enforcement now requires the core relay described in the updated provider design. Product wiring, permission cards, and complete approval acceptance remain open.
+
+
+The shared approval review is now connected to committed, workspace-scoped live events. It shows the session, captured policy revision and digest, exact operation and target, deadline, and delivery state. Allow once and Deny require an explicit operator action. Decisions preserve saved policies. Reads and mutations are scoped to the authenticated user, session incarnation, attempt, and connection epoch. Duplicate clicks share one request. Late responses after sign-out or operator replacement cannot enable an old action.
+
+A deferred-read regression found that ordinary query invalidation could retain an older empty response. Live events now cancel that read and obtain the current list. Desktop browser testing found that the final request removed its own focus target; closing now returns focus to Execution. Twenty-four focused frontend tests, typecheck, localization, scoped lint, and public-doc validation pass. Desktop and phone browser checks pass for live arrival, explicit allow/deny, focus return, read-only access, expiry, disconnection, long content, 44px touch targets, and phone widths 393, 700, and 767. Both final screenshots were inspected. Browser fixtures prove interface behavior only. Full actual-agent acceptance, denial learning, explicit restart review, and child-state deletion remain open.

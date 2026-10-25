@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CommandPreviewCard } from "./command-preview-card";
 import type { CommandPreviewResponse } from "@/app/actions/agents";
 
@@ -15,7 +15,15 @@ afterEach(() => {
 });
 
 function response(commandString: string): CommandPreviewResponse {
-  return { supported: true, command: commandString.split(" "), command_string: commandString };
+  return {
+    supported: true,
+    command: [],
+    command_string: "",
+    composition: {
+      wrapper: null,
+      agent: { executable: commandString, omitted_arguments: 0, references: [] },
+    },
+  };
 }
 
 describe("CommandPreviewCard", () => {
@@ -42,10 +50,11 @@ describe("CommandPreviewCard", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText(commandPreviewLabel));
     // Wait past the debounce so the stale request has actually fired.
     await waitFor(() => expect(previewAgentCommandActionMock).toHaveBeenCalledTimes(1));
 
-    previewAgentCommandActionMock.mockImplementationOnce(async () => response("agent --new"));
+    previewAgentCommandActionMock.mockImplementationOnce(async () => response("agent-new"));
     rerender(
       <CommandPreviewCard
         agentName="claude"
@@ -57,63 +66,41 @@ describe("CommandPreviewCard", () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByText("agent --new")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("agent-new")).toBeTruthy());
 
     // The stale request finally resolves — it must not clobber the newer preview.
     await act(async () => {
-      resolveStale(response("agent --stale"));
+      resolveStale(response("agent-stale"));
       await stalePromise;
     });
 
     await waitFor(() => {
-      expect(screen.getByText("agent --new")).toBeTruthy();
-      expect(screen.queryByText("agent --stale")).not.toBeTruthy();
+      expect(screen.getByText("agent-new")).toBeTruthy();
+      expect(screen.queryByText("agent-stale")).not.toBeTruthy();
     });
   });
 
-  // The `{prompt}` hint is a <Trans>: its <0> index addresses the JSX children
-  // positionally, so a prettier reflow can silently reassemble the sentence
-  // into fragments without failing anything. Assert the whole reconstructed
-  // sentence, and that the token itself is never translated or re-interpolated.
-  it("renders the {prompt} hint as one sentence with the token intact", async () => {
-    previewAgentCommandActionMock.mockImplementation(async () => response("agent run {prompt}"));
-
+  it("requests a safe composition only after opening diagnostics", async () => {
+    previewAgentCommandActionMock.mockResolvedValue({
+      ...response("agent"),
+      command: ["opaque-secret"],
+      command_string: "opaque-secret",
+    });
     render(
       <CommandPreviewCard
-        agentName="claude"
-        model="claude-sonnet-4-5"
-        permissionSettings={{}}
-        cliPassthrough={false}
-        cliFlags={[]}
-        commandPrefix=""
-      />,
-    );
-
-    const hint = await screen.findByText(
-      (_content, element) =>
-        element?.tagName === "P" &&
-        element.textContent ===
-          "{prompt} will be replaced with your task description or follow-up message.",
-    );
-    expect(hint.querySelector("code")?.textContent).toBe("{prompt}");
-  });
-
-  it("omits the {prompt} hint in CLI passthrough mode", async () => {
-    previewAgentCommandActionMock.mockImplementation(async () => response("agent"));
-
-    render(
-      <CommandPreviewCard
-        agentName="claude"
-        model="claude-sonnet-4-5"
+        agentName="agent"
+        model="model"
         permissionSettings={{}}
         cliPassthrough
         cliFlags={[]}
-        commandPrefix=""
+        commandPrefix="wrapper --token=opaque-secret"
       />,
     );
-
-    await waitFor(() => expect(screen.getByText("agent")).toBeTruthy());
-    expect(screen.queryByText(/will be replaced with your task description/)).toBeNull();
+    expect(previewAgentCommandActionMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(commandPreviewLabel));
+    await screen.findByText("agent");
+    expect(previewAgentCommandActionMock.mock.calls[0][1].safe_only).toBe(true);
+    expect(screen.queryByText(/opaque-secret/)).toBeNull();
   });
 });
 
@@ -138,6 +125,7 @@ describe("CommandPreviewCard flag destination", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText(commandPreviewLabel));
     await waitFor(() => {
       expect(screen.getByTestId("command-preview-flag-destination")).toBeTruthy();
     });
@@ -160,6 +148,7 @@ describe("CommandPreviewCard flag destination", () => {
       />,
     );
 
+    fireEvent.click(screen.getByText(commandPreviewLabel));
     await waitFor(() => {
       expect(screen.queryByTestId("command-preview-flag-destination")).toBeNull();
     });
@@ -200,3 +189,4 @@ describe("CommandPreviewCard deferred Copilot mounts", () => {
     );
   });
 });
+const commandPreviewLabel = "Command Preview";

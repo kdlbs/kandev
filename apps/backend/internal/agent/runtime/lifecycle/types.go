@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
+	policy "github.com/kandev/kandev/internal/agent/sandbox"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -34,6 +35,13 @@ const AgentCtlPort = ports.AgentCtl
 type AgentExecution struct {
 	builtinMCPMu                 sync.Mutex
 	builtinDispatch              *builtinDispatchState
+	SandboxSelection             *policy.SelectionContext `json:"-"`
+	sandboxMu                    sync.Mutex
+	sandboxAttempt               SandboxAttempt
+	sandboxConfigHome            string
+	sandboxPreviousAttempt       string
+	sandboxGeneration            uint64
+	sandboxDispatched            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -1687,6 +1695,7 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	SandboxSelection *policy.SelectionContext `json:"-"`
 	// ResumePassthrough preserves provider resume intent after runtime cleanup.
 	ResumePassthrough            bool
 	RequiredNativeConversationID string

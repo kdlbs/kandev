@@ -1,7 +1,7 @@
 ---
 id: "02-bootstrap-recovery"
 title: "Recover failed bootstrap attempts without losing queued work"
-status: pending
+status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -21,7 +21,7 @@ system_design:
 
 ## Summary
 
-Reproduce Task 04 on the current parent and repair the generic attempt/queue distinction.
+Reproduce Task 04 on the current main-based feature branch and repair the generic attempt/queue distinction.
 
 ## In scope
 
@@ -87,4 +87,18 @@ The retained build is older. Preserve already-fixed behavior if the current sour
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Implementation and targeted checks are complete in the primary session.
+
+The current source already persists correlated bootstrap failures. New failing tests exposed missing-row retry admission, lost queued work after a recovery refusal, and native conversation loss when runtime inventory is absent. The changes use the existing session locks, stamped errors, queue ownership, and readiness handler. They add no provider-specific recovery path.
+
+Missing-row recovery now requires the displayed error stamp and matching saved agent, executor, and repository identities. It rejects changed or deleted executors, newer attempts, cancellation, and arbitrary inventory lookup errors. Office sessions still require scheduler-owned recovery blocks.
+
+The real SQLite integration test drives authentication failure, normal inventory deletion, explicit recovery, readiness, and one queued dispatch on the same session. Its runtime boundary is mocked. This is not real Nono or ACP acceptance.
+
+The hook and transport tests pass (51 tests). Web typecheck passes with `NODE_OPTIONS=--max-old-space-size=8192`; the default heap exhausted memory. Changed-file ESLint passes. Desktop Chromium and mobile Chrome each pass the recovery scenario, including error and queue persistence after reload. The phone Retry target meets the 44px minimum. The first browser attempt stopped during fixture startup because it inherited a Tailscale-only bind. Successful runs set `KANDEV_SERVER_HOST=127.0.0.1` for the isolated fixture.
+
+Backend regression checks pass. The final race run covers all added backend tests plus fresh-start, explicit resume, ordinary startup queues, and stale readiness checks. Routing classification and task service checks pass with non-empty test selections. Go lint passes for the two changed packages against this branch's pre-implementation HEAD. The repository wrapper first reported two unchanged baseline findings and exceeded its five-minute timeout. The final run used the available Nix linter, a ten-minute timeout, and the same two-worker memory bound.
+
+The existing initial-submission replay test now retains executor inventory for its ordinary-resume setup. Its assertion still proves that a later accepted prompt blocks initial replay across restart. Missing bootstrap inventory is covered separately by stamped recovery tests.
+
+Sandbox revision eligibility remains part of Task 04. Actual Nono/ACP same-session acceptance remains part of Task 09.

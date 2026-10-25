@@ -3,6 +3,7 @@ package utility
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/pkg/agent"
@@ -13,6 +14,8 @@ const inferenceErrorKey = "error"
 
 // Handler provides HTTP handlers for inference operations.
 type Handler struct {
+	sandboxMu            sync.Mutex
+	sandboxes            map[string]*utilitySandboxGate
 	acpExecutor          *ACPInferenceExecutor
 	codexExecutor        *CodexAppServerInferenceExecutor
 	logger               *zap.Logger
@@ -33,6 +36,9 @@ func (h *Handler) RegisterRoutes(api *gin.RouterGroup) {
 	aux := api.Group("/inference")
 	aux.POST("/prompt", h.handlePrompt)
 	aux.POST("/probe", h.handleProbe)
+	aux.GET("/sandbox/:attemptID/owner", h.handleSandboxOwner)
+	aux.GET("/sandbox/:attemptID/receipt", h.handleSandboxReceipt)
+	aux.PUT("/sandbox/:attemptID/owner", h.handleSandboxOwnerAck)
 }
 
 // handleProbe handles POST /api/v1/inference/probe
@@ -49,13 +55,19 @@ func (h *Handler) handleProbe(c *gin.Context) {
 	if !h.admitWrapper(c, req.InferenceConfig) {
 		return
 	}
+	finish, admitted := h.reserveSandbox(c, req.InferenceConfig)
+	if !admitted {
+		return
+	}
+	defer finish()
 
 	resp, err := h.probeExecutor(req).Probe(c.Request.Context(), &req)
 	if err != nil {
 		h.logger.Error("inference probe failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, ProbeResponse{
-			Success: false,
-			Error:   "probe execution failed",
+			Success:        false,
+			Error:          "probe execution failed",
+			SandboxReceipt: utilitySandboxReceipt(req.InferenceConfig),
 		})
 		return
 	}
@@ -69,6 +81,7 @@ func (h *Handler) handleProbe(c *gin.Context) {
 			zap.Int("modes", len(resp.Modes)))
 	}
 
+	resp.SandboxReceipt = utilitySandboxReceipt(req.InferenceConfig)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -86,6 +99,11 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 	if !h.admitWrapper(c, req.InferenceConfig) {
 		return
 	}
+	finish, admitted := h.reserveSandbox(c, req.InferenceConfig)
+	if !admitted {
+		return
+	}
+	defer finish()
 
 	h.logger.Info("executing inference prompt",
 		zap.String("agent_id", req.AgentID),
@@ -96,8 +114,9 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("inference prompt failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, PromptResponse{
-			Success: false,
-			Error:   "inference execution failed",
+			Success:        false,
+			Error:          "inference execution failed",
+			SandboxReceipt: utilitySandboxReceipt(req.InferenceConfig),
 		})
 		return
 	}
@@ -108,6 +127,7 @@ func (h *Handler) handlePrompt(c *gin.Context) {
 		h.logger.Info("inference prompt completed", zap.Int("duration_ms", resp.DurationMs))
 	}
 
+	resp.SandboxReceipt = utilitySandboxReceipt(req.InferenceConfig)
 	c.JSON(http.StatusOK, resp)
 }
 
@@ -136,15 +156,15 @@ func (h *Handler) SetControlAuthorization(authenticated func(*gin.Context) bool)
 }
 
 func (h *Handler) admitWrapper(c *gin.Context, cfg *InferenceConfigDTO) bool {
-	if cfg == nil || cfg.LaunchWrapper.IsZero() {
+	if cfg == nil || (cfg.LaunchWrapper.IsZero() && cfg.Sandbox == nil) {
 		return true
 	}
 	if h.authenticatedControl == nil || !h.authenticatedControl(c) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, inferenceErrorKey: "authenticated control is required for launch wrappers"})
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"success": false, inferenceErrorKey: "authenticated control is required for execution settings"})
 		return false
 	}
-	if cfg.LaunchWrapper.Validate() != nil || len(cfg.CommandPrefix) != 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"success": false, inferenceErrorKey: "invalid launch wrapper configuration"})
+	if (!cfg.LaunchWrapper.IsZero() && (cfg.LaunchWrapper.Validate() != nil || len(cfg.CommandPrefix) != 0)) || (cfg.Sandbox != nil && cfg.Sandbox.Validate() != nil) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"success": false, inferenceErrorKey: "invalid execution configuration"})
 		return false
 	}
 	return true

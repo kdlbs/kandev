@@ -33,6 +33,7 @@ import {
   type WorkspaceRestorationAttempt,
 } from "@/lib/state/slices/session-runtime/workspace-restoration";
 import { applyForegroundActivity, applyCancellationPending } from "./session-activity";
+import { registerSessionExecutionHandlers } from "./session-execution";
 
 const debug = createDebugLogger("session:state");
 
@@ -232,6 +233,9 @@ export function pickPrimarySessionReplacement(
 // composer can switch affordance without a refetch; cancellation_* carry the
 // backend-owned cancellation projection.
 const CARRIED_WHEN_DEFINED = [
+  "execution_snapshot",
+  "execution_observation",
+  "queue_incarnation_id",
   "session_recovery_blocks",
   "review_status",
   "error_message",
@@ -880,6 +884,7 @@ function clearResumeAndLaunchWarnings(store: StoreApi<AppState>, sessionId: stri
 // eslint-disable-next-line max-lines-per-function -- session events remain one ordered registry.
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    ...registerSessionExecutionHandlers(store),
     "message.queue.status_changed": (message) =>
       handleQueueStatusChangedMessage(store, message.payload),
     // eslint-disable-next-line complexity -- ordered session reconciliation keeps stale-event guards together

@@ -1,7 +1,7 @@
 ---
 id: "01-runtime-contract"
 title: "Pin the runtime and build conformance evidence"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -32,6 +32,8 @@ Create the opt-in Nono harness from the temporary binary experiments. Pin versio
 ## In scope
 
 Test pipe transparency, PTY transport, approval grant/deny/timeout, denied access, and owned cleanup with synthetic fixtures. Record unsupported shapes explicitly.
+Identify a protected runtime evidence source that binds the live sandbox mechanism to the child identity and policy digest.
+If the pinned runtime cannot supply that evidence, record unknown status and keep the active-shield capability unsupported.
 
 ## Out of scope
 
@@ -50,6 +52,7 @@ New test and runner paths below are implementation deliverables, not existing pa
 
 ```bash
 python3 scripts/check-nono-real.test.py
+python3 scripts/check-generic-wrapper-real.test.py
 python3 scripts/check-nono-real.py --check-prerequisites
 python3 scripts/check-nono-real.py --conformance --record docs/plans/nono-sandbox-integration/acceptance.md
 ```
@@ -82,4 +85,18 @@ Nono documentation contains contradictory webhook statements. Binary evidence mu
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Completed on 2026-10-23.
+
+- Red: missing binary returned success in the initial skeleton. The real conformance test then refused the unimplemented runner.
+- Red: missing Landlock still reported ready before adding the ABI gate.
+- `python3 scripts/check-nono-real.test.py`: three safety tests passed, one explicit-runtime test skipped without its environment input.
+- The same command with `NONO_ACCEPTANCE_BINARY` set to the verified private binary: four tests passed.
+- `python3 scripts/check-generic-wrapper-real.test.py`: 14 tests passed, including PID reuse, unrelated listener preservation, and TERM-time descendants.
+- `--check-prerequisites`: verified binary digest, Linux x86_64, and Landlock ABI 7.
+- `--conformance --record ...`: ten actual-runtime checks passed. See [acceptance.md](acceptance.md).
+
+Set `NONO_ACCEPTANCE_BINARY` to an explicit verified 0.80.0 binary for runtime commands.
+The harness does not install a runtime or load credentials. Its process ownership/cleanup reuses the existing acceptance runner.
+The session registry lacks a current policy digest. Its process identity alone cannot support an active-shield claim.
+The evidence gate remains unsupported until a later provider implementation proves a stronger source.
+Fresh-process restart is not Kandev same-session recovery. No full product acceptance is claimed.

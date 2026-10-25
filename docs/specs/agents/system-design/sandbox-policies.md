@@ -9,6 +9,8 @@ requirements:
   - REQ-AGENTS-SANDBOX-004
   - REQ-AGENTS-SANDBOX-005
   - REQ-AGENTS-SANDBOX-006
+  - REQ-AGENTS-SANDBOX-007
+  - REQ-AGENTS-SANDBOX-008
 ---
 
 # Sandbox policy system design
@@ -21,9 +23,10 @@ The [plugin contract](../../plugins/system-design/sandbox-provider-capability.md
 [Generic wrapping](generic-launch-wrappers.md) remains an independent core facility.
 The [boundary decision](../../../decisions/2026-10-22-optional-sandbox-provider-boundary.md) records alternatives.
 
-Source baseline is parent `fff43904827d8b44bf2a33439bce7fee022fc893`.
+Source baseline is `main` at `1eb53576f496759b58ae73d4cba7bd96cbc91288`.
+PR #4538 merged as `76c9ada7baaa6b15bf814aec2ef093cc7dc07610` and supplies core wrapping.
 The [investigation](../../../plans/nono-sandbox-integration/investigation.md) distinguishes historical failures from current source and runtime experiments.
-All new types, tables, capability names, and routes below are proposed. They do not exist yet.
+Policy storage, authority, plugin RPCs, and runtime wiring use a default-off flag. Operator UI and product acceptance remain in progress. Work orders record evidence and open gates.
 
 ## Requirement mapping
 
@@ -35,13 +38,15 @@ All new types, tables, capability names, and routes below are proposed. They do 
 | REQ-AGENTS-SANDBOX-004 | Reports and learning |
 | REQ-AGENTS-SANDBOX-005 | Runtime endpoints |
 | REQ-AGENTS-SANDBOX-006 | Operator surfaces, Acceptance |
+| REQ-AGENTS-SANDBOX-007 | Execution settings, Projection and evidence |
+| REQ-AGENTS-SANDBOX-008 | Execution details, Projection and evidence, Session indicator |
 
 ## Core launch composition
 
 Keep `internal/common/launchwrapper.Spec` and `Prepare` provider-neutral.
 Keep `resolveSpawnCommand` inner-command admission and execution-host managed npm preparation.
-A proposed `internal/agent/sandbox` service resolves policy and creates immutable attempt snapshots.
-A neutral `internal/common/sandbox` envelope carries those snapshots to agentctl without importing backend-owned packages.
+`internal/agent/sandbox` resolves policy and captures immutable attempts.
+`internal/common/sandbox` carries them to agentctl without backend imports.
 
 Composition is deployment guard, selected sandbox, existing profile prefix, then admitted child argv.
 Core inserts each layer once. A provider returns sandbox prefix tokens and artifacts, never replacement child argv.
@@ -74,7 +79,12 @@ Do not use Nono `extends` as a restriction mechanism. Its list composition commo
 Resolve inheritance, include implicit groups, and compare the effective result before authorizing it.
 Freeze inherited contents and hashes. Do not follow mutable registry names at launch.
 
-V1 permits exact path roots with read/write modes and explicit route/service grants.
+V1 permits exact path roots with read/write modes, logical `work_dir` and `agent_state` roots, and explicit route/service grants.
+A filesystem entry contains either an absolute `path` or one logical `reference`, never both. Compare logical roots by identity and access mode when publishing a revision. After workspace allocation, core resolves `work_dir` from its owned execution context and checks the resulting absolute path against protected roots. A missing or unsafe work directory refuses launch. The attempt stores both immutable intent and resolved grants; disposable paths do not replace reusable policy intent.
+The optional `agent_state` grant binds to a core-owned child home. Its identity includes organization, workspace, session, agent profile, provider installation, and provider key. Keep it separate from per-attempt supervisor state. Core retains agent files across attempt cleanup and locks the allocation against concurrent use. Store the allocation scope in the immutable attempt. A literal path into protected storage cannot use this exception. Require the same logical grant in the executor ceiling. Refuse missing scope, symlink substitution, or a closed ownership lease. Deleting session data must release this allocation only after every owned process has stopped.
+
+Core supplies child home, config, state, and temporary directories as runtime references. These references carry paths, never credentials. The provider binds them into its child environment without changing the supervisor environment. No real home contents or operator credentials are copied. An absent state grant does not imply host-home access. Utility state is disposable and must have a distinct execution scope.
+
 Canonicalize paths on the execution host. Reject symlink escapes, overlapping protected roots, and unresolved paths.
 Where the provider cannot enforce a nested exclusion, reject the policy instead of claiming subtraction from a broader grant.
 Elevation can approve only operations inside an operator-approved expansion envelope, which itself stays within the executor ceiling.
@@ -96,9 +106,11 @@ The sandbox child must not read Kandev configuration, database files, operator s
 Grant runtime directories individually. Never grant the whole real home, temporary root, or Kandev home.
 Remove provider override variables, loader injection, and unapproved configuration roots from the supervised environment.
 Treat agent profile environment as untrusted relative to the executor ceiling.
-Reject `--allow-net`, `--sandbox-policy external`, and `NONO_ALLOW_NET` in required-policy mode.
+The provider contract declares override variables and arguments that conflict with required policy.
+Core enforces these declarations without matching provider IDs or embedding a Nono flag list.
+The Nono plugin must reject overrides such as `--allow-net`, `--sandbox-policy external`, and `NONO_ALLOW_NET`.
 Freeze the provider environment and configuration search roots before process creation.
-Approved provider credentials remain a separate explicit grant. Do not copy them from retained test instances.
+Approved provider credentials remain a separate explicit grant. Canonical `environment_keys` grants contain exact uppercase variable names, no values or patterns. Deduplicate and sort keys, require every key to fit the executor ceiling, and preserve them in the immutable revision. Core rejects configuration roots, loader injection, interpreter startup hooks, and Kandev control keys. The provider rejects its own override keys. Filter the final environment to approved keys and the fixed runtime baseline. Do not copy credentials from retained test instances.
 
 Plugins are trusted installed host code. The extension permission does not isolate a malicious plugin from host files.
 An unsandboxed same-user host process and the host administrator remain outside this confinement claim.
@@ -108,11 +120,14 @@ An unsandboxed same-user host process and the host administrator remain outside 
 Agentctl's existing `process.Manager` and `InteractiveRunner` own the launch process and cancellation handle.
 Use foreground `nono run`. Do not use `--detached` in v1.
 The Nono supervisor owns its sandboxed child, optional inner PTY, audit state, and proxy.
-Core owns the supervisor process group, operation directory, callback listener lease, and terminal transport.
+Core owns the supervisor process group, kernel descendant container, operation directory, callback listener lease, and terminal transport.
+
+On Linux, create an owned cgroup v2 leaf under the execution host's delegated cgroup. Start with `clone3(CLONE_INTO_CGROUP)`. Record path, boot ID, and inode in the private snapshot. Refuse unsupported kernels or delegation without fallback. Never move the host or change controllers. Ordinary wrappers remain independent.
+
+Deny grants and approvals for cgroup controls. Verify supervisor and child membership. Process sessions alone cannot track native PTYs or detached children. After supervisor exit, validate the captured kernel identity, terminate its cgroup, and require `populated 0` before removing artifacts. Missing or replaced ownership requires recovery. Never signal sibling services.
 
 ACP starts with pipes. Verified Nono 0.80.0 behavior preserves piped stdin and stdout without terminal decoration under `--silent`.
-Native terminal starts through the existing outer Kandev PTY.
-Nono may create an inner PTY when all descriptors are terminals.
+Native terminal uses the outer Kandev PTY. Nono may add an inner PTY for terminal descriptors.
 Verify resize, input, signals, EOF, exit codes, and output draining across both PTYs before enabling terminal support.
 No approval UI reads from the agent's terminal. Use the separate webhook channel.
 
@@ -132,7 +147,10 @@ Persist unresolved policy intent plus the immutable resolved revision and provid
 Recovery must bind the retained runtime to the same owner, generation, policy digest, and process identity before adoption.
 Never adopt an unknown supervisor by name or replace it using mutable defaults.
 Missing evidence produces recovery-required status with Stop available.
-Automatic replacement reuses the snapshot. Explicit restart uses the reviewed current selection only after showing its difference.
+Backend-owned callback and egress leases cannot survive detachment. A graceful backend shutdown stops these sandbox executions even when ordinary agent survival is enabled. Recovery checks the private attempt store before reconstructing commands or replaying prompts. A retained process whose callback owner was lost is stopped through the existing bounded recovery path. It is not adopted as an ordinary agent. A replacement can reuse the frozen policy only after core verifies that the captured supervisor and every process in its kernel container ended. Missing supervisor birth evidence keeps the attempt blocked and retains its private files.
+
+Retain bounded, authenticated startup receipts. `not_started` proves no spawn. `terminated` requires matching attempt, generation, policy, supervisor identity, and an empty kernel container. Missing or mismatched receipts prove neither. Keep replay tombstones until attempt files are removed. Reject excess receipts before dispatch. Never expose receipt evidence in public errors.
+Automatic replacement retains policy and work directory. Refuse rebinding. Explicit restart requires review of selection changes.
 
 ## Approval protocol
 
@@ -185,7 +203,8 @@ Do not claim external MCP servers inherit confinement merely because the agent i
 
 ## Persistence and learning
 
-Core owns proposed tables `sandbox_policy_revisions`, `sandbox_policy_bindings`, `sandbox_attempts`, and `sandbox_approval_requests`.
+Core owns `sandbox_policy_heads`, `sandbox_policy_revisions`, `sandbox_policy_bindings`, `sandbox_task_guards`, `sandbox_attempts`, and `sandbox_reports`. Approval integration also requires `sandbox_approval_requests`. Attempt snapshots freeze the resolved policy, ceiling, provider package, runtime digest, launch envelope, and resolved filesystem grants. Versioned lifecycle updates cannot rewrite those snapshots. A running lifecycle state records an owned process; it is not an active-confinement claim. Terminal attempts reject late running events.
+Task guards retain the last admitted permission limit across context changes and service reloads. Compare-and-swap writes reject concurrent admission against a stale limit. Child admission checks the captured parent limit. These guards are policy authority records, not evidence that a process is sandboxed.
 Use the existing database abstraction and migrations for SQLite and PostgreSQL.
 Store schema version, content hash, dependency hashes, source kind, operator ID, timestamps, ceiling identity, and selection source.
 Attempt records contain non-secret endpoint intent and resource identities. Protected runtime files contain transient callback material.
@@ -207,17 +226,126 @@ Revoked revisions block new attempts. Explicitly stopping already-running attemp
 
 ## Operator surfaces
 
-Use existing agent/executor profile settings and workflow/task editors for reference selection.
-Show inherited source and ceiling summary beside the effective revision.
-The permission card shows the denied operation, deadline, and one-operation decision.
-Denial details and learning use a focused review surface with a diff and explicit persistence scope.
+Agents owns these surfaces because the underlying contract describes launch configuration and runtime evidence.
+Tasks supplies session identity and presentation placement. Its lifecycle state remains independent of sandbox status.
+Use generic settings and session details, without a security dashboard or provider-specific pages.
+[Runtime identity display](runtime-identity-display.md) owns settings runtime information. It proves nothing about an existing session.
 
-Desktop uses existing settings cards, selectors, and session cards.
-Phone uses `MobilePickerSheet` for temporary selection and a full-height review surface for denial details.
+### Execution settings
+
+`ProfileFormFields` places `CommandPrefixField` in Execution, with Command wrapper and Sandbox groups.
+Preserve `command_prefix` storage and save/dirty behavior. Do not duplicate the editor in Advanced.
+Raw launch diagnostics remain an initially closed disclosure. The command preview shows composition, not a shell command to execute.
+Use the existing `launchwrapper` parser for validation and reserved references.
+Show unresolved work-directory/runtime references symbolically until the operator selects execution context.
+For diagnostic previews, show command identities and typed safe values only. Replace opaque arguments with an omitted-arguments label.
+Do not interpolate inherited environment values or secrets into preview text, logs, telemetry, or session responses.
+
+Sandbox displays the provider inherited from the executor, policy default selector, capability health, and permission summary.
+Its sections are Readable locations, Writable locations, Network, Kandev MCP, and Mandatory restrictions.
+Use canonical grants and declared capabilities from the validated provider contract.
+Do not inspect command text for provider names or infer grants from arbitrary flags.
+A custom prefix remains independent and runs inside structured confinement when both are configured.
+No plugin shows an explanatory empty state while leaving the core wrapper editor available.
+An installed but unavailable provider preserves its selection and shows the exact blocker.
+
+Agent profiles can apply to multiple executors. Require an executor context to resolve availability, eligible policies, and the ceiling.
+Before context selection, show the stored agent default and unresolved inherited provider without a health claim.
+Executor selection in this preview does not assign the agent to that executor or change stored defaults.
+An explicit Check availability action performs a bounded probe. Opening settings does not install software or start an agent.
+`POST /api/v1/sandbox/availability` requires operator authority and a five-second deadline. It checks the saved selection and runtime artifact, then rechecks installation and binding identities. Return only availability and a stable blocker, never paths or provider errors. This proves no confinement. Context or binding changes invalidate the displayed result. Unsaved drafts hide it.
+Reuse executor profile settings for provider and ceiling authority, and workflow/task editors for revision selection.
+Show inherited source and ceiling restrictions beside each selector. An absent selection means inherit, not disable.
+Existing authorization gates apply to all saves. Read-only users can inspect a permitted summary but cannot modify configuration.
+
+### Projection and evidence
+
+Capture an `ExecutionSnapshot` for every agent launch, including core wrappers and unwrapped agents.
+Capture wrapper source and digest, safe command identities, executor context, selection source, and the resolved policy before process creation.
+Persist immutable session, attempt, and generation identity.
+Sandbox snapshots contain provider/runtime identity and policy digest. Only verified evidence supplies the mechanism.
+Do not persist secret argv in this public-facing snapshot. Keep private launch material separate.
+Legacy sessions without snapshots receive unknown history rather than data reconstructed from mutable profile settings.
+
+Core projects execution details through authenticated session reads and WebSocket updates.
+The DTO includes the snapshot, observed status, evidence timestamp, provider-service health, report completeness, and next-launch selection.
+Next-launch selection is a separate current-policy resolution. A failed resolution leaves the recorded attempt readable.
+Use existing session access checks. Shared/read-only surfaces receive only their permitted redacted fields and never operator actions.
+No new unauthenticated diagnostics endpoint is permitted.
+
+Provider runtime evidence uses the versioned `NormalizeSandboxStatus` contract.
+Core reads only declared private artifacts and binds normalized evidence to its owned process identity, generation, and policy digest.
+A provider's availability declaration or self-reported boolean cannot create active status.
+The provider adapter must have conformance evidence for its host, mechanism, and transport before core accepts its evidence schema.
+The initial Nono adapter's evidence source remains a Task 01 runtime gate. Missing reliable evidence yields unknown, not inferred active.
+Do not insert a Nono-specific process or JSON parser into the core projection.
+
+| Status | Entry condition | Exit or invalidation |
+| --- | --- | --- |
+| Not configured | Current known snapshot has no selected sandbox | New attempt with a selected policy |
+| Configured | Required policy resolved, no process launch yet | Admission starts or fails |
+| Starting | Current attempt launched, confinement evidence pending | Accepted evidence, launch failure, stop, or lost evidence |
+| Active | Accepted current confinement evidence and live owned process tree | Stop, generation change, or uncertain evidence/ownership |
+| Failed | Required launch or enforcement verification failed | Explicit new attempt |
+| Unknown | Missing, stale, incompatible, or unbound evidence | Fresh accepted evidence or confirmed terminal outcome |
+| Stopped | Core confirmed the attempt's process tree ended | New attempt only |
+
+One core observer reads bounded pages of current sandbox attempts with bounded concurrency. Capture wakes it; a ten-second tick refreshes evidence. No per-tab polling.
+Bound provider verification to a five-second call deadline and a 30-second maximum evidence freshness window.
+Active status requires a live ownership observation and valid confinement evidence within that window.
+Set unknown when the window expires, observation fails, or a required transport disconnects. Never extend freshness from a cached response.
+Persist the last evidence for history, but invalidate active status across backend restart until recovery rebinds the live attempt.
+The browser marks live status unknown on WebSocket loss and waits for a fresh server projection after reconnect.
+Order updates by session ID, attempt generation, and monotonic projection revision. Reject stale and foreign updates.
+Ignore a late active event after a terminal observation for the same attempt.
+
+Keep provider-service health separate from confinement state.
+If the plugin exits, existing kernel confinement may persist. Core can retain active only with still-valid independent runtime evidence.
+Otherwise show unknown and provider unavailable, preserve history, deny new decisions, and retain Stop.
+Changing the sandbox status never synthesizes task completion or resolves a launch-recovery error.
+
+### Execution details
+
+Use the same detail model from the session header, Dockview tab action, and mobile session status control.
+Desktop opens a focused dialog with fixed title/close controls and one scrolling body.
+Order the content as current status and observation time, This attempt, Protection scope, Next launch, then Approvals and Denials.
+This attempt shows the captured wrapper, provider/runtime versions, immutable policy revision, and selection source.
+Next launch shows current defaults and a diff when they differ. Configuration changes do not silently restart the session.
+Protection scope names the agent process tree and the actual mechanism. List user shells, setup, and external MCP services as separate boundaries.
+Kandev MCP indicates a narrowly allowed route, not confinement of the service itself.
+Stopped attempts show historical status and time without a live shield.
+
+The permission card shows the operation, deadline, and one-operation decision.
+Details links to that same approval record instead of creating duplicate decision state.
+Denial details and learning share the existing report/revision model with a diff and explicit persistence scope.
+Absent reports say unavailable or unsupported, never zero denials. Provider failure preserves the configuration and any recorded report.
+
+### Session indicator
+
+Integrate a small button beside the title in `session-tab.tsx`. Keep task, session, and attempt identities distinct.
+Use Tabler icons from the existing surface: neutral wrapper, shield for active confinement, and warning for a required failure.
+Use a neutral status variant for configured, starting, unknown, and stopped. Do not reuse an active shield outline for these states.
+When wrapping and confinement coexist, show one sandbox-status icon. Details describes both layers.
+Sessions with neither can omit the decorative indicator but retain an Execution details menu/header action.
+The accessible name includes the session and status. A tooltip supplements it but is not the only access path.
+Activation opens details and does not close, rename, maximize, or initiate a drag of the tab.
+Preserve tab keyboard navigation and focus return after closing details. Avoid a nested button within another button.
+On coarse-pointer desktop/tablet layouts, use a 44px hit target or the existing touch action surface without overlapping tab actions.
+Do not aggregate one session's shield into a task-wide protection claim or add badges to every board card.
+
+### Phone composition and accessibility
+
+Phone settings retain the same group order in one column with the page as scroll owner.
+Use `MobilePickerSheet` for policy and executor choices. Return to the same draft after selection or Back.
+Add a labelled Execution status control for the selected session in `session-mobile-top-bar.tsx` and the session picker actions.
+Open a full-height detail surface with fixed title/Back, one scrolling body, and safe-area-aware actions.
+Approval and learning open a next view within that surface, not a stack of drawers.
 Reuse `session-task-switcher-sheet.tsx` for fixed-header and safe-area behavior.
 Use one internal scroll owner, dynamic viewport height, visible Back, and fixed decision controls.
 Share state, authority, stale-response guards, and action handlers across presentations.
 Maintain 28px desktop controls and at least 44px phone/coarse-pointer targets.
+Long policy names, provider names, and paths wrap within the surface. Browser zoom and keyboards must not hide actions.
+Include keyboard, screen-reader, forced-colors, and reduced-motion checks. Do not rely on color or animated state alone.
 Use existing UI tokens. Any press motion uses 0.96 scale for 150ms and respects reduced motion.
 Errors retain drafts. Empty lists explain missing provider or policy setup without enabling an unsafe default.
 All copy uses localization across the seven maintained locales.

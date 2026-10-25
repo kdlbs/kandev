@@ -1,11 +1,12 @@
 ---
 id: "08-operator-policy-learning"
-title: "Deliver policy selection and explicit learning"
-status: pending
-wave: 8
+title: "Deliver denial review and explicit learning"
+status: in_progress
+wave: 9
 depends_on:
   - "06-approval-channel"
   - "07-mcp-connectivity"
+  - "10-execution-surfaces"
 plan: "plan.md"
 requirements:
   - REQ-AGENTS-SANDBOX-002
@@ -31,15 +32,16 @@ system_design:
   - ../../specs/agents/system-design/sandbox-policies.md
 ---
 
-# Task 08: Deliver policy selection and explicit learning
+# Task 08: Deliver denial review and explicit learning
 
 ## Summary
 
-Expose effective selections and bounded denial reports, then publish operator-approved immutable revisions.
+Extend the shared Execution details surface with bounded denial reports and operator-approved immutable revisions.
 
 ## In scope
 
-Implement settings/task/workflow selectors, source provenance, report completeness, diff review, suppressions, revision persistence, and responsive UI.
+Implement report completeness, provenance, access-diff review, suppressions, revision persistence, and responsive learning views.
+Reuse Task 10 selectors for the explicit learned-revision selection. Keep publication separate from selection and existing attempts.
 
 ## Out of scope
 
@@ -47,14 +49,16 @@ No automatic learning, live repo-profile mutation, retroactive changes to runnin
 
 ## Acceptance
 
-- All selection surfaces show source and ceiling and reject unauthorized weakening after reload.
+- Report and learning views preserve source and ceiling information. Published revisions do not change selection without an explicit authorized action.
 - Learning shows exact access changes and provenance, rejects stale/out-of-ceiling proposals, and changes future selection only explicitly.
 - Desktop and phone support loading, empty, error, read-only, approval, denial, and learning flows with all locale keys.
 
 ## UI preview
 
-UI-01: Selection and UI-03: Learning. See the [combined preview](plan.md#ui-preview).
-Desktop: settings selectors plus provenance, then denial list and revision diff. Phone: bottom picker for selection and full-height review for learning.
+UI-03: Learning extends UI-05: Execution details. See the [combined preview](plan.md#ui-preview).
+Desktop: open the denial list from Execution details, then review the access diff and persistence scope.
+Phone: navigate within the full-height detail surface to the diff, with fixed Back and Create revision controls.
+Use Task 10 policy pickers only after explicit selection of the new revision. Map to SANDBOX-004.1-5 and SANDBOX-006.1-2.
 Preserve loading, error, expired, and read-only states. Use shared domain state and localized labels.
 
 ## Verification
@@ -80,7 +84,7 @@ Run each listed suite after its files exist. Do not count a zero-test filter as 
 - `apps/web/components/settings/profile-edit/`
 - `apps/web/components/settings/executor-profile-dialog.tsx`
 - `apps/web/components/task/`
-- `apps/web/components/workflow/`
+- `apps/web/components/settings/workflow-step-agent-profile-selector.tsx`
 - `apps/web/src/locales/`
 - `apps/web/e2e/tests/settings/sandbox-policies.spec.ts (new)`
 - `apps/web/e2e/tests/settings/mobile-sandbox-policies.spec.ts (new)`
@@ -88,7 +92,7 @@ Run each listed suite after its files exist. Do not count a zero-test filter as 
 
 ## Dependencies
 
-06-approval-channel, 07-mcp-connectivity
+06-approval-channel, 07-mcp-connectivity, 10-execution-surfaces
 
 ## Risks
 
@@ -105,4 +109,6 @@ Missing audit data must remain unknown. Suppression must never translate into ac
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Implementation is authorized. Bounded report storage and trusted runtime capture are implemented. SQLite and PostgreSQL report persistence checks pass. The actual packaged Nono runtime retains denied reads, preserves prior evidence when audit parsing fails, and captures the final report before artifact cleanup. Session-scoped HTTP reads recheck authorization after the runtime read and sanitize failures. Seven frontend tests cover attempt binding, failed refresh, disconnect, and account changes. Desktop and phone report rendering checks pass, including failed refresh, final captures, empty captures, long paths, focus return, and 393/700/767px phone widths. Both screenshots were inspected. Typecheck, scoped lint, localization, public-doc validation, SQL guard, and spec validation pass. Learning publication remains pending.
+
+The report extends the existing Execution details body. The phone surface keeps its fixed Back control and one scroll owner. Report refresh and source disclosure use 44px phone/coarse-pointer targets. Desktop controls retain the surrounding density. Empty and incomplete captures never imply that no operations were denied.

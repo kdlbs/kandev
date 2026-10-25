@@ -1,8 +1,8 @@
 ---
 id: "09-acceptance-delivery"
-title: "Prove real Nono acceptance and prepare the stacked PR"
+title: "Prove real Nono acceptance and prepare the follow-up PR"
 status: pending
-wave: 9
+wave: 10
 depends_on:
   - "02-bootstrap-recovery"
   - "08-operator-policy-learning"
@@ -13,6 +13,7 @@ requirements:
   - REQ-AGENTS-SANDBOX-004
   - REQ-AGENTS-SANDBOX-005
   - REQ-AGENTS-SANDBOX-006
+  - REQ-AGENTS-SANDBOX-008
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005
   - REQ-PLUGINS-SANDBOX-001
 acceptance_criteria:
@@ -39,6 +40,8 @@ acceptance_criteria:
   - AC-AGENTS-SANDBOX-006.2
   - AC-AGENTS-SANDBOX-006.3
   - AC-AGENTS-SANDBOX-006.4
+  - AC-AGENTS-SANDBOX-008.2
+  - AC-AGENTS-SANDBOX-008.5
   - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.1
   - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.2
   - AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-005.3
@@ -55,7 +58,7 @@ system_design:
   - ../../specs/plugins/system-design/sandbox-provider-capability.md
 ---
 
-# Task 09: Prove real Nono acceptance and prepare the stacked PR
+# Task 09: Prove real Nono acceptance and prepare the follow-up PR
 
 ## Summary
 
@@ -64,6 +67,8 @@ Run complete real-provider acceptance and document only proven support before th
 ## In scope
 
 Use disposable authenticated test data, a packaged plugin, pinned Nono, fresh current-source binaries, explicit network policy, and negative enforcement controls.
+Verify that real runtime evidence drives active status for the exact attempt and policy.
+Document the protection scope and unsupported evidence shapes. A seeded mock reply cannot close this gate.
 
 ## Out of scope
 
@@ -73,7 +78,8 @@ No retained-instance mutation, replacement-run recovery claim, merge, parent-bra
 
 - Discovery, ACP tool work, terminal input/tools, same-session restart, cancellation, cleanup, approvals, reports, learning, and MCP pass with positive receipts.
 - Denied read/write and network controls fail while permitted work succeeds. Policy edits by agents, callback forgery, and credential disclosure checks fail safely.
-- Delivery evidence identifies exact commits, plugin/runtime hashes, platform, commands, limitations, and the new PR parent.
+- Delivery evidence identifies exact commits, plugin/runtime hashes, platform, commands, limitations, and the verified main base with #4538 as its merged prerequisite.
+  The new draft PR targets `main`. Do not reopen or modify #4538.
 
 ## Verification
 

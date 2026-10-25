@@ -331,6 +331,8 @@ const (
 	ActionExecutorPrepareCompleted      = "executor.prepare.completed"
 	ActionSystemMetricsUpdated          = "system.metrics.updated"
 	ActionUpdateAvailable               = "system.update_available"
+	ActionSessionExecutionChanged        = "session.execution_changed"
+	ActionSessionSandboxApprovalsChanged = "session.sandbox_approvals_changed"
 
 	ActionAgentProfileDeleted    = "agent.profile.deleted"
 	ActionAgentProfileCreated    = "agent.profile.created"

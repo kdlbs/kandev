@@ -23,6 +23,7 @@ Tasks retains launch failure, recovery, queue, and error-history ownership.
 - **Selection:** A reference to an approved revision, not provider flags or profile text.
 - **Attempt:** One process launch generation within a Kandev session.
 - **Learning:** An operator reviews denied operations and explicitly approves a new policy revision.
+- **Execution details:** A session view of its captured launch configuration, current enforcement evidence, and protection scope.
 
 ## Requirements
 
@@ -95,6 +96,48 @@ Tasks retains launch failure, recovery, queue, and error-history ownership.
 - **AC-AGENTS-SANDBOX-006.3:** Nono acceptance shall prove discovery, ACP tools, native terminal tools, restart, cancellation, and cleanup with the pinned real runtime.
 - **AC-AGENTS-SANDBOX-006.4:** Each supported configuration shall prove permitted work and blocked filesystem and network operations.
   Generic fixtures and successful replacement sessions shall not substitute for these checks.
+
+### REQ-AGENTS-SANDBOX-007: Discoverable execution configuration
+
+**Intent:** Operators configure ordinary wrappers and optional sandboxes without constructing provider commands.
+
+- **AC-AGENTS-SANDBOX-007.1:** Agent profile settings shall expose an Execution section with separate Command wrapper and Sandbox groups.
+  Existing command prefixes shall retain their value and behavior. Editing a wrapper shall not require a plugin.
+- **AC-AGENTS-SANDBOX-007.2:** Command wrapper shall provide an editable prefix, validation, and a safe command preview.
+  Runtime placeholders shall remain explicit until execution context exists. Viewing settings shall not start an agent or install a provider.
+- **AC-AGENTS-SANDBOX-007.3:** Sandbox shall show the executor-selected provider, agent policy default, inherited source, availability, and supported capabilities.
+  When executor context is absent, settings shall request that context before claiming an effective policy or host support.
+- **AC-AGENTS-SANDBOX-007.4:** The policy summary shall show readable locations, writable locations, network permissions, Kandev MCP access, and mandatory restrictions.
+  Unsupported or unknown permissions shall remain explicit. Details shall distinguish unavailable capabilities from disabled capabilities.
+- **AC-AGENTS-SANDBOX-007.5:** A custom wrapper and a sandbox selection shall coexist. The custom wrapper shall run inside the selected confinement.
+  Provider names and command text shall not select special UI behavior or prove enforcement.
+- **AC-AGENTS-SANDBOX-007.6:** Workflow-step and task selectors shall show inherited defaults and effective selection sources before launch.
+  Invalid selections shall preserve the saved reference and explain the launch blocker. Read-only users shall not receive mutation controls.
+
+### REQ-AGENTS-SANDBOX-008: Session execution visibility
+
+**Intent:** Users can inspect actual session execution without confusing configuration with active confinement.
+
+- **AC-AGENTS-SANDBOX-008.1:** Execution details shall show the captured wrapper, provider, policy revision, selection source, and current attempt status.
+  Settings for the next launch shall appear separately. Editing defaults shall not change the displayed history of an existing attempt.
+- **AC-AGENTS-SANDBOX-008.2:** The sandbox status shall distinguish configured, starting, active, failed, unknown, stopped, and not configured.
+  Only current runtime evidence bound to the attempt and policy shall permit active status.
+  A launch receipt, installed executable, provider declaration, or successful agent reply shall not suffice.
+- **AC-AGENTS-SANDBOX-008.3:** Each Dockview session tab shall expose its own execution indicator and Execution details action.
+  A confirmed active sandbox shall use a shield. An ordinary wrapper shall use a neutral wrapper indicator.
+  A failed required sandbox shall use a warning. Configured, starting, unknown, and stopped states shall not show an active shield.
+- **AC-AGENTS-SANDBOX-008.4:** Status from a sibling session or previous attempt shall not change the selected session's indicator.
+  Connection loss or uncertain runtime ownership shall remove the active claim until current evidence restores it.
+  A completed or stopped attempt shall retain historical evidence without claiming current protection.
+- **AC-AGENTS-SANDBOX-008.5:** Execution details shall state which agent process tree the policy covers.
+  It shall not imply protection for user terminals, repository setup, external MCP servers, or the whole task.
+  Kandev MCP route access and external service protection shall appear as separate facts.
+- **AC-AGENTS-SANDBOX-008.6:** Execution details shall expose supported approval and denial-report views with their completeness and service health.
+  Provider loss shall preserve the captured configuration. It shall not imply that the kernel removed existing confinement.
+- **AC-AGENTS-SANDBOX-008.7:** Desktop users shall open details with pointer or keyboard activation without closing, renaming, or dragging the session tab.
+  Phone users shall have a labelled, tappable equivalent. Tooltips, color, and hover shall not be the only status or navigation cues.
+- **AC-AGENTS-SANDBOX-008.8:** Previews, indicators, and detail responses shall omit credentials, callback secrets, and unfiltered provider output.
+  Legacy attempts without recorded execution evidence shall show unknown history. Current profile settings shall not reconstruct that history.
 
 ## Exclusions
 

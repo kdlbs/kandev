@@ -478,6 +478,7 @@ type Repos struct {
 type Service struct {
 	workspaceCollaboration          WorkspaceCollaborationBoundary
 	workspaceCollaborationStore     WorkspaceCollaborationStore
+	sandboxCreationAdmission        func(context.Context, *models.Task, *CreateTaskRequest) error
 	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory

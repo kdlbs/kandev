@@ -184,7 +184,7 @@ const UI_SETTINGS_COVERAGE_INVENTORY: SettingsCoverageEvidence[] = [
     "agent_profile",
     "config_options",
     source(
-      "apps/web/components/settings/profile-advanced-options.tsx",
+      "apps/web/components/settings/profile-form-fields.tsx",
       "apps/backend/internal/agent/settings/profileconfig/profileconfig.go",
     ),
     PROFILE_TASK,

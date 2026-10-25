@@ -99,7 +99,7 @@ func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentE
 		return passthroughResetPreparation{}, err
 	}
 	var env map[string]string
-	if isSSHPassthrough(execution) {
+	if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
 		env, err = m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
 		if err != nil {
 			return passthroughResetPreparation{}, err
@@ -146,7 +146,7 @@ func (m *Manager) preparePassthroughResetCommand(
 		pt, rt, cmd, err = m.freshPassthroughCommandForResolved(ctx, execution, resolved, progress)
 	}
 	if err != nil {
-		if isSSHPassthrough(execution) {
+		if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
 			m.updateExecutionError(execution.ID, "failed to prepare replacement passthrough session: "+err.Error())
 		}
 		if progress != nil {
@@ -171,7 +171,7 @@ func (m *Manager) preparePassthroughResetEnvironment(
 	copilotPrepared bool,
 	env map[string]string,
 ) (map[string]string, error) {
-	if isSSHPassthrough(execution) {
+	if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
 		maps.Copy(env, getPassthroughMCPEnv(execution))
 		return env, nil
 	}
@@ -240,11 +240,11 @@ func (m *Manager) stopPassthroughForReset(ctx context.Context, execution *AgentE
 	execution.PassthroughStartedAt = time.Time{}
 
 	if err := runner.Stop(ctx, oldProcessID); err != nil {
-		if isSSHPassthrough(execution) {
+		if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
 			execution.PassthroughProcessID = oldProcessID
 			execution.PassthroughStartedAt = oldStartedAt
 			execution.passthroughInitialPromptProcessID = oldInitialPromptID
-			return fmt.Errorf("stop remote passthrough before reset: %w", err)
+			return fmt.Errorf("stop passthrough before reset: %w", err)
 		}
 		m.logger.Warn("failed to stop passthrough process during context reset",
 			zap.String("execution_id", execution.ID),

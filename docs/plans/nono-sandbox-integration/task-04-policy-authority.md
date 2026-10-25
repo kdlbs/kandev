@@ -1,7 +1,7 @@
 ---
 id: "04-policy-authority"
 title: "Persist and enforce policy selections"
-status: pending
+status: in_progress
 wave: 4
 depends_on:
   - "03-plugin-capability"
@@ -88,4 +88,14 @@ Nono inheritance can add access. Unknown subset relationships must refuse activa
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Implementation is in progress. Core revisions, policy bindings, selection precedence, ceiling checks, revocation, and strict operator HTTP writes have focused passing tests. SQLite and PostgreSQL checks cover schema replay, immutable content, provenance, concurrent publication, conflicts, and transactions. Target lookup checks workspace access instead of trusting request scope.
+
+The restart-required `features.sandboxPolicies` flag is off in prod, dev, and e2e. It gates provider dispatch and operator routes. Disabling it blocks required policy resolution while preserving ordinary wrappers. The feature registry, profile contract, and frontend contract checks pass. Backend configuration tests require a clean test environment and umask 022; inherited server settings and umask 077 caused unrelated initial failures.
+
+Launch admission now rejects a selected policy until the runtime path is available. Discovery carries executor context and policy cache identity. Utility prompts and background probes enforce admission before process creation or cache reads. Missing tenant context cannot bypass saved requirements.
+
+Durable task guards retain the admitted permission limit across service reloads and context changes. Tests reject expanded permissions through agent or executor switches and through captured parent context. Task creation captures policy before inserting the task and carries restrictions from the verified MCP caller even when the new task has no parent link. Focused creation/copy tests pass. Task-guard persistence and concurrent-write tests pass under the race detector on SQLite and PostgreSQL.
+
+Logical `work_dir` grants support reusable policies without granting a parent task directory. Focused tests cover read/write ceilings, per-execution resolution, missing paths, protected roots, and symlink aliases. The import/copy integration audit, final environment enforcement, runtime compilation, and immutable attempt materialization remain. Native Nono profiles are not accepted as live authority; the current import contract accepts only canonical revisions and pinned revision sources. Do not treat these service-level results as full product acceptance.
+
+Immutable attempt persistence now passes focused SQLite and PostgreSQL race tests. Capture rechecks the selected revision and binding version, and stores provider/runtime identity plus resolved grants. Tests cover service reload, later policy publication, stale selection, stale lifecycle writes, process identity replacement, and terminal-state revival refusal. Runtime preparation and lifecycle callers still need to adopt this store. Custom database WAL and SHM paths are also protected by passing startup-policy tests.

@@ -1,7 +1,7 @@
 ---
 id: "03-plugin-capability"
 title: "Add the optional sandbox provider contract"
-status: pending
+status: done
 wave: 3
 depends_on: []
 plan: "plan.md"
@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-PLUGINS-SANDBOX-001.3
   - AC-PLUGINS-SANDBOX-001.4
   - AC-PLUGINS-SANDBOX-001.5
+  - AC-PLUGINS-SANDBOX-001.6
   - AC-AGENTS-SANDBOX-001.1
   - AC-AGENTS-SANDBOX-001.2
   - AC-AGENTS-SANDBOX-001.3
@@ -32,6 +33,8 @@ Add the typed optional capability, manifest validation, SDK methods, and determi
 ## In scope
 
 Implement negotiation, bounded calls, artifact validation, and compatibility failure paths through the existing plugin transport.
+Include canonical display metadata, override constraints, and `NormalizeSandboxStatus` evidence without an authoritative active boolean.
+Use two differently named fixture providers to prove generic dispatch. Fixtures do not establish confinement.
 
 ## Out of scope
 
@@ -41,7 +44,7 @@ No production Nono implementation in the monorepo and no remote executor interfa
 
 - New and old plugin combinations negotiate or refuse without affecting ordinary prefixes.
 - Malformed replies, unknown versions, timeout, crash, and disabled providers cannot cause unwrapped fallback.
-- The fixture proves calls cannot replace the admitted child or persist a policy.
+- Both fixtures use the same contract without provider-ID branches. Calls cannot replace the child, persist policy, or independently assert active confinement.
 
 ## Verification
 
@@ -85,4 +88,10 @@ Generated protobuf changes and manifest permissions must remain backward compati
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Completed with additive manifest, protobuf, SDK, and host dispatch contracts. Calls have deadlines, message limits, installation binding checks, artifact validation, and cancellation on disable, removal, upgrade, and configuration restart. Disabled providers remain visible as unavailable.
+
+The packaged fixture exercises all six operations for two provider names through the same host path. It also covers disable, re-enable, upgrade, stale bindings, and removal. The fixture explicitly reports no confinement.
+
+Validation passed: protobuf generation, focused provider tests, packaged conformance, existing SDK/manifest/wrapper compatibility tests, race tests, and changed-package Go lint. Old plugins return unsupported for the optional methods. This does not claim an old-host binary integration test or actual Nono product acceptance.
+
+Policy persistence, launch snapshots, provider package digest pinning, and production provider enforcement belong to the following work orders.

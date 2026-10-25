@@ -106,7 +106,9 @@ const (
 
 // Event types for task sessions
 const (
-	TaskSessionStateChanged = "task_session.state_changed"
+	TaskSessionStateChanged            = "task_session.state_changed"
+	TaskSessionExecutionChanged        = "task_session.execution_changed"
+	TaskSessionSandboxApprovalsChanged = "task_session.sandbox_approvals_changed"
 	// SessionPendingActionChanged carries the compact, workspace-scoped
 	// pending-action projection for one session. It contains no transcript
 	// content and lets inactive session selectors stay current.

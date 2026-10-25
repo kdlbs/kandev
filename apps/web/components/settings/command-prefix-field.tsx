@@ -5,10 +5,8 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
-// An example sandbox launcher invocation — a shell fragment the user types
-// verbatim, so it is interpolated as a value rather than written into the
-// catalog.
-const EXAMPLE_PREFIX = "greywall --";
+// Command syntax is interpolated without translation.
+const EXAMPLE_PREFIX = "env --";
 
 export function CommandPrefixField({
   profile,

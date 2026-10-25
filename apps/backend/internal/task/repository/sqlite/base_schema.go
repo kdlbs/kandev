@@ -32,6 +32,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initExecutionSnapshotSchema,
 		r.initMessageShellOutputSchema,
 		r.initSessionContinuitySchema,
 		r.initAgentDeliverySchema,

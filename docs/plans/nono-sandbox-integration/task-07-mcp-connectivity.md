@@ -1,7 +1,7 @@
 ---
 id: "07-mcp-connectivity"
 title: "Permit only the current Kandev MCP route"
-status: pending
+status: in_progress
 wave: 7
 depends_on:
   - "05-nono-provider-lifecycle"
@@ -77,4 +77,20 @@ Nono network rules must constrain the actual relay. Hostname-only permission doe
 
 ## Results
 
-Pending. No production implementation is authorized during the design turn.
+Implementation is authorized. Component checks are recorded below; full product acceptance is pending.
+
+
+## Component evidence (2026-10-24)
+
+The core relay accepts only its private route, bounds incoming bodies and concurrency, filters headers, rejects redirects, and cancels outstanding requests on close. Each HTTP request uses a fresh connection; this also avoids the pinned Nono forward proxy retaining an upstream connection after its first response.
+
+The provider receives a logical `kandev.mcp` endpoint descriptor with the current loopback address and port. It receives no URL capability. An explicit logical grant is required. The core exact TCP relay enforces that endpoint. Ephemeral endpoint addresses do not become durable policy grants.
+
+The real packaged Nono test now initializes MCP and calls `get_task_plan_kandev` through the core relay and the actual Kandev MCP server. The backend dispatcher is a scoped fixture. The same process cannot access the settings route, private profile/proc data, or approval listener, directly or through the proxy. This proves component connectivity, not a live task/agent journey.
+
+The authenticated agentctl control route checks the retained process owner, attempt, generation, and policy digest. Configuration replaces the automatically injected MCP address with the captured relay, or removes it when no logical grant exists. Focused control-route and process tests pass. Backend task lifecycle wiring and the native terminal path remain unfinished.
+
+
+### Native MCP artifacts
+
+Generated native config now uses the explicitly granted child home. Core does not fall back to private host configuration when that grant is absent. Linux writes use directory-rooted operations, bounded regular-file reads, and atomic replacement. Focused regressions verify permitted writes, outside-path refusal, parent and leaf symlink refusal, malformed-merge refusal, and cleanup after directory replacement. Existing passthrough MCP tests and sandbox lifecycle tests pass under the race detector. These are transport checks, not actual Pi chat or terminal acceptance.

@@ -440,17 +440,19 @@ type TaskSessionDTO struct {
 	// the flattened Worktree* fields above carry only the first for backward
 	// compatibility. Entries use the stable session-worktree wire shape
 	// (session_id + worktree identity) shared with TaskSession.ToAPI.
-	Worktrees            []map[string]interface{} `json:"worktrees,omitempty"`
-	State                models.TaskSessionState  `json:"state"`
-	ErrorMessage         string                   `json:"error_message,omitempty"`
-	Metadata             map[string]interface{}   `json:"metadata,omitempty"`
-	AgentProfileSnapshot map[string]interface{}   `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{}   `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{}   `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{}   `json:"repository_snapshot,omitempty"`
-	StartedAt            time.Time                `json:"started_at"`
-	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time                `json:"updated_at"`
+	Worktrees            []map[string]interface{}     `json:"worktrees,omitempty"`
+	State                models.TaskSessionState      `json:"state"`
+	ErrorMessage         string                       `json:"error_message,omitempty"`
+	Metadata             map[string]interface{}       `json:"metadata,omitempty"`
+	AgentProfileSnapshot map[string]interface{}       `json:"agent_profile_snapshot,omitempty"`
+	ExecutionSnapshot    *models.ExecutionSnapshot    `json:"execution_snapshot"`
+	ExecutionObservation *models.ExecutionObservation `json:"execution_observation"`
+	ExecutorSnapshot     map[string]interface{}       `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{}       `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{}       `json:"repository_snapshot,omitempty"`
+	StartedAt            time.Time                    `json:"started_at"`
+	CompletedAt          *time.Time                   `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time                    `json:"updated_at"`
 	// Workflow fields
 	IsPrimary         bool                  `json:"is_primary"`
 	IsPassthrough     bool                  `json:"is_passthrough"`
@@ -1296,6 +1298,8 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,
 		AgentProfileSnapshot: session.AgentProfileSnapshot,
+		ExecutionSnapshot:    session.ExecutionSnapshot,
+		ExecutionObservation: session.ExecutionObservation,
 		ExecutorSnapshot:     session.ExecutorSnapshot,
 		EnvironmentSnapshot:  session.EnvironmentSnapshot,
 		RepositorySnapshot:   session.RepositorySnapshot,

@@ -347,6 +347,7 @@ export async function updateAgentProfileMcpConfigAction(
 }
 
 export type CommandPreviewRequest = {
+  safe_only?: boolean;
   model: string;
   permission_settings: Record<string, boolean>;
   cli_passthrough: boolean;
@@ -356,6 +357,7 @@ export type CommandPreviewRequest = {
 };
 
 export type CommandPreviewResponse = {
+  composition?: import("@/lib/types/execution").CommandComposition;
   supported: boolean;
   command: string[];
   command_string: string;

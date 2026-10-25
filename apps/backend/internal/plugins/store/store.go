@@ -49,6 +49,7 @@ type Record struct {
 	// and admitted configuration save, so earlier approvals require review.
 	// It is preserved across restarts and status-only enable/disable.
 	AgentToolPolicyVersion string `yaml:"agent_tool_policy_version,omitempty" json:"agent_tool_policy_version,omitempty"`
+	PackageDigest          string `yaml:"package_digest,omitempty" json:"package_digest,omitempty"`
 	InstallPath            string `yaml:"install_path" json:"install_path"`
 	Signed                 bool   `yaml:"signed" json:"signed"`
 	// AutoUpdate is the operator's per-plugin auto-update override. It is a

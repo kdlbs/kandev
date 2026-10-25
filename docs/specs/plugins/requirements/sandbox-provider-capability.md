@@ -27,6 +27,9 @@ Production provider code belongs in a dedicated repository.
   Existing attempts shall retain enforced policy and core-owned cancellation, with explicit unavailable-service status.
 - **AC-PLUGINS-SANDBOX-001.5:** Nono production artifacts shall build and release from a separate repository.
   The Kandev repository shall contain only host, SDK, protocol, UI, and test-fixture changes.
+- **AC-PLUGINS-SANDBOX-001.6:** Providers shall expose bounded typed capabilities, effective grants, and supported runtime evidence without provider-specific host UI.
+  Availability shall not assert active confinement. Unsupported evidence shall remain unknown.
+  A second fixture provider shall use the same settings, details, and status contracts without host changes keyed to its identity.
 
 ## Exclusions
 

@@ -2508,7 +2508,7 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 			isRecoverableCancelledResumeSession(session) ||
 			session.State == models.TaskSessionStateCompleted ||
 			(session.State == models.TaskSessionStateFailed &&
-				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
+				(req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored || isExplicitBootstrapResume(req, session)))
 		if startAgent && noAutoPromptState {
 			if req.ForceContextContinuation {
 				return nil
@@ -2570,6 +2570,15 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 	}
 
 	return running
+}
+
+func isExplicitBootstrapResume(req *LaunchAgentRequest, session *models.TaskSession) bool {
+	const recoveryActionResume = "resume"
+	if req.RecoveryAction != recoveryActionResume {
+		return false
+	}
+	failure, found := models.LoadLastAgentError(session.Metadata)
+	return found && failure.Phase == models.LaunchErrorPhaseBootstrap
 }
 
 // persistedSessionResumeToken returns the provider conversation identity that

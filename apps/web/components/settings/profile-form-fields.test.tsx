@@ -9,8 +9,8 @@ import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
 import type { DynamicModelsResponse, ModelConfig } from "@/lib/types/http";
 
-const probeAgentProfileMock = vi.fn<(...args: unknown[]) => Promise<DynamicModelsResponse>>(
-  async () => ({
+function probeResponse(): DynamicModelsResponse {
+  return {
     agent_name: mockAgentName,
     status: "ok",
     models: [
@@ -21,7 +21,10 @@ const probeAgentProfileMock = vi.fn<(...args: unknown[]) => Promise<DynamicModel
     commands: [],
     context_revision: "profile-form-test",
     error: null,
-  }),
+  };
+}
+const probeAgentProfileMock = vi.fn<(...args: unknown[]) => Promise<DynamicModelsResponse>>(
+  async () => probeResponse(),
 );
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
@@ -60,18 +63,7 @@ vi.mock("@/lib/api/domains/profile-capability-api", () => ({
 
 afterEach(() => {
   cleanup();
-  probeAgentProfileMock.mockReset().mockImplementation(async () => ({
-    agent_name: mockAgentName,
-    status: "ok",
-    models: [
-      { id: "model-a", name: "Model A" },
-      { id: "model-b", name: "Model B" },
-    ],
-    modes: [],
-    commands: [],
-    context_revision: "profile-form-test",
-    error: null,
-  }));
+  probeAgentProfileMock.mockReset().mockImplementation(async () => probeResponse());
 });
 
 const modelConfig: ModelConfig = {
@@ -170,29 +162,33 @@ function expandFallbackSettings() {
 }
 
 describe("ProfileFormFields command prefix visibility", () => {
-  it("keeps the command prefix behind collapsed advanced options", () => {
+  it("shows the wrapper in an expanded Execution section", () => {
     renderForm(formData({ cli_passthrough: false }));
-
-    expect(screen.queryByTestId("command-prefix-input")).toBeNull();
-
-    fireEvent.click(screen.getByTestId("profile-advanced-options-trigger"));
-    expect(screen.getByTestId("command-prefix-input")).not.toBeNull();
+    const execution = screen.getByTestId("profile-execution-section");
+    expect(within(execution).getByTestId("command-prefix-input")).not.toBeNull();
+    expect(screen.queryByTestId("profile-advanced-options-trigger")).toBeNull();
   });
 
-  it("places fallback settings before advanced options at the bottom of the form", () => {
+  it("places Execution before the fallback disclosure", () => {
     renderForm(formData({ cli_passthrough: false }));
-
+    const execution = screen.getByTestId("profile-execution-section");
     const fallback = screen.getByTestId("profile-fallback-settings");
-    const advanced = screen.getByTestId("profile-advanced-options");
     expect(
-      fallback.compareDocumentPosition(advanced) & Node.DOCUMENT_POSITION_FOLLOWING,
+      execution.compareDocumentPosition(fallback) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  it("hides the command prefix field for a TUI-passthrough profile", () => {
-    renderForm(formData({ cli_passthrough: true, command_prefix: "greywall --" }));
-
-    expect(screen.queryByTestId("command-prefix-input")).toBeNull();
+  it("preserves and edits the saved wrapper for a native terminal profile", () => {
+    const onChange = vi.fn();
+    renderStatefulForm(
+      formData({ cli_passthrough: true, command_prefix: "greywall --" }),
+      modelConfig,
+      onChange,
+    );
+    const input = screen.getByTestId("command-prefix-input");
+    expect((input as HTMLInputElement).value).toBe("greywall --");
+    fireEvent.change(input, { target: { value: "env --" } });
+    expect(onChange).toHaveBeenCalledWith({ command_prefix: "env --" });
   });
 });
 

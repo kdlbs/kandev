@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { PortForwardingManager } from "./port-forward-dialog";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
@@ -61,7 +61,8 @@ import { TaskPageEntryFeedback } from "@/components/task/task-page-entry-feedbac
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
 
 const PAGE_LEVEL_MOBILE_FEEDBACK_STYLE = {
-  paddingTop: "calc(3.5rem + 1px + env(safe-area-inset-top, 0px))",
+  paddingTop:
+    "calc(var(--task-mobile-header-height, 3.5rem) + 1px + env(safe-area-inset-top, 0px))",
 } as const;
 
 export type TaskPageInnerProps = {
@@ -372,6 +373,16 @@ function useTaskPageDerivedProps(
   };
 }
 
+function taskPageStyle(
+  hasPageLevelMobileFeedback: boolean,
+  sessionId: string | null,
+): CSSProperties {
+  return {
+    ...(hasPageLevelMobileFeedback ? PAGE_LEVEL_MOBILE_FEEDBACK_STYLE : {}),
+    "--task-mobile-header-height": sessionId ? "6.5rem" : "3.5rem",
+  } as CSSProperties;
+}
+
 export function TaskPageInner(props: TaskPageInnerProps) {
   const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
     props;
@@ -413,7 +424,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
           >
             <div
               className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
-              style={hasPageLevelMobileFeedback ? PAGE_LEVEL_MOBILE_FEEDBACK_STYLE : undefined}
+              style={taskPageStyle(hasPageLevelMobileFeedback, effectiveSessionId)}
             >
               <TaskPageCommandSurfaces
                 taskProps={taskProps}
