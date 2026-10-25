@@ -111,11 +111,11 @@ test.describe("mobile: session deletion", () => {
     await expect(actionsMenu).toBeVisible({ timeout: 5_000 });
     await actionsMenu.getByRole("menuitem", { name: "Delete" }).tap();
 
-    const confirmation = secondaryRow.getByTestId("mobile-session-delete-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Delete session?" });
     await expect(confirmation).toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    // The row-local confirmation reflects archive-or-delete behavior and
-    // explicitly says the task workspace and files are retained.
+    // The confirmation reflects archive-or-delete behavior and explicitly
+    // says the task workspace and files are retained.
     await expect(confirmation).toContainText("removes the session from active views");
     await expect(confirmation).toContainText("task workspace and its files are kept");
 
@@ -127,7 +127,7 @@ test.describe("mobile: session deletion", () => {
     const reopenedActionsMenu = testPage.getByRole("menu");
     await expect(reopenedActionsMenu).toBeVisible({ timeout: 5_000 });
     await reopenedActionsMenu.getByRole("menuitem", { name: "Delete" }).tap();
-    await secondaryRow.getByTestId("mobile-session-delete-confirm").tap();
+    await confirmation.getByTestId("mobile-session-delete-confirm").tap();
 
     await expect(secondaryRow).not.toBeVisible({ timeout: 15_000 });
     await expect(sheet.getByTestId(`mobile-session-row-${primarySessionId}`)).toBeVisible();
