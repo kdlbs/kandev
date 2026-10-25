@@ -1,0 +1,14 @@
+{
+  "case": "Folder-only addition after explicit nested repository attachment",
+  "shown_note": "Working directory, agent session, and running processes stay unchanged.",
+  "before": {
+    "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/.kandev/tasks/qa-explicit-base-bra_zaqx3bon/E2E-Repo",
+    "session_id": "1411549b-69be-434c-a557-0f16f205282a"
+  },
+  "after": {
+    "workspace_path": "/tmp/kandev-e2e-0-pDDyV2/.kandev/tasks/qa-explicit-base-bra_zaqx3bon",
+    "session_id": "1411549b-69be-434c-a557-0f16f205282a",
+    "state": "WAITING_FOR_INPUT"
+  },
+  "folder_link_target": "/tmp/kandev-e2e-0-pDDyV2/qa-sources/reference-notes"
+}

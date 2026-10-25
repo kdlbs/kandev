@@ -75,7 +75,7 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 	decidedBy := decidingUserID(ctx)
 
 	switch proposal.Status {
-	case ProposalStatusApproved, ProposalStatusRejected:
+	case ProposalStatusApproved, ProposalStatusRejected, ProposalStatusReturned:
 		return nil, &ProposalConflictError{Proposal: proposal}
 	case ProposalStatusApproving:
 		return s.approveApproving(ctx, workspaceID, coordinatorID, proposalID, proposal, carriesEdits)
@@ -96,10 +96,10 @@ func (s *Service) ApproveProposal(ctx context.Context, workspaceID, coordinatorI
 // claim may be stale and must settle whatever the flag says.
 func (s *Service) readForApprove(ctx context.Context, workspaceID, coordinatorID, proposalID string) (*Proposal, error) {
 	p, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
-	if s.phase2 || !errors.Is(err, ErrNotFound) {
+	if (s.phase2 && s.phase3) || !errors.Is(err, ErrNotFound) {
 		return p, err
 	}
-	p, err = s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	p, err = s.store.GetProposalAnyKind(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil || p.Status != ProposalStatusApproving || p.Kind == "" || p.Kind == ProposalKindCreateTask {
 		return nil, ErrNotFound
 	}
@@ -137,15 +137,21 @@ func (s *Service) approveApproving(ctx context.Context, workspaceID, coordinator
 // approvePending validates and claims a never-claimed proposal (proposals.md#approve
 // step 2 and step 3, pending branch).
 func (s *Service) approvePending(ctx context.Context, workspaceID, coordinatorID, proposalID, decidedBy string, proposal *Proposal, edits ApproveProposalRequest) (*Proposal, error) {
-	candidate, err := s.buildCandidateSpec(ctx, workspaceID, proposal.Spec, edits)
-	if err != nil {
-		return nil, err
-	}
-	validated, err := s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
+	validated, err := s.prepareApproval(ctx, workspaceID, proposal, edits)
 	if err != nil {
 		return nil, err
 	}
 	return s.claimAndProceed(ctx, workspaceID, coordinatorID, proposalID, decidedBy, validated, proposal.StartsAgent, nil)
+}
+
+// prepareApproval builds and validates the frozen spec of a never-claimed
+// proposal from its proposed spec and edits. It writes nothing.
+func (s *Service) prepareApproval(ctx context.Context, workspaceID string, proposal *Proposal, edits ApproveProposalRequest) (ProposalSpec, error) {
+	candidate, err := s.buildCandidateSpec(ctx, workspaceID, proposal.Spec, edits)
+	if err != nil {
+		return ProposalSpec{}, err
+	}
+	return s.validateProposalSpecFor(ctx, workspaceID, candidate, proposal.StartsAgent)
 }
 
 // approveFailed handles an approve request against a failed row
@@ -304,6 +310,12 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 	if !matched {
 		return s.claimRaceResult(ctx, workspaceID, coordinatorID, proposalID)
 	}
+	return s.finishClaim(ctx, workspaceID, coordinatorID, proposalID, token, spec, startsAgent, foundTask)
+}
+
+// finishClaim continues a just-committed claim: it publishes the update and
+// runs the create sequence.
+func (s *Service) finishClaim(ctx context.Context, workspaceID, coordinatorID, proposalID, token string, spec ProposalSpec, startsAgent bool, foundTask *taskmodels.Task) (*Proposal, error) {
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal claimed",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
@@ -316,7 +328,7 @@ func (s *Service) claimAndProceed(ctx context.Context, workspaceID, coordinatorI
 // request's inline stale re-claim (cutoff = now - 2 minutes) and the startup
 // recovery pass (cutoff = T0, task 08).
 func (s *Service) reclaimStaleAndProceed(ctx context.Context, workspaceID, coordinatorID, proposalID string, cutoff time.Time) (*Proposal, error) {
-	row, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, true)
+	row, err := s.store.GetProposalAnyKind(ctx, workspaceID, coordinatorID, proposalID)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +396,26 @@ func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coor
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, "the target step is no longer eligible")
 	}
 
-	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec, startsAgent)
+	outcome, err := s.newTaskAgentReads().taskAgent(ctx, workspaceID, coordinatorID, spec, startsAgent)
+	if err != nil {
+		s.logger.Warn("created-task agent read failed before proposal create",
+			zap.String("proposal_id", proposalID), zap.Error(err))
+		return nil, err
+	}
+	switch {
+	case outcome.StepGone:
+		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, "the target step is no longer eligible")
+	case outcome.WorkspaceGone, outcome.CoordinatorGone:
+		return nil, ErrNotFound
+	case outcome.Refusal != "":
+		s.logger.Warn("coordinator.created_task_agent refused",
+			zap.String("proposal_id", proposalID), zap.String("reason", outcome.Refusal))
+		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, outcome.Refusal)
+	}
+	s.logger.Info("coordinator.created_task_agent",
+		zap.String("proposal_id", proposalID), zap.String("source", outcome.Source))
+
+	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec, startsAgent, outcome.Meta)
 	if err != nil {
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, err.Error())
 	}
@@ -409,7 +440,7 @@ func (s *Service) stepStillEligible(ctx context.Context, spec ProposalSpec, star
 // proposal: the frozen spec's fields, the reserved external id, the regular
 // board origin, and no session/auto-start intent
 // (proposals.md#no-agent-starts).
-func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec, startsAgent bool) (taskservice.CreateTaskResult, error) {
+func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec, startsAgent bool, addMeta map[string]any) (taskservice.CreateTaskResult, error) {
 	req := &taskservice.CreateTaskRequest{
 		WorkspaceID:             workspaceID,
 		WorkflowID:              spec.WorkflowID,
@@ -422,6 +453,14 @@ func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalI
 	}
 	if startsAgent {
 		req.Metadata = map[string]interface{}{taskmodels.MetaKeyAutoStartOnCreate: true}
+	}
+	if len(addMeta) > 0 {
+		if req.Metadata == nil {
+			req.Metadata = map[string]interface{}{}
+		}
+		for k, v := range addMeta {
+			req.Metadata[k] = v
+		}
 	}
 	if spec.RepositoryID != "" {
 		req.Repositories = []taskservice.TaskRepositoryInput{{RepositoryID: spec.RepositoryID}}
@@ -480,7 +519,11 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 	s.logger.Info("proposal approved",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("task_id", taskID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	approved, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if err == nil {
+		s.notifyApproved(ctx, approved)
+	}
+	return approved, err
 }
 
 // failApproval runs step 5's failure fence (the same fence completeApproval
@@ -547,6 +590,8 @@ func kindAction(kind string) Action {
 		return ActionMove
 	case ProposalKindResume:
 		return ActionResume
+	case ProposalKindImprovement:
+		return ActionImprovement
 	default:
 		return ActionCreateTask
 	}
@@ -556,7 +601,7 @@ func kindAction(kind string) Action {
 // policy now denies. It reads only the proposal and the policy, so it runs
 // before any kind's own checks, and only with phase 2 on.
 func (s *Service) recheckPolicy(ctx context.Context, coordinatorID string, proposal *Proposal) error {
-	if !s.phase2 {
+	if !s.phase2 || proposal.Kind == ProposalKindImprovement {
 		return nil
 	}
 	c, err := s.store.GetCoordinatorByID(ctx, coordinatorID)

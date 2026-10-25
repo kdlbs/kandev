@@ -751,6 +751,3 @@ func (r *RemoteDockerExecutor) Close() error {
 	}
 	return firstErr
 }
-
-// executorNameRemoteDocker is a test-visible accessor for the runtime's name.
-func executorNameRemoteDocker() executor.Name { return executor.NameRemoteDocker }

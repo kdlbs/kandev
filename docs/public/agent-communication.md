@@ -54,7 +54,8 @@ Delivery behaviour depends on the target session's state at the moment of the ca
 |---|---|---|
 | Running or starting | Message is queued; delivered when the current turn ends | `"queued"` |
 | Running or starting, direct parent uses `delivery_mode="interrupt"` | Kandev queues the message, then tries to interrupt the current turn and deliver it immediately | `"sent"` if interrupted and delivered immediately; otherwise `"queued"` |
-| Idle (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
+| Waiting on a live clarification, default or queued delivery | Message waits behind the question and is delivered after its turn finishes or the question detaches | `"queued"` |
+| Idle with no live clarification (waiting for input, or turn just finished) | Message starts a new turn immediately | `"sent"` |
 | Created (agent not yet started) | Agent is started with this message as its first prompt | `"started"` |
 | Failed or cancelled | Error is returned | N/A |
 
@@ -126,6 +127,24 @@ Each `ask_user_question_kandev` question can set `allow_custom_text` to `false`
 when the user must select one of the offered options. If omitted, the user can
 also provide a free-text answer. Native Codex questions use the same setting
 that Codex provides for an "Other" answer.
+
+The tool returns answers keyed by question ID. An option selection includes
+`selected_option` (the option ID) and `selected_label` (the exact displayed label):
+
+```json
+{
+  "flow": {
+    "selected_option": "q1_opt1",
+    "selected_label": "A"
+  }
+}
+```
+
+Read the label to understand the user's choice. Keep the ID when you need to
+distinguish options with identical labels. If the ID cannot identify exactly
+one offered option with a nonempty label, `selected_label` is omitted.
+Free-text-only answers return `custom_text` without a selected label.
+Selections can also retain accompanying `custom_text`.
 
 ## Reading the thread
 
@@ -255,6 +274,17 @@ Kandev normalizes the object, omits empty optional strings, and validates the de
 - `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
 - Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
 - The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
+- A prompt or `entry_options` is rejected for a manual destination, such as Waiting, Blocked, or Done, even when the task has a session. A manual step starts no work on entry.
+
+  This stricter rule applies only to agent calls. Move without options and record instructions in the task description or plan instead.
+
+  <details>
+  <summary>Steps that accept entry options</summary>
+
+  A step accepts options when it has an `auto_start_agent`, `queue_run`, `queue_run_for_each_participant`, or `run_code_review` entry action, or a pull source.
+
+  </details>
+- A rejected move names a recognized reason, such as a WIP limit, an active session, an archived task, a different workspace, or a step outside the requested workflow. Other failures return generic text.
 - Pull-request draft and review status are not generic move options.
 
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.

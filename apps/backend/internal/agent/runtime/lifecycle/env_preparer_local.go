@@ -71,7 +71,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 			completeStepError(&step, "required workspace is unavailable")
 			return &EnvPrepareResult{Success: false, Steps: []PrepareStep{step}, ErrorMessage: step.Error, Error: worktree.ErrReuseWorktreeUnavailable, Duration: time.Since(start)}, nil
 		}
-		if req.RepositoryID != "" || req.RepositoryPath != "" {
+		if (req.RepositoryID != "" || req.RepositoryPath != "") && !localWorkspaceUsesEstablishedRoot(req) {
 			if err := validateLocalRepositoryWorkspace(ctx, workspacePath, req.RepositoryPath); err != nil {
 				completeStepError(&step, "workspace is not the expected Git repository checkout")
 				return &EnvPrepareResult{
@@ -123,7 +123,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 			Error:        prepErr,
 		}, prepErr
 	}
-	if req.RepositoryID != "" || req.RepositoryPath != "" {
+	if (req.RepositoryID != "" || req.RepositoryPath != "") && !localWorkspaceUsesEstablishedRoot(req) {
 		if err := validateLocalRepositoryWorkspace(ctx, workspacePath, req.RepositoryPath); err != nil {
 			completeStepError(&step, "workspace is not the expected Git repository checkout")
 			steps = append(steps, step)
@@ -144,50 +144,20 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 	stepIdx++
 
 	// Step 2: Checkout target branch (only when it differs from current).
-	if effectiveBranch != "" {
-		currentBranch := readCurrentBranchForLocal(workspacePath)
-		if currentBranch != "" && currentBranch == effectiveBranch {
-			// Workspace already on the target branch — "use current state"
-			// path, no git ops, no risk of failing on dirty/unmerged index.
-			step = beginStep("Checkout branch")
-			step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
-			step.Output = fmt.Sprintf("already on %q, skipping", effectiveBranch)
-			completeStepSuccess(&step)
-			steps = append(steps, step)
-			reportProgress(onProgress, step, stepIdx, totalSteps)
-			stepIdx++
-		} else {
-			// User picked a different branch — switch the working tree.
-			step = beginStep("Checkout branch")
-			if req.RemoteSyncHandled {
-				step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
-			} else {
-				step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
-			}
-			reportProgress(onProgress, step, stepIdx, totalSteps)
-			output, err := checkoutBranch(
-				ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env), req.RemoteSyncHandled,
-			)
-			if err != nil {
-				errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
-				completeStepError(&step, errMsg)
-				steps = append(steps, step)
-				reportProgress(onProgress, step, stepIdx, totalSteps)
-				prepErr := fmt.Errorf("checkout branch: %w", err)
-				return &EnvPrepareResult{
-					Success:      false,
-					Steps:        steps,
-					ErrorMessage: errMsg,
-					Duration:     time.Since(start),
-					Error:        prepErr,
-				}, prepErr
-			}
-			step.Output = output
-			completeStepSuccess(&step)
-			steps = append(steps, step)
-			reportProgress(onProgress, step, stepIdx, totalSteps)
-			stepIdx++
+	if effectiveBranch != "" && !localWorkspaceUsesEstablishedRoot(req) {
+		step, checkoutErr := prepareLocalCheckoutStep(ctx, req, workspacePath, effectiveBranch, onProgress, stepIdx, totalSteps)
+		steps = append(steps, step)
+		reportProgress(onProgress, step, stepIdx, totalSteps)
+		if checkoutErr != nil {
+			return &EnvPrepareResult{
+				Success:      false,
+				Steps:        steps,
+				ErrorMessage: step.Error,
+				Duration:     time.Since(start),
+				Error:        checkoutErr,
+			}, checkoutErr
 		}
+		stepIdx++
 	}
 
 	// Step 3: Run setup script (if provided)
@@ -201,6 +171,42 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 		WorkspacePath: workspacePath,
 		Duration:      time.Since(start),
 	}, nil
+}
+
+func prepareLocalCheckoutStep(ctx context.Context, req *EnvPrepareRequest, workspacePath, effectiveBranch string, onProgress PrepareProgressCallback, stepIdx, totalSteps int) (PrepareStep, error) {
+	step := beginStep("Checkout branch")
+	currentBranch := readCurrentBranchForLocal(workspacePath)
+	if currentBranch != "" && currentBranch == effectiveBranch {
+		// Workspace already on the target branch. The use-current-state path does
+		// not run Git operations that could fail on a dirty or unmerged index.
+		step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
+		step.Output = fmt.Sprintf("already on %q, skipping", effectiveBranch)
+		completeStepSuccess(&step)
+		return step, nil
+	}
+
+	if req.RemoteSyncHandled {
+		step.Command = fmt.Sprintf("git checkout %s", effectiveBranch)
+	} else {
+		step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
+	}
+	reportProgress(onProgress, step, stepIdx, totalSteps)
+	output, err := checkoutBranch(ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env), req.RemoteSyncHandled)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
+		completeStepError(&step, errMsg)
+		return step, fmt.Errorf("checkout branch: %w", err)
+	}
+	step.Output = output
+	completeStepSuccess(&step)
+	return step, nil
+}
+
+func localWorkspaceUsesEstablishedRoot(req *EnvPrepareRequest) bool {
+	if req == nil {
+		return false
+	}
+	return req.WorkspaceLayout == workspaceLayoutCurrentRoot || req.WorkspaceLayout == workspaceLayoutKandevDirectory
 }
 
 func validateLocalRepositoryWorkspace(ctx context.Context, workspacePath, repositoryPath string) error {

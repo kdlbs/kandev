@@ -374,9 +374,9 @@ func (s *Service) claimAndDispatchSendNow(ctx context.Context, identity *message
 	s.publishQueueStatusEventForIdentity(ctx, claim.Identity)
 	var reservation *queuedDispatchReservation
 	if claim.Identity.SessionIncarnationID != "" {
-		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(claim.Identity, claim.Dispatch.ID, nil)
+		reservation = s.markQueuedDispatchInFlightWithIdentityLocked(ctx, claim.Identity, claim.Dispatch.ID, nil)
 	} else {
-		reservation = s.markQueuedDispatchInFlightWithSourceLocked(sessionID, claim.Dispatch.ID, nil)
+		reservation = s.markQueuedDispatchInFlightWithSourceLocked(ctx, sessionID, claim.Dispatch.ID, nil)
 	}
 	if !s.launchSendNowClaim(claim, reservation) {
 		if restoreErr := s.restoreSendNowClaimWithRetry(context.Background(), claim); restoreErr != nil {
@@ -500,9 +500,10 @@ func (s *Service) executeSendNowClaimWithContext(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
+	ctx = s.queuedRecoveryContext(ctx, reservation)
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.drainQueuedDispatchIfPending(sessionID)
+		s.drainQueuedDispatchIfPending(ctx, sessionID)
 	}()
 
 	restore := func() {
@@ -537,6 +538,16 @@ func (s *Service) executeSendNowClaimWithContext(
 		}
 	}
 	deliveryAttempted, err := s.promptSendNowClaim(ctx, claim)
+	if errors.Is(err, errSendNowInitialPromptUncertain) {
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+		defer cancel()
+		recoveryErr := s.recordSessionRecoveryBlock(recoveryCtx, sessionID, "send_now", &sessionRecoveryRequiredError{
+			Block: &models.SessionRecoveryBlock{Reason: "unknown_send_now_outcome"},
+		})
+		s.logger.Warn("retained initial Send Now claim with uncertain acceptance",
+			zap.String("session_id", sessionID), zap.Error(errors.Join(err, recoveryErr)))
+		return
+	}
 	if err != nil {
 		var acceptedDispatch *acceptedPromptDispatchError
 		if deliveryAttempted || errors.As(err, &acceptedDispatch) {
@@ -658,6 +669,7 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 				)
 			},
 		}
+		waitForAdmission := s.configureSendNowInitialAdmission(ctx, claim, &startOptions)
 		createdPrompt := promptContent
 		createdSkipMessageRecord := false
 		createdPlanMode := claim.Dispatch.PlanMode
@@ -729,6 +741,9 @@ func (s *Service) promptSendNowClaim(ctx context.Context, claim *messagequeue.Se
 		}
 		if execution == nil {
 			return false, errors.New("send-now launch did not dispatch a created session")
+		}
+		if admissionErr := waitForAdmission(); admissionErr != nil {
+			return false, admissionErr
 		}
 		if ceilingClaim != nil {
 			ceilingClaim.settle(ctx)

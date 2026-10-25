@@ -115,6 +115,11 @@ A shortcut is a reference to an existing destination or supported host action.
   current default position. Feature or workspace eligibility shall take precedence
   over visibility, without removing a saved Inbox node or changing its position.
 
+- **AC-UI-SIDEBAR-CUSTOMIZATION-006.9:** Interacting with a dialog opened from
+  navigation shall not open Sidebar settings. This includes tapping, holding,
+  selecting text, and requesting a context menu in the task prompt. The dialog
+  shall retain its draft and normal editing behavior on desktop and phone.
+
 ### REQ-UI-SIDEBAR-CUSTOMIZATION-007: Persisted navigation and Tasks split
 
 - **AC-UI-SIDEBAR-CUSTOMIZATION-007.1:** In expanded regular desktop navigation,
@@ -161,3 +166,5 @@ these fixed entries. Phone composition follows the
 - [Sidebar preferences and direct editing](../../../plans/sidebar-presentation-preferences/plan.md)
 
 - [Flagged sidebar entries update](../../../plans/flagged-sidebar-entries/plan.md)
+
+- [Sidebar dialog event isolation](../../../plans/sidebar-dialog-event-isolation/plan.md)

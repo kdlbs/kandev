@@ -24,6 +24,8 @@ import type { BulkTaskActionSelection } from "@/hooks/use-task-multi-select";
 type BulkTaskActionOptions = {
   cascade?: boolean;
   discardWorktreeChanges?: boolean;
+  workspaceCleanup?: "delete" | "retain";
+  allowUnverifiedWorkspaceChanges?: boolean;
   confirmationId?: string;
 };
 
@@ -148,7 +150,13 @@ function BulkDeleteDialog({
   getEligibleSelectedIds: (ids: string[]) => string[];
   isProcessing: boolean;
   onConfirm: (
-    opts: { cascade: boolean; discardWorktreeChanges: boolean; confirmationId: string },
+    opts: {
+      cascade: boolean;
+      discardWorktreeChanges: boolean;
+      workspaceCleanup?: "delete" | "retain";
+      allowUnverifiedWorkspaceChanges?: boolean;
+      confirmationId: string;
+    },
     selection: BulkTaskActionSelection,
   ) => void;
 }) {

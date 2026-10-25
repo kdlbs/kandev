@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
@@ -354,4 +355,50 @@ it("invalidates cached pages without restarting reads on deletion and unsubscrib
   expect((await request.promise).provisional).toBe(true);
   expect(cache.get("b")).toBeNull();
   request.release();
+});
+
+// @covers AC-TASKS-KANBAN-TASK-REORDERING-001.13
+it("journals admitted sidebar stages without granting authority to cache reuse or stale rows", async () => {
+  const { store, cache } = setup();
+  const { taskId, workflowId, workspaceId } = await import("@/lib/types/ids");
+  const task = {
+    id: taskId("task-stage"),
+    workspace_id: workspaceId("ws"),
+    workflow_id: workflowId("flow"),
+    workflow_step_id: "optimistic",
+    position: 7,
+    title: "Current",
+    description: "",
+    state: "TODO" as const,
+    priority: "medium" as const,
+    created_at: "2026-10-22T10:00:00Z",
+    updated_at: "2026-10-22T10:00:00Z",
+  };
+  store.getState().retainTaskOverviews("sidebar:display", [toKanbanTask(task)]);
+  const canonical = store.getState().taskOverview.byId[task.id];
+  const pendingMove = store.getState().beginTaskOverviewRead();
+  await load(cache, "equal-stage", { ...page(), entries: [{ kind: "task", task }] });
+  expect(store.getState().taskOverview.byId[task.id]).toBe(canonical);
+  expect(store.getState().taskOverview.reads[pendingMove].changes[task.id]).toEqual({
+    id: task.id,
+    workflowStepId: "optimistic",
+  });
+  store.getState().finishTaskOverviewRead(pendingMove);
+
+  const laterMove = store.getState().beginTaskOverviewRead();
+  expect(cache.get("equal-stage")).not.toBeNull();
+  expect(store.getState().taskOverview.reads[laterMove].changes).toEqual({});
+  await load(cache, "stale-stage", {
+    ...page(),
+    entries: [
+      {
+        kind: "task",
+        task: { ...task, workflow_step_id: "stale", updated_at: "2026-10-22T09:00:00Z" },
+      },
+    ],
+  });
+  expect(store.getState().taskOverview.byId[task.id].workflowStepId).toBe("optimistic");
+  expect(store.getState().taskOverview.reads[laterMove].changes).toEqual({});
+  store.getState().finishTaskOverviewRead(laterMove);
+  expect(store.getState().taskOverview.reads).toEqual({});
 });

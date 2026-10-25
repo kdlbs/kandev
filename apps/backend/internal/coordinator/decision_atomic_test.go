@@ -36,7 +36,7 @@ func TestSettleDecision_RecordFailureRollsBackStatus(t *testing.T) {
 			return svc.failProposalStore(ctx, c.WorkspaceID, c.ID, p.ID, tok, "boom")
 		}, true},
 		{"reject", ProposalStatusPending, func(svc *Service, _ *Coordinator, p *Proposal, _ string) (bool, error) {
-			return svc.rejectProposalStore(ctx, p, "no", "u1")
+			return svc.rejectProposalStore(ctx, p, "no", "u1", svc.store.now().UTC())
 		}, false},
 	}
 	for _, tc := range cases {

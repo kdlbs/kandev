@@ -48,6 +48,57 @@ function recovery(phase: AgentDeliveryRecoveryPhase, revision: number) {
 }
 
 describe("TaskSession delivery recovery hydration reconciliation", () => {
+  it("preserves immutable historical gap records across stale and partial reconnect snapshots", () => {
+    const original = { stream_id: "old-stream", gap: { first_sequence: 2, last_sequence: 6 } };
+    const current = session(
+      { agent_delivery_history_gaps: { "old-stream": original } },
+      LATER_UPDATED_AT,
+    );
+    const merged = mergeTaskSession(
+      current,
+      session(
+        {
+          agent_delivery_history_gaps: {
+            "old-stream": { gap: null },
+            "next-stream": { stream_id: "next-stream" },
+          },
+        },
+        EARLIER_UPDATED_AT,
+      ),
+    );
+    expect(merged.metadata?.agent_delivery_history_gaps).toEqual({
+      "old-stream": original,
+      "next-stream": { stream_id: "next-stream" },
+    });
+    expect(
+      mergeTaskSession(merged, session({}, EQUAL_UPDATED_AT)).metadata?.agent_delivery_history_gaps,
+    ).toEqual(merged.metadata?.agent_delivery_history_gaps);
+  });
+
+  it.each([true, false])(
+    "clears only the matching gap error when a newer restore commits (match: %s)",
+    (matches) => {
+      const gap = {
+        first_sequence: 2,
+        last_sequence: 6,
+        received_sequence: 1,
+        projected_sequence: 1,
+      };
+      const restored = { ...recovery("restored", 3), history_gap: gap };
+      const error = {
+        code: "delivery_history_gap",
+        details: `delivery_history_gap: stream ${matches ? "stream-1" : "other-stream"}, missing event range 2..6`,
+      };
+      const merged = mergeTaskSession(
+        session(
+          { agent_delivery_recovery: recovery("uncertain", 2), last_agent_error: error },
+          EARLIER_UPDATED_AT,
+        ),
+        session({ agent_delivery_recovery: restored }, LATER_UPDATED_AT),
+      );
+      expect(merged.metadata?.last_agent_error).toEqual(matches ? undefined : error);
+    },
+  );
   it.each(["settled", "restored"] as const)(
     "rejects an older recovery revision after %s and preserves unrelated errors at equal timestamps",
     (phase) => {

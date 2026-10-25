@@ -102,13 +102,17 @@ function useSplitDrag(height: number, maximum: number, commit: (height: number) 
 }
 
 export function SidebarNavigationSplit({
+  collapsed = false,
   navigation,
   tasks,
 }: {
+  collapsed?: boolean;
   navigation: ReactNode;
   tasks: ReactNode;
 }) {
   const { t } = useTranslation();
+  // i18n-exempt: CSS display utility keeps rail wrappers transparent without remounting their children.
+  const railLayout = collapsed ? "contents" : undefined;
   const { root, content, size } = useSplitMeasurements();
   const { isFinePointer } = useResponsiveBreakpoint();
   const dividerHeight = isFinePointer ? 12 : 44;
@@ -144,70 +148,123 @@ export function SidebarNavigationSplit({
       navigationHeight: current.navigationHeight ?? savedNavigationHeight(rendered.height),
       navigationExpanded: !current.navigationExpanded,
     }));
-  useClippedNavigationFocus(content, clip, rendered.height, isExpanded, navigation);
+  useClippedNavigationFocus(content, clip, rendered.height, collapsed || isExpanded, navigation);
   return (
-    <div ref={root} className="flex min-h-0 flex-1 flex-col" data-testid="sidebar-navigation-split">
-      <div
-        ref={clip}
-        id="sidebar-navigation-content"
-        className="relative shrink-0"
-        style={{ height: rendered.height, overflowY: isExpanded ? "auto" : "hidden" }}
-        onFocusCapture={(event) => {
-          if (
-            !isExpanded &&
-            clip.current &&
-            (event.target as HTMLElement).getBoundingClientRect().bottom >
-              clip.current.getBoundingClientRect().bottom
-          )
-            toggle();
-        }}
+    <div
+      ref={root}
+      className={railLayout ?? "flex min-h-0 flex-1 flex-col"}
+      data-testid="sidebar-navigation-split"
+    >
+      <SplitNavigationRegion
+        collapsed={collapsed}
+        clip={clip}
+        content={content}
+        geometry={rendered}
+        expanded={isExpanded}
+        onExpand={toggle}
       >
-        <div ref={content}>{navigation}</div>
-        {rendered.clipped && !isExpanded && (
-          <div
-            aria-hidden="true"
-            data-testid="sidebar-navigation-fade"
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background to-transparent"
+        {navigation}
+      </SplitNavigationRegion>
+      {!collapsed && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t("settings:sidebarResizeNavigation")}
+          aria-valuemin={Math.min(0, maximum, size.content)}
+          aria-valuemax={maximum}
+          aria-valuenow={Math.round(rendered.height)}
+          tabIndex={0}
+          data-testid="sidebar-navigation-divider"
+          {...handlers}
+          className="relative z-10 flex h-3 shrink-0 touch-none items-center justify-center border-b border-border/60 outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-row-resize [@media(pointer:coarse)]:h-11"
+        >
+          <SplitDisclosure
+            clipped={rendered.clipped}
+            expandable={geometry.expandable}
+            hasSavedHeight={savedHeight !== undefined}
+            expanded={isExpanded}
+            disabled={status === "saving"}
+            onClick={toggle}
           />
-        )}
+        </div>
+      )}
+      <div className={railLayout ?? "flex min-h-0 flex-1 flex-col [&>div]:border-t-0 [&>div]:pt-1"}>
+        {tasks}
       </div>
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label={t("settings:sidebarResizeNavigation")}
-        aria-valuemin={Math.min(0, maximum, size.content)}
-        aria-valuemax={maximum}
-        aria-valuenow={Math.round(rendered.height)}
-        tabIndex={0}
-        data-testid="sidebar-navigation-divider"
-        {...handlers}
-        className="relative z-10 flex h-3 shrink-0 touch-none items-center justify-center border-b border-border/60 outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-row-resize [@media(pointer:coarse)]:h-11"
-      >
-        <SplitDisclosure
-          visible={rendered.clipped || (savedHeight !== undefined && geometry.expandable)}
-          expanded={isExpanded}
-          disabled={status === "saving"}
-          onClick={toggle}
+      {!collapsed && <SidebarCustomizationFeedback status={status} />}
+    </div>
+  );
+}
+
+function SplitNavigationRegion({
+  collapsed,
+  clip,
+  content,
+  geometry,
+  expanded,
+  onExpand,
+  children,
+}: {
+  collapsed: boolean;
+  clip: RefObject<HTMLDivElement | null>;
+  content: RefObject<HTMLDivElement | null>;
+  geometry: ReturnType<typeof navigationGeometry>;
+  expanded: boolean;
+  onExpand: () => void;
+  children: ReactNode;
+}) {
+  // i18n-exempt: CSS display utility for the collapsed rail's transparent wrappers.
+  const railLayout = collapsed ? "contents" : undefined;
+  return (
+    <div
+      ref={clip}
+      id="sidebar-navigation-content"
+      className={railLayout ?? "relative shrink-0"}
+      style={
+        collapsed ? undefined : { height: geometry.height, overflowY: expanded ? "auto" : "hidden" }
+      }
+      onFocusCapture={(event) => {
+        if (
+          !collapsed &&
+          !expanded &&
+          clip.current &&
+          (event.target as HTMLElement).getBoundingClientRect().bottom >
+            clip.current.getBoundingClientRect().bottom
+        )
+          onExpand();
+      }}
+    >
+      <div ref={content} className={railLayout}>
+        {children}
+      </div>
+      {!collapsed && geometry.clipped && !expanded && (
+        <div
+          aria-hidden="true"
+          data-testid="sidebar-navigation-fade"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background to-transparent"
         />
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col [&>div]:border-t-0 [&>div]:pt-1">{tasks}</div>
-      <SidebarCustomizationFeedback status={status} />
+      )}
     </div>
   );
 }
 
 function SplitDisclosure({
-  visible,
+  clipped,
+  expandable,
+  hasSavedHeight,
   expanded,
   disabled,
   onClick,
 }: {
-  visible: boolean;
+  clipped: boolean;
+  expandable: boolean;
+  hasSavedHeight: boolean;
   expanded: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
   const { t } = useTranslation();
+  const visible = clipped || (hasSavedHeight && expandable);
   if (!visible) return null;
   return (
     <button

@@ -146,25 +146,27 @@ vi.mock("@/components/task-create-dialog-handlers", () => ({
   resetTaskCreateLastUsedSync: () => undefined,
 }));
 
+function getDialogStoreState() {
+  return {
+    userSettings: { taskCreateLastUsed: null, autoFocusNewTasks },
+    repositorySets: {
+      itemsByWorkspaceId: { [DEFAULT_WORKSPACE_ID]: [], [SECOND_WORKSPACE_ID]: [] },
+      loadingByWorkspaceId: {},
+      loadedByWorkspaceId: { [DEFAULT_WORKSPACE_ID]: true, [SECOND_WORKSPACE_ID]: true },
+      revisionByWorkspaceId: {},
+    },
+    repositoryBranchPolicies: { revisionByRepositoryId: {} },
+    setRepositorySets: () => undefined,
+    setRepositorySetsLoading: () => undefined,
+  };
+}
+
+const mockDialogStoreApi = { getState: getDialogStoreState };
+
 vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  useAppStore: (selector: (state: any) => unknown) =>
-    selector({
-      userSettings: { taskCreateLastUsed: null, autoFocusNewTasks },
-      repositorySets: {
-        itemsByWorkspaceId: {},
-        loadingByWorkspaceId: {},
-        loadedByWorkspaceId: {},
-        revisionByWorkspaceId: {},
-      },
-      setRepositorySets: () => undefined,
-      setRepositorySetsLoading: () => undefined,
-    }),
-  useAppStoreApi: () => ({
-    getState: () => ({
-      repositoryBranchPolicies: { revisionByRepositoryId: {} },
-    }),
-  }),
+  useAppStore: (selector: (state: any) => unknown) => selector(getDialogStoreState()),
+  useAppStoreApi: () => mockDialogStoreApi,
 }));
 
 vi.mock("@/components/task-create-dialog-submit", () => ({
@@ -289,7 +291,13 @@ vi.mock("@/components/task-create-dialog-state", () => ({
   useTaskCreateDialogData: () => ({
     workflows: [],
     agentProfiles: [],
-    executors: [],
+    executors: [
+      {
+        id: "executor-1",
+        type: "local",
+        profiles: [{ id: "executor-profile-1", executor_id: "executor-1" }],
+      },
+    ],
     snapshots: {},
     repositories: [],
     repositoriesLoading: false,
@@ -330,6 +338,10 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,

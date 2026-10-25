@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -201,15 +201,30 @@ function useExternalLinkForm(
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const owner = useRef<{ submitting: boolean } | null>(null);
+
+  useLayoutEffect(() => {
+    const opening = open ? { submitting: false } : null;
+    owner.current = opening;
     if (open) {
+      setSubmitting(false);
       setInput("");
       setError(null);
       setInstanceId("");
     }
+    return () => {
+      owner.current = null;
+    };
   }, [open]);
 
+  const changeOpen = (nextOpen: boolean) => {
+    if (!nextOpen) owner.current = null;
+    onOpenChange(nextOpen);
+  };
+
   const submit = async () => {
+    const admission = owner.current;
+    if (!admission || admission.submitting) return;
     const key = config.extractKey(input);
     if (!key) {
       setError(t(config.validationHintKey));
@@ -220,6 +235,7 @@ function useExternalLinkForm(
       return;
     }
 
+    admission.submitting = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -230,27 +246,50 @@ function useExternalLinkForm(
         state.kanbanMulti.snapshots,
         state.kanban.tasks,
       );
-      const linkedKey = config.resolveLinkedKey?.(key, result) ?? key;
+      const linkedKey = config.resolveLinkedKey ? config.resolveLinkedKey(key, result) : key;
       await updateTask(task.id, {
         title: buildLinkedIssueTitle(latestTask?.title ?? task.title, linkedKey),
       });
       toast({ description: t(config.successLabelKey), variant: "success" });
-      onOpenChange(false);
+      if (owner.current === admission) changeOpen(false);
     } catch (err) {
-      setError(
+      const description =
         err instanceof Error
           ? err.message
-          : t("task:failedToLinkTarget", { target: t(config.inputLabelKey) }),
-      );
+          : t("task:failedToLinkTarget", { target: t(config.inputLabelKey) });
+      if (owner.current === admission) setError(description);
+      else toast({ description, variant: "error" });
     } finally {
-      setSubmitting(false);
+      if (owner.current === admission) {
+        admission.submitting = false;
+        setSubmitting(false);
+      }
     }
   };
 
-  return { input, setInput, instanceId, setInstanceId, submitting, error, setError, submit };
+  return {
+    input,
+    setInput,
+    instanceId,
+    setInstanceId,
+    submitting,
+    error,
+    setError,
+    submit,
+    changeOpen,
+  };
 }
 
-export function TaskExternalLinkDialog({
+export function TaskExternalLinkDialog(props: TaskExternalLinkDialogProps) {
+  return (
+    <ExternalLinkFormDialog
+      key={JSON.stringify([props.task.id, props.workspaceId, props.provider])}
+      {...props}
+    />
+  );
+}
+
+function ExternalLinkFormDialog({
   open,
   onOpenChange,
   provider,
@@ -260,11 +299,20 @@ export function TaskExternalLinkDialog({
 }: TaskExternalLinkDialogProps) {
   const { t } = useTranslation();
   const config = PROVIDERS[provider];
-  const { input, setInput, instanceId, setInstanceId, submitting, error, setError, submit } =
-    useExternalLinkForm(config, task, workspaceId, open, onOpenChange);
+  const {
+    input,
+    setInput,
+    instanceId,
+    setInstanceId,
+    submitting,
+    error,
+    setError,
+    submit,
+    changeOpen,
+  } = useExternalLinkForm(config, task, workspaceId, open, onOpenChange);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={changeOpen}>
       <DialogContent
         className="w-[calc(100vw-2rem)] sm:max-w-lg"
         onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
@@ -304,7 +352,7 @@ export function TaskExternalLinkDialog({
             type="button"
             variant="outline"
             className="cursor-pointer"
-            onClick={() => onOpenChange(false)}
+            onClick={() => changeOpen(false)}
             disabled={submitting}
           >
             {t("common:cancel")}

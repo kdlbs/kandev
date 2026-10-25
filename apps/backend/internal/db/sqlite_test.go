@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,30 @@ import (
 )
 
 type sqliteFactoryFixture struct{ writer, waiter, observer, reader *sqlx.DB }
+
+// @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.1
+func TestSQLiteWriterPowerLossDurability(t *testing.T) {
+	ctx := t.Context()
+	writer, err := internaldb.OpenSQLite(filepath.Join(t.TempDir(), "delivery.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	check := func() {
+		t.Helper()
+		var mode string
+		var synchronous int
+		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode))
+		require.Equal(t, "wal", mode)
+		require.NoError(t, writer.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous))
+		require.Equal(t, 2, synchronous, "journal pruning requires a power-loss-durable WAL commit")
+	}
+	check()
+	conn, err := writer.Conn(ctx)
+	require.NoError(t, err)
+	// Discard the physical connection; the pool must reopen with the same durability.
+	require.ErrorIs(t, conn.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+	_ = conn.Close()
+	check()
+}
 
 func newSQLiteFactoryFixture(t *testing.T, ctx context.Context) sqliteFactoryFixture {
 	t.Helper()
@@ -329,4 +354,36 @@ func TestSQLiteReaderProgressDuringWriterTransaction(t *testing.T) {
 	require.NoError(t, f.reader.QueryRowContext(ctx, `SELECT revision FROM admission_probe WHERE id=1`).Scan(&revision))
 	require.Equal(t, 3, revision)
 	require.Zero(t, f.reader.Stats().InUse)
+}
+
+func sqliteJournalSizeLimit(t *testing.T, ctx context.Context, database *sql.DB) int64 {
+	t.Helper()
+	var limit int64
+	require.NoError(t, database.QueryRowContext(ctx, `PRAGMA journal_size_limit`).Scan(&limit))
+	return limit
+}
+
+// @covers AC-PLATFORM-SQLITE-FILE-HYGIENE-001.1, AC-PLATFORM-SQLITE-FILE-HYGIENE-001.3
+func TestSQLiteWriterJournalSizeLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	path := filepath.Join(t.TempDir(), "wal-limit.db")
+	writer, err := internaldb.OpenSQLite(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, writer.Close()) })
+	reader, err := internaldb.OpenSQLiteReader(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+
+	require.Equal(t, int64(64<<20), sqliteJournalSizeLimit(t, ctx, writer))
+
+	// Discard the pooled writer connection so the next query opens a new one.
+	conn, err := writer.Conn(ctx)
+	require.NoError(t, err)
+	require.ErrorIs(t, conn.Raw(func(any) error { return driver.ErrBadConn }), driver.ErrBadConn)
+	require.ErrorIs(t, conn.Close(), sql.ErrConnDone)
+	require.Zero(t, writer.Stats().OpenConnections, "bad writer connection must be discarded")
+	require.Equal(t, int64(64<<20), sqliteJournalSizeLimit(t, ctx, writer), "replacement writer connection")
+
+	require.Equal(t, int64(-1), sqliteJournalSizeLimit(t, ctx, reader), "reader keeps the SQLite default")
 }

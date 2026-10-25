@@ -9,6 +9,7 @@
 // The accessibility scan (AC .008.2) lives in mobile-needs-you-a11y.spec.ts,
 // kept separate so it can be dropped independently of this file's coverage.
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForSessionState } from "../../helpers/session";
 import { linkToCoordinator, linkToCoordinatorNeedsYou } from "../../../lib/coordinator/links";
 
@@ -33,6 +34,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
       name: "Mobile Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const taskA = await apiClient.createTaskWithAgent(
@@ -105,6 +108,30 @@ test.describe("Coordinator screens on a phone viewport", () => {
       (el) => getComputedStyle(el.parentElement ?? el).position,
     );
     expect(stripPosition).toBe("sticky");
+
+    await cardA.getByTestId("needs-you-answer-here").tap();
+    const overlay = cardA.getByTestId("clarification-overlay");
+    await expect(overlay).toBeVisible();
+    const disclosure = overlay.getByRole("button", { name: "Collapse clarification", exact: true });
+    const disclosureBox = await disclosure.boundingBox();
+    expect(disclosureBox).not.toBeNull();
+    expect(disclosureBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    expect(disclosureBox!.width).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+    await disclosure.tap();
+    await expect(overlay).toBeHidden();
+    const expand = cardA.getByRole("button", { name: "Expand clarification", exact: true });
+    await expect(expand).toHaveCount(1);
+    await expect(expand).toHaveAttribute("aria-expanded", "false");
+    await waitForSessionState(apiClient, {
+      taskId: taskA.id,
+      sessionId: taskA.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "collapsing a phone question must not answer or reject it",
+    });
+    await expand.tap();
+    await expect(overlay).toBeVisible();
+    await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    await expectNoHorizontalScroll(testPage);
   });
 
   // The phone nav's Inbox/Coordinator rows live in the "saved sidebar layout"
@@ -184,6 +211,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
         name: "Default Layout Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
 
       await testPage.goto("/");
@@ -201,11 +230,17 @@ test.describe("Coordinator screens on a phone viewport", () => {
       await expect(
         section.getByTestId(`mobile-sidebar-coordinator-${coordinator.id}`),
       ).toBeVisible();
-      const sectionBox = await section.boundingBox();
-      const automationsBox = await menu.getByTestId("mobile-automations-section").boundingBox();
-      expect(sectionBox).not.toBeNull();
-      expect(automationsBox).not.toBeNull();
-      expect(sectionBox!.y).toBeLessThan(automationsBox!.y);
+      await expect(menu.getByTestId("mobile-automations-section")).toBeVisible();
+      await waitForFiniteAnimations(menu);
+      const positions = await menu.evaluate((element) => ({
+        coordinators: element
+          .querySelector('[data-testid="mobile-coordinators-section"]')!
+          .getBoundingClientRect().y,
+        automations: element
+          .querySelector('[data-testid="mobile-automations-section"]')!
+          .getBoundingClientRect().y,
+      }));
+      expect(positions.coordinators).toBeLessThan(positions.automations);
     } finally {
       await apiClient.deleteWorkspace(workspace.id, workspace.name);
     }

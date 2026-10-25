@@ -41,7 +41,7 @@ func (r *Repository) completePendingToolCallsForTurnTx(ctx context.Context, tx *
 	drv := r.db.DriverName()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
+		SET metadata = %s, updated_at = ?
 		WHERE turn_id = ?
 		  AND type != 'permission_request'
 		  AND %s NOT IN ('complete', 'error')
@@ -49,7 +49,7 @@ func (r *Repository) completePendingToolCallsForTurnTx(ctx context.Context, tx *
 	`, dialect.JSONSet(drv, "metadata", "status", "complete"),
 		dialect.JSONExtract(drv, "metadata", "status"),
 		dialect.JSONExtractIsNotNull(drv, "metadata", "tool_call_id"))
-	result, err := tx.ExecContext(ctx, tx.Rebind(query), turnID)
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), time.Now().UTC(), turnID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to complete pending tool calls for turn %s: %w", turnID, err)
 	}
@@ -290,7 +290,7 @@ func (r *Repository) UpdateMessageWithConversationReceipt(ctx context.Context, m
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput); err != nil {
+	if err := r.updateMessageWithPayloadGuardTx(ctx, tx, message, metadataJSON, requestsInput, true); err != nil {
 		return nil, err
 	}
 	receipt := &models.ConversationMutationReceipt{}
@@ -429,10 +429,11 @@ func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Cont
 	_, stepID, found, stepErr := r.readTaskStepInTx(ctx, tx, turn.TaskID)
 	stamped := false
 	if stepErr == nil && found && stepID != "" {
-		if turn.Metadata == nil {
-			turn.Metadata = map[string]interface{}{}
+		if err := r.stampTurnWorkflowEntryTx(ctx, tx, turn, stepID); err != nil {
+			_ = tx.Rollback()
+			receipt, insertErr := r.CreateTurnWithConversationReceipt(ctx, turn)
+			return false, receipt, insertErr
 		}
-		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
 		stamped = true
 	}
 	if err := r.insertTurnRow(ctx, tx, turn); err != nil {

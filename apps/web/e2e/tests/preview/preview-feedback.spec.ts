@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
+import { mockTurnGate } from "../../helpers/mock-turn-gate";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import {
@@ -19,8 +20,10 @@ test.describe("Web preview feedback", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const server = await startPreviewServer();
+    const busyTurn = mockTurnGate(backend.tmpDir, "Preview blocking turn completed");
     const createFailure = await routeMainWebSocketWithPreviewFeedbackCreateFailure(testPage);
     try {
       const { session, frame } = await openBrowserPreview(
@@ -49,7 +52,7 @@ test.describe("Web preview feedback", () => {
       }
       expect(new Set(choiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
 
-      await chooseCapture(testPage, "Select element");
+      await chooseCapture(testPage, "Select element", frame);
       await frame.locator("#save").hover();
       const candidate = frame.locator('[data-kandev-inspector-ui="candidate"]');
       await expect(candidate).toBeVisible();
@@ -59,7 +62,7 @@ test.describe("Web preview feedback", () => {
 
       await frame.locator("#details-route").click();
       await expect(frame.locator("h1")).toHaveText("Order details");
-      await chooseCapture(testPage, "Select text");
+      await chooseCapture(testPage, "Select text", frame);
       await selectGeneratedText(frame);
       await expect(testPage.getByTestId("preview-feedback-draft")).toContainText("$42.00");
       await saveDraft(testPage, "Explain how this generated total was calculated");
@@ -184,7 +187,10 @@ test.describe("Web preview feedback", () => {
       await testPage.keyboard.press("Escape");
       await session.waitForChatIdle({ timeout: 45_000 });
 
-      await session.sendMessage("/slow 5s");
+      await session.sendMessage(busyTurn.prompt);
+      await expect(
+        session.activeChat().getByText("Queue blocking turn started", { exact: true }),
+      ).toBeVisible();
       await waitForComposerQueueMode(testPage);
       await session.addBrowserPanel();
       await session.clickTab("Browser");
@@ -192,7 +198,7 @@ test.describe("Web preview feedback", () => {
       await session.browserAddressInput.press("Enter");
       const queuedFrame = session.browserPanel.frameLocator("iframe");
       await expect(queuedFrame.locator("#save")).toBeVisible({ timeout: 15_000 });
-      await chooseCapture(testPage, "Select element");
+      await chooseCapture(testPage, "Select element", queuedFrame);
       await queuedFrame.locator("#save").click();
       await saveDraft(testPage, "Queue this button adjustment while the agent is busy");
 
@@ -201,6 +207,7 @@ test.describe("Web preview feedback", () => {
       await typeWhileBusy(testPage, editor, "Apply the queued preview feedback");
       await session.submitButton().click();
       await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
+      await busyTurn.release();
 
       const queuedMessage = session
         .activeChat()
@@ -213,6 +220,7 @@ test.describe("Web preview feedback", () => {
       await session.waitForChatIdle({ timeout: 45_000 });
       await expect(session.activeChat()).not.toContainText("1 preview feedback item");
     } finally {
+      await busyTurn.release();
       await apiClient.updateRepository(seedData.repositoryId, { dev_script: "" });
       await server.close();
     }

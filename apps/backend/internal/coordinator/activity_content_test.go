@@ -81,7 +81,7 @@ func TestSettleDecision_ActivityContent(t *testing.T) {
 	t.Run("rejected carries reason code", func(t *testing.T) {
 		store, c, svc := phase2Fixture(t, true)
 		p := insertKind(t, store, c, ProposalKindCreateTask)
-		if m, err := svc.rejectProposalStore(ctx, p, "not now", "u1"); err != nil || !m {
+		if m, err := svc.rejectProposalStore(ctx, p, "not now", "u1", store.now().UTC()); err != nil || !m {
 			t.Fatalf("matched=%v err=%v", m, err)
 		}
 		rows := listActivity(t, store, c.ID)
@@ -93,7 +93,7 @@ func TestSettleDecision_ActivityContent(t *testing.T) {
 	t.Run("rejected without reason has no reason code", func(t *testing.T) {
 		store, c, svc := phase2Fixture(t, true)
 		p := insertKind(t, store, c, ProposalKindCreateTask)
-		if _, err := svc.rejectProposalStore(ctx, p, "", "u1"); err != nil {
+		if _, err := svc.rejectProposalStore(ctx, p, "", "u1", store.now().UTC()); err != nil {
 			t.Fatal(err)
 		}
 		if rows := listActivity(t, store, c.ID); len(rows) != 1 || rows[0].ReasonCode != nil {

@@ -9,6 +9,21 @@ This how-to guide connects a phone to Kandev through Tailscale, Cloudflare Tunne
 
 Anyone who can reach an unauthenticated Kandev origin has administrator access. Use a protected network boundary.
 
+## Use task controls on a phone
+
+The controls above the message composer keep task actions within reach. When
+the task's pull requests are all merged or all closed without merging, a
+full-width notice appears above the controls. Choose **Archive** to archive
+the task using your confirmation preference, or dismiss the notice with **X**.
+Dismissal hides the notice without archiving the task.
+
+Todo, usage, sharing, and conversation controls remain available below the
+notice. Extra controls wrap onto another line on narrow screens. The action
+labelled with the next workflow step still moves the task to that step. In task
+Chat, that action occupies a right-aligned row above the transcript utility
+icons. Status icons and transcript utilities share the row below it when they
+fit. They wrap onto additional rows when needed, with the message composer below.
+
 ## Confirm an action on a phone
 
 Archiving from the **Tasks** sheet shows a dedicated confirmation step in that

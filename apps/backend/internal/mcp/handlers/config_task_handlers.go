@@ -75,6 +75,13 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
 		return response, err
 	}
+	// Agent entry options require work on entry, independently of existing
+	// sessions. HTTP and WebSocket moves retain their service validation.
+	if req.EntryOptions != nil {
+		if err := h.validateEntryTargetStep(ctx, req.WorkflowStepID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
 
 	// entry_options are OPTIONAL — config-mode/admin moves don't always have an
 	// agent to hand off to. When supplied, one-shot instructions/reset/profile
@@ -232,6 +239,14 @@ func (h *Handlers) deferMoveTask(
 	// before committing the deferred move. Without this check a stale or
 	// foreign step_id would be stored and silently fail at turn-end, leaving
 	// the task orphaned on the board.
+	//
+	// sourceStepID records the step the task occupies now, and
+	// sourceTransitionID its latest step-transition ledger id. The recorded
+	// source governs replay: a later explicit move supersedes this one instead
+	// of being overwritten at replay — including when the card returns to the
+	// same source step (A to B to A).
+	sourceStepID := ""
+	var sourceTransitionID int64
 	if h.workflowCtrl != nil {
 		stepResp, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
 		if err != nil || stepResp == nil || stepResp.Step == nil {
@@ -275,6 +290,15 @@ func (h *Handlers) deferMoveTask(
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 				"target workflow_id does not exist", nil)
 		}
+		sourceStepID = task.WorkflowStepID
+		if reader, ok := h.taskRepo.(taskStepTransitionIDReader); ok {
+			if id, readErr := reader.GetLatestTaskStepTransitionID(ctx, req.TaskID); readErr != nil {
+				h.logger.Warn("move_task: failed to read source transition id; deferred move keeps legacy ordering",
+					zap.String("task_id", req.TaskID), zap.Error(readErr))
+			} else {
+				sourceTransitionID = id
+			}
+		}
 		if targetWorkflow.WorkspaceID != task.WorkspaceID {
 			h.logger.Error("move_task: target workflow is in a different workspace",
 				zap.String("task_id", req.TaskID),
@@ -302,6 +326,8 @@ func (h *Handlers) deferMoveTask(
 		TaskID:               req.TaskID,
 		WorkflowID:           req.WorkflowID,
 		WorkflowStepID:       req.WorkflowStepID,
+		FromStepID:           sourceStepID,
+		FromTransitionID:     sourceTransitionID,
 		Position:             req.Position,
 		Actor:                string(wfmodels.StepTransitionActorAgent),
 		SenderSessionID:      req.SenderSessionID,
@@ -327,6 +353,24 @@ func moveChange(fromStepID, toStepID string) workflowmove.MoveChange {
 		return workflowmove.MoveChangeStep
 	}
 	return workflowmove.MoveChangePositionOnly
+}
+
+// validateEntryTargetStep reports whether the target step can receive one-shot
+// entry options. A manual step (one that does not start work on entry) cannot,
+// so the caller is told to move without options. A missing workflow controller
+// or an unreadable step fails open, letting the normal move path report its own
+// canonical not-found or validation error.
+func (h *Handlers) validateEntryTargetStep(ctx context.Context, stepID string) error {
+	if h.workflowCtrl == nil {
+		return nil
+	}
+	resp, err := h.workflowCtrl.GetStep(ctx, stepID)
+	if err != nil || resp == nil || resp.Step == nil {
+		h.logger.Debug("move_task: could not read target step for entry-target check",
+			zap.String("workflow_step_id", stepID), zap.Error(err))
+		return nil
+	}
+	return workflowmove.ValidateEntryTarget(resp.Step)
 }
 
 // applyMoveTaskImmediate runs the move now, optionally queueing a hand-off
@@ -380,13 +424,16 @@ func classifyMoveTaskError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
 	}
-	if errors.Is(err, workflowmove.ErrMoveConflict) {
+	if errors.Is(err, workflowmove.ErrMoveConflict) ||
+		errors.Is(err, workflowmove.ErrPendingMoveActiveSession) ||
+		errors.Is(err, workflowmove.ErrPermanentPendingMoveMismatch) {
 		return ws.ErrorCodeConflict
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
-		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) ||
+		errors.Is(err, workflowmove.ErrEntryTargetIsManual) {
 		return ws.ErrorCodeValidation
 	}
 	msg := strings.ToLower(err.Error())
@@ -405,14 +452,64 @@ func classifyMoveTaskError(err error) string {
 	}
 }
 
+// moveTaskErrorMessage returns the agent-facing text for a failed move. A
+// recognized reason is included so the caller can correct the call in one
+// step. Service errors that embed internal identifiers (for example a
+// WIP-limit step ID) map to fixed phrases, and any unrecognized error keeps the
+// generic text so raw service messages never reach the agent.
 func moveTaskErrorMessage(err error) string {
+	reason, known := moveTaskErrorReason(err)
 	switch classifyMoveTaskError(err) {
 	case ws.ErrorCodeConflict:
+		if known {
+			return "Move task conflicts with the current task or workflow state: " + reason
+		}
 		return "Move task conflicts with the current task or workflow state"
 	case ws.ErrorCodeValidation:
+		if known {
+			return reason
+		}
 		return "Invalid move_task request"
 	default:
 		return "Failed to move task"
+	}
+}
+
+// moveTaskErrorReason returns a stable, non-sensitive reason for a recognized
+// move error: a workflow move sentinel's own message, or a fixed phrase for a
+// known service error. known is false for anything else.
+func moveTaskErrorReason(err error) (reason string, known bool) {
+	if err == nil {
+		return "", false
+	}
+	for _, sentinel := range []error{
+		workflowmove.ErrMoveConflict,
+		workflowmove.ErrPendingMoveActiveSession,
+		workflowmove.ErrPermanentPendingMoveMismatch,
+		workflowmove.ErrConflictingInstructions,
+		workflowmove.ErrEntryOptionsRequireStepChange,
+		workflowmove.ErrEntryOptionsUnsupported,
+		workflowmove.ErrEntryTargetUnavailable,
+		workflowmove.ErrEntryTargetIsManual,
+	} {
+		if errors.Is(err, sentinel) {
+			return sentinel.Error(), true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "wip limit exceeded"):
+		return "the target workflow step's WIP limit is exceeded", true
+	case strings.Contains(msg, "active session"):
+		return "the task has an active session", true
+	case strings.Contains(msg, "archived tasks cannot be moved"):
+		return "archived tasks cannot be moved", true
+	case strings.Contains(msg, "different workspace"):
+		return "the target workflow is in a different workspace", true
+	case strings.Contains(msg, "does not belong to target workflow"):
+		return "the target workflow_step_id does not belong to the requested workflow_id", true
+	default:
+		return "", false
 	}
 }
 
@@ -525,23 +622,39 @@ func (h *Handlers) queueMoveTaskPromptWithMoveID(
 }
 
 func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	taskID, err := unmarshalStringField(msg.Payload, "task_id")
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	var request struct {
+		TaskID           string `json:"task_id"`
+		WorkspaceCleanup string `json:"workspace_cleanup"`
+		Discard          bool   `json:"discard_worktree_changes"`
+		Unverified       bool   `json:"allow_unverified_workspace_changes"`
 	}
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid task deletion payload", nil)
+	}
+	taskID, mode := request.TaskID, request.WorkspaceCleanup
 	if taskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-
+	if mode != "" && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupDelete && models.WorkspaceCleanupMode(mode) != models.WorkspaceCleanupRetain {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workspace cleanup mode", nil)
+	}
+	if (request.Unverified && !request.Discard) || (mode == string(models.WorkspaceCleanupRetain) && (request.Discard || request.Unverified)) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid workspace cleanup consent", nil)
+	}
+	options := service.DeleteTaskOptions{WorkspaceCleanup: models.WorkspaceCleanupMode(mode), DiscardWorktreeChanges: request.Discard, AllowUnverifiedWorkspaceChanges: request.Unverified}
 	// Keep MCP task lifecycle mutations on the same HandoffService path as
 	// HTTP/WS when it is wired. This releases workspace-group membership and
 	// preserves shared-environment ownership before the task row is removed.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(ctx, taskID, false); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(ctx, taskID, false, options); err != nil {
 			var postCommitErr *service.CascadePostCommitError
 			if !errors.As(err, &postCommitErr) {
 				h.logger.Error("failed to delete task", zap.Error(err))
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+			}
+			if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+				result := h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options)
+				return ws.NewResponse(msg.ID, msg.Action, result)
 			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
@@ -551,11 +664,17 @@ func (h *Handlers) handleDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				keyTaskID:  taskID,
 			})
 		}
+		if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+			return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options))
+		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 	}
-	if err := h.taskSvc.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
+	if err := h.taskSvc.DeleteTaskWithLifecycleOptions(ctx, taskID, options); err != nil {
 		h.logger.Error("failed to delete task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete task", nil)
+	}
+	if models.WorkspaceCleanupMode(mode) == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+		return ws.NewResponse(msg.ID, msg.Action, h.taskSvc.CommittedTaskDeletionResult(ctx, []string{taskID}, options))
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{keySuccess: true})
 }

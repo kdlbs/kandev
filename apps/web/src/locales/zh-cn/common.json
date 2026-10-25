@@ -551,5 +551,17 @@
   "sidebarYearsMax": "99+年",
   "integrationSettings": "集成设置",
   "pageNavigation": "本页导航",
-  "viewOptions": "视图选项"
+  "viewOptions": "视图选项",
+  "commandGoToArchivedTasks": "前往已归档任务",
+  "commandGoToArchivedTasksKeywords": "已归档任务, 归档, 历史记录",
+  "conversationSearch_open": "搜索任务",
+  "conversationSearch_match": "对话匹配",
+  "conversationSearch_searching": "正在搜索对话…",
+  "conversationSearch_indexing": "正在为对话建立索引。",
+  "conversationSearch_limited": "部分对话匹配已省略。请缩小搜索范围。",
+  "conversationSearch_unavailable": "对话搜索不可用。",
+  "conversationSearch_query_too_short": "请使用至少 3 个字符搜索对话。",
+  "conversationSearch_query_too_long": "搜索对话时请最多使用 200 个字符。",
+  "conversationSearch_query_too_broad": "请使用至少 3 个连续的字母、汉字或数字。",
+  "conversationSearch_title": "命令面板"
 }

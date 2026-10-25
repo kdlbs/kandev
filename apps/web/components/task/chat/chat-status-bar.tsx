@@ -25,6 +25,7 @@ import { ConversationUsageDisplay } from "@/components/task/chat/conversation-us
 import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { OpenInThreadsButton } from "@/components/threads/open-in-threads-button";
 import { useIsDeckThread } from "@/hooks/domains/threads/use-deck-thread";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
@@ -153,7 +154,12 @@ export function ComposerCIStatus({
 }) {
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-1.5 empty:hidden", standalone && "px-2 py-1")}
+      className={cn(
+        "flex min-w-0 max-w-full flex-wrap items-center gap-1.5 empty:hidden",
+        !standalone &&
+          "max-md:[&_[data-slot=change-request-status-chip]]:min-h-11 max-md:[&_[data-slot=change-request-status-chip]]:min-w-11 [@media(pointer:coarse)]:[&_[data-slot=change-request-status-chip]]:min-h-11 [@media(pointer:coarse)]:[&_[data-slot=change-request-status-chip]]:min-w-11",
+        standalone && "px-2 py-1",
+      )}
     >
       <PRStatusChip taskId={taskId} />
       <MRStatusChip taskId={taskId} />
@@ -212,7 +218,7 @@ function ChatStatusBarRightControls({
   return (
     <div
       data-testid="chat-status-bar-right-controls"
-      className="flex shrink-0 items-center gap-1.5 empty:hidden"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5 empty:hidden"
     >
       {showThreadsLink && <OpenInThreadsButton taskId={taskId} sessionId={sessionId} />}
       {showAutoScrollControl && sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
@@ -241,7 +247,10 @@ function ChatStatusBarRightControls({
   );
 }
 
+/** Phones place progression above utilities; each composition follows its DOM order. */
 function ChatStatusBarActions({
+  children,
+  taskId,
   rightControlProps,
   showRightControls,
   showProceed,
@@ -250,6 +259,8 @@ function ChatStatusBarActions({
   onProceed,
   isMoving,
 }: {
+  children: ReactNode;
+  taskId: string | null;
   rightControlProps: ChatStatusBarRightControlsProps;
   showRightControls: boolean;
   showProceed: boolean;
@@ -258,23 +269,38 @@ function ChatStatusBarActions({
   onProceed: ChatStatusBarProps["onProceed"];
   isMoving: boolean;
 }) {
-  if (!showRightControls && !(showProceed && nextStepName)) return null;
-  return (
+  const { isMobile } = useResponsiveBreakpoint();
+  const status = (
     <div
-      data-testid="chat-status-bar-actions"
-      className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5"
+      key="status"
+      className="mr-auto flex min-w-0 max-w-full flex-wrap items-center gap-1.5 [&:not(:has(>_:not(:empty)))]:hidden"
     >
-      {showRightControls && <ChatStatusBarRightControls {...rightControlProps} />}
-      {showProceed && nextStepName && (
+      {children}
+    </div>
+  );
+  const banners = <ChatStatusBarArchiveBanners key="banners" taskId={taskId} />;
+  const controls = showRightControls ? (
+    <ChatStatusBarRightControls key="controls" {...rightControlProps} />
+  ) : null;
+  const proceed =
+    showProceed && nextStepName ? (
+      <div key="proceed" className="contents max-md:flex max-md:w-full max-md:justify-end">
         <WorkflowMoveProceedButton
           previewTarget={previewTarget}
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6"
+          className="h-6 max-w-full max-md:ml-auto max-md:h-auto max-md:min-h-11 max-md:min-w-11 max-md:whitespace-normal max-md:break-words [@media(pointer:coarse)]:h-auto [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:whitespace-normal [@media(pointer:coarse)]:break-words"
           testId="proceed-next-step"
         />
-      )}
+      </div>
+    ) : null;
+  return (
+    <div
+      data-testid="chat-status-bar-actions"
+      className="ml-auto flex w-full min-w-0 flex-wrap items-center gap-1.5 md:justify-end"
+    >
+      {isMobile ? [banners, proceed, status, controls] : [status, banners, controls, proceed]}
     </div>
   );
 }
@@ -361,15 +387,8 @@ export function ChatStatusBar({
       data-testid="chat-status-bar"
       className="flex min-w-0 flex-wrap items-center gap-1.5 py-1 text-xs text-muted-foreground"
     >
-      {showTodos && <TodoIndicator todos={todoItems} />}
-      {autopilot && <AutopilotChatChip />}
-      <TaskDependencyChip taskId={taskId} />
-      {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
-      {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
-      <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
-      {queueChip}
-      <ChatStatusBarArchiveBanners taskId={taskId} />
       <ChatStatusBarActions
+        taskId={taskId}
         rightControlProps={rightControlProps}
         showRightControls={showRightControls}
         showProceed={showProceed}
@@ -377,7 +396,15 @@ export function ChatStatusBar({
         previewTarget={previewTarget}
         onProceed={onProceed}
         isMoving={isMoving}
-      />
+      >
+        {showTodos && <TodoIndicator todos={todoItems} />}
+        {autopilot && <AutopilotChatChip />}
+        <TaskDependencyChip taskId={taskId} />
+        {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
+        {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
+        <BackgroundWorkChip sessionId={sessionId} detailActive={detailActive} />
+        {queueChip}
+      </ChatStatusBarActions>
     </div>
   );
 }

@@ -55,6 +55,7 @@ type mockAgent struct {
 	sessions                       map[acp.SessionId]bool
 	promptCancels                  map[acp.SessionId]context.CancelFunc
 	promptCancelHolds              map[acp.SessionId]chan struct{}
+	detachedWork                   map[acp.SessionId]map[*mockDetachedWork]struct{}
 	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
 	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
 	sessionModes                   map[acp.SessionId]acp.SessionModeId
@@ -477,7 +478,13 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
 		}
 		<-cancelHold
-		time.Sleep(mockCancelHoldDuration())
+		if release := os.Getenv("E2E_MOCK_AGENT_CANCEL_RELEASE_FILE"); release != "" {
+			if err := waitForCancelHoldRelease(release); err != nil {
+				return acp.PromptResponse{}, err
+			}
+		} else {
+			time.Sleep(mockCancelHoldDuration())
+		}
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	// Dynamic unclassified fallback scenarios must return a terminal ACP
@@ -506,7 +513,10 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	a.mu.Lock()
 	sessionMCPServers := cloneMCPServerDefs(a.sessionMCPServers[req.SessionId])
 	a.mu.Unlock()
-	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers}
+	e := &emitter{
+		ctx: promptCtx, conn: a.conn, sid: req.SessionId, mcpServers: sessionMCPServers,
+		registerDetachedWork: a.registerDetachedWork,
+	}
 	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
@@ -531,6 +541,7 @@ func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error 
 	cancelHold := a.promptCancelHolds[req.SessionId]
 	cancelPrompt := a.promptCancels[req.SessionId]
 	a.mu.Unlock()
+	a.cancelDetachedWork(req.SessionId)
 	if cancelHold != nil {
 		select {
 		case <-cancelHold:
@@ -940,4 +951,12 @@ func mockCancelHoldDuration() time.Duration {
 		}
 	}
 	return 8 * time.Second
+}
+
+func waitForCancelHoldRelease(release string) error {
+	// ACP cancels the request context before acknowledgement. The fixture keeps
+	// that boundary pending until explicit release, bounded by the browser test budget.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return waitForScriptFile(ctx, release)
 }

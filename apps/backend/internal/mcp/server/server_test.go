@@ -847,6 +847,7 @@ drained:
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
 	require.Len(t, tools, 41, "final registry should contain the complete GitLab-only task tool set")
+	assert.NotContains(t, tools, "get_github_rate_limit_kandev")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "manage_task_change_request_kandev")
 	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
@@ -1163,6 +1164,7 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer = 16.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
+	// (record_step_decision_kandev retired in favour of the task-bound CLI.)
 	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
 	assert.Contains(t, tools, "transfer_task_kandev")
 	assert.Equal(t, 16, len(tools))

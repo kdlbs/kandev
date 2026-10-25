@@ -58,7 +58,8 @@ If the PR is merged or closed, stop. For a merge, report
 `mergedAt` and `mergeCommit.oid`.
 
 Treat peer alerts as advisory until their SHA matches the current head.
-If captured output is empty, truncated, or invalid, rerun through `rtk proxy`.
+If captured output is empty, truncated, or invalid, rerun the command directly
+and save its unmodified output to a file.
 Capture stdout and stderr separately and preserve the exit code.
 An empty capture cannot prove that the PR is clean.
 
@@ -108,9 +109,14 @@ not flood the conversation. If it returns only GitHub request/transport lines
 or no failure text, treat logs as unavailable and, after terminal state, use
 `scripts/pr-state --job-log <job_id>`. For temporary gaps or aggregate-only
 logs, use the same fallback; it handles plain-text and ZIP responses and emits
-bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the exact
-failed command where possible; CI-specific Go lint often needs
-`golangci-lint run ./... --new-from-rev=<base> --timeout=5m`.
+bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the failing
+scope locally. For Go lint, use `bash scripts/lint-go-changed <changed-go-files>`
+from the repository root, including any file named by the failure. Follow
+`apps/backend/AGENTS.md` for PR-base selection and resource defaults. CI owns the
+full-backend scan; `--new-from-rev` only filters reported findings. Run lint and
+race/build suites sequentially. If the scoped check cannot reproduce CI, use its
+logs before expanding local scope; a full local scan requires explicit user
+authorization and OS-level resource limits.
 
 Bind every failed status and workflow run to the current PR head SHA and the
 current run attempt before acting. Older red runs can remain visible after a
@@ -306,10 +312,13 @@ fixup and recapture and re-publish every affected viewport after the final
 commit. Never leave pre-fixup screenshots in the PR.
 Anchor each recapture on the promised user-visible notice or download affordance
 and assert that affordance is visible before capture; a preview container alone
-is not evidence of the behavior. If the UI changes after publication, publish
-the replacement on a new immutable ref such as
-`media/pr-<PR_NUMBER>-screenshots-fixup` instead of rewriting the prior media
-ref, then repeat the live-body compare-and-swap procedure.
+is not evidence of the behavior. If the UI changes after publication, upload
+the fresh assets with `gh pr comment --body-file <screenshots-file> --attach
+<path>` (repeat `--attach` for each asset) using `/pr` step 7. After uploading,
+replace only the owned screenshot section through its live-body
+fetch/merge/check procedure, without attachments on the body edit, and
+verify the uploaded embeds by reading the PR body back. Do not create or
+rewrite media refs; preserve legacy refs used by historical PR embeds.
 
 Immediately before a remediation commit or push—and again after long-running
 remediation—refresh PR state. Require the PR to remain open and its head ref to

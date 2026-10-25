@@ -260,13 +260,18 @@ func TestTaskDeletePreflightPreservesInspectionCause(t *testing.T) {
 			}
 			cleanup.inspectErr = inspection
 			result, err := svc.TaskDeletePreflight(ctx, []string{"inspection"}, false)
-			var got *worktree.CleanupInspectionError
-			if !errors.Is(err, ErrTaskDeletePreflightUnavailable) || !errors.As(err, &got) || got != inspection || !errors.Is(err, cause) {
-				t.Fatalf("preflight error = %v; want unavailable sentinel and original typed cause", err)
+			if errors.Is(cause, context.Canceled) {
+				var got *worktree.CleanupInspectionError
+				if !errors.Is(err, ErrTaskDeletePreflightUnavailable) || !errors.As(err, &got) || !errors.Is(err, cause) {
+					t.Fatalf("cancellation cause lost: %v", err)
+				}
+				if result != (TaskDeletePreflightResult{}) {
+					t.Fatalf("cancelled preflight issued result: %+v", result)
+				}
+			} else if err != nil || result.WorkspaceInspection != "unknown" || !result.RequiresDiscardConsent {
+				t.Fatalf("physical inspection must require explicit acknowledgement: %+v, %v", result, err)
 			}
-			if result != (TaskDeletePreflightResult{}) {
-				t.Fatalf("failed preflight issued a result: %+v", result)
-			}
+
 			after, readErr := repo.GetTask(ctx, "inspection")
 			if readErr != nil || after.State != before.State || !after.UpdatedAt.Equal(before.UpdatedAt) {
 				t.Fatalf("preflight changed task: %+v, %v", after, readErr)

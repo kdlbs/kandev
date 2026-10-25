@@ -16,7 +16,7 @@ vi.mock("@/lib/api/domains/office-pause-api", () => ({
 }));
 
 const beginPauseRequest = vi.fn();
-const resetPauseState = vi.fn();
+const beginPauseRead = vi.fn();
 const applyPauseResponse = vi.fn();
 
 // A mutable snapshot read via `storeApi.getState()` inside the hook's async
@@ -24,7 +24,7 @@ const applyPauseResponse = vi.fn();
 // resolving it to simulate the operator switching workspaces mid-flight.
 let snapshot: {
   workspaces: { activeId: string | null };
-  office: { pause: { record: unknown; status: "unknown" | "known" } };
+  office: { pause: { record: unknown; status: "unknown" | "loading" | "known" | "error" } };
   connection: { status: string };
 } = {
   workspaces: { activeId: "ws-1" },
@@ -41,13 +41,13 @@ const failedSweep = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (sel: (state: unknown) => unknown) =>
-    sel({ ...snapshot, beginPauseRequest, resetPauseState, applyPauseResponse }),
+    sel({ ...snapshot, beginPauseRequest, beginPauseRead, applyPauseResponse }),
   useAppStoreApi: () => ({ getState: () => snapshot }),
 }));
 
 beforeEach(() => {
   beginPauseRequest.mockReset();
-  resetPauseState.mockReset();
+  beginPauseRead.mockReset();
   applyPauseResponse.mockReset();
   applyPauseResponse.mockReturnValue(true);
   let nextTag = 1;
@@ -64,10 +64,10 @@ beforeEach(() => {
 });
 
 describe("useWorkspacePause: mount, workspace change, reconnect", () => {
-  it("resets and reads on mount", async () => {
+  it("begins and reads on mount", async () => {
     renderHook(() => useWorkspacePause("ws-1"));
     await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledWith("ws-1"));
-    expect(resetPauseState).toHaveBeenCalledTimes(1);
+    expect(beginPauseRead).toHaveBeenCalledTimes(1);
     expect(applyPauseResponse).toHaveBeenCalledWith(
       expect.any(Number),
       "ws-1",
@@ -76,7 +76,7 @@ describe("useWorkspacePause: mount, workspace change, reconnect", () => {
     );
   });
 
-  it("resets and re-reads when the workspace changes", async () => {
+  it("begins and re-reads when the workspace changes", async () => {
     const { rerender } = renderHook(({ id }: { id: string | null }) => useWorkspacePause(id), {
       initialProps: { id: "ws-1" },
     });
@@ -84,7 +84,7 @@ describe("useWorkspacePause: mount, workspace change, reconnect", () => {
     snapshot = { ...snapshot, workspaces: { activeId: "ws-2" } };
     rerender({ id: "ws-2" });
     await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledWith("ws-2"));
-    expect(resetPauseState).toHaveBeenCalledTimes(2);
+    expect(beginPauseRead).toHaveBeenCalledTimes(2);
   });
 
   it("issues a read when the WS connection transitions to connected", async () => {
@@ -96,7 +96,7 @@ describe("useWorkspacePause: mount, workspace change, reconnect", () => {
     await waitFor(() => expect(mocks.getWorkspacePause).toHaveBeenCalledTimes(2));
     // Reconnect does not reset status/record first (design: "status
     // unchanged, the last known state still being the best available").
-    expect(resetPauseState).toHaveBeenCalledTimes(1);
+    expect(beginPauseRead).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -237,6 +237,6 @@ describe("useWorkspacePause: no workspace selected", () => {
   it("does nothing when no workspace is selected", () => {
     renderHook(() => useWorkspacePause(null));
     expect(mocks.getWorkspacePause).not.toHaveBeenCalled();
-    expect(resetPauseState).not.toHaveBeenCalled();
+    expect(beginPauseRead).not.toHaveBeenCalled();
   });
 });

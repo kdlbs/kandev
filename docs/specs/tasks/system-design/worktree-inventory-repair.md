@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-WORKTREE-INVENTORY-REPAIR-001
   - REQ-TASKS-WORKTREE-INVENTORY-REPAIR-002
   - REQ-TASKS-WORKTREE-INVENTORY-REPAIR-003
+  - REQ-TASKS-WORKTREE-INVENTORY-REPAIR-004
 ---
 
 # Worktree inventory repair system design
@@ -29,6 +30,7 @@ continues to follow [metadata recovery](worktree-metadata-recovery.md).
 | `REQ-TASKS-WORKTREE-INVENTORY-REPAIR-001` | Maintenance entry point; validation; journaled application |
 | `REQ-TASKS-WORKTREE-INVENTORY-REPAIR-002` | Repository repair; cleanup evidence |
 | `REQ-TASKS-WORKTREE-INVENTORY-REPAIR-003` | Stop diagnostics |
+| `REQ-TASKS-WORKTREE-INVENTORY-REPAIR-004` | Duplicate ownership reconciliation |
 
 ## Maintenance entry point
 
@@ -97,8 +99,179 @@ Preflight the complete requested change set before any move or database write:
    naming its canonical task root and every bound session. Reject an omitted
    workspace repair even when the Git move and inventory slot are valid.
 
-The helper does not merge slots or infer new branch slugs. An absent checkout
+Version 1 does not merge slots or infer new branch slugs. An absent checkout
 cannot establish an incomplete repository identity.
+
+## Duplicate ownership reconciliation
+
+This section describes the extension delivered by the
+[legacy duplicate repair package](../../../plans/legacy-worktree-alias-repair/plan.md).
+It preserves the existing explicit maintenance boundary. It is not a startup
+migration, a read-time normalization, or permission to ignore a failed Git check.
+
+### Discovery and versioned selection
+
+Extend `cmd/worktree-inventory-repair` with a mutually exclusive `--discover`
+mode. It accepts explicit `--home`, `--database`, and `--tasks-root` paths, plus
+`--after` and `--limit`. Use `internal/task/inventoryrepair` and its existing
+read-only SQLite opening and path-escaping contract. Do not construct migrating
+repositories. Reject unsupported schemas or drivers before path inspection.
+
+Discovery reads inventory only. Select nonempty `worktree_id` values claimed by
+more than one active, non-deleted environment-repository row, across environments
+and branch slots. Page by worktree ID with a default limit of 50 and maximum of
+100 identities. Cap each identity at 256 claims and each response at 1,000 rows
+and 1 MiB. A group that exceeds the cap is explicitly oversized, never a partial
+repair candidate. Return stable cursors, claim row IDs, environment owners,
+repository/branch/path fields, and a selection template. Do not traverse the
+tasks directory or run Git against unselected paths. This permits safe discovery
+while the backend runs, but the result is provisional until offline preview.
+
+Retain version-1 plan decoding and journal compatibility. Introduce version 2
+for duplicate repair only. It cannot combine relocation, repository reassignment,
+or cleanup-job supersession with reconciliation. Its typed selection names:
+
+- One canonical environment-repository row ID per physical worktree ID, plus
+  every alias row ID to remove.
+- Each redundant environment to retire, its canonical environment, its workspace
+  group and ownership generations, and every session to rebind.
+- Explicit canonical workspace-path corrections and every affected bound session.
+- Existing row and Git/content observations, including the complete competing
+  set and negative queries for new claims or dependent records.
+
+Bound one plan to 16 physical identities, 16 environments, 16 groups, 256 alias
+rows, and 256 sessions, within the existing 1 MiB input limit. Reject truncated
+or omitted connected ownership sets. Discovery provides candidates, not authority
+to choose the winner or apply a repair.
+
+### Canonical proof and dependent records
+
+Preview reloads all claims for each selected identity. The selected canonical
+slot must identify a registered checkout strictly below its marked task root.
+Reuse `inspectGit`, root-handle checks, content/index/ref digests, and repository
+workspace authorization. Prove the branch, common directory, administrative
+backlink, registration, and root owner together. A checkout cannot be the task
+root itself. A task-root alias can be removed only when it names the same
+repository, worktree, and branch as the proven child checkout, has no local
+`.git`, and is precisely that checkout's verified enclosing task root. Do not
+repair a broken `.git` pointer, an unrelated path, or two real competing
+checkouts through this rule. Do not infer a branch slug or rename a branch.
+
+For copied child environments, use `task_workspace_groups` and active
+`task_workspace_group_members` to prove the current steward and canonical
+`materialized_environment_id`. The child's saved workspace policy and membership
+must agree. All active rows of the redundant environment must exactly match
+selected canonical counterparts by physical identity, repository, branch, and
+checkout path. A single unmatched or failed independent slot blocks retirement.
+The task tree alone is insufficient. No group owner, membership, or ownership
+generation changes during this operation.
+
+The version-2 mutation set is closed:
+
+| Record | Permitted change |
+| --- | --- |
+| Selected `task_environment_repos` aliases | Remove exact row IDs after canonical proof |
+| Selected `task_sessions` | Rebind to the canonical environment and correct the explicit workspace path, preserving all other fields |
+| Canonical `task_environments` | Correct only the explicit workspace path to its marked group root |
+| Selected `task_session_git_snapshots` | Rebind the environment FK for observations of those same physical checkouts, preserving ID, session provenance, timestamps, metadata, and content |
+| Redundant `task_environments` | Remove only after every permitted reference is rebound and every other dependent set is proven empty |
+
+Do not merge conflicting current Git observations or fabricate capture times.
+Reject snapshot scopes whose repository/path cannot be related to the selected
+canonical inventory. Check both declared foreign keys and the explicit non-FK
+reference set. Recovery claims, operations, artifacts, recovery receipts,
+adoption receipts, Kubernetes records, terminal consumers, another group's
+materialized-environment reference, and unknown referencing tables block this
+version. Keep original cleanup snapshots and source manifests byte-for-byte.
+Cancel neither tasks nor cleanup jobs to make the proof pass.
+
+Every task whose environment or sessions participate must have no cleanup job
+that could still run against the selected inventory. Only cancelled or succeeded
+jobs are inert for this extension. A failed, pending, prepared, running,
+retry-wait, or waiting-for-clean job blocks the selection. The existing explicit
+cleanup recovery remains a separate operation. Its immutable observations must
+not be rewritten by duplicate repair.
+
+### Offline application and recovery
+
+Retain Linux-only application, ownership locks, process census across all UIDs,
+backup validation, private journal, startup fences, and expected-value guards.
+All selected tasks, canonical borrowers, and redundant owners participate in
+admission. Preview may report blockers while the backend runs. Application
+requires known absence of every affected runtime, agentctl, shell, terminal,
+and recovery consumer. `STARTING`, `RUNNING`, cancellation-in-progress, or unknown
+session states block application. `CREATED`, `WAITING_FOR_INPUT`, `COMPLETED`,
+`CANCELLED`, and `FAILED` are eligible only after the independent process and
+claim checks succeed. Preserve their states and provider resume identities.
+
+Capture the complete dependency graph in a single read transaction for preview.
+Under the existing offline ownership lock, revalidate it in the write transaction
+before publication. Journal exact original row values, including raw timestamp
+text. Publish all alias removals, session/snapshot rebindings, workspace-path
+corrections, and redundant-environment retirement atomically. Verify foreign
+keys and the complete selected graph before commit. Before fencing, record existing
+foreign-key violations in the affected inventory tables. Refuse a selected row
+with an existing violation because rollback cannot safely restore that row.
+Forward publication must not introduce a new violation. Unrelated legacy
+violations must not prevent apply or rollback, including recovery from journals
+that predate this baseline. Keep SQLite foreign-key enforcement enabled.
+Preserve unrelated records.
+Perform no Git or filesystem mutation in version 2. Content, index, refs, and
+markers must match before and after application and rollback.
+
+Extend journal verification for negative observations and rows intentionally
+removed. Rollback restores environments before dependent rows, then restores
+bindings and aliases in dependency order. Do not replay forward mutation order
+blindly in reverse mode. Failpoints before commit, after commit, and before fence
+release must prove restart fencing and idempotent continuation. A changed row,
+new claimant, changed checkout, or conflicting journal leaves the repair fenced
+and refuses both unsafe completion and unsafe rollback.
+
+### Runtime ambiguity prevention
+
+The current `worktree.SQLiteStore.GetWorktreeByID` uses `LIMIT 1` over a join.
+`GetWorktreesByTaskID` orders newest first and `scanWorktrees` silently keeps the
+first matching worktree ID. Replace those authority decisions with explicit
+claim checks. Session joins may multiply one slot but cannot create a claimant.
+Multiple active slots for one physical ID produce a typed ambiguity error before
+attachment, identity capture, or mutation. One active slot plus deleted history
+continues to resolve the active slot. Historical cleanup retains its exact
+snapshot validation rather than borrowing an arbitrary active owner.
+
+Audit ID-based mutations in `worktree/store.go`, including `CreateWorktree`,
+`UpdateWorktree`, `DeleteWorktree`, and branch/recovery updates, plus physical
+inventory writes in `task/repository/sqlite/task_environment.go`. An operation
+must address one proven slot and cannot fan out over duplicate IDs. Serialize
+physical identity claims by ID in the transaction. SQLite uses its writer lock,
+and PostgreSQL uses a transaction-scoped advisory lock in the established
+dialect pattern. Inventory-only rows with no physical ID remain valid. Preserve
+attach-only session reuse and distinct branches of one repository. Do not add
+a global unique index that would prevent an older installation from starting
+before an explicit repair.
+
+These are implementations of existing task-owned lifetime and fail-closed repair
+decisions, not a new automatic ownership election. The original writer of the
+August aliases is unknown. Do not attribute it to the one-time ownership cutover
+or rerun that cutover on an already normalized schema.
+
+### Operator outcome and verification
+
+Keep source-command distribution explicit in `docs/public/git-operations.md`.
+Operators build this utility from a release containing the extension, discover
+their own identities, select the canonical rows, stop the backend normally,
+refresh the preview, then apply and verify. Do not publish the investigated
+installation's IDs or filesystem paths as a reusable repair recipe.
+
+Use generic SQLite/Git fixtures for both observed shapes and an unrelated
+multi-branch control. Test canonical parent ownership with a copied child
+environment, sessions in both environments, and environment Git snapshots.
+Demonstrate normal archive and confirmed delete after reopening the database,
+including child-only operations that preserve an active shared workspace.
+Dirty tracked, untracked, ignored, and staged files survive metadata repair.
+Ordinary deletion then enforces its existing dirty-file policy. Keep completed
+source evidence immutable and retain normal branch/commit safety refusals.
+No rendered UI change is planned. This backend lifecycle evidence covers both
+desktop and phone task actions through their existing APIs.
 
 ## Journaled application
 
@@ -177,8 +350,10 @@ remote liveness. This change does not itself repair inventory failures.
 
 Use real temporary Git repositories and SQLite databases for preview, guarded
 application, partial-move recovery, and cleanup replay tests. Prove that the old
-refs and original evidence survive, and that ownership, dirty-worktree, and
-immutable-commit refusals still work. Integrate the repaired inventory through
+refs and original evidence survive, and that ownership and immutable-commit
+refusals still work. Repair must preserve dirty files before cleanup; subsequent
+archive cleanup follows [the current archive policy](dirty-worktree-archive.md)
+and removes eligible dirty checkouts. Integrate the repaired inventory through
 the real cleanup worker and existing attach-only worktree admission boundary.
 Run the affected executor tests separately; do not launch a real agent in a repair
 fixture.

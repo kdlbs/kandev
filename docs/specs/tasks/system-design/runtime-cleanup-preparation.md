@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-09
-updated: 2026-09-28
+updated: 2026-10-19
 owners:
   - cfl
 ---
@@ -18,6 +18,14 @@ preparation boundary. It implements AC-TASKS-RUNTIME-CLEANUP-001.9 and
 AC-TASKS-RUNTIME-CLEANUP-001.13. The task system owns preparation because its
 cleanup snapshot must survive task deletion.
 
+These identity-capture rules authorize physical cleanup in normal delete mode.
+[Task deletion recovery](task-delete-recovery.md) defines separate retain-mode
+preparation. It captures database inventory without physical inspection and
+never authorizes workspace removal. That design also defines acknowledged
+normal deletion with incomplete physical evidence. It permits a durable
+per-resource blocked preparation result before deleting the task. It does not
+relax the identity requirements for physical removal described here.
+
 ## Identity capture
 
 `worktree.Manager.CaptureCleanupHeadOIDs` distinguishes an absent path from
@@ -25,6 +33,12 @@ filesystem errors, symbolic links, and non-directory replacements. An existing
 checkout supplies its commit identity through the bounded Git inspection path.
 An absent checkout requires an exact local branch inspection in the parent
 repository. A surviving branch supplies its commit identity for later audits.
+A directory without checkout-local `.git` metadata counts as an absent
+checkout: Git would otherwise discover an enclosing repository and report its
+HEAD as this worktree's identity. The HEAD inspection pins Git to that
+`.git`, so metadata removed after the presence check fails the inspection
+instead of reaching an enclosing repository. The pin resolves from the
+command's checkout directory, including when its recorded path is relative.
 
 Only a successful inspection that finds no exact branch permits omission of
 that worktree's commit identity. Git exit 128, diagnostic text, cancellation,

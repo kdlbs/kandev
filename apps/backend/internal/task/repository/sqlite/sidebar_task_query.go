@@ -302,14 +302,6 @@ func querySidebarGroupHeaders(
 	return groups, nil
 }
 
-func stringSliceToAny(values []string) []any {
-	result := make([]any, len(values))
-	for index, value := range values {
-		result[index] = value
-	}
-	return result
-}
-
 func scanSidebarPageRows(rows *sql.Rows) (sidebarPageQueryResult, error) {
 	defer func() { _ = rows.Close() }()
 	result := sidebarPageQueryResult{rows: make([]sidebarPageRow, 0, models.MaxSidebarTaskPageSize)}

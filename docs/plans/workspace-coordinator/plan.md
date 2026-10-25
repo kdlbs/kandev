@@ -384,3 +384,9 @@ The flag is on in e2e; the tests above pass; task 03's tests prove the
 coordinator's Kandev surface can only read and propose, that Kandev
 auto-approves nothing else for it, and that nothing but a manager's message
 starts a turn; public docs are updated.
+
+
+PR #3680's fixture compatibility follow-up verifies Task 04's coordinator
+empty-state navigation with fast actions both enabled and disabled. Task 04
+records the reproduced assumption and test correction. The follow-up does not
+change this package's implementation statuses or coordinator behavior.

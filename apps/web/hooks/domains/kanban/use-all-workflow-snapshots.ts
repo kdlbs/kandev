@@ -18,7 +18,7 @@ import {
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { generateUUID } from "@/lib/utils";
-import { reconcileTaskOverviewRead } from "@/lib/state/slices/task-overview-merge";
+import { acceptWorkflowSnapshotOverview } from "./workflow-snapshot-overviews";
 import type { TaskCoverage, WorkflowSnapshot } from "@/lib/types/http";
 import { getWorkflowSnapshotReads } from "@/lib/state/workflow-snapshot-reads";
 import { raceSharedRead } from "@/lib/state/shared-resource-reads";
@@ -29,6 +29,17 @@ type WorkspaceContextRequest = { workspaceId: string; generation: number };
 
 function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
   return !!snapshot && snapshot.isPlaceholder !== true && snapshot.fetchFailed !== true;
+}
+
+function canUseBootSnapshots(
+  connectionStatus: string,
+  workflows: Workflow[],
+  snapshots: Record<string, WorkflowSnapshotData>,
+): boolean {
+  return (
+    connectionStatus !== "connected" &&
+    workflows.every((wf) => isBootHydratedSnapshot(snapshots[wf.id]))
+  );
 }
 
 function hasNewerLivePlacement(existing: KanbanTask, fetchStart: KanbanTask | undefined): boolean {
@@ -290,12 +301,17 @@ async function fetchAndWriteSnapshot(
       snapshotAtFetchStart,
       existingSnapshot,
     );
-    const tasks = reconcileSnapshotOverview(store.getState(), mergedTasks, overviewRead, wf.id);
+    const tasks = acceptWorkflowSnapshotOverview(
+      store.getState(),
+      mergedTasks,
+      overviewRead,
+      wf.id,
+      snapshot.tasks,
+    );
     if (!tasks) {
       markFailed(wf.id, new Error("overview_read_expired"));
       return;
     }
-    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
 
     const workflowSnapshot = {
       workflowId: wf.id,
@@ -304,7 +320,11 @@ async function fetchAndWriteSnapshot(
       tasks,
       taskCoverage: reconciledSnapshotCoverage(snapshot, stepIds, tasks.length),
     };
-    store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
+    if (overviewRead)
+      store
+        .getState()
+        .setWorkflowSnapshot(wf.id, workflowSnapshot, { stageClaimsReconciled: true });
+    else store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
     const activeKanban = store.getState().kanban;
     if (activeKanban?.workflowId === wf.id) {
       store.getState().hydrate({
@@ -350,21 +370,6 @@ function markSnapshotIncomplete(store: StoreApi<AppState>, workflowId: string) {
       taskCoverage: current.taskCoverage ? { ...current.taskCoverage, complete: false } : undefined,
     });
   }
-}
-
-function reconcileSnapshotOverview(
-  state: AppState,
-  tasks: KanbanTask[],
-  readId: string | undefined,
-  workflowId: string,
-) {
-  const scoped = tasks.map((task) =>
-    task.workflowId === undefined ? { ...task, workflowId } : task,
-  );
-  const reconciled = state.taskOverview
-    ? reconcileTaskOverviewRead(state.taskOverview, scoped, readId, true)
-    : scoped;
-  return reconciled?.filter((task) => task.workflowId === workflowId && !task.isArchived) ?? null;
 }
 
 function reconciledSnapshotCoverage(
@@ -564,11 +569,15 @@ export function useAllWorkflowSnapshots(
       return;
     }
     const retryFailedOnly = lastFetchedRef.current === key && failedWorkflows.length > 0;
+    // Boot data predates the live subscription. A consumer mounted after the
+    // socket connects still needs one read to catch events from that gap.
     if (
       lastFetchedRef.current === "" &&
       !isRefresh &&
-      workspaceWorkflows.every((wf) =>
-        isBootHydratedSnapshot(store.getState().kanbanMulti.snapshots[wf.id]),
+      canUseBootSnapshots(
+        connectionStatus,
+        workspaceWorkflows,
+        store.getState().kanbanMulti.snapshots,
       )
     ) {
       lastFetchedRef.current = key;

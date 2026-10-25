@@ -55,6 +55,7 @@ type Manager struct {
 		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
 	}
 	providerGatewayAuthResolver ProviderGatewayAuthResolver
+	profileEnvironmentResolver  ProfileEnvironmentResolver
 
 	parentTmpDir  string
 	tempArtifacts *tempartifacts.Registry

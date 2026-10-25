@@ -1,10 +1,6 @@
 package coordinator
 
-import (
-	"context"
-
-	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
-)
+import "context"
 
 // LoadStepGraph reads a workflow's steps through reader and maps them to
 // []StepNode for EligibleStep (docs/specs/coordinator/system-design/
@@ -15,18 +11,7 @@ func LoadStepGraph(ctx context.Context, reader WorkflowStepReader, workflowID st
 	if err != nil {
 		return nil, err
 	}
-	nodes := make([]StepNode, len(steps))
-	for i, step := range steps {
-		nodes[i] = StepNode{
-			ID:               step.ID,
-			IsStart:          step.IsStartStep,
-			AllowManualMove:  step.AllowManualMove,
-			AutoStartOnEnter: step.HasOnEnterAction(workflowmodels.OnEnterAutoStartAgent),
-			CompletesOnEnter: step.CompleteTaskOnEnter,
-			PullFromStepID:   step.PullFromStepID,
-		}
-	}
-	return nodes, nil
+	return proposalStepNodes(steps), nil
 }
 
 // StartStepID returns the id of nodes' start step (IsStart == true), or ""

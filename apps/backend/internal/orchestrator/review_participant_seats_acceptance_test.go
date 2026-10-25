@@ -316,10 +316,11 @@ func TestReviewParticipantSeats_ProductRouteQueuesReviewerRun(t *testing.T) {
 	// lets the turn-complete trigger through, mirroring a real
 	// step_complete_kandev call.
 	if err := env.taskRepo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID:     env.workStepID,
-		Source:     "agent",
-		Summary:    "ready for review",
-		SignaledAt: now,
+		WorkflowStepTransitionID: signalEntryForSession(t, env.taskRepo, sessionID),
+		StepID:                   env.workStepID,
+		Source:                   "agent",
+		Summary:                  "ready for review",
+		SignaledAt:               now,
 	}); err != nil {
 		t.Fatalf("seed pending step completion signal: %v", err)
 	}

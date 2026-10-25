@@ -46,6 +46,16 @@ func withWorkflowEffect(ctx context.Context, effect *models.AgentDeliveryEffect)
 	return context.WithValue(ctx, workflowEffectContextKey{}, effect)
 }
 
+// withoutWorkflowEffect drops the workflow delivery effect from ctx. Use it
+// before driving another task's transition from inside a turn: the effect
+// belongs to the task whose turn produced it.
+func withoutWorkflowEffect(ctx context.Context) context.Context {
+	if workflowEffectFromContext(ctx) == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, workflowEffectContextKey{}, (*models.AgentDeliveryEffect)(nil))
+}
+
 func workflowEffectFromContext(ctx context.Context) *models.AgentDeliveryEffect {
 	if ctx == nil {
 		return nil

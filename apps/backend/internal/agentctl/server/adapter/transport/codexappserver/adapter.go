@@ -652,6 +652,7 @@ func (a *Adapter) emitTerminal(threadID, turnID string, generation uint64, messa
 }
 
 func (a *Adapter) emit(event streams.AgentEvent) {
+	event = streams.BoundGenericToolEvent(event)
 	a.updatesMu.RLock()
 	defer a.updatesMu.RUnlock()
 	a.mu.RLock()

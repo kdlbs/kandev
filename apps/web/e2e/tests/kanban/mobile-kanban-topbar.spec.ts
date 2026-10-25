@@ -11,6 +11,10 @@ test.describe("Shared phone listing topbar", () => {
     const menu = testPage.getByRole("dialog", { name: "View options", exact: true });
     const search = testPage.getByPlaceholder("Search tasks...");
     await opener.tap();
+    await menu.getByRole("radio", { name: "Kanban", exact: true }).tap();
+    await expect(menu).toBeHidden();
+    await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+    await opener.tap();
     await menu.getByTestId("mobile-search-toggle").tap();
     await expect(menu).toBeHidden();
     await expect(search).toBeFocused();

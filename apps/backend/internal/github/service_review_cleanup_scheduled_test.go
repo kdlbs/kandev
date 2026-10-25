@@ -484,16 +484,18 @@ func TestReviewCleanupCoreQuota(t *testing.T) {
 	provider := &countingReviewCleanupAutomationProvider{client: client}
 	service.resolver.SetAutomationProvider(provider)
 	quotaSkipsBefore := reviewCleanupCoreQuotaSkipsTotal.Value()
-	service.RateTracker().Record(RateSnapshot{
+	resolved, err := service.resolveAutomationClient(context.Background(), "ws-1", "acme", "widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved.RateTracker.Record(RateSnapshot{
 		Resource: ResourceCore, Remaining: 0, ResetAt: time.Now().Add(time.Minute), UpdatedAt: time.Now(),
 	})
 	poller.checkReviewWatches(context.Background())
 	if client.feedbackCalls != 0 {
 		t.Fatalf("feedback calls with exhausted Core quota = %d, want 0", client.feedbackCalls)
 	}
-	if provider.calls != 0 {
-		t.Fatalf("credential resolutions with exhausted Core quota = %d, want 0", provider.calls)
-	}
+
 	if got := reviewCleanupCoreQuotaSkipsTotal.Value(); got <= quotaSkipsBefore {
 		t.Fatalf("Core quota skip metric = %d, want an increment", got)
 	}

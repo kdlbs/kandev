@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -82,6 +83,11 @@ func TestAuthorizeCoordinatorRequest_TableOverEveryRegisteredAction(t *testing.T
 			guarded, replacement, err := h.authorizeCoordinatorRequest(principalCtx, msg)
 			require.NoError(t, err)
 			_, allowed := coordinatorSurfaceActions[action]
+			if action == coordinator.ActionProposeImprovement || action == coordinator.ActionListTurns {
+				// Phases 3 and 3.1 are off in this fixture: the actions answer the phase 1 unknown-action error.
+				assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+				return
+			}
 			if allowed {
 				require.Nil(t, guarded, "allowlisted action %q must not be guarded", action)
 				require.NotNil(t, replacement)
@@ -359,4 +365,60 @@ func TestAuthorizeCoordinatorRequest_NonCoordinatorPrincipalUnaffected(t *testin
 		require.Nil(t, guarded)
 		require.Same(t, msg, replacement)
 	})
+}
+
+// TestAuthorizeCoordinatorRequest_NoAutonomySettingAction proves a coordinator
+// session cannot change its own autonomy or ceiling: no registered or
+// allowlisted action can patch a coordinator, and the guard refuses the
+// candidate names.
+func TestAuthorizeCoordinatorRequest_NoAutonomySettingAction(t *testing.T) {
+	h, _ := newCoordinatorGuardTestHandlers(t)
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	ctx := context.Background()
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	principalCtx := mcpscope.WithPrincipal(ctx, coordinatorTestPrincipal(workspaces[0].ID))
+
+	for _, action := range []string{"patch_coordinator", "update_coordinator", "set_autonomy", "set_cost_ceiling"} {
+		require.NotContains(t, dispatcher.Actions(), action)
+		require.NotContains(t, coordinatorSurfaceActions, action)
+		msg := makeWSMessage(t, action, map[string]interface{}{"autonomy_enabled": true})
+		guarded, _, err := h.authorizeCoordinatorRequest(principalCtx, msg)
+		require.NoError(t, err)
+		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+	}
+}
+
+// With phase 3 effective, the improvement handler reaches the service, which answers its own validation error instead of the
+// unknown-action refusal that phase 3 off produces.
+func TestProposeImprovement_Phase3OnReachesTheService(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	store, err := coordinator.NewStore(conn, conn)
+	require.NoError(t, err)
+	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, testLogger(t),
+		coordinator.WithPhase2(true), coordinator.WithPhase3(true))
+	h := &Handlers{logger: testLogger(t).WithFields()}
+	h.SetCoordinatorService(svc)
+
+	ctx := mcpscope.WithPrincipal(context.Background(), coordinatorTestPrincipal("ws-1"))
+	msg := makeWSMessage(t, coordinator.ActionProposeImprovement, map[string]interface{}{})
+
+	response, err := h.handleProposeImprovement(ctx, msg)
+	require.NoError(t, err)
+	require.NotEqual(t, ws.ErrorCodeUnknownAction, errorCodeOf(t, response))
+}
+
+func errorCodeOf(t *testing.T, resp *ws.Message) string {
+	t.Helper()
+	require.NotNil(t, resp)
+	if resp.Type != ws.MessageTypeError {
+		return ""
+	}
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	return ep.Code
 }

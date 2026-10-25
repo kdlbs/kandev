@@ -61,7 +61,7 @@ func TestInsertActivity_Invalid(t *testing.T) {
 	mutations := map[string]func(*ActivityRow){
 		"class":         func(r *ActivityRow) { r.ActionClass = Action("bogus") },
 		"outcome":       func(r *ActivityRow) { r.Outcome = ActivityOutcome("bogus") },
-		"authorization": func(r *ActivityRow) { r.Authorization = ActivityAuthorization("automatic") },
+		"authorization": func(r *ActivityRow) { r.Authorization = ActivityAuthorization("bogus") },
 		"coordinator":   func(r *ActivityRow) { r.CoordinatorID = "" },
 		"workspace":     func(r *ActivityRow) { r.WorkspaceID = "" },
 	}
@@ -338,5 +338,34 @@ func TestActivitySourceScan_WriteStatements(t *testing.T) {
 			name != "store.go" && name != "store_workspace_delete.go" && name != "retention.go" {
 			t.Errorf("%s deletes activity rows outside retention and the deletion transactions", name)
 		}
+	}
+}
+
+func TestInsertActivity_Phase3Values(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+	cases := map[string]func(*ActivityRow){
+		"returned":    func(r *ActivityRow) { r.Outcome = ActivityReturned },
+		"automatic":   func(r *ActivityRow) { r.Authorization = AuthAutomatic },
+		"improvement": func(r *ActivityRow) { r.ActionClass = ActionImprovement },
+	}
+	for name, mutate := range cases {
+		row := validRow(c.ID)
+		mutate(&row)
+		if err := store.InsertActivity(ctx, store.db, row); err != nil {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestActionImprovementIsActivityOnly(t *testing.T) {
+	for _, a := range AllActions {
+		if a == ActionImprovement {
+			t.Fatal("improvement must not be a policy action")
+		}
+	}
+	if isPolicyAction(ActionImprovement) {
+		t.Fatal("improvement must not be a policy action")
 	}
 }

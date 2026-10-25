@@ -655,7 +655,8 @@ fi`, shellQuote(pidFile), remove)
 // signalled when SIGKILL is actually needed, mirroring the AC's wording.
 // sessionDir, when non-empty, is removed only after the pid is confirmed
 // gone, and only when sshOrphanSessionDirCleanupCommand's pidfile-identity
-// check still allows it. The final liveness check treats a zombie (STAT
+// check still allows it. A second bounded wait permits SIGKILL delivery.
+// The final liveness check treats a zombie (STAT
 // starting with Z) as gone too: kill(2) still reports success for an
 // unreaped zombie, and this sweep is not the process's parent, so it can
 // never be the one to reap it.
@@ -728,15 +729,18 @@ if kill -0 "$TARGET_PID" 2>/dev/null; then
     kill -9 -$cpid 2>/dev/null || true
   done
 fi
-if kill -0 "$TARGET_PID" 2>/dev/null; then
+attempt=0
+while kill -0 "$TARGET_PID" 2>/dev/null; do
   STATE=$(ps -o stat= -p "$TARGET_PID" 2>/dev/null | tr -d ' ')
   case "$STATE" in
-    Z*|"") ;;
-    *)
-      echo "orphan sweep: remote agentctl pid %[1]d is still running" >&2
-      exit 1
-      ;;
+    Z*|"") break ;;
   esac
-fi
+  if [ "$attempt" -ge %[4]d ]; then
+    echo "orphan sweep: remote agentctl pid %[1]d is still running" >&2
+    exit 1
+  fi
+  sleep 0.1
+  attempt=$((attempt + 1))
+done
 %[5]s`, pid, shellQuote(taskDirPath), remoteProcessCommandLineCommand(pid), sshAgentctlStopPollAttempts, cleanup)
 }

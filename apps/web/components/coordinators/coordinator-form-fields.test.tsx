@@ -49,6 +49,8 @@ const baseForm = {
   name: "Planner",
   agentProfileId: "agent-1",
   executorProfileId: "profile-1",
+  taskAgentProfileId: "task-agent-1",
+  taskExecutorProfileId: "task-profile-1",
   context: "Some context",
 };
 
@@ -67,6 +69,8 @@ function renderFields(overrides: Partial<React.ComponentProps<typeof Coordinator
     </TooltipProvider>,
   );
 }
+
+const AGENT_STATUS = "coordinator-agent-profile-status";
 
 describe("CoordinatorFormFields", () => {
   afterEach(cleanup);
@@ -108,14 +112,12 @@ describe("CoordinatorFormFields", () => {
 
   it("shows the agent-missing warning under Agent profile (AC-005.1)", () => {
     renderFields({ agentProfileStatus: "missing" });
-    expect(screen.getByTestId("coordinator-agent-profile-status").textContent).toContain("removed");
+    expect(screen.getByTestId(AGENT_STATUS).textContent).toContain("removed");
   });
 
   it("shows the agent-passthrough warning under Agent profile, distinct from missing (AC-005.1)", () => {
     renderFields({ agentProfileStatus: "passthrough" });
-    expect(screen.getByTestId("coordinator-agent-profile-status").textContent).toContain(
-      "CLI passthrough",
-    );
+    expect(screen.getByTestId(AGENT_STATUS).textContent).toContain("CLI passthrough");
   });
 
   it("shows the executor-missing warning under Executor (AC-005.1)", () => {
@@ -125,7 +127,7 @@ describe("CoordinatorFormFields", () => {
 
   it("shows no profile-status warnings when both are ok", () => {
     renderFields({ agentProfileStatus: "ok", executorProfileStatus: "ok" });
-    expect(screen.queryByTestId("coordinator-agent-profile-status")).toBeNull();
+    expect(screen.queryByTestId(AGENT_STATUS)).toBeNull();
     expect(screen.queryByTestId("coordinator-executor-status")).toBeNull();
   });
 
@@ -141,9 +143,9 @@ describe("CoordinatorFormFields", () => {
     expect(
       (screen.getByTestId("coordinator-agent-profile-picker") as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect((screen.getByTestId("executor-profile-selector") as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getAllByTestId("executor-profile-selector")[0] as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 
   it("shows the stored executor profile as unavailable when it no longer resolves (B11)", () => {
@@ -151,7 +153,42 @@ describe("CoordinatorFormFields", () => {
       form: { ...baseForm, executorProfileId: "profile-missing" },
       executors: [mkExecutor()],
     });
-    fireEvent.click(screen.getByTestId("executor-profile-selector"));
+    fireEvent.click(screen.getAllByTestId("executor-profile-selector")[0]);
     expect(screen.getAllByRole("option")[0].getAttribute("aria-disabled")).toBe("true");
+  });
+});
+
+describe("CoordinatorFormFields: Agent for created tasks", () => {
+  afterEach(cleanup);
+
+  it("renders Agent for created tasks and disables its pickers for a reader", () => {
+    renderFields({ disabled: true });
+    expect(screen.getByTestId("coordinator-task-pair").textContent).toContain(
+      "Agent for created tasks",
+    );
+    expect(
+      (screen.getByTestId("coordinator-task-agent-profile-picker") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getAllByTestId("executor-profile-selector")[1] as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("shows task pair warnings under their own fields", () => {
+    renderFields({ taskAgentProfileStatus: "passthrough", taskExecutorProfileStatus: "missing" });
+    expect(screen.getByTestId("coordinator-task-agent-profile-status").textContent).toContain(
+      "CLI passthrough",
+    );
+    expect(screen.getByTestId("coordinator-task-executor-status").textContent).toContain("removed");
+    expect(screen.queryByTestId(AGENT_STATUS)).toBeNull();
+  });
+
+  it("shows a 400 field error under the task agent field", () => {
+    renderFields({
+      fieldError: { field: "task_agent_profile_id", message: "Agent is unusable" },
+    });
+    expect(screen.getByTestId("coordinator-task-agent-profile-error").textContent).toBe(
+      "Agent is unusable",
+    );
   });
 });

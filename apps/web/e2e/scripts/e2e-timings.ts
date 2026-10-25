@@ -139,7 +139,8 @@ export function stableTestKey(project: string, file: string, title: string): str
 function collectProjectTests(project: JsonRecord, descriptors: Map<string, TestDescriptor>): void {
   const projectName = asString(project.name, "unknown");
 
-  const walkSuite = (suite: JsonRecord, parentTitles: string[]) => {
+  const walkSuite = (suite: JsonRecord, parentTitles: string[], owningFile?: string) => {
+    const suiteFile = owningFile || asString(asRecord(suite.location)?.file);
     const suiteTitle = asString(suite.title);
     const titles = suiteTitle ? [...parentTitles, suiteTitle] : parentTitles;
     const entries = Array.isArray(suite.entries) ? suite.entries : [];
@@ -150,7 +151,7 @@ function collectProjectTests(project: JsonRecord, descriptors: Map<string, TestD
       const testId = asString(entry.testId);
       if (testId) {
         const location = asRecord(entry.location);
-        const file = normalizeReportPath(asString(location?.file));
+        const file = normalizeReportPath(suiteFile || asString(location?.file));
         const fileName = path.posix.basename(file);
         const title = [...titles.filter((value) => value !== fileName), asString(entry.title)]
           .filter(Boolean)
@@ -164,7 +165,7 @@ function collectProjectTests(project: JsonRecord, descriptors: Map<string, TestD
         continue;
       }
 
-      walkSuite(entry, titles);
+      walkSuite(entry, titles, suiteFile);
     }
   };
 
@@ -492,7 +493,7 @@ export function readShardMetadata(inputPath: string): ShardMetadata[] {
 
 export function hasCompleteShardSet(metadata: ShardMetadata[]): boolean {
   const expected = new Map([
-    ["normal", 14],
+    ["normal", 28],
     ["containers", 6],
   ]);
   const seen = new Set<string>();
@@ -511,7 +512,7 @@ export function hasCompleteShardSet(metadata: ShardMetadata[]): boolean {
     if (seen.has(key)) return false;
     seen.add(key);
   }
-  return seen.size === 20;
+  return seen.size === 34;
 }
 
 export function readBlobReportJsonl(filePath: string): string {

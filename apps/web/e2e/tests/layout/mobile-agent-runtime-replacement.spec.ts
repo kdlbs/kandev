@@ -79,18 +79,9 @@ test.describe("Mobile agent runtime replacement", () => {
     expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(pageTimeOrigin);
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
     await expect(testPage.getByTestId("agent-runtime-alert")).toHaveCount(0);
-    await expect(
-      session.chat.getByText("Delivery was interrupted. The prompt outcome is uncertain.", {
-        exact: true,
-      }),
-    ).toBeVisible({ timeout: 30_000 });
     await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
     await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
-    const stop = session.chat.getByTestId("recovery-stop-button");
-    await expect(stop).toBeEnabled();
-    const stopBox = await stop.boundingBox();
-    expect(stopBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile runtime replacement");
     await expectSilentRestartRestoration(
       testPage,
@@ -99,6 +90,7 @@ test.describe("Mobile agent runtime replacement", () => {
       beforeReplacement,
       traffic.frames,
     );
+    await expect(session.chat.getByTestId("recovery-stop-button")).toHaveCount(0);
     await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
     const beforeReload = await captureSilentRestartSnapshot(apiClient, task.id, sessionId);
     const messageAddsBeforeReload = countSessionMessageAdds(messageAdds.frames, task.id, sessionId);

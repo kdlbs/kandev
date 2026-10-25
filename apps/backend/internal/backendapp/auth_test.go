@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -20,7 +22,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -247,11 +248,11 @@ func seedRunForWorkspace(t *testing.T, officeRepo *officesqlite.Repository, work
 		t.Fatalf("seed agent profile: %v", err)
 	}
 	runID := "run-" + agentID
-	if err := officeRepo.CreateRun(ctx, &models.Run{
+	if err := officeRepo.CreateRun(ctx, &runsmodels.Run{
 		ID:             runID,
 		AgentProfileID: agentID,
 		Reason:         "task_assigned",
-		Status:         models.RunStatus("queued"),
+		Status:         runsmodels.RunStatus("queued"),
 		CoalescedCount: 1,
 	}); err != nil {
 		t.Fatalf("seed run: %v", err)

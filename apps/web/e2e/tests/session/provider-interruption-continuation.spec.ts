@@ -8,6 +8,7 @@ import {
   assertContinuationSettingRetired,
 } from "../../helpers/provider-interruption-continuation";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -108,6 +109,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
   seedData,
 }) => {
   const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const gateway = watchWs(testPage);
   try {
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
@@ -160,7 +162,15 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     } finally {
       await viewer.close();
     }
+    const cancelResponse = gateway.waitForResponse("session.recover", {
+      timeout: 35_000,
+      requestWhere: (payload) =>
+        payload.action === "cancel_retry" &&
+        payload.task_id === fixture.taskId &&
+        payload.session_id === fixture.sessionId,
+    });
     await session.recoveryCancelRetryButton().click();
+    expect((await cancelResponse).payload.cancelled).toBe(true);
     const cancelled = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -308,11 +318,14 @@ test("desktop: Cancel while waiting prevents native restore", async ({
   apiClient,
   seedData,
 }) => {
-  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold");
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read-hold", {
+    prepareOnly: true,
+  });
   try {
-    await testPage.goto(`/t/${fixture.taskId}`);
+    await testPage.goto(`/t/${fixture.taskId}?sessionId=${fixture.sessionId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await session.sendMessageViaButton("/continuation-read-hold");
     await expect(session.transientRetryCard()).toContainText("Continuing in", { timeout: 30_000 });
     await session.recoveryCancelRetryButton().click();
     const cancelled = await waitForContinuationMessage(
@@ -466,9 +479,21 @@ for (const survives of [false, true]) {
           (message) => message.metadata?.recovery_disposition === "restart_interrupted",
         );
         expect(recovery.metadata?.attempts_started).toBe(1);
-        await expect(session.recoveryResumeButton()).toBeVisible();
+        await expect
+          .poll(
+            async () => {
+              const restored = (await apiClient.getTaskSession(fixture.sessionId)).session;
+              const delivery = restored.metadata?.agent_delivery_recovery as
+                | { phase?: string }
+                | undefined;
+              return { state: restored.state, phase: delivery?.phase };
+            },
+            { timeout: 90_000 },
+          )
+          .toEqual({ state: "WAITING_FOR_INPUT", phase: "restored" });
+        await session.composerReady();
       }
-      assertNativeContinuationTrace(fixture.tracePath, "read-hold");
+      assertNativeContinuationTrace(fixture.tracePath, "read-hold", survives ? 0 : 1);
       await expect(session.activeChat()).toContainText("partial history preserved");
     } finally {
       await fixture.dispose();

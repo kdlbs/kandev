@@ -1565,6 +1565,21 @@
       },
       "fields": [
         {
+          "key": "executor.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
+        {
           "key": "executor.name",
           "field_path": "name",
           "label": "Name",
@@ -1657,6 +1672,21 @@
         "requires_resource_id": true
       },
       "fields": [
+        {
+          "key": "executor_profile.owner_user_id",
+          "field_path": "owner_user_id",
+          "label": "Owner",
+          "description": "Optional personal executor owner; null shares the resource.",
+          "json_type": "string",
+          "nullable": true,
+          "support": "supported",
+          "classification": "writable",
+          "owner": "execution",
+          "writable": true,
+          "validator": "execution.executor_profile",
+          "authority": "execution.manage",
+          "settings_href": "/settings"
+        },
         {
           "key": "executor_profile.name",
           "field_path": "name",
@@ -4807,6 +4837,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.show_turn_changed_files",
+          "field_path": "show_turn_changed_files",
+          "label": "turn changed files",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.show_release_notification",
           "field_path": "show_release_notification",
           "label": "release notification",
@@ -6076,6 +6121,38 @@
                 },
                 "type": "array"
               },
+              "on_pr_closed": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "on_pr_merged": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "config": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "on_turn_complete": {
                 "items": {
                   "additionalProperties": false,
@@ -6471,6 +6548,7 @@
       "show_todo_list_panel",
       "show_todo_list_panel_only_when_not_empty",
       "show_transcript_auto_scroll_control",
+      "show_turn_changed_files",
       "sidebar_active_view_id",
       "sidebar_draft",
       "sidebar_fast_actions_enabled",

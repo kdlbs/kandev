@@ -138,7 +138,7 @@ func (c *RestoreCoordinator) decide(ctx context.Context, request RestoreCoordina
 				Action:       RestoreActionNativeResume,
 			}), request.Identity.NativeSessionID, nil
 		} else {
-			restoreErr := newRestoreRequiredError(request.Identity, err)
+			restoreErr := newRestoreRequiredError(request.Identity, request.AgentType, err)
 			if request.Action == RestoreActionContinueFromHistory && request.ExplicitAuthorization && restoreErr.Decision.AllowsContextContinuation {
 				return DecideRestore(RestoreRequest{
 					Identity:              request.Identity,

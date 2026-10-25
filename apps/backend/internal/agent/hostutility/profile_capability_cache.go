@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"sort"
 	"sync"
 	"time"
@@ -135,17 +136,17 @@ func (c *profileCapabilityCache) entry(element *list.Element) *profileCapability
 }
 
 type profileContextIdentity struct {
-	Scope             string            `json:"scope"`
-	AgentType         string            `json:"agent_type"`
-	Protocol          string            `json:"protocol"`
-	Command           []string          `json:"command"`
-	OperatorDefined   bool              `json:"operator_defined"`
-	CLIFlags          []string          `json:"cli_flags"`
-	CommandPrefix     []string          `json:"command_prefix"`
-	Env               []profileEnvValue `json:"env"`
-	StripEnv          []string          `json:"strip_env"`
-	RuntimeGeneration uint64            `json:"runtime_generation"`
-	ContextGeneration uint64            `json:"context_generation"`
+	Scope             string             `json:"scope"`
+	AgentType         string             `json:"agent_type"`
+	Protocol          string             `json:"protocol"`
+	Command           []string           `json:"command"`
+	OperatorDefined   bool               `json:"operator_defined"`
+	CLIFlags          []string           `json:"cli_flags"`
+	LaunchWrapper     launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	Env               []profileEnvValue  `json:"env"`
+	StripEnv          []string           `json:"strip_env"`
+	RuntimeGeneration uint64             `json:"runtime_generation"`
+	ContextGeneration uint64             `json:"context_generation"`
 }
 
 type profileEnvValue struct {
@@ -167,12 +168,12 @@ func profileContextRevision(key []byte, context ProfileProbeContext, agentType, 
 		Scope: context.Scope, AgentType: agentType, Protocol: protocol,
 		Command: append([]string(nil), command...), OperatorDefined: operatorDefined,
 		CLIFlags:      append([]string(nil), context.CLIFlags...),
-		CommandPrefix: append([]string(nil), context.CommandPrefix...), Env: env,
+		LaunchWrapper: launchwrapper.Profile(context.CommandPrefix), Env: env,
 		StripEnv:          append([]string(nil), stripEnv...),
 		RuntimeGeneration: runtimeGeneration, ContextGeneration: contextGeneration,
 	}
 	data, _ := json.Marshal(identity)
-	return profileHMAC(key, append([]byte("profile-context-v1:"), data...))
+	return profileHMAC(key, append([]byte("profile-context-v2:"), data...))
 }
 
 func profileCapabilityKey(key []byte, contextRevision string) string {

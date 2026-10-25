@@ -10,6 +10,7 @@ import {
   getMcpToolSchemaState,
   isKandevMcpServer,
   mcpStatusLabelKey,
+  mcpStatusPresentation,
   selectMcpServerName,
   selectMcpToolName,
 } from "./mcp-explorer-view-model";
@@ -26,7 +27,7 @@ function history(servers: MCPAttachmentServer[]): MCPAttachmentHistory {
 }
 
 describe("MCP explorer view model", () => {
-  it("uses observed servers and falls back to configured names", () => {
+  it("keeps configured servers visible when observations are partial", () => {
     const configured = buildMcpExplorerServers(["kandev", "filesystem"]);
     expect(configured.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
 
@@ -34,8 +35,19 @@ describe("MCP explorer view model", () => {
       ["kandev", "filesystem"],
       history([server({ name: "filesystem", source: "profile", status: "delivered" })]),
     );
-    expect(observed.map((item) => item.name)).toEqual(["filesystem"]);
+    expect(observed.map((item) => item.name)).toEqual(["filesystem", "kandev"]);
     expect(observed[0].source).toBe("profile");
+    expect(observed[1].status).toBe("unknown");
+
+    const partial = buildMcpExplorerServers(
+      ["kandev", "filesystem"],
+      history([server({ name: "kandev", source: "kandev", status: "active" })]),
+    );
+    expect(partial.map((item) => item.name)).toEqual(["kandev", "filesystem"]);
+    expect(partial[1]).toMatchObject({
+      source: "profile",
+      status: "delivered",
+    });
   });
 
   it("selects kandev first and falls back when the selection disappears", () => {
@@ -109,4 +121,36 @@ describe("MCP explorer view model", () => {
       kind: "too_large",
     });
   });
+});
+
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.13
+it.each([
+  ["http_unsupported", "HttpUnsupported"],
+  ["sse_unsupported", "SseUnsupported"],
+  ["duplicate_name", "DuplicateName"],
+  ["transport_policy", "TransportPolicy"],
+  ["server_policy", "ServerPolicy"],
+  ["invalid_transport", "InvalidTransport"],
+  ["definition_disabled", "DefinitionDisabled"],
+  ["definition_missing", "DefinitionMissing"],
+  ["secret_resolution_failed", "SecretResolution"],
+])("explains the recorded %s exclusion safely", (reason_code, suffix) => {
+  expect(mcpStatusPresentation(server({ status: "filtered", reason_code })).explanationKey).toBe(
+    `task:mcpReason${suffix}`,
+  );
+});
+// @covers AC-PLATFORM-MCP-SESSION-OBSERVABILITY-001.16
+it("does not reuse a stale filtered reason for stronger evidence or expose arbitrary reasons", () => {
+  expect(
+    mcpStatusPresentation(server({ status: "active", reason_code: "http_unsupported" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationActive");
+  expect(
+    mcpStatusPresentation(server({ status: "delivered", reason_code: "http_unsupported" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationDelivered");
+  expect(
+    mcpStatusPresentation(server({ status: "filtered", reason_code: "sensitive unknown" }))
+      .explanationKey,
+  ).toBe("task:mcpExplanationFiltered");
 });

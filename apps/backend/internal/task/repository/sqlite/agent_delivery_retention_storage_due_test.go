@@ -11,10 +11,19 @@ import (
 )
 
 func TestDeliveryRetentionStorageDueDiscovery(t *testing.T) {
-	for _, engine := range []string{"SQLite", "Postgres"} {
-		t.Run(engine, func(t *testing.T) {
-			repo, events := seedRetentionBoundsStream(t, engine, "due-discovery", 1, 0)
+	for _, tc := range []struct {
+		name, engine string
+		loseAck      bool
+	}{
+		{"SQLite", "SQLite", false},
+		{"Postgres", "Postgres", false},
+		{"SQLite lost commit ack", "SQLite", true},
+		{"Postgres lost commit ack", "Postgres", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, events := seedRetentionBoundsStream(t, tc.engine, "due-discovery", 1, 0)
 			seedRetentionStorageRows(t, repo, events[0], 600, 1024)
+			measured := &retentionStorageCommitAckRepository{Repository: repo, loseAck: tc.loseAck}
 			now := repo.nowUTC()
 			repo.clockNow = func() time.Time { return now }
 			for _, group := range []struct {
@@ -30,14 +39,15 @@ func TestDeliveryRetentionStorageDueDiscovery(t *testing.T) {
 				}
 			}
 			for attempt := 0; attempt < 2; attempt++ {
-				if _, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{}); err != nil {
-					t.Fatal(err)
-				}
+				runRetentionStorageBatch(t, measured, 200)
 			}
 			now = now.Add(2 * time.Minute)
-			result, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{})
-			if err != nil || result.EventPayloadsPruned == 0 || result.Candidates > 200 || result.PayloadBytesRead > 4<<20 {
-				t.Fatalf("newly due rows behind the sequence sweep must be found in the next bounded batch: result=%+v error=%v", result, err)
+			measured.loseAck = tc.loseAck
+			before := measureRetentionStorage(t, repo).RawPayloadBytes
+			result, _ := runRetentionStorageBatch(t, measured, 200)
+			removedBytes := before - measureRetentionStorage(t, repo).RawPayloadBytes
+			if removedBytes <= 0 || removedBytes > 200*1024 || result.Candidates > 200 || result.PayloadBytesRead > 4<<20 {
+				t.Fatalf("newly due rows behind the sequence sweep must be found in the next bounded batch: result=%+v durable_removed_bytes=%d", result, removedBytes)
 			}
 		})
 	}

@@ -25,7 +25,15 @@ var ErrCoordinatorProposalCapReached = errors.New("coordinator: open proposal ca
 // reported as a coordinator's open_proposals count (decision 9).
 var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed}
 
-const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json`
+const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to, decided_automatically, claimed_automatically, automatic_at, ` + changeStatusColumn
+
+// changeStatusColumn is the status of the pending change an approved
+// improvement produced, NULL for every other proposal.
+const changeStatusColumn = `(SELECT pc.status FROM coordinator_pending_changes pc WHERE pc.proposal_id = coordinator_proposals.id) AS change_status`
+
+// proposalInsertColumns are the columns a new proposal row sets; the reply
+// columns other than in_reply_to stay NULL until a reply.
+const proposalInsertColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, in_reply_to, turn_id`
 
 // proposalRow is the DB scan target for coordinator_proposals.
 type proposalRow struct {
@@ -48,6 +56,16 @@ type proposalRow struct {
 	StandingIDs   string         `db:"standing_order_ids"`
 	StartsAgent   bool           `db:"starts_agent"`
 	OutcomeJSON   sql.NullString `db:"outcome_json"`
+
+	ReplyText              sql.NullString `db:"reply_text"`
+	ReplyDeliveredAt       sql.NullTime   `db:"reply_delivered_at"`
+	ReplyDeliveryClaimedAt sql.NullTime   `db:"reply_delivery_claimed_at"`
+	InReplyTo              sql.NullString `db:"in_reply_to"`
+
+	DecidedAutomatically bool           `db:"decided_automatically"`
+	ClaimedAutomatically bool           `db:"claimed_automatically"`
+	AutomaticAt          sql.NullTime   `db:"automatic_at"`
+	ChangeStatus         sql.NullString `db:"change_status"`
 }
 
 func (r *proposalRow) toProposal() (*Proposal, error) {
@@ -116,6 +134,27 @@ func (r *proposalRow) copyNullables(p *Proposal) {
 	}
 	if r.DecidedBy.Valid {
 		p.DecidedBy = &r.DecidedBy.String
+	}
+	if r.ReplyText.Valid {
+		p.ReplyText = &r.ReplyText.String
+	}
+	if r.ReplyDeliveredAt.Valid {
+		p.ReplyDeliveredAt = &r.ReplyDeliveredAt.Time
+	}
+	if r.ReplyDeliveryClaimedAt.Valid {
+		p.ReplyDeliveryClaimedAt = &r.ReplyDeliveryClaimedAt.Time
+	}
+	if r.InReplyTo.Valid {
+		p.InReplyTo = &r.InReplyTo.String
+	}
+	if r.ChangeStatus.Valid {
+		p.ChangeStatus = &r.ChangeStatus.String
+	}
+	p.DecidedAutomatically = r.DecidedAutomatically
+	p.ClaimedAutomatically = r.ClaimedAutomatically
+	if r.AutomaticAt.Valid {
+		at := r.AutomaticAt.Time
+		p.AutomaticAt = &at
 	}
 }
 
@@ -197,11 +236,12 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 	p.UpdatedAt = now
 
 	_, err = exec.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO coordinator_proposals (`+proposalColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		INSERT INTO coordinator_proposals (`+proposalInsertColumns+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		p.ID, p.CoordinatorID, p.WorkspaceID, string(p.Status), string(specJSON),
 		nil, nil, nil, nil, nil, nil, nil, p.CreatedAt, p.UpdatedAt,
-		p.Kind, nullableString(p.TargetTaskID), string(idsJSON), p.StartsAgent, nullableString(p.OutcomeJSON))
+		p.Kind, nullableString(p.TargetTaskID), string(idsJSON), p.StartsAgent, nullableString(p.OutcomeJSON),
+		nullableString(p.InReplyTo), s.ledgerTurnID(ctx))
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
 	}
@@ -215,7 +255,7 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 // coordinator, on any executor that supports parameterized queries (a
 // transaction-bound coordinatorExec during InsertProposal, or the store's
 // reader pool via CountOpenProposals).
-func countOpenProposals(ctx context.Context, exec queryRowExec, rebind func(string) string, coordinatorID string, phase2 bool) (int, error) {
+func countOpenProposals(ctx context.Context, exec queryRowExec, rebind func(string) string, coordinatorID, kindClause string) (int, error) {
 	placeholders := make([]string, len(openProposalStatuses))
 	args := make([]any, 0, len(openProposalStatuses)+1)
 	args = append(args, coordinatorID)
@@ -223,7 +263,7 @@ func countOpenProposals(ctx context.Context, exec queryRowExec, rebind func(stri
 		placeholders[i] = "?"
 		args = append(args, string(status))
 	}
-	query := rebind(`SELECT COUNT(*) FROM coordinator_proposals WHERE coordinator_id = ? AND status IN (` + strings.Join(placeholders, ",") + `)` + kindFilter(phase2))
+	query := rebind(`SELECT COUNT(*) FROM coordinator_proposals WHERE coordinator_id = ? AND status IN (` + strings.Join(placeholders, ",") + `)` + kindClause)
 	var count int
 	if err := exec.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count open proposals: %w", err)
@@ -241,21 +281,24 @@ type queryRowExec interface {
 // for a coordinator (decision 9's open_proposals DTO field), read from the
 // reader pool.
 func (s *Store) CountOpenProposals(ctx context.Context, coordinatorID string, phase2 bool) (int, error) {
-	return countOpenProposals(ctx, s.ro, s.ro.Rebind, coordinatorID, phase2)
+	return countOpenProposals(ctx, s.ro, s.ro.Rebind, coordinatorID, s.kindFilter(phase2))
 }
 
 // CountOpenProposalsTx is CountOpenProposals on a transaction-bound handle.
 func (s *Store) CountOpenProposalsTx(ctx context.Context, exec coordinatorExec, coordinatorID string, phase2 bool) (int, error) {
-	return countOpenProposals(ctx, exec, s.db.Rebind, coordinatorID, phase2)
+	return countOpenProposals(ctx, exec, s.db.Rebind, coordinatorID, s.kindFilter(phase2))
 }
 
 // kindFilter hides every proposal kind other than create_task while phase 2
-// is off.
-func kindFilter(phase2 bool) string {
-	if phase2 {
-		return ""
+// is off, and improvement proposals while phase 3 is off.
+func (s *Store) kindFilter(phase2 bool) string {
+	if !phase2 {
+		return " AND kind = '" + ProposalKindCreateTask + "'"
 	}
-	return " AND kind = '" + ProposalKindCreateTask + "'"
+	if s.phase3 == nil || !s.phase3() {
+		return " AND kind <> '" + ProposalKindImprovement + "'"
+	}
+	return ""
 }
 
 // CountOpenProposalsByWorkspace is the batch counterpart to
@@ -275,7 +318,7 @@ func (s *Store) CountOpenProposalsByWorkspace(ctx context.Context, workspaceID s
 	}
 	query := s.ro.Rebind(`
 		SELECT coordinator_id, COUNT(*) AS open_count FROM coordinator_proposals
-		WHERE workspace_id = ? AND status IN (` + strings.Join(placeholders, ",") + `)` + kindFilter(phase2) + `
+		WHERE workspace_id = ? AND status IN (` + strings.Join(placeholders, ",") + `)` + s.kindFilter(phase2) + `
 		GROUP BY coordinator_id`)
 
 	var rows []struct {
@@ -295,10 +338,20 @@ func (s *Store) CountOpenProposalsByWorkspace(ctx context.Context, workspaceID s
 // GetProposal returns a proposal scoped to both workspaceID and
 // coordinatorID; ErrNotFound if absent or scoped elsewhere.
 func (s *Store) GetProposal(ctx context.Context, workspaceID, coordinatorID, id string, phase2 bool) (*Proposal, error) {
+	return s.getProposal(ctx, workspaceID, coordinatorID, id, s.kindFilter(phase2))
+}
+
+// GetProposalAnyKind is GetProposal without any kind fence: the reads that
+// settle a claim already held must see the row whatever the phase flags say.
+func (s *Store) GetProposalAnyKind(ctx context.Context, workspaceID, coordinatorID, id string) (*Proposal, error) {
+	return s.getProposal(ctx, workspaceID, coordinatorID, id, "")
+}
+
+func (s *Store) getProposal(ctx context.Context, workspaceID, coordinatorID, id, kindClause string) (*Proposal, error) {
 	var row proposalRow
 	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT `+proposalColumns+` FROM coordinator_proposals
-		WHERE id = ? AND coordinator_id = ? AND workspace_id = ?`+kindFilter(phase2)),
+		WHERE id = ? AND coordinator_id = ? AND workspace_id = ?`+kindClause),
 		id, coordinatorID, workspaceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -322,7 +375,7 @@ const (
 
 // ListProposals returns a coordinator's proposals per status. Never nil.
 func (s *Store) ListProposals(ctx context.Context, workspaceID, coordinatorID string, status ListProposalsStatus, phase2 bool) ([]*Proposal, error) {
-	query := `SELECT ` + proposalColumns + ` FROM coordinator_proposals WHERE coordinator_id = ? AND workspace_id = ?` + kindFilter(phase2)
+	query := `SELECT ` + proposalColumns + ` FROM coordinator_proposals WHERE coordinator_id = ? AND workspace_id = ?` + s.kindFilter(phase2)
 	args := []any{coordinatorID, workspaceID}
 	switch status {
 	case ListProposalsPending:
@@ -360,10 +413,20 @@ func (s *Store) ListProposals(ctx context.Context, workspaceID, coordinatorID st
 // ReclaimStale), and SQLite compares DATETIME columns lexicographically, so a
 // cutoff carrying a different offset would not order correctly against it.
 func (s *Store) ListApprovingClaimedBefore(ctx context.Context, cutoff time.Time, phase2 bool) ([]*Proposal, error) {
+	return s.listApprovingClaimedBefore(ctx, cutoff, s.kindFilter(phase2))
+}
+
+// ListApprovingClaimedBeforeAnyKind is ListApprovingClaimedBefore without any
+// kind fence, for the passes that settle stale claims whatever the flags say.
+func (s *Store) ListApprovingClaimedBeforeAnyKind(ctx context.Context, cutoff time.Time) ([]*Proposal, error) {
+	return s.listApprovingClaimedBefore(ctx, cutoff, "")
+}
+
+func (s *Store) listApprovingClaimedBefore(ctx context.Context, cutoff time.Time, kindClause string) ([]*Proposal, error) {
 	var rows []proposalRow
 	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT `+proposalColumns+` FROM coordinator_proposals
-		WHERE status = ? AND claimed_at < ?`+kindFilter(phase2)+`
+		WHERE status = ? AND claimed_at < ?`+kindClause+`
 		ORDER BY claimed_at ASC, id ASC`),
 		string(ProposalStatusApproving), cutoff.UTC()); err != nil {
 		return nil, fmt.Errorf("list approving proposals claimed before cutoff: %w", err)
@@ -386,23 +449,43 @@ func (s *Store) ListApprovingClaimedBefore(ctx context.Context, cutoff time.Time
 // (ListApprovingClaimedBefore, ReclaimStale), which only orders correctly
 // when every stored value carries the same offset.
 func (s *Store) ClaimProposal(ctx context.Context, id, token string, finalSpec ProposalSpec, decidedBy string, now time.Time) (bool, error) {
-	finalJSON, err := json.Marshal(finalSpec)
-	if err != nil {
-		return false, fmt.Errorf("marshal final spec: %w", err)
-	}
-	return s.ClaimProposalRaw(ctx, id, token, string(finalJSON), decidedBy, now)
+	return s.ClaimProposalTx(ctx, s.db, id, token, finalSpec, decidedBy, now, nil)
 }
 
 // ClaimProposalRaw is ClaimProposal for a frozen spec already encoded as JSON,
 // the form every non-create_task kind stores.
 func (s *Store) ClaimProposalRaw(ctx context.Context, id, token, finalJSON, decidedBy string, now time.Time) (bool, error) {
+	return s.ClaimProposalRawTx(ctx, s.db, id, token, finalJSON, decidedBy, now, nil)
+}
+
+// ClaimProposalTx is ClaimProposal on a transaction-bound handle. A non-nil
+// automaticAt marks the claim as the automatic path's: it also stamps
+// decided_automatically, claimed_automatically and automatic_at. A manager's
+// claim (nil) writes claimed_automatically = 0 and never touches
+// decided_automatically or automatic_at.
+func (s *Store) ClaimProposalTx(ctx context.Context, exec coordinatorExec, id, token string, finalSpec ProposalSpec, decidedBy string, now time.Time, automaticAt *time.Time) (bool, error) {
+	finalJSON, err := json.Marshal(finalSpec)
+	if err != nil {
+		return false, fmt.Errorf("marshal final spec: %w", err)
+	}
+	return s.ClaimProposalRawTx(ctx, exec, id, token, string(finalJSON), decidedBy, now, automaticAt)
+}
+
+// ClaimProposalRawTx is ClaimProposalTx for a frozen spec already encoded as JSON.
+func (s *Store) ClaimProposalRawTx(ctx context.Context, exec coordinatorExec, id, token, finalJSON, decidedBy string, now time.Time, automaticAt *time.Time) (bool, error) {
 	now = now.UTC()
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	query := `
 		UPDATE coordinator_proposals
-		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?
-		WHERE id = ? AND status IN (?, ?)`),
-		string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now,
-		id, string(ProposalStatusPending), string(ProposalStatusFailed))
+		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?, claimed_automatically = ?`
+	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, autonomyColumn(automaticAt != nil)}
+	if automaticAt != nil {
+		query += `, decided_automatically = 1, automatic_at = ?`
+		args = append(args, automaticAt.UTC())
+	}
+	query += `
+		WHERE id = ? AND status IN (?, ?)`
+	args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+	res, err := exec.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, fmt.Errorf("claim proposal: %w", err)
 	}
@@ -420,7 +503,7 @@ func (s *Store) ReclaimStale(ctx context.Context, id, token string, now, staleBe
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
 		SET claimed_at = ?, claim_token = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND claimed_at < ?`+kindFilter(phase2)),
+		WHERE id = ? AND status = ? AND claimed_at < ?`+s.kindFilter(phase2)),
 		now, token, now, id, string(ProposalStatusApproving), staleBefore.UTC())
 	if err != nil {
 		return false, fmt.Errorf("reclaim stale proposal: %w", err)

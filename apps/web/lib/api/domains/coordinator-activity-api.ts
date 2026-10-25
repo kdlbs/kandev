@@ -8,6 +8,7 @@ export type ActivityClass =
   | "move"
   | "resume"
   | "stop"
+  | "improvement"
   | "unknown";
 
 export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
@@ -17,6 +18,7 @@ export const ACTIVITY_CLASSES: readonly ActivityClass[] = [
   "move",
   "resume",
   "stop",
+  "improvement",
   "unknown",
 ];
 
@@ -31,10 +33,11 @@ export type ActivityOutcome =
   | "rejected"
   | "failed"
   | "refused"
-  | "undone";
+  | "undone"
+  | "returned";
 
 // Mirrors internal/coordinator/activity.go's ActivityAuthorization values.
-export type ActivityAuthorization = "requires_approval" | "denied";
+export type ActivityAuthorization = "requires_approval" | "denied" | "automatic";
 
 // Mirrors internal/coordinator/activity_service.go's ActivityItem: the row plus
 // the read-time fields. The server sends ids only; names are resolved by the
@@ -61,6 +64,8 @@ export type ActivityItem = {
   undoable: boolean;
   target_task_identifier: string | null;
   from_step_id: string | null;
+  // Present only while features.coordinatorPhase3 is effective.
+  unattended_turn_id?: string | null;
 };
 
 export type ActivityPage = {

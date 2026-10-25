@@ -1,8 +1,11 @@
 import { expect, type Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
-export async function assertDeliveryRecoveryGeometry(page: Page) {
-  const retry = page.getByTestId("recovery-retry-connection-button");
+export async function assertDeliveryRecoveryGeometry(
+  page: Page,
+  primaryTestId = "recovery-retry-connection-button",
+) {
+  const retry = page.getByTestId(primaryTestId);
   const stop = page.getByTestId("recovery-stop-button");
   await expect(retry).toBeVisible();
   await expect(stop).toBeVisible();

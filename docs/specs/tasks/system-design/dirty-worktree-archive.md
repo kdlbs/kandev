@@ -1,220 +1,222 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-001
   - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-002
+  - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-003
+  - REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-004
 created: 2026-09-21
-updated: 2026-09-24
+updated: 2026-10-18
 owners:
   - cfl
 ---
 
-# Dirty Worktree Task Archive System Design
+# Managed Worktree Task Archive System Design
 
 ## Purpose and boundaries
 
-This design extends task runtime cleanup so archiving a task preserves
-uncommitted local work. It defines how archive cleanup detects local worktree
-changes, keeps the affected checkout, and later reclaims it when safe. It also
-defines the storage-maintenance boundary for a retained physical checkout.
+Tasks owns archive authorization, runtime stop ordering, cleanup jobs, and
+archive-generation fencing. The worktree manager owns audited physical removal.
+The replacement design implements immediate removal under requirement 004.
+Requirement 001 and the superseded portions of 002 and 003 remain historical
+traceability; they no longer require cleanliness for archive removal.
 
-It does not change task deletion, session deletion, branch-handoff cleanup, the
-orphan worktree reaper, workspace reset, automatic commit or push behavior, or
-branch redundancy rules. It adds no new refusal, consent flag, or error shape to
-the archive API.
+The change removes a retention policy, not ownership checks. It uses the
+existing asynchronous archive cleanup attempt, with its deadline and retries;
+“immediate” means no dirtiness deferral, not a new synchronous API guarantee.
+Delete consent, ordinary local executors, independent-checkout adoption consent,
+remote executor teardown, session deletion, reset, and storage schedules retain
+their existing contracts.
 
 ## Requirement mapping
 
-| Requirement | Design source |
+| Requirement | Design section |
 | --- | --- |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.1-.3 | Admission inspection and preservation below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.4 | Failure and state handling below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.5-.6 | Admission inspection below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-001.7 | Out of scope below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.1-.4 | Archived worktree recheck below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.5 | Storage protection and existing quarantine below |
-| AC-TASKS-DIRTY-WORKTREE-ARCHIVE-002.6 | Archive confirmation below |
+| 001; 002.1-.4 and .6 (superseded) | Replacement policy and compatibility |
+| 002.5 | Storage boundary |
+| 003.1-.4, subject to 004 | Task-root completion |
+| 004.1-.2 and .4 | Archive admission and manager removal |
+| 004.3 and .7 | Ownership and runtime boundaries; Task-root completion |
+| 004.5 | Existing retained work and restart |
+| 004.6 | Confirmation and documentation |
 
-## Existing system context
+All abbreviated numbers in this table use the
+`REQ-TASKS-DIRTY-WORKTREE-ARCHIVE-` / corresponding `AC-` prefix.
 
-`Dirty Worktree Task Deletion` states that it does not change archive. Nothing
-has covered archive since, so archive has no dirty-checkout protection.
+## Replacement policy and compatibility
 
-The worktree manager couples its clean-checkout gate to branch deletion rather
-than to directory removal. `auditCleanupBranchDisposition` returns before
-`verifyCleanRedundantCheckout` whenever `removeBranch` is false:
+[Immediate archive removal](../../../decisions/2026-10-17-immediate-archive-worktree-removal.md)
+replaces dirty-checkout retention while preserving the lifecycle/storage split
+from the [reclamation decision](../../../decisions/2026-09-24-archived-worktree-reclamation.md)
+and the terminal-root operation from the
+[task-directory decision](../../../decisions/2026-10-13-archived-task-directory-cleanup.md).
+Prior implemented plans remain delivery history and are not reopened.
 
-```go
-if !removeBranch || branchRef == "" || branchOID == "" {
-    return false, nil
-}
-if pathPresent && !options.DiscardWorktreeChanges {
-    return m.verifyCleanRedundantCheckout(ctx, wt, branchRef)
-}
-```
+There is no new feature flag, discard parameter, consent flow, schema, or job
+format. Existing archive entry points share `cleanupDestructiveTaskResources`.
+API acknowledgement still archives the task while physical cleanup proceeds in
+the background. Failures retain their existing diagnostic/retry behavior.
 
-`CleanupWorktreesPreservingBranches` always passes `removeBranch=false`, so every
-archive skips the gate. `completeOwnedWorktreeCleanup` then force-removes the
-directory once Git registration ownership is proven. Ownership is checked;
-cleanliness is not. Archive uses the existing branch-preserving cleanup path.
-Clean worktrees are removed, and the manager may compact a managed branch after
-proving that it is fully integrated. A dirty worktree is filtered out before
-cleanup, so its branch ref and `task_environment` row remain.
+## Archive admission and manager removal
 
-Three archive entry points converge on one site. `HandoffService.archiveTaskTree`
-calls `CleanupTaskResources(ctx, taskID, false)`, `Service.ArchiveTask` builds
-`taskEnvironmentCleanup{preserveBranches: true}`, and the durable cleanup job
-sets `preserveBranches: job.IsArchive()`. All three reach the
-`envCleanup.preserveBranches` branch of
-`Service.cleanupDestructiveTaskResources`.
+`Service.cleanupDestructiveTaskResources` keeps eligibility filtering for
+ownership, shared references, and runtime stops. In its `preserveBranches`
+branch, pass the entire resulting eligible set to
+`CleanupWorktreesPreservingBranches`. Remove
+`filterDirtyWorktreesForArchive` and the archive-only suppression of dirty
+cleanup errors. Delete-path `InspectDirtyWorktrees` remains intact.
 
-## Design
+`Manager.CleanupWorktreesPreservingBranches` and
+`Manager.CleanupArchivedWorktree` stop setting `RequireCleanCheckout`; remove
+that now-unused option and its archive-only audit gates. Keep
+`removeBranch=false` and the expected owner/path tuple used by reclaim.
+Registered managed Git worktrees already support force removal through the
+audited cleanup path; no new recursive deletion primitive is needed.
+Do not switch archive to `CleanupWorktreesWithOptions`, which uses different
+branch-removal semantics, or globally set `DiscardWorktreeChanges`, which also
+authorizes independent adopted checkouts. Search other callers of the two
+archive manager methods and verify that their archive intent remains valid.
 
-### Preserve rather than refuse
+`RequireCleanCheckout` currently checks cleanliness before and after repository
+cleanup scripts. Removing the archive option disables both archive checks.
+Staged, unstaged, untracked, ignored, and script-created files disappear with
+the admitted checkout. Identity validation, Git registration verification,
+locks, pinned directory handles, and branch-compaction audits remain active.
+Cleanup errors are ordinary retryable failures, with no successful dirty-skip
+outcome. Remove unused archive-only dirty helpers after checking all callers.
 
-Archive admits the task unconditionally and filters the cleanup set instead of
-rejecting the operation. Archive is routine board maintenance; a refusal would
-block tidying the board behind a checkout the user may not care about, and a
-consent flag would train users to pass discard reflexively, recreating the
-defect. Preservation also matches archive's existing posture, which already
-retains the branch ref and the `task_environment` row for recovery.
+## Ownership and runtime boundaries
 
-### Admission inspection
+Original cleanup continues stopping every required runtime before destructive
+work. `cleanupEligibleWorktrees`, ownership-generation checks, and shared
+references decide each repository independently. A mixed clean/dirty set is
+fully eligible by cleanliness; a mixed eligible/shared set removes only the
+eligible members and protects the root.
 
-`Service.cleanupDestructiveTaskResources` inspects the eligible worktree set
-before calling `CleanupWorktreesPreservingBranches`. It reuses the existing
-`WorktreeDirtyInspector.InspectDirtyWorktrees`, which runs
-`git status --porcelain=v1 --untracked-files=normal -z` read-only over every
-recorded worktree and deduplicates by repository and cleaned path.
+Reclaim continues loading the current task and worktree, checking the exact
+`archived_at`, owner, expected path, and active references. Before removing a
+checkout it also lists the owning task's runtime rows. Any retained runtime
+defers reclaim as in use, including after the original archive stop fails;
+missing or failed runtime inventory keeps the job retryable. Manager mutation
+checks retain `ExpectedTaskID`, `ExpectedWorktreePath`, and
+`ExpectedRepositoryPath`. Removing the dirty predicate must not turn inspection,
+identity, reference, or stop failures into successful cleanup.
 
-Worktrees reported dirty are removed from the cleanup set. The remaining clean
-worktrees proceed through the unchanged audited removal path. Filtering is
-per-worktree rather than all-or-nothing, so a multi-repository task still
-reclaims its clean repositories. The inspector already walks every recorded
-worktree, which covers each `task_environment_repos` row rather than only the
-session workspace path.
+Inventory-repair admission follows the same archive policy after identities
+are repaired. Repair itself preserves local files and Git refs; a later
+authorized archive removes eligible clean or dirty checkouts while retaining
+the audited branch-identity and recovery-ref checks.
 
-### Failure and state handling
+## Existing retained work and restart
 
-Inspection failure preserves every worktree in the set and archives the task.
-The failure is logged and counts as a cleanup diagnostic, never as a fall-through
-to removal.
+`processArchiveReclaimJob` and `archiveReclaimWorktreeOutcome` no longer inspect
+Git dirtiness or wait on `ErrDirtyWorktreeCleanup`. Remaining in-use outcomes
+continue to defer with bounded scheduling. Keep persisted `archive_reclaim`
+triggers and `waiting_for_clean` values readable for upgrade compatibility;
+the historical state name does not imply a live cleanliness predicate.
 
-A preserved worktree is never passed to cleanup, so its record keeps its active
-status and its branch is untouched. The record remains available for a later
-cleanup operation after the checkout becomes clean. The archive job does not
-schedule another attempt solely because the checkout was dirty, because this
-preservation is not a cleanup error.
+The existing candidate reconciliation creates missing jobs for archived active
+worktree rows. Extend startup reconciliation with a bounded wake of existing
+`archive_reclaim` jobs in `waiting_for_clean`, so a future `next_attempt_at`
+from the old policy does not postpone removal by 24 hours. `WakeWaitingArchiveReclaimJobs` in
+`task/repository/sqlite/resource_cleanup.go` supplies the bounded repository
+operation through a service-local contract. Use an ID cursor and a startup timestamp cutoff;
+conditionally change only matching waiting rows last updated before that
+cutoff to pending. Do not modify snapshots, archive identities, attempt counts,
+ordinary retry deadlines, cancelled/succeeded jobs, or running claims.
 
-### Archived worktree recheck
+Process bounded pages through the existing worker until the startup cursor is
+exhausted. Do not re-wake an in-use job deferred by this process. Waking grants
+no destruction authority: the normal claim and archive/ownership checks still
+run, and unarchive can cancel the pending operation under the existing fence.
+A restart safely repeats the bounded admission; no persistent migration marker
+or schema change is needed. SQL must use the shared dialect bindings and work
+with both SQLite and PostgreSQL. Database failures remain visible and retryable.
 
-The [reclamation decision](../../../decisions/2026-09-24-archived-worktree-reclamation.md)
-assigns this follow-up to task lifecycle, not install-wide storage maintenance.
-Extend the existing `Service.runTaskResourceCleanupWorker` loop with a bounded
-archived-worktree pass. The worker already starts independently of
-`StorageMaintenanceSettings.Enabled` and stops with the backend. It must not
-reopen a succeeded archive job or consume its eight-attempt failure budget.
+Do not rerun attachments or unrelated task cleanup from a reclaim job. Do not
+reopen succeeded original archive jobs or discard a saved root obligation when
+an individual checkout has already been removed.
 
-`task_environment_repos` remains the physical worktree authority. Add an
-`archive_reclaim` trigger and a `waiting_for_clean` state to the existing
-`task_resource_cleanup_jobs` model. For each worktree skipped because it is
-dirty, create one follow-up job keyed by task, worktree, and the task's
-`archived_at` value. Its snapshot records that archive value and the worktree
-ID, not another
-copy of the full task cleanup inventory. Persist the follow-up intent before
-the original archive job succeeds. The follow-up never re-runs runtime,
-attachment, or other task cleanup.
+## Task-root completion
 
-The one-minute cleanup worker already claims due jobs in batches of 100.
-Include due `waiting_for_clean` jobs in that query. After a dirty check, set
-`next_attempt_at` to 24 hours later without storing a cleanup error or
-consuming the ordinary eight-attempt failure budget. Dirty jobs stay out of
-the due query until that time, so older dirty jobs cannot starve clean ones.
-On startup, a bounded, idempotent reconciliation creates missing follow-up
-jobs for active archived worktree rows left by older versions. It excludes
-rows with a still-running original archive job and uses the same stable
-operation identity, so a restart does not duplicate jobs. An inspection or
-database failure is reported and retried; it is not treated as cleanliness.
+Keep `captureArchiveTaskDirectory`, `captureReclaimTaskDirectory`,
+`cleanupArchiveTaskDirectory`, and `finishArchiveReclaimDirectory` as the
+terminal task-root operation. Before destructive I/O, retain the root target,
+immutable creation marker, current owner, admitted worktree paths, and native
+filesystem identity in the existing cleanup snapshot.
 
-For each claimed job, reload the task and worktree through their authoritative
-repositories. Recheck the exact `archived_at` value, current owner, active
-references, path and Git registration, and cleanliness at the mutation
-boundary. `CancelArchiveTaskResourceCleanup` includes follow-up jobs: an
-unarchive cancels pending and waiting jobs and refuses to race one already
-running. Cascade unarchive applies this fence to every member before the first
-task mutation. If a later member cannot be restored, it restores the exact
-cleanup operations it cancelled so archived members remain eligible for
-cleanup. Candidate insertion and each unarchive mutation also serialize on the
-task row.
-Candidate insertion requires the exact archived generation while holding that
-lock. Unarchive checks for active archive jobs again in its transaction and
-aborts if a backfill inserted one after the service's cancellation scan. If
-unarchive wins the lock, a late backfill sees the task is active and skips the
-stale candidate. A task that transfers ownership leaves the candidate set.
-The worktree manager holds its existing path and repository locks and applies a
-final cleanliness guard inside the audited archive removal path after the
-repository cleanup script runs, close to physical removal. If that check
-finds changes, it retains the checkout and active row; this is a retained
-outcome for original archive cleanup, with its durable reclaim candidate
-preserved. Other cleanup errors still reach retry handling. A successful
-removal uses
-`CleanupWorktreesWithReceipt`/the branch-preserving archive policy and marks
-only that repository worktree deleted. Other repositories remain independent.
-The manager's audit, path identity, and branch-compaction rules remain in
-force. Do not run the whole task resource cleanup sequence again.
+Root eligibility is universal: every recorded worktree must have confirmed
+removal. Any active borrowed, failed, unknown, or otherwise retained sibling
+prevents recursive root removal. Dirtiness alone no longer retains a sibling.
+After the final eligible checkout disappears, remove loose files, nested
+folders, and the marker in that same cleanup attempt.
 
-The recheck reports bounded counts for considered, reclaimed, dirty, in-use,
-and failed worktrees. Inspection and mutation errors are logged with task and
-worktree IDs, without file contents. Dirty is a deferred state, not a failed
-archive job. Restart resumes waiting jobs from their due timestamp. An absent
-worktree with unproven ownership is not treated as clean; the existing
-worktree recovery rules govern it.
+Reuse no-follow directory handles, path/repository locks, marker and identity
+validation, and unarchive fencing. Internal symlinks are removed without
+traversing targets. Replaced roots, symlinked roots/parents, foreign markers,
+base-directory targets, and inconsistent paths fail closed. Individual
+worktree/session removal keeps the empty-only `tryRemoveEmptyTaskDir` behavior.
 
-### Storage protection and existing quarantine
+Root failures remain durable across restart even after the worktree row becomes
+deleted. A busy root with no active checkout remains a retry obligation.
+Missing evidence cannot be treated as proven absence. Legacy unmarked roots
+retain audited individual-checkout cleanup without gaining recursive authority.
+Removed-root recording for orphan-process cleanup continues to include the
+successfully removed root and worktree paths.
 
-`storageInventory.activeWorktreePaths` currently filters out archived tasks.
-Include every active `task_environment_repos` physical worktree path regardless
-of the owner's archive marker. A deleted row with a historical branch remains
-unprotected. `workspaces.buildProtectedSet` already protects a candidate root
-when one descendant is in this inventory, so a multi-repository root is kept
-while any sibling checkout remains active. A borrowed environment remains
-protected by the existing borrower rule.
+## Storage boundary
 
-Protection must also be checked before `workspaces.Provider.PermanentDelete`
-and `PermanentDeleteForce` remove a previously quarantined task root. Compare
-the entry's original path with the current active worktree inventory. If an
-active recorded path is within that root, leave the entry restorable and
-report it as protected, even after retention or with force confirmation. If
-inventory cannot be loaded, fail closed. The Storage page's existing Restore
-action remains the recovery path for an entry quarantined before this change;
-the lifecycle worker does not inspect or delete its relocated payload.
-Storage analysis classifies these retained roots as protected, not orphan
-candidates. No storage setting or global schedule default changes.
+`storageInventory.activeWorktreePaths` continues protecting every active
+physical worktree row, including archived owners. `workspaces.buildProtectedSet`,
+`PermanentDelete`, and `PermanentDeleteForce` keep their inventory checks for
+quarantine and purge. A retained shared or failed workspace is still protected;
+a deleted historical row alone does not protect an absent checkout. Storage
+maintenance does not acquire archive destruction authority.
 
-### Archive confirmation
+## Confirmation and documentation
 
-`task-cleanup-summary.ts` also supplies task-delete confirmation. Add an
-archive-specific summary selection and update only its archive callers. Keep
-the delete warning and discard-consent copy unchanged. The archive summary
-used by desktop confirmation, compact inline confirmation, and the phone
-confirmation sheet must say
-that a checkout with Git changes is retained and that a retained checkout is
-removed after it becomes clean. It must not claim that every worktree branch
-is deleted: unpublished branches remain recoverable. Keep the existing
-`confirm_task_archive` bypass and archive API unchanged. Add translations in
-the supported locale catalogs and update public task/storage documentation.
-The existing mobile confirmation composition and touch targets stay in place;
-only their shared copy changes.
+Update the existing archive-specific locale keys
+`archiveSingleWorktreeCleanup` and `archiveBulkWorktreeCleanup_one/_other` in
+`src/locales/*/task.json`. Proposed single-task copy:
+“Git worktrees and local changes are deleted on archive.” Keep
+`archiveWorktreeBranchNote`, runtime-stop text, local-executor summaries, and
+delete summaries accurate and separate. No new dirty-file list or consent flag.
 
-## Out of scope
+`task-cleanup-summary.ts` supplies full, compact inline, and bulk archive
+consumers. `task-archive-confirm-dialog.tsx` uses the same summary in its desktop
+AlertDialog and phone `MobileActionConfirmation` bottom drawer. Reuse those
+surfaces and the task confirmation primitives; change copy only. Maintain
+Cancel/Archive order, focus return, existing cascade controls, confirmation
+bypass, safe-area behavior, scrolling, and phone touch targets.
 
-- Refusing archive, or adding a discard-consent flag and a dirty-file list to
-  the archive API. Surfacing the dirty set so the interface can offer an
-  explicit discard is a separate user-visible contract change.
-- The sibling `removeBranch=false` callers in branch-handoff cleanup and the
-  orphan worktree reaper, which have different triggers and admission rules.
-- Any change to the delete-path guard.
-- Automatically deleting ignored files or unrelated non-Git task files; the
-  existing Git change-inspection contract and separate storage policy apply.
-- Making scheduled storage maintenance run by default.
+Add the updated copy in English, Portuguese, Simplified Chinese, both
+Traditional Chinese locales, Japanese, and Korean; use `i18n:zh-hant` for the
+Traditional pair and regenerate pseudo through the repository tooling. Existing
+component and desktop/phone Playwright checks must assert destruction wording
+and absence of the old retention promise. Extend the mobile confirmation
+preference spec with a confirmation-enabled worktree case.
+
+At implementation, update the how-to sections in
+`docs/public/tasks-and-workflows.md`, `docs/public/git-operations.md`, and
+`docs/public/operations.md`, and inspect README/screenshot guidance for old
+wording. Public docs must distinguish lost local files from retained committed
+branch recovery and from guarded cleanup failures. Public wording ships with
+the production behavior.
+
+## Observability and validation
+
+Keep task, worktree, and job identifiers in existing cleanup logs; do not add
+new metric labels or log file contents. Successful dirty-checkout removal uses
+normal cleanup success and branch receipts. There is no new dirty-deferral log
+for an eligible archive checkout.
+
+Service integration tests exercise the real ArchiveTask, manager, SQL jobs,
+and filesystem. Manager tests cover dirtiness created by cleanup scripts and
+retained identity/branch rules. Repository tests cover bounded startup wakes
+and claim/cancellation races. Desktop and phone rendered checks prove truthful
+copy and archive interaction. The linked work order owns exact commands.
+
+## Implementation plan
+
+[Immediate archive removal](../../../plans/immediate-archive-worktree-removal/plan.md).

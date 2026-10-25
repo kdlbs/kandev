@@ -28,7 +28,7 @@ func TestDurablePromptBindingRetainsHistoricalProcessProof(t *testing.T) {
 	lease, err := owner.Acquire(context.Background())
 	require.NoError(t, err)
 	defer lease.Close()
-	sm, execution, _ := initialDeliveryPersistenceFixture(t)
+	sm, execution, _, _ := initialDeliveryPersistenceFixture(t)
 	execution.agentctl = lease.NewBoundInstanceClient(1234, newTestLogger())
 	execution.DeliveryStreamID = "stream"
 	execution.promptGeneration = 3

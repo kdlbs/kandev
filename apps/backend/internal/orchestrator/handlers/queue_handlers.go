@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"strings"
 
+	"sync"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -28,8 +31,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 const (
@@ -706,6 +707,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		if conflict := planCommentQueueError(msg, err); conflict != nil {
 			return conflict, nil
 		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
+		}
 		h.logger.Error("failed to queue message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
 	}
@@ -1191,6 +1195,9 @@ func (h *QueueHandlers) queueEditError(msg *ws.Message, err error) *ws.Message {
 		response, _ := ws.NewError(msg.ID, msg.Action, "queue_conflict",
 			"Queue entry changed while it was being edited", nil)
 		return response
+	case errors.Is(err, messagequeue.ErrSessionAdmissionTimeout):
+		response, _ := queueAdmissionErrorResponse(msg)
+		return response
 	default:
 		h.logger.Error("failed to process queue edit", zap.Error(err))
 		response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
@@ -1333,23 +1340,6 @@ func (h *QueueHandlers) updateQueuedMessage(
 	)
 }
 
-func (h *QueueHandlers) releaseFailedQueueAttachmentClaims(
-	ctx context.Context,
-	releaser QueueAttachmentReleaser,
-	previous *messagequeue.QueuedMessage,
-	sessionID string,
-	attachments []messagequeue.MessageAttachment,
-) {
-	if releaser == nil || previous == nil {
-		return
-	}
-	if err := releaser.ReleaseMessageAttachments(
-		ctx, previous.TaskID, sessionID, queueAttachmentsToV1(attachments),
-	); err != nil {
-		h.logger.Warn("failed to release attachments after queue update failure", zap.Error(err))
-	}
-}
-
 // wsUpdateMessage handles ActionMessageQueueUpdate, replacing a queued entry's content.
 func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsUpdateMessageRequest
@@ -1439,6 +1429,9 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 			if isQueueIdentityError(err) {
 				return queueAccessDeniedResponse(msg), nil
 			}
+			if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+				return queueAdmissionErrorResponse(msg)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		newlyAdded = newlyAddedQueueAttachments(previous.Attachments, req.Attachments)
@@ -1466,6 +1459,9 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 			releaseClaims,
 		)
 		if prepareErr != nil {
+			if errors.Is(prepareErr, messagequeue.ErrSessionAdmissionTimeout) {
+				return queueAdmissionErrorResponse(msg)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, prepareErr.Error(), nil)
 		}
 	}
@@ -1843,13 +1839,22 @@ func (h *QueueHandlers) settlePendingAttachmentCleanup(
 	}
 }
 
+var pendingAttachmentCleanupMaxAttempts = 60
+
 func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) {
 	defer h.attachmentCleanupWG.Done()
 	delay := 10 * time.Millisecond
-	for {
+	var lastErr error
+	for attempt := 0; attempt < pendingAttachmentCleanupMaxAttempts; {
 		if !h.editLeaseActive(pending) {
-			if err := h.runPendingAttachmentCleanup(pending); err == nil {
+			cleanupErr := h.runPendingAttachmentCleanup(pending)
+			if !errors.Is(cleanupErr, errAttachmentCleanupLeaseActive) {
+				attempt++
+				lastErr = cleanupErr
+			}
+			if cleanupErr == nil {
 				if err := h.deletePendingAttachmentCleanup(pending); err != nil {
+					lastErr = err
 					h.logger.Warn("failed to acknowledge queue attachment cleanup", zap.Error(err))
 				} else {
 					h.attachmentCleanupMu.Lock()
@@ -1866,6 +1871,14 @@ func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttac
 			delay *= 2
 		}
 	}
+	h.logger.Warn("queue attachment cleanup attempts exhausted; leaving durable cleanup for recovery",
+		zap.String(fieldSessionID, pending.key.sessionID),
+		zap.String(fieldEntryID, pending.key.entryID),
+		zap.Int("attempts", pendingAttachmentCleanupMaxAttempts),
+		zap.Error(lastErr))
+	h.attachmentCleanupMu.Lock()
+	delete(h.pendingAttachmentCleanup, pending.key)
+	h.attachmentCleanupMu.Unlock()
 }
 
 func (h *QueueHandlers) deletePendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) error {
@@ -2273,6 +2286,9 @@ func (h *QueueHandlers) queueUpdateFailure(
 	if errors.Is(updateErr, messagequeue.ErrEntryNotFound) {
 		return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 	}
+	if errors.Is(updateErr, messagequeue.ErrSessionAdmissionTimeout) {
+		return queueAdmissionErrorResponse(msg)
+	}
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, updateErr.Error(), nil)
 }
 
@@ -2518,6 +2534,9 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg)
 		}
 		h.logger.Error("failed to append to queue", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)

@@ -1,6 +1,7 @@
 import type { Page, Response } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import { installNewerNegativePRProjectionFixture } from "../../helpers/pr-negative-projection-fixture";
 
@@ -438,6 +439,7 @@ test.describe("inactive task PR summary hydration", () => {
     const picker = testPage.getByRole("dialog", { name: "Tasks" });
     const narrowRow = picker.locator(`[data-task-row-id="${targetTask.task_id}"]`);
     const narrowIcon = narrowRow.getByTestId(`pr-task-icon-${targetTask.task_id}`);
+    await waitForFiniteAnimations(picker);
     await narrowIcon.hover();
     await expectVisibleTooltipInsideViewport(testPage);
     await testPage.setViewportSize({ width: 768, height: 600 });

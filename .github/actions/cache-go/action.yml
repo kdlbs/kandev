@@ -1,0 +1,44 @@
+name: Cache Go compilation
+description: Separate module downloads from daily compatible compilation snapshots
+inputs:
+  family:
+    description: Compilation family (static, test-1, test-2, ambient, or e2e-build)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve installed Go cache identity
+      id: identity
+      continue-on-error: true
+      shell: bash
+      env:
+        CACHE_FAMILY: ${{ inputs.family }}
+      run: node "$GITHUB_WORKSPACE/.github/scripts/go-cache-identity.mjs"
+
+    # actions/cache registers success-only post saves. Cache service failures
+    # remain optional and cannot suppress the caller's build or verification.
+    - name: Cache Go module downloads
+      if: steps.identity.outputs.enabled == 'true'
+      continue-on-error: true
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.modulePath }}
+        key: ${{ steps.identity.outputs.moduleKey }}
+
+    - name: Cache Go build generation
+      if: steps.identity.outputs.enabled == 'true'
+      continue-on-error: true
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.buildPath }}
+        key: ${{ steps.identity.outputs.buildKey }}
+        restore-keys: ${{ steps.identity.outputs.buildPrefix }}
+
+    - name: Cache static analysis generation
+      if: steps.identity.outputs.enabled == 'true' && inputs.family == 'static'
+      continue-on-error: true
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.identity.outputs.lintPath }}
+        key: ${{ steps.identity.outputs.lintKey }}
+        restore-keys: ${{ steps.identity.outputs.lintPrefix }}

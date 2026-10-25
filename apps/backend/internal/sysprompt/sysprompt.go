@@ -245,7 +245,7 @@ const canvasGuidanceSection = `CANVAS AUTHORING:
 Use these tools only when the user explicitly asks for a Kandev canvas: create_canvas_kandev, read_canvas_authoring_skill_kandev, and publish_canvas_kandev. Create it in Kandev before writing app files. Read the skill once, edit only in its returned source directory, then publish through MCP. Report publication status, including failures. Local files or a successful build do not publish a canvas.
 `
 
-const richOutputSection = `- show_rich_output_kandev: For a chart, graph, plot, file preview, KPI, or metrics request with data, call this now. Do not implement it as ASCII, SVG, HTML, or another app. Otherwise use prose or a small Markdown table. Get the schema and examples from tool discovery. Paths are workspace-relative; Kandev owns layout, axes, legends, and tooltips. Label series with units.
+const richOutputSection = `- show_rich_output_kandev: For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now. Table compares; StatusList checks; Callout notes. Use version=2,catalog_version=1,spec; discover schema/examples. Workspace-relative paths. Kandev owns layout/styling. Label series with units. No ASCII/SVG/HTML/separate app. Otherwise prose or small Markdown tables.
 `
 
 // stepCompleteSection is the description + instruction block for the

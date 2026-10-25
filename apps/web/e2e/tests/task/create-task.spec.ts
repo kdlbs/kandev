@@ -1,9 +1,13 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
@@ -439,12 +443,67 @@ test.describe("Task creation", () => {
     }
   });
 
-  test("opens create task dialog from kanban header", async ({ testPage }) => {
+  test("creates a single-repository task in the optional parent workspace layout", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-
     await kanban.createTaskButton.first().click();
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-title-input").fill("Parent workspace task");
+    await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+      timeout: START_ENABLED_TIMEOUT,
+    });
+
+    await dialog.getByTestId("task-create-advanced-settings-trigger").click();
+    const layoutSetting = dialog.getByTestId("task-create-initial-workspace-layout-setting");
+    await expect(layoutSetting).toBeVisible();
+    const checkbox = layoutSetting.getByTestId("task-create-initial-workspace-layout-checkbox");
+    await checkbox.click();
+    await expect(checkbox).toHaveAttribute("data-state", "checked");
+
+    await dialog.getByTestId("submit-start-agent-chevron").click();
+    await testPage.getByTestId("submit-create-without-agent").click();
+    await expect(dialog).not.toBeVisible();
+
+    const createdTaskId = await getTaskIdFromPage(testPage);
+    await expect
+      .poll(() => apiClient.getTask(createdTaskId), { timeout: 15_000 })
+      .toMatchObject({ initial_workspace_layout: "task_root" });
+    expect(createdTaskId).not.toBe(seedData.repositoryId);
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(createdTaskId))?.status, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
+    const environment = await apiClient.getTaskEnvironment(createdTaskId);
+    expect(environment?.repos).toHaveLength(1);
+    const checkout = environment!.repos![0].worktree_path!;
+    expect(path.dirname(checkout)).toBe(environment?.workspace_path);
+    expect(
+      execFileSync("git", ["-C", checkout, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        env: makeGitEnv(backend.tmpDir),
+      }).trim(),
+    ).toBe(checkout);
+    await expect
+      .poll(
+        async () => (await apiClient.listTaskSessions(createdTaskId)).sessions[0]?.workspace_path,
+        {
+          timeout: 30_000,
+        },
+      )
+      .toBe(environment?.workspace_path);
+
+    await apiClient.deleteTask(createdTaskId, { discardWorktreeChanges: true });
+    await expect.poll(() => fs.existsSync(checkout), { timeout: 30_000 }).toBe(false);
   });
 
   test("explains when a Docker executor has no compatible agent credentials", async ({
@@ -547,24 +606,10 @@ test.describe("Task creation", () => {
     await expect(testPage.getByTestId("agent-profile-selector")).not.toContainText("Select agent");
   });
 
-  test("can fill in task title and description", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    const titleInput = testPage.getByTestId("task-title-input");
-    await titleInput.fill("My E2E Test Task");
-    await expect(titleInput).toHaveValue("My E2E Test Task");
-
-    const descInput = testPage.getByTestId("task-description-input");
-    await descInput.fill("This is a test description");
-    await expectTaskDescription(descInput, "This is a test description");
-  });
-
-  test("start agent: creates task, starts session, navigates to session", async ({ testPage }) => {
+  test("start agent: creates task, starts session, navigates to session", async ({
+    testPage,
+    apiClient,
+  }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -573,8 +618,12 @@ test.describe("Task creation", () => {
     await expect(dialog).toBeVisible();
 
     // Fill in title and description — description enables the "Start task" button
-    await testPage.getByTestId("task-title-input").fill("Start Agent Task");
-    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+    const titleInput = testPage.getByTestId("task-title-input");
+    await titleInput.fill("Start Agent Task");
+    await expect(titleInput).toHaveValue("Start Agent Task");
+    const descriptionInput = testPage.getByTestId("task-description-input");
+    await descriptionInput.fill("/e2e:simple-message");
+    await expectTaskDescription(descriptionInput, "/e2e:simple-message");
 
     // The dialog auto-selects the E2E Repo (first available repository) and the main branch.
     // Wait for the button to become enabled (repo + branch + agent profile all resolved).
@@ -623,6 +672,14 @@ test.describe("Task creation", () => {
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
+    const taskId = await getTaskIdFromPage(testPage);
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    expect(sessions).toHaveLength(1);
+    expect(DONE_STATES).toContain(sessions[0].state);
+    const env = await apiClient.getTaskEnvironment(taskId);
+    expect(env).not.toBeNull();
+    expect(env!.task_id).toBe(taskId);
+    expect(env!.status).toBe("ready");
   });
 
   test("plan mode with MCP tool: creates plan via create_task_plan", async ({ testPage }) => {
@@ -759,48 +816,6 @@ test.describe("Task creation", () => {
  * correctly with the new per-task environment layer.
  */
 test.describe("Create task regression", () => {
-  test("create and start agent: session completes with task environment created", async ({
-    testPage,
-    apiClient,
-  }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-
-    await testPage.getByTestId("task-title-input").fill("Regression Task");
-    await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
-
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    // Wait for mock agent to complete its turn
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
-
-    // Verify task has exactly one session
-    const taskId = await getTaskIdFromPage(testPage);
-    const { sessions } = await apiClient.listTaskSessions(taskId);
-    expect(sessions.length).toBe(1);
-    expect(DONE_STATES).toContain(sessions[0].state);
-
-    // Verify task environment was created
-    const env = await apiClient.getTaskEnvironment(taskId);
-    expect(env).not.toBeNull();
-    expect(env!.task_id).toBe(taskId);
-    expect(env!.status).toBe("ready");
-  });
-
   test("create task via API: session and environment link correctly", async ({
     apiClient,
     seedData,

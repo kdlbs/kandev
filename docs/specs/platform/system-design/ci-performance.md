@@ -13,6 +13,14 @@ requirements:
 
 # CI performance system design
 
+## October 14 full-pipeline continuation
+
+[Complete CI design](ci-completion-budget.md) owns the new fifteen-minute delivery target
+under REQ-PLATFORM-CI-PERFORMANCE-007. The earlier fixed E2E job-count restriction
+applies to Task 13; subsequent measured partition experiments follow the new
+budget decision. Existing coverage, trust, resource guards and measurement rules
+remain authoritative. Frontend adoption retains its three-sample and 10% occupancy gate.
+
 ## Purpose and boundaries
 
 This design changes repository CI execution and test infrastructure. It does not change application behavior.

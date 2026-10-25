@@ -29,6 +29,10 @@ The first exemption covers verified regular Go `_test.go` files, with existing d
 Unknown, mixed, embedded, renamed production, or unavailable comparison inputs retain full verification.
 The unit and static checks remain required. Main, merge-group, and manual selection policies remain unchanged.
 
+The October 14 [complete CI budget decision](2026-10-14-complete-ci-latency-budget.md)
+supersedes only the fixed E2E fan-out restriction for the subsequent full-pipeline
+experiment. The remaining coverage, trust and frontend adoption rules continue.
+
 ## Consequences
 
 Measurements report execution, runner occupancy, scheduling, failures, and cancellations separately.

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -92,7 +94,7 @@ type RunSessionLaunch struct {
 // task session. A route is optional; when present it is the concrete provider
 // selection chosen by the routing dispatcher.
 type RunSessionLauncher interface {
-	StartRunSession(ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	StartRunSession(ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 		launch LaunchContext, route *RouteOverride) (RunSessionLaunch, error)
 }
 
@@ -132,9 +134,12 @@ type SessionRecoveryBlockLookup interface {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID           string
-	ExecutorProfileID    string
-	Priority             string
+	ExecutorID        string
+	ExecutorProfileID string
+	Priority          string
+	// CausingRunID is the immutable Office run that initiated this task-owned
+	// execution. It is carried through lifecycle events for transition records.
+	CausingRunID         string
 	Prompt               string
 	WorkflowStepID       string
 	PlanMode             bool
@@ -166,17 +171,17 @@ type RoutingDispatcher interface {
 	// with err=nil means routing is disabled (caller falls through to
 	// the legacy launch path) OR the run was parked (caller treats as
 	// handled — no failure escalation).
-	DispatchWithRouting(ctx context.Context, run *models.Run,
+	DispatchWithRouting(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, launch LaunchContext) (launched bool, parked bool, err error)
 	// HandlePostStartFailure classifies a streaming/tool failure for a
 	// run that was launched via routing. Returns handled=true when the
 	// routing path requeued the run (caller should NOT escalate).
-	HandlePostStartFailure(ctx context.Context, run *models.Run,
+	HandlePostStartFailure(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance, errorMessage string,
 		providerError *streams.ProviderError) (handled bool, err error)
 	// MarkRunSuccessHealth flips a successful run's resolved provider /
 	// model / tier scopes back to healthy.
-	MarkRunSuccessHealth(ctx context.Context, run *models.Run,
+	MarkRunSuccessHealth(ctx context.Context, run *runsmodels.Run,
 		agent *models.AgentInstance)
 }
 
@@ -1149,7 +1154,7 @@ func (s *Service) ReleaseTaskCheckout(ctx context.Context, taskID string) error 
 // -- Runs --
 
 // ListRuns returns run requests for a workspace.
-func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*models.Run, error) {
+func (s *Service) ListRuns(ctx context.Context, wsID string) ([]*runsmodels.Run, error) {
 	return s.repo.ListRuns(ctx, wsID)
 }
 

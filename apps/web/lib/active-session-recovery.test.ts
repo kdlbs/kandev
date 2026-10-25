@@ -252,6 +252,27 @@ describe("active session recovery ownership", () => {
     expect(model?.stamp).toBe("managed-clone-stamp");
     expect(selectActiveSessionRecovery({ ...session, state: "CANCELLED" }, [])).toBeNull();
   });
+  it.each(["CANCELLED", "COMPLETED"])("owns a new cleanup failure while %s", (state) => {
+    const cleanupError = {
+      ...error,
+      stamp: "cleanup-resume",
+      occurred_at: FAILED_AT,
+      phase: "bootstrap",
+      scope: "session",
+      causes: [{ operation: "resume", code: "runtime_cleanup_failed", prompt_not_sent: true }],
+    };
+    const failedSession = { ...session, state, metadata: { last_agent_error: cleanupError } };
+    expect(selectActiveSessionRecovery(failedSession, [])?.stamp).toBe("cleanup-resume");
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...failedSession,
+          metadata: { ...failedSession.metadata, ...resolution("cleanup-resume") },
+        },
+        [],
+      ),
+    ).toBeNull();
+  });
   it.each(["RUNNING", "STARTING", "COMPLETED", "CANCELLED"])(
     "does not block %s from retained errors",
     (state) => {

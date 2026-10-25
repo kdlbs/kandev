@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createAppStore } from "@/lib/state/store";
 import type { Task } from "@/components/kanban-card";
 
 const mockMoveTaskById = vi.fn();
@@ -7,27 +8,11 @@ vi.mock("@/hooks/use-task-actions", () => ({
   useTaskActions: () => ({ moveTaskById: mockMoveTaskById }),
 }));
 
-type FakeTask = { id: string; workflowStepId: string; position: number };
-
 const WORKFLOW_ID = "wf1";
 const SOURCE_STEP = "step-source";
 const TARGET_STEP = "step-target";
+let store = createAppStore();
 
-let storeState: {
-  kanbanMulti: { snapshots: Record<string, { tasks: FakeTask[] }> };
-  setWorkflowSnapshot: (wfId: string, snapshot: { tasks: FakeTask[] }) => void;
-};
-
-function resetStore(tasks: FakeTask[]) {
-  storeState = {
-    kanbanMulti: { snapshots: { [WORKFLOW_ID]: { tasks } } },
-    setWorkflowSnapshot(wfId, snapshot) {
-      storeState.kanbanMulti.snapshots[wfId] = snapshot;
-    },
-  };
-}
-
-const store = { getState: () => storeState };
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => store,
 }));
@@ -35,10 +20,37 @@ vi.mock("@/components/state-provider", () => ({
 import { useCrossStepMove } from "./use-swimlane-kanban-dnd";
 
 beforeEach(() => {
-  resetStore([
-    { id: "moving", workflowStepId: SOURCE_STEP, position: 0 },
-    { id: "occupant", workflowStepId: TARGET_STEP, position: 0 },
-  ]);
+  store = createAppStore({
+    kanbanMulti: {
+      snapshots: {
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "Workflow",
+          steps: [],
+          tasks: [
+            {
+              id: "moving",
+              workflowId: WORKFLOW_ID,
+              workflowStepId: SOURCE_STEP,
+              title: "Moving",
+              position: 0,
+            },
+            {
+              id: "occupant",
+              workflowId: WORKFLOW_ID,
+              workflowStepId: TARGET_STEP,
+              title: "Occupant",
+              position: 0,
+            },
+          ],
+        },
+      },
+      isLoading: false,
+      orderRevisionByStepId: {},
+      pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
+    },
+  });
   mockMoveTaskById.mockReset();
 });
 
@@ -57,11 +69,11 @@ describe("useCrossStepMove", () => {
       workflow_step_id: TARGET_STEP,
     });
     expect(mockMoveTaskById.mock.calls[0]?.[1]).not.toHaveProperty("position");
-    const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
+    const tasks = store.getState().kanbanMulti.snapshots[WORKFLOW_ID].tasks;
     expect(tasks.find((t) => t.id === "moving")?.workflowStepId).toBe(TARGET_STEP);
   });
 
-  it("restores the original snapshot on failure", async () => {
+  it("restores the owned original stage on failure", async () => {
     mockMoveTaskById.mockRejectedValue(new Error("move failed"));
     const onMoveError = vi.fn();
     const { result } = renderHook(() => useCrossStepMove(WORKFLOW_ID, onMoveError));
@@ -71,7 +83,7 @@ describe("useCrossStepMove", () => {
       await result.current("moving", TARGET_STEP, task);
     });
 
-    const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
+    const tasks = store.getState().kanbanMulti.snapshots[WORKFLOW_ID].tasks;
     expect(tasks.find((t) => t.id === "moving")?.workflowStepId).toBe(SOURCE_STEP);
     expect(onMoveError).toHaveBeenCalledWith(expect.objectContaining({ taskId: "moving" }));
   });

@@ -181,13 +181,13 @@ test.describe("PR top-bar CI popover", () => {
     await expect(session.prDetailPanel()).toBeVisible();
   });
 
-  test("counts row uses TaskPR aggregates and hides zero-count buckets", async ({
+  test("PR aggregate, review and navigation state transitions", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const title = "Counts Aggregates";
+    const title = "PR aggregate state transitions";
     const seed = await seedTask(
       apiClient,
       seedData.workspaceId,
@@ -196,57 +196,117 @@ test.describe("PR top-bar CI popover", () => {
       title,
     );
     await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 27,
-      checks_passing: 22,
-      review_state: "approved",
-      review_count: 1,
-      pending_review_count: 0,
+      checks_state: "",
+      checks_total: 0,
+      checks_passing: 0,
     });
     const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
-
-    await expect(session.prCheckGroupCount("passed")).toHaveText("22");
-    await expect(session.prCheckGroupCount("failed")).toHaveText("5");
-    // No in-progress group when checks_state=failure with full passing count.
-    await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
-  });
-
-  test("shows only Passed when all checks succeed (in_progress + failed hidden)", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "All Passed";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "success",
-      checks_total: 22,
-      checks_passing: 22,
+    await test.step("empty state when PR has no checks at all", async () => {
+      await expect(session.prChecksEmpty()).toBeVisible();
+      await expect(session.prChecksEmpty()).toContainText("No checks have started");
     });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
+    await test.step("counts row uses TaskPR aggregates and hides zero-count buckets", async () => {
+      await associatePR(apiClient, seed.taskId, {
+        checks_state: "failure",
+        checks_total: 27,
+        checks_passing: 22,
+        review_state: "approved",
+        review_count: 1,
+        pending_review_count: 0,
+      });
+      await session.hoverPRTopbar();
+      await session.prTopbarPopover().hover();
+      await expect(session.prCheckGroupCount("passed")).toHaveText("22");
+      await expect(session.prCheckGroupCount("failed")).toHaveText("5");
+      // No in-progress group when checks_state=failure with full passing count.
+      await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
+    });
+    await test.step("counts update on a re-associate (live refresh)", async () => {
+      await expect(session.prCheckGroupCount("passed")).toHaveText("22");
 
-    await expect(session.prCheckGroup("passed")).toBeVisible();
-    await expect(session.prCheckGroupCount("passed")).toHaveText("22");
-    await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
-    await expect(session.prCheckGroup("failed")).toHaveCount(0);
-    // Passed group is header-only — no workflow rows beneath it.
-    await expect(session.prCheckGroup("passed").getByTestId("pr-workflow-row")).toHaveCount(0);
+      // Re-POST with a new passing count to simulate a CI tick.
+      await associatePR(apiClient, seed.taskId, {
+        checks_state: "failure",
+        checks_total: 27,
+        checks_passing: 25,
+      });
+      await expect(session.prCheckGroupCount("passed")).toHaveText("25", { timeout: 5_000 });
+    });
+    await test.step("shows only Passed when all checks succeed (in_progress + failed hidden)", async () => {
+      await associatePR(apiClient, seed.taskId, {
+        checks_state: "success",
+        checks_total: 22,
+        checks_passing: 22,
+      });
+      await session.hoverPRTopbar();
+      await session.prTopbarPopover().hover();
+      await expect(session.prCheckGroup("passed")).toBeVisible();
+      await expect(session.prCheckGroupCount("passed")).toHaveText("22");
+      await expect(session.prCheckGroup("in_progress")).toHaveCount(0);
+      await expect(session.prCheckGroup("failed")).toHaveCount(0);
+      // Passed group is header-only — no workflow rows beneath it.
+      await expect(session.prCheckGroup("passed").getByTestId("pr-workflow-row")).toHaveCount(0);
+    });
+    await test.step("review row shows N / M required + unresolved comments count", async () => {
+      await associatePR(apiClient, seed.taskId, {
+        review_state: "approved",
+        review_count: 1,
+        pending_review_count: 0,
+        required_reviews: 2,
+        unresolved_review_threads: 3,
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+      });
+      await session.hoverPRTopbar();
+      await session.prTopbarPopover().hover();
+      await expect(session.prReviewRow()).toBeVisible();
+      await expect(session.prReviewRow()).toContainText("Approved");
+      await expect(session.prReviewRow()).toContainText("1 / 2");
+      await expect(session.prCommentsRow()).toBeVisible();
+      await expect(session.prCommentsRow()).toContainText("3 unresolved comments");
+    });
+    await test.step("comments row hidden when unresolved_review_threads = 0", async () => {
+      await associatePR(apiClient, seed.taskId, {
+        review_state: "approved",
+        review_count: 1,
+        unresolved_review_threads: 0,
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+      });
+      await session.hoverPRTopbar();
+      await session.prTopbarPopover().hover();
+      await expect(session.prReviewRow()).toBeVisible();
+      await expect(session.prCommentsRow()).toHaveCount(0);
+    });
+    await test.step("header PR link points at the PR on GitHub", async () => {
+      await associatePR(apiClient, seed.taskId, {
+        checks_state: "success",
+        checks_total: 1,
+        checks_passing: 1,
+      });
+      await session.hoverPRTopbar();
+      await session.prTopbarPopover().hover();
+      await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
+      await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(
+        0,
+      );
+    });
+    await test.step("hover opens popover; mouse-leave closes it after the close delay", async () => {
+      await session.hoverPRTopbar();
+      // The hover helper focuses the trigger to make the synthetic hover
+      // reliable. Blur it here so this assertion exercises pointer-only close.
+      await session.prTopbarButton().blur();
+      // Move the cursor far away from the popover; close timer fires and the
+      // popover unmounts.
+      await testPage.mouse.move(0, 0);
+      await expect(session.prTopbarPopover()).toHaveCount(0, { timeout: 5_000 });
+    });
   });
 
-  test("workflow rollup groups jobs and shows (N/M passed) badge under Failed", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
+  test("workflow grouping and pointer bridges", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const title = "Workflow Rollup";
     const seed = await seedTask(
@@ -266,7 +326,13 @@ test.describe("PR top-bar CI popover", () => {
       repo: REPO,
       pr_number: PR_NUMBER,
       checks: [
-        { name: "Lint / check", status: "completed", conclusion: "failure", html_url: "" },
+        {
+          name: "Lint / check",
+          status: "completed",
+          conclusion: "failure",
+          html_url: "https://example.com/lint-run-1",
+          output: "lint failed",
+        },
         { name: "E2E / a", status: "completed", conclusion: "failure", html_url: "" },
         { name: "E2E / b", status: "completed", conclusion: "success", html_url: "" },
         { name: "E2E / c", status: "completed", conclusion: "success", html_url: "" },
@@ -277,10 +343,71 @@ test.describe("PR top-bar CI popover", () => {
     const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
-    await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
-    await expect(session.prWorkflowRow("E2E")).toBeVisible();
-    await expect(session.prWorkflowRow("Lint")).toContainText("0/1 passed");
-    await expect(session.prWorkflowRow("E2E")).toContainText("4/5 passed");
+    await test.step("workflow rollup groups jobs and shows (N/M passed) badge under Failed", async () => {
+      await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
+      await expect(session.prWorkflowRow("E2E")).toBeVisible();
+      await expect(session.prWorkflowRow("Lint")).toContainText("0/1 passed");
+      await expect(session.prWorkflowRow("E2E")).toContainText("4/5 passed");
+    });
+    await test.step("failed workflow row exposes open + add-to-context buttons", async () => {
+      await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
+      await expect(session.prWorkflowOpenButton("Lint")).toBeVisible();
+      await expect(session.prWorkflowAddContextButton("Lint")).toBeVisible();
+    });
+    await test.step("popover survives the cursor crossing from the button onto it", async () => {
+      await session.hoverPRTopbar();
+      const popover = session.prTopbarPopover();
+      const openButton = session.prWorkflowOpenButton("Lint");
+      await expect(openButton).toBeVisible({ timeout: 10_000 });
+
+      // Real cursor crossing from the trigger button onto a control *inside* the
+      // popover, over the sideOffset gap. The browser fires a native mouseleave on
+      // the button (queuing the close timer) immediately followed by a mouseenter
+      // on the popover — the enter handler must cancel the pending close, else the
+      // popover vanishes before the user can reach anything inside it.
+      await openButton.hover();
+
+      // Past the 150ms close delay the popover must still be open and its buttons
+      // clickable.
+      await dwell(
+        testPage,
+        600,
+        "product-timer",
+        "outlasts our own 150ms hover-intent close delay; the assertion is that the popover is still there afterwards, and a close that must not happen publishes nothing to wait on",
+      );
+      await expect(popover).toBeVisible();
+      await expect(openButton).toBeVisible();
+      await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
+    });
+    await test.step("chip popover survives the cursor crossing from the chip onto it", async () => {
+      await testPage.keyboard.press("Escape");
+      await expect(session.prTopbarPopover()).toBeHidden();
+      await expect(session.prStatusChip()).toBeVisible();
+      await session.hoverPRChip();
+
+      // Wait for the async CI content so the popover is at its final size/position
+      // before crossing onto it.
+      const popover = session.prChipPopover();
+      const openButton = popover.getByTestId("pr-workflow-open").first();
+      await expect(openButton).toBeVisible({ timeout: 10_000 });
+
+      // Cross from the chip onto a control inside the popover (over the sideOffset
+      // gap). The enter handler must cancel the close queued when the cursor left
+      // the chip, or the popover vanishes before its buttons can be used.
+      await openButton.hover();
+
+      // Past the 150ms close delay the popover must still be open and interactive,
+      // not merely mounted — parity with the topbar test.
+      await dwell(
+        testPage,
+        600,
+        "product-timer",
+        "outlasts our own 150ms hover-intent close delay; the assertion is that the popover survives the gap crossing, and a close that must not happen publishes nothing to wait on",
+      );
+      await expect(popover).toBeVisible();
+      await expect(openButton).toBeVisible();
+      await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
+    });
   });
 
   test("desktop CI popovers scroll instead of overflowing the viewport", async ({
@@ -315,308 +442,6 @@ test.describe("PR top-bar CI popover", () => {
     await expectScrollablePopoverWithinViewport(testPage, session.prTopbarPopover());
   });
 
-  test("review row shows N / M required + unresolved comments count", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Review + Comments";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      review_state: "approved",
-      review_count: 1,
-      pending_review_count: 0,
-      required_reviews: 2,
-      unresolved_review_threads: 3,
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-
-    await expect(session.prReviewRow()).toBeVisible();
-    await expect(session.prReviewRow()).toContainText("Approved");
-    await expect(session.prReviewRow()).toContainText("1 / 2");
-    await expect(session.prCommentsRow()).toBeVisible();
-    await expect(session.prCommentsRow()).toContainText("3 unresolved comments");
-  });
-
-  test("comments row hidden when unresolved_review_threads = 0", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "No Unresolved";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      review_state: "approved",
-      review_count: 1,
-      unresolved_review_threads: 0,
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-
-    await expect(session.prReviewRow()).toBeVisible();
-    await expect(session.prCommentsRow()).toHaveCount(0);
-  });
-
-  test("hover opens popover; mouse-leave closes it after the close delay", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Hover Open Close";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-
-    await session.hoverPRTopbar();
-    // The hover helper focuses the trigger to make the synthetic hover
-    // reliable. Blur it here so this assertion exercises pointer-only close.
-    await session.prTopbarButton().blur();
-    // Move the cursor far away from the popover; close timer fires and the
-    // popover unmounts.
-    await testPage.mouse.move(0, 0);
-    await expect(session.prTopbarPopover()).toHaveCount(0, { timeout: 5_000 });
-  });
-
-  test("popover survives the cursor crossing from the button onto it", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Hover Bridge Topbar";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 1,
-      checks_passing: 0,
-    });
-    await apiClient.mockGitHubSeedPRFeedback({
-      owner: OWNER,
-      repo: REPO,
-      pr_number: PR_NUMBER,
-      checks: [
-        {
-          name: "Lint / check",
-          status: "completed",
-          conclusion: "failure",
-          html_url: "https://example.com/lint-run-1",
-          output: "lint failed",
-        },
-      ],
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-
-    // Wait for the async CI content so the popover is at its final size/position
-    // before we cross onto it (it grows/repositions once checks load).
-    const popover = session.prTopbarPopover();
-    const openButton = session.prWorkflowOpenButton("Lint");
-    await expect(openButton).toBeVisible({ timeout: 10_000 });
-
-    // Real cursor crossing from the trigger button onto a control *inside* the
-    // popover, over the sideOffset gap. The browser fires a native mouseleave on
-    // the button (queuing the close timer) immediately followed by a mouseenter
-    // on the popover — the enter handler must cancel the pending close, else the
-    // popover vanishes before the user can reach anything inside it.
-    await openButton.hover();
-
-    // Past the 150ms close delay the popover must still be open and its buttons
-    // clickable.
-    await dwell(
-      testPage,
-      600,
-      "product-timer",
-      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover is still there afterwards, and a close that must not happen publishes nothing to wait on",
-    );
-    await expect(popover).toBeVisible();
-    await expect(openButton).toBeVisible();
-    await expect(session.prWorkflowAddContextButton("Lint")).toBeEnabled();
-  });
-
-  test("chip popover survives the cursor crossing from the chip onto it", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Hover Bridge Chip";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 1,
-      checks_passing: 0,
-    });
-    await apiClient.mockGitHubSeedPRFeedback({
-      owner: OWNER,
-      repo: REPO,
-      pr_number: PR_NUMBER,
-      checks: [
-        {
-          name: "Lint / check",
-          status: "completed",
-          conclusion: "failure",
-          html_url: "https://example.com/lint-run-1",
-          output: "lint failed",
-        },
-      ],
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await expect(session.prStatusChip()).toBeVisible();
-    await session.hoverPRChip();
-
-    // Wait for the async CI content so the popover is at its final size/position
-    // before crossing onto it.
-    const popover = session.prChipPopover();
-    const openButton = popover.getByTestId("pr-workflow-open").first();
-    await expect(openButton).toBeVisible({ timeout: 10_000 });
-
-    // Cross from the chip onto a control inside the popover (over the sideOffset
-    // gap). The enter handler must cancel the close queued when the cursor left
-    // the chip, or the popover vanishes before its buttons can be used.
-    await openButton.hover();
-
-    // Past the 150ms close delay the popover must still be open and interactive,
-    // not merely mounted — parity with the topbar test.
-    await dwell(
-      testPage,
-      600,
-      "product-timer",
-      "outlasts our own 150ms hover-intent close delay; the assertion is that the popover survives the gap crossing, and a close that must not happen publishes nothing to wait on",
-    );
-    await expect(popover).toBeVisible();
-    await expect(openButton).toBeVisible();
-    await expect(popover.getByTestId("pr-workflow-add-context").first()).toBeEnabled();
-  });
-
-  test("failed workflow row exposes open + add-to-context buttons", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Failed Affordances";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 1,
-      checks_passing: 0,
-    });
-    await apiClient.mockGitHubSeedPRFeedback({
-      owner: OWNER,
-      repo: REPO,
-      pr_number: PR_NUMBER,
-      checks: [
-        {
-          name: "Lint / check",
-          status: "completed",
-          conclusion: "failure",
-          html_url: "https://example.com/lint-run-1",
-          output: "lint failed",
-        },
-      ],
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-    // Move into the popover so it stays open while we read the row.
-    await session.prTopbarPopover().hover();
-
-    await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
-    await expect(session.prWorkflowOpenButton("Lint")).toBeVisible();
-    await expect(session.prWorkflowAddContextButton("Lint")).toBeVisible();
-  });
-
-  test("header PR link points at the PR on GitHub", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(120_000);
-    const title = "External Link";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "success",
-      checks_total: 1,
-      checks_passing: 1,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-    await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
-    await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(0);
-  });
-
-  test("empty state when PR has no checks at all", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(120_000);
-    const title = "No Checks Yet";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "",
-      checks_total: 0,
-      checks_passing: 0,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-    await expect(session.prChecksEmpty()).toBeVisible();
-    await expect(session.prChecksEmpty()).toContainText("No checks have started");
-  });
-
   test("auth lost surfaces a Reconnect GitHub link", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const title = "Reconnect GitHub";
@@ -637,39 +462,6 @@ test.describe("PR top-bar CI popover", () => {
     await session.hoverPRTopbar();
     await expect(session.prPopoverReconnectLink()).toBeVisible();
     await expect(session.prPopoverReconnectLink()).toHaveAttribute("href", /settings/);
-  });
-
-  test("counts update on a re-associate (live refresh)", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const title = "Live Refresh";
-    const seed = await seedTask(
-      apiClient,
-      seedData.workspaceId,
-      seedData.agentProfileId,
-      seedData.repositoryId,
-      title,
-    );
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 27,
-      checks_passing: 22,
-    });
-    const session = await openTaskAndWait(testPage, seed, title);
-    await session.hoverPRTopbar();
-    await session.prTopbarPopover().hover();
-    await expect(session.prCheckGroupCount("passed")).toHaveText("22");
-
-    // Re-POST with a new passing count to simulate a CI tick.
-    await associatePR(apiClient, seed.taskId, {
-      checks_state: "failure",
-      checks_total: 27,
-      checks_passing: 25,
-    });
-    await expect(session.prCheckGroupCount("passed")).toHaveText("25", { timeout: 5_000 });
   });
 
   test("footer reports the refresh instead of claiming the data is fresh", async ({

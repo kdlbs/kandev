@@ -106,7 +106,7 @@ func TestReject_Phase2OnDeletedCoordinatorIs404(t *testing.T) {
 	if err := store.DeleteCoordinator(context.Background(), c.WorkspaceID, c.ID); err != nil {
 		t.Fatal(err)
 	}
-	matched, err := svc.rejectProposalStore(context.Background(), p, "", "")
+	matched, err := svc.rejectProposalStore(context.Background(), p, "", "", store.now().UTC())
 	if err != nil || matched {
 		t.Fatalf("matched=%v err=%v, want false/nil", matched, err)
 	}

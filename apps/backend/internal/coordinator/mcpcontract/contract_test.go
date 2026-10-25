@@ -21,12 +21,15 @@ func TestDecisionActions_ReservesApproveAndReject(t *testing.T) {
 	if ActionRejectProposal != "coordinator.reject_proposal" {
 		t.Errorf("ActionRejectProposal = %q, want %q", ActionRejectProposal, "coordinator.reject_proposal")
 	}
-	for _, action := range []string{ActionApproveProposal, ActionRejectProposal} {
+	if ActionReplyProposal != "coordinator.reply_proposal" || ActionDeliverReply != "coordinator.deliver_reply" {
+		t.Errorf("reply action names = %q, %q", ActionReplyProposal, ActionDeliverReply)
+	}
+	for _, action := range []string{ActionApproveProposal, ActionRejectProposal, ActionReplyProposal, ActionDeliverReply} {
 		if _, ok := DecisionActions[action]; !ok {
 			t.Errorf("DecisionActions missing %q", action)
 		}
 	}
-	if len(DecisionActions) != 2 {
-		t.Errorf("len(DecisionActions) = %d, want 2", len(DecisionActions))
+	if len(DecisionActions) != 4 {
+		t.Errorf("len(DecisionActions) = %d, want 4", len(DecisionActions))
 	}
 }

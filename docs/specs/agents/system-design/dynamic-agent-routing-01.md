@@ -127,7 +127,9 @@ its work through complete existing agent profiles.
 - Kandev always registers one built-in virtual agent family with canonical ID
   `dynamic` and display name Dynamic. It cannot be disabled or uninstalled,
   does not expose a CLI command, and is not probed as a concrete inference
-  agent. Profiles created under it have kind `dynamic`.
+  agent. Profiles created under it have kind `dynamic`. Every lifecycle launch
+  path resolves its agent through one helper that rejects the virtual family
+  with `ErrVirtualProfile`, so a virtual agent never reaches command building.
 - Agent settings can create a dynamic profile with a user-defined name,
   description, icon, and availability scope.
 - A dynamic profile references existing concrete agent profiles. It never
@@ -512,6 +514,10 @@ and never derive historical attribution from current session state.
   returns the current route snapshot. A stale generation returns a conflict
   with the authoritative snapshot. An action during an active turn returns a
   failed-precondition response.
+  The browser applies an action response against the current session row. A
+  session projection received after the request owns the same or a newer route
+  generation; a delayed action response cannot replace that projection. The
+  response must not recreate a removed session or invent a session timestamp.
 - Route events use the contracts described above. All route-scoped user actions
   include the expected generation so a stale Retry now or Skip now action cannot
   affect a successor route.

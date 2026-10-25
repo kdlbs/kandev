@@ -192,3 +192,10 @@ and corrected-runtime deployment await the coordinated interruption checkpoint.
   disk usage differ. Backups and pre-compaction files retain removed bytes.
 - Observed traffic is a short interval. Verify several intervals locally and a sustained
   mixed-history fixture; do not claim a permanent total-size quota.
+
+## Throughput follow-up
+
+The [database maintenance throughput package](../database-maintenance-throughput/plan.md)
+addresses backup rebuilding and cleanup idle time observed after PR #4418. It does
+not change this package's historical verification results. The automatic live worker
+is running; live physical compaction has not been performed by this session.

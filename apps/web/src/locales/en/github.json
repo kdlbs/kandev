@@ -54,7 +54,7 @@
   "autoFixCiAndAddressComments": "Auto-fix CI and address comments",
   "autoFixPrompt": "Auto-fix prompt",
   "autoFixPromptDescription": "This prompt is used only for this task. Leave it blank to use the default prompt. Add <0>{{placeholder}}</0> when you want Kandev to include PR feedback, ordinary merge-conflict context, actionable queue-removal context, and available failed merge-group checks.",
-  "autoFixRoundExplanation": "Auto-fix has used {{current}} of {{max}} rounds for this PR. A round is counted when Kandev sends or queues a CI auto-fix message. Kandev waits for all PR checks to finish before starting a new CI auto-fix turn, so the agent gets the final failed checks, current comments, ordinary merge conflicts, and actionable merge-queue removals together. Updating an already queued auto-fix message does not use another round. When this is at {{max}}/{{max}} and there is no pending auto-fix message left to update, Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and re-enable auto-fix after manual review to start over. If a turn ends without a recorded outcome, Kandev can retry the same settled feedback, and that retry uses another round. After an action-taken outcome, Kandev waits for provider progress before retrying. A non-actionable or blocked outcome acknowledges unchanged feedback and does not retry it.",
+  "autoFixRoundExplanation": "Auto-fix has used {{current}} of {{max}} rounds.\n\nEach new or retried auto-fix message uses one round when sent or queued. Updating a queued message uses no extra round. Kandev waits for all PR checks before starting the next fix. The fix includes failed checks, comments, merge conflicts, and merge-queue removals that can be repaired.\n\nAt the limit, auto-fix pauses once no queued message remains to update. After reviewing the PR, disable and re-enable auto-fix to reset the count.\n\nIf the agent reports no outcome, Kandev may retry the same feedback. After the agent makes a change, Kandev waits for GitHub to update before retrying. Feedback marked blocked or requiring no action is not retried while unchanged.",
   "autoMerge": "Auto-merge",
   "autoMergeEnabledAria": "auto-merge enabled",
   "autoMergeWhenReady": "Auto-merge when ready",
@@ -651,5 +651,11 @@
   "mergeQueueRecoveryStatusRepairRequested": "Repair requested for this removal.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "Repair requested. Waiting for a new commit before requeue.",
   "mergeQueueRecoveryStatusWaitingForCommit": "Waiting for a new commit before requeue.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks."
+  "mergeQueueRecoveryStatusWaitingForChecks": "New head detected. Waiting for required checks.",
+  "mergeAccessLoading": "Checking merge permissions.",
+  "mergeAccessUnavailable": "Merge permissions are unavailable.",
+  "mergeAccessDeniedByActor": "{{actor}} cannot merge into {{repository}}.",
+  "mergeAccessDenied": "This account cannot merge into {{repository}}.",
+  "checkMergeAccess": "Check again",
+  "mergeAsActor": "as {{actor}}"
 }

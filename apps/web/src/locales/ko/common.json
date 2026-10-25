@@ -551,5 +551,17 @@
   "sidebarYearsMax": "99년+",
   "integrationSettings": "통합 설정",
   "pageNavigation": "이 페이지에서",
-  "viewOptions": "보기 옵션"
+  "viewOptions": "보기 옵션",
+  "commandGoToArchivedTasks": "보관된 작업으로 이동",
+  "commandGoToArchivedTasksKeywords": "보관된 작업, 보관, 기록",
+  "conversationSearch_open": "작업 검색",
+  "conversationSearch_match": "대화 일치",
+  "conversationSearch_searching": "대화 검색 중…",
+  "conversationSearch_indexing": "대화 색인을 생성하는 중입니다.",
+  "conversationSearch_limited": "일부 대화 일치 항목이 생략되었습니다. 검색 범위를 좁히세요.",
+  "conversationSearch_unavailable": "대화 검색을 사용할 수 없습니다.",
+  "conversationSearch_query_too_short": "대화를 검색하려면 3자 이상 입력하세요.",
+  "conversationSearch_query_too_long": "대화 검색어는 200자 이하로 입력하세요.",
+  "conversationSearch_query_too_broad": "문자 또는 숫자를 3개 이상 연속해서 입력하세요.",
+  "conversationSearch_title": "명령 팔레트"
 }

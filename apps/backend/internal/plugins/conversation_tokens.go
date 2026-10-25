@@ -189,22 +189,6 @@ func (m *conversationTokenManager) renew(claims conversationTokenClaims) (string
 	return token, expiresAt, err
 }
 
-func (m *conversationTokenManager) mintResume(
-	pluginID string,
-	userID string,
-	generation int64,
-	sessionID string,
-	consumerID string,
-	wireID string,
-	sequence uint64,
-) (string, error) {
-	return m.seal(conversationTokenClaims{
-		Version: 1, Kind: tokenKindResume, PluginID: pluginID, UserID: userID,
-		Generation: generation, ExpiresAt: m.now().UTC().Add(conversationTokenTTL).Unix(),
-		SessionID: sessionID, ConsumerID: consumerID, WireID: wireID, Sequence: sequence,
-	})
-}
-
 func (m *conversationTokenManager) seal(claims conversationTokenClaims) (string, error) {
 	if claims.Nonce == "" {
 		nonce := make([]byte, 16)

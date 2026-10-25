@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import type { Branch } from "@/lib/types/http";
 
@@ -284,34 +284,33 @@ describe("Pill tooltip", () => {
     expect(tooltipTrigger.querySelector("[aria-hidden='true'] button")).not.toBeNull();
   });
 
-  it("allows the first later mouse hover when the pointer left for the picker", async () => {
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  it("suppresses restored focus and allows the first later mouse hover after selection", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
 
     renderTooltipPill({ options: [{ value: "repo-1", label: "repo-one" }] });
+    act(() => vi.advanceTimersToNextFrame());
 
     const trigger = screen.getByRole("button", { name: new RegExp(TOOLTIP_PILL_VALUE, "i") });
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
     fireEvent.click(trigger);
     fireEvent.pointerLeave(trigger);
     fireEvent.click(await screen.findByRole("option", { name: "repo-one" }));
-    fireEvent.pointerEnter(trigger);
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
+    fireEvent.focus(trigger);
+
+    expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("false");
+
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
 
     expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("true");
   });
 
   it("keeps touch selection tooltip suppression through focus restoration", async () => {
-    const frameCallbacks: FrameRequestCallback[] = [];
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      frameCallbacks.push(callback);
-      return frameCallbacks.length;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
 
     renderTooltipPill({ options: [{ value: "repo-1", label: "repo-one" }] });
-    frameCallbacks.shift()?.(0);
+    act(() => vi.advanceTimersToNextFrame());
 
     const trigger = screen.getByRole("button", { name: new RegExp(TOOLTIP_PILL_VALUE, "i") });
     fireEvent.pointerEnter(trigger, { pointerType: "touch" });
@@ -320,8 +319,8 @@ describe("Pill tooltip", () => {
     fireEvent.pointerDown(option, { pointerType: "touch" });
     fireEvent.click(option);
     fireEvent.pointerLeave(trigger, { pointerType: "touch" });
-    frameCallbacks.shift()?.(0);
-    frameCallbacks.shift()?.(0);
+    act(() => vi.advanceTimersToNextFrame());
+    act(() => vi.advanceTimersToNextFrame());
     fireEvent.blur(trigger);
     fireEvent.focus(trigger);
 

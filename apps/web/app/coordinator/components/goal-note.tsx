@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
 import { useGoal } from "@/hooks/domains/coordinator/use-goal";
 import type { Goal } from "@/lib/api/domains/coordinator-api";
+import { linkToCoordinatorSettings } from "@/lib/coordinator/links";
 import {
   formatCalendarDate,
   formatTimestampDate,
@@ -19,7 +20,7 @@ type GoalNoteProps = {
 };
 
 function goalSectionHref(workspaceId: string, coordinatorId: string): string {
-  return `/settings/workspaces/${workspaceId}/coordinators/${coordinatorId}?section=goal`;
+  return `${linkToCoordinatorSettings(workspaceId, coordinatorId)}?section=goal`;
 }
 
 function ActiveGoalLine({ goal }: { goal: Goal }) {

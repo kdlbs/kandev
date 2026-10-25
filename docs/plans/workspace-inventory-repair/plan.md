@@ -69,3 +69,11 @@ Task 01 includes callback-safe Git inspection, owner-bound inherited receipts,
 session-bound explicit retries, and durable environment claims shared with
 writer admission. Regression and delivery evidence is recorded in its Results
 section and the existing Kandev task for PR #3310.
+
+## Follow-up: branch continuity
+
+The [attested branch continuity package](../attested-worktree-branch-continuity/plan.md)
+corrects ordinary admission after a completed repair and later branch change.
+It preserves this package's historical results, strict explicit-retry semantics,
+and incomplete/negative attestation guards. Its new work order owns validation
+of the changed lifecycle contract.

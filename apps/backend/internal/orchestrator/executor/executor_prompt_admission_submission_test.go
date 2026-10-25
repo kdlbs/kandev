@@ -18,13 +18,13 @@ func (m *admissionSubmissionManager) PromptAgentWithAdmissionCallbackAndSubmissi
 	executionID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
 	m.submissionID = submissionID
 	if beforeAdmission != nil {
-		if err := beforeAdmission(); err != nil {
+		if err := beforeAdmission(ctx, prompt, attachments); err != nil {
 			return nil, err
 		}
 	}
@@ -44,12 +44,12 @@ func TestPromptWithAdmissionCallbackAndSubmissionIDPreservesBothCapabilities(t *
 	var admitted, dispatched bool
 	result, err := exec.PromptWithAdmissionCallbackAndSubmissionID(
 		context.Background(), "task-1", "session-1", "prompt", nil, true,
-		func() error {
+		func(context.Context, string, []v1.MessageAttachment) error {
 			admitted = true
 			return nil
 		},
 		func() { dispatched = true },
-		"submission-42",
+		"submission-42", nil,
 	)
 	if err != nil {
 		t.Fatalf("PromptWithAdmissionCallbackAndSubmissionID: %v", err)
@@ -74,14 +74,50 @@ func TestPromptWithAdmissionCallbackAndSubmissionIDFailsClosedWithoutCapability(
 	var callbackCalled bool
 	_, err := exec.PromptWithAdmissionCallbackAndSubmissionID(
 		context.Background(), "task-1", "session-1", "prompt", nil, true,
-		func() error { callbackCalled = true; return nil },
+		func(context.Context, string, []v1.MessageAttachment) error { callbackCalled = true; return nil },
 		func() { callbackCalled = true },
-		"submission-42",
+		"submission-42", nil,
 	)
 	if !errors.Is(err, ErrPromptAdmissionCallbackUnsupported) {
 		t.Fatalf("error = %v, want unsupported combined admission capability", err)
 	}
 	if callbackCalled || manager.promptAgentCallCount != 0 {
 		t.Fatalf("unsupported path ran callbacks or prompt: callback=%v prompt_calls=%d", callbackCalled, manager.promptAgentCallCount)
+	}
+}
+
+func TestPromptPassthroughRejectsBeforeInputAndAcceptance(t *testing.T) {
+	for _, rejectAdmission := range []bool{true, false} {
+		t.Run(map[bool]string{true: "admission", false: "running publication"}[rejectAdmission], func(t *testing.T) {
+			repo := newMockRepository()
+			manager := &mockAgentManager{isPassthroughSessionFunc: func(context.Context, string) bool { return true }}
+			seedPassthroughSession(t, repo, manager, "task-1", "session-1", "execution-1")
+			exec := newTestExecutor(t, manager, repo)
+			rejection := errors.New("admission ownership rejected")
+			var publications, accepted int
+			result, err := exec.PromptWithAdmissionCallbackAndSubmissionID(
+				context.Background(), "task-1", "session-1", "prompt", nil, false,
+				func(context.Context, string, []v1.MessageAttachment) error {
+					if rejectAdmission {
+						return rejection
+					}
+					return nil
+				},
+				func() { accepted++ }, "", func() error { publications++; return rejection },
+			)
+			if !errors.Is(err, rejection) || result != nil {
+				t.Fatalf("result=%v error=%v, want rejection", result, err)
+			}
+			if accepted != 0 || len(manager.writePassthroughStdinCalls) != 0 {
+				t.Fatalf("rejected prompt accepted=%d writes=%d", accepted, len(manager.writePassthroughStdinCalls))
+			}
+			wantPublications := 1
+			if rejectAdmission {
+				wantPublications = 0
+			}
+			if publications != wantPublications {
+				t.Fatalf("publications=%d, want %d", publications, wantPublications)
+			}
+		})
 	}
 }

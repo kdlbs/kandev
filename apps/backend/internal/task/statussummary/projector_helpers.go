@@ -210,10 +210,6 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 		slices.Equal(a.RecoveryActions, b.RecoveryActions) && models.AgentErrorCausesEqual(a.Causes, b.Causes)
 }
 
-func normalizeRecoveryActions(actions []string) []string {
-	return models.NormalizeRecoveryActions(actions)
-}
-
 func normalizeRecoveryActionsForCategory(category string, actions []string) []string {
 	return models.NormalizeRecoveryActionsForCategory(category, actions)
 }

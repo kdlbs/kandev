@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -49,11 +51,17 @@ func newTestServer(t *testing.T) *Server {
 
 func prepareVscodeTestServer(t *testing.T) *Server {
 	t.Helper()
-	t.Setenv(apiTestVscodeFixtureEnv, "1")
+	shutdownPath := filepath.Join(t.TempDir(), "vscode-fixture-shutdown")
+	t.Setenv(apiTestVscodeFixtureEnv, shutdownPath)
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir(), VscodeCommand: os.Args[0]}
 	procMgr := process.NewManager(cfg, log)
 	t.Cleanup(func() {
+		if runtime.GOOS == "windows" {
+			if err := os.WriteFile(shutdownPath, nil, 0o600); err != nil {
+				t.Errorf("request VS Code fixture shutdown: %v", err)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := procMgr.StopVscode(ctx); err != nil {
@@ -138,7 +146,7 @@ func TestHandleAgentConfigure_UsesLegacyOnlyWhenArgsAbsent(t *testing.T) {
 func dialTestWS(t *testing.T, server *httptest.Server) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/agent/stream"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"X-Kandev-Delivery-Version": []string{"2"}})
 	if err != nil {
 		t.Fatalf("failed to dial WebSocket: %v", err)
 	}
@@ -584,6 +592,17 @@ type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }
 
 func (*mcpResultCaptureAdapter) PublishesMCPAttachmentResults() bool { return true }
 
+type resumeErrorAdapter struct {
+	mcpCaptureAdapter
+	resumeErr error
+}
+
+func (*resumeErrorAdapter) SupportsSessionResume() bool { return true }
+func (*resumeErrorAdapter) SupportsSessionLoad() bool   { return true }
+func (a *resumeErrorAdapter) ResumeSession(context.Context, string, []types.McpServer) error {
+	return a.resumeErr
+}
+
 type newSessionDeadlineCaptureAdapter struct {
 	promptErrorAdapter
 	remaining time.Duration
@@ -629,6 +648,26 @@ func TestPublishMCPAttachmentResultDoesNotDuplicateAdapterFilteredEvidence(t *te
 	case event := <-s.procMgr.GetUpdates():
 		t.Fatalf("unexpected generic attachment result: %+v", event)
 	default:
+	}
+}
+
+func TestHandleWSResumeSessionSanitizesAdapterError(t *testing.T) {
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(&resumeErrorAdapter{resumeErr: errors.New("provider details should stay server-side")})
+	msg, err := ws.NewRequest("req-resume", "agent.session.resume", ResumeSessionRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSResumeSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", resp.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if payload.Message != "session resume failed" {
+		t.Fatalf("error message = %q, want sanitized message", payload.Message)
 	}
 }
 

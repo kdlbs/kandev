@@ -11,12 +11,18 @@ import type { useSheetData, useSheetActions } from "./session-task-switcher-shee
 import type { useMobileTaskRename } from "./use-mobile-task-rename";
 import type { useMobileTaskLinking } from "./session-task-switcher-sheet";
 
+export type MobileSubtaskTarget = {
+  id: string;
+  title: string;
+  task?: ReturnType<typeof useSheetData>["allTasks"][number];
+};
+
 export function MobileSubtaskDialog({
   target,
   onTargetChange,
 }: {
-  target: { id: string; title: string } | null;
-  onTargetChange: (next: { id: string; title: string } | null) => void;
+  target: MobileSubtaskTarget | null;
+  onTargetChange: (next: MobileSubtaskTarget | null) => void;
 }) {
   return (
     <NewSubtaskDialog
@@ -26,6 +32,7 @@ export function MobileSubtaskDialog({
       }}
       parentTaskId={target?.id ?? ""}
       parentTaskTitle={target?.title ?? ""}
+      parentTask={target?.task}
     />
   );
 }
@@ -54,8 +61,8 @@ export function TaskSwitcherDialogs({
   rename: ReturnType<typeof useMobileTaskRename>;
   edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
-  subtaskTarget: { id: string; title: string } | null;
-  onSubtaskTargetChange: (target: { id: string; title: string } | null) => void;
+  subtaskTarget: MobileSubtaskTarget | null;
+  onSubtaskTargetChange: (target: MobileSubtaskTarget | null) => void;
 }) {
   return (
     <>
@@ -105,9 +112,7 @@ export function TaskSwitcherDialogs({
         taskId={actions.deletingTask?.id}
         executorType={actions.deletingTask?.executorType}
         isDeleting={actions.isDeleting}
-        onConfirm={({ cascade, discardWorktreeChanges, confirmationId }) =>
-          actions.handleDeleteConfirm({ cascade, discardWorktreeChanges, confirmationId })
-        }
+        onConfirm={actions.handleDeleteConfirm}
       />
       <TaskDetachTargetConfirmDialog
         target={actions.detachingTask}

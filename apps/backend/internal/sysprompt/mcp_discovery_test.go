@@ -36,7 +36,7 @@ func TestFormatKandevContext_CanvasGuidanceFollowsCapability(t *testing.T) {
 	assert.Contains(t, withCanvas, "Report publication status, including failures.")
 	assert.Contains(t, withCanvas, "Local files or a successful build do not publish a canvas.")
 	assert.NotContains(t, withCanvas, "Create the draft in Kandev before writing application files.")
-	assert.Contains(t, withCanvas, "Get the schema and examples from tool discovery.")
+	assert.Contains(t, withCanvas, "discover schema/examples.")
 	assert.NotContains(t, withCanvas, `"chart_type":"bar"`)
 }
 

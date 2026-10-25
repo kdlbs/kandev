@@ -20,7 +20,7 @@ test.describe("@search panel search bar — shared contract", () => {
 
   for (const kind of panels) {
     test.describe(`panel=${kind}`, () => {
-      test(`S1+S7 Ctrl+F opens bar, autofocuses input, shows counter`, async ({
+      test(`S1+S3+S4+S7 opens, focuses and closes through keyboard and button`, async ({
         testPage,
         apiClient,
         seedData,
@@ -41,30 +41,9 @@ test.describe("@search panel search bar — shared contract", () => {
         await expect(panelSearchInput(testPage)).toHaveValue("");
         // Counter is always mounted (may show 0 / 0 with no query)
         await expect(panelSearchMatchCounter(testPage)).toBeVisible();
-      });
 
-      test(`S3 Esc closes the bar`, async ({ testPage, apiClient, seedData }) => {
-        test.setTimeout(90_000);
-        const description =
-          kind === "plan" ? planScript("## Scratch\nnothing") : seedMessagesDescription(["hello"]);
-        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S3`, {
-          description: description,
-        });
-        await preparePanel(session, kind);
-
-        await openPanelSearch(testPage, kind);
         await closePanelSearch(testPage);
         await expect(panelSearchBar(testPage)).toHaveCount(0);
-      });
-
-      test(`S4 Close button closes the bar`, async ({ testPage, apiClient, seedData }) => {
-        test.setTimeout(90_000);
-        const description =
-          kind === "plan" ? planScript("## Scratch\ntext") : seedMessagesDescription(["foo"]);
-        const { session } = await seedTask(testPage, apiClient, seedData, `shared-${kind}-S4`, {
-          description: description,
-        });
-        await preparePanel(session, kind);
 
         await openPanelSearch(testPage, kind);
         // Button by title="Close (Esc)"

@@ -192,6 +192,10 @@ func (s *Service) UpdateReviewWatch(ctx context.Context, id string, req *UpdateR
 		}
 		rw.CleanupPolicy = NormalizeCleanupPolicy(*req.CleanupPolicy)
 	}
+
+	if _, err := s.executorActorContext(ctx, rw.CreatedByUserID, rw.ExecutorProfileID, rw.WorkspaceID); err != nil {
+		return err
+	}
 	return s.store.UpdateReviewWatch(ctx, rw)
 }
 
@@ -270,6 +274,12 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
+	var admissionErr error
+	ctx, admissionErr = s.executorActorContext(ctx, watch.CreatedByUserID, watch.ExecutorProfileID, watch.WorkspaceID)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+
 	connection, err := s.store.GetWorkspaceConnection(ctx, watch.WorkspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("load review watch workspace connection: %w", err)
@@ -307,7 +317,7 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
 	}
-	prs, err := s.fetchReviewPRs(ctx, resolved.Client, &fetchWatch)
+	prs, complete, err := s.fetchReviewPRs(ctx, resolved.Client, &fetchWatch, scopedCacheKey(resolved.CacheScope, workspaceSearchScopeKey(settings)))
 	if err != nil {
 		return nil, err
 	}
@@ -351,6 +361,9 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 		zap.Int("already_tracked", len(prs)-len(newPRs)))
 
 	// Update last polled
+	if !complete {
+		return newPRs, nil
+	}
 	now := time.Now().UTC()
 	watch.LastPolledAt = &now
 	_ = s.store.UpdateReviewWatch(ctx, watch)
@@ -374,7 +387,7 @@ func (s *Service) TriggerReviewWatch(ctx context.Context, watch *ReviewWatch) ([
 // fetchReviewPRs fetches PRs needing review based on the watch configuration.
 // When repo filters are set, they are always applied — even when a custom query is present
 // (the filter qualifier is appended to the query for each repo).
-func (s *Service) fetchReviewPRs(ctx context.Context, client Client, watch *ReviewWatch) ([]*PR, error) {
+func (s *Service) fetchReviewPRs(ctx context.Context, client Client, watch *ReviewWatch, scope string) ([]*PR, bool, error) {
 	hasRepos := len(watch.Repos) > 0
 	customQuery := reviewWatchQuery(watch)
 
@@ -390,25 +403,33 @@ func (s *Service) fetchReviewPRs(ctx context.Context, client Client, watch *Revi
 		if customQuery != "" {
 			s.logger.Debug("fetchReviewPRs: using custom query (all repos)",
 				zap.String("query", customQuery))
-			return client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+			items, err := client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+			return items, err == nil, err
 		}
 		s.logger.Debug("fetchReviewPRs: using scope (all repos)",
 			zap.String("scope", watch.ReviewScope))
-		return client.ListReviewRequestedPRs(ctx, watch.ReviewScope, "", "")
+		items, err := client.ListReviewRequestedPRs(ctx, watch.ReviewScope, "", "")
+		return items, err == nil, err
 	}
 
 	// Has repo filters: iterate repos, appending filter to customQuery or scope
-	prs := s.fetchReviewPRsWithFilter(ctx, client, watch)
-	return prs, nil
+	return s.fetchReviewPRsWithFilter(ctx, client, watch, scope)
 }
 
 // fetchReviewPRsWithFilter queries each repo filter individually and deduplicates results.
 // When customQuery is set, the repo qualifier is appended to it; otherwise scope+filter is used.
-func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, watch *ReviewWatch) []*PR {
+func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, watch *ReviewWatch, scope string) ([]*PR, bool, error) {
+	cursor := s.beginWatchFilters(ctx, watchPollKey{kind: "review", workspace: watch.WorkspaceID, id: watch.ID}, scope, watch.ReviewScope+"\n"+reviewWatchQuery(watch), watch.Repos)
+	if cursor == nil {
+		return nil, false, nil
+	}
+	defer cursor.mu.Unlock()
+
 	var allPRs []*PR
 	seen := make(map[string]bool)
 
-	for _, repo := range watch.Repos {
+	for i := cursor.next; i < len(watch.Repos); i++ {
+		repo := watch.Repos[i]
 		qualifier := repoFilterToQualifier(repo)
 
 		var prs []*PR
@@ -426,6 +447,13 @@ func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, w
 				zap.String("filter", qualifier))
 			prs, err = client.ListReviewRequestedPRs(ctx, watch.ReviewScope, qualifier, "")
 		}
+		if watchReadDeferred(err) {
+			return allPRs, false, nil
+		}
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		cursor.next = i + 1
 		if err != nil {
 			if IsConnectivityError(err) {
 				s.logger.Warn("failed to list review PRs (connectivity)",
@@ -449,7 +477,8 @@ func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, w
 			}
 		}
 	}
-	return allPRs
+	cursor.next = 0
+	return allPRs, true, nil
 }
 
 func reviewWatchQuery(watch *ReviewWatch) string {
@@ -974,6 +1003,7 @@ func (s *Service) publishNewReviewPREvent(ctx context.Context, watch *ReviewWatc
 		return
 	}
 	event := bus.NewEvent(events.GitHubNewReviewPR, "github", &NewReviewPREvent{
+		CreatedByUserID:   watch.CreatedByUserID,
 		ReviewWatchID:     watch.ID,
 		WorkspaceID:       watch.WorkspaceID,
 		WorkflowID:        watch.WorkflowID,

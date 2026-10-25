@@ -20,7 +20,7 @@ It does not change the existing requirement that launch baseline capture waits f
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-PLATFORM-GIT-CAPTURE-RECOVERY-001 | Corrective capture; Consumers and errors; Validation |
+| REQ-PLATFORM-GIT-CAPTURE-RECOVERY-001 | Corrective capture; Comparison reference resolution; Consumers and errors; Validation |
 
 ## Corrective capture
 
@@ -44,6 +44,20 @@ Normal final publication still rejects an observation older than the latest acce
 
 Keep enrichment correction bounded under its existing policy.
 The basic retry does not reset the enrichment correction budget or create a second worker.
+
+## Comparison reference resolution
+
+Each attempt reads comparison evidence twice: once while capturing and once while validating.
+Each read resolves the base, ahead/behind, remote-head, and comparison references to commit object IDs.
+Apply the existing reference allowlist first; an empty or unsafe reference yields an empty value without running Git.
+A single remaining reference keeps the existing `rev-parse --verify` call.
+Resolve two or more distinct references with one `git rev-parse <ref>^{commit}...` process.
+Accept the batch only when Git exits zero and returns exactly one full SHA-1 or SHA-256 object-ID line per argument.
+Allow LF or CRLF termination; extra records, including blank records, require fallback.
+Otherwise resolve each reference with the existing `rev-parse --verify` path.
+That fallback also covers a missing reference, a truncated result, and an echoed argument that only looks like an object ID.
+A cancelled context skips the fallback and yields the same empty values the separate path yields.
+The evidence comparison and its errors are unchanged.
 
 ## Consumers and errors
 

@@ -17,7 +17,7 @@ import (
 // unbounded-growth source of its own.
 const defaultKeepMaintenanceBackups = 5
 
-// createVerifiedBackup takes a fresh VACUUM INTO snapshot into
+// createVerifiedBackup takes a fresh consistent page-copy snapshot into
 // backupDir/kandev-pre-maintenance-<timestamp>.db, verifies it with
 // PRAGMA integrity_check, and prunes old maintenance backups beyond
 // defaultKeepMaintenanceBackups. Returns the backup path on success. On any
@@ -32,7 +32,7 @@ func createVerifiedBackup(writer *sqlx.DB, backupDir string) (string, error) {
 		return "", fmt.Errorf("%w: %v", ErrBackupUnverified, err)
 	}
 
-	if _, err := persistence.SnapshotSQLite(writer, path); err != nil {
+	if _, err := persistence.CopySQLiteSnapshot(writer, path); err != nil {
 		return "", fmt.Errorf("%w: %v", ErrBackupUnverified, err)
 	}
 	if err := verifySQLiteIntegrity(path); err != nil {
@@ -48,7 +48,7 @@ func createVerifiedBackup(writer *sqlx.DB, backupDir string) (string, error) {
 }
 
 // uniqueBackupPath picks a backup file name that does not yet exist.
-// VACUUM INTO refuses to write over an existing file, and a second-level
+// The snapshot copy refuses to write over an existing file, and a second-level
 // timestamp alone can collide when two runs happen inside the same wall
 // clock second (e.g. immediate back-to-back --execute invocations, or a
 // test); this appends nanosecond precision and, defensively, a numeric

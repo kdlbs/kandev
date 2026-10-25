@@ -1,3 +1,4 @@
+import { readDockviewGrid } from "../dockview-internals";
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type {
   LayoutState,
@@ -360,11 +361,8 @@ function readRootOrientation(
  * and a flat groups list (for filtering and column identification).
  */
 export function fromDockviewApi(api: DockviewApi): LayoutState {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const root = (api as any).component?.gridview?.root;
-  const sv = root?.splitview;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rootChildren = root?.children;
+  const root = readDockviewGrid(api);
+  const { splitview: sv, children: rootChildren } = root;
 
   if (!rootChildren || !sv) {
     console.warn("fromDockviewApi: no root splitview or children found");

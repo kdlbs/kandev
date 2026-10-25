@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeGitShimLauncher } from "../e2e/fixtures/git-shim-launcher";
 
 const tempDirs: string[] = [];
 
@@ -19,6 +20,18 @@ function runGit(cwd: string, ...args: string[]): void {
   }
 }
 
+function createGitLauncher(repoDir: string): string {
+  const shimDir = path.join(repoDir, "shim-bin");
+  fs.mkdirSync(shimDir);
+  writeGitShimLauncher(shimDir, path.resolve("e2e/fixtures/git-shim.mjs"), {
+    KANDEV_E2E_ORIGINAL_PATH: process.env.PATH ?? "",
+    KANDEV_E2E_GIT_DELAY_FILE: path.join(repoDir, "delay"),
+    KANDEV_E2E_GITLAB_PUSH_FILE: path.join(repoDir, "expected-remote"),
+    KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: path.join(repoDir, "push-record"),
+  });
+  return path.join(shimDir, process.platform === "win32" ? "git.cmd" : "git");
+}
+
 describe("E2E git shim", () => {
   it("holds a configured diff enrichment until released", async () => {
     const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-git-shim-"));
@@ -31,18 +44,11 @@ describe("E2E git shim", () => {
       delayFile,
       JSON.stringify({ subcommand: "diff", requiredArgs: ["--numstat"], startedFile, releaseFile }),
     );
-    const child = spawn(
-      process.execPath,
-      [path.resolve("e2e/fixtures/git-shim.mjs"), "diff", "--numstat"],
-      {
-        cwd: repoDir,
-        env: {
-          ...process.env,
-          KANDEV_E2E_GIT_DELAY_FILE: delayFile,
-          KANDEV_E2E_ORIGINAL_PATH: process.env.PATH ?? "",
-        },
-      },
-    );
+    fs.writeFileSync(`${delayFile}.command`, "diff\n");
+    const child = spawn(createGitLauncher(repoDir), ["diff", "--numstat"], {
+      cwd: repoDir,
+      shell: process.platform === "win32",
+    });
     const completion = new Promise<number | null>((resolve, reject) => {
       child.on("error", reject);
       child.on("exit", resolve);
@@ -71,17 +77,15 @@ describe("E2E git shim", () => {
     runGit(repoDir, "init", "--initial-branch=main");
     runGit(repoDir, "remote", "add", "origin", missingRemote);
 
-    const shim = path.resolve(process.cwd(), "e2e/fixtures/git-shim.mjs");
-    const result = spawnSync(process.execPath, [shim, ...globalArgs, "push", "origin", "main"], {
-      cwd: repoDir,
-      env: {
-        ...process.env,
-        KANDEV_E2E_ORIGINAL_PATH: process.env.PATH ?? "",
-        KANDEV_E2E_GITLAB_PUSH_FILE: expectedRemoteFile,
-        KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: recordFile,
+    const result = spawnSync(
+      createGitLauncher(repoDir),
+      [...globalArgs, "push", "origin", "main"],
+      {
+        cwd: repoDir,
+        encoding: "utf8",
+        shell: process.platform === "win32",
       },
-      encoding: "utf8",
-    });
+    );
 
     expect(result.status, result.stderr).toBe(0);
     expect(fs.readFileSync(recordFile, "utf8")).toContain("push origin main");

@@ -229,6 +229,7 @@ func cleanupManagerStopCh(t *testing.T, mgr *Manager) {
 		if mgr.streamManager != nil {
 			mgr.streamManager.Wait()
 		}
+		mgr.wg.Wait()
 	})
 }
 

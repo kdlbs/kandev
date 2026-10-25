@@ -6,9 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/journal"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -159,10 +165,17 @@ func TestDurableAgentEventAcknowledgesOnlyAfterInboxProjection(t *testing.T) {
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	event := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream-1", DeliverySequence: 3}
 
-	if err := sm.projectAndAcknowledgeDurableAgentEvent(
-		context.Background(), &AgentExecution{SessionID: "session-1"}, event, repository, acknowledger,
-	); err != nil {
+	execution, client, acked := deliveryProjectionFixture(t, event, acknowledger)
+	defer sm.Wait()
+	if err := sm.processPreparedAgentEvent(context.Background(), execution, client, repository,
+		preparedAgentEvent{event: event, durableEvent: durableAgentEvent(execution, event)}, 0); err != nil {
 		t.Fatalf("project and acknowledge durable event: %v", err)
+	}
+
+	select {
+	case <-acked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("delivery was not acknowledged")
 	}
 	if got, want := fmt.Sprint(order), "[project ack]"; got != want {
 		t.Fatalf("operation order = %s, want %s", got, want)
@@ -179,15 +192,21 @@ func TestDurableAgentEventProjectionFailureDoesNotAcknowledge(t *testing.T) {
 	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	event := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream-1", DeliverySequence: 3}
 
-	err := sm.projectAndAcknowledgeDurableAgentEvent(
-		context.Background(), &AgentExecution{SessionID: "session-1"}, event, repository, acknowledger,
-	)
+	execution, client, _ := deliveryProjectionFixture(t, event, acknowledger)
+	defer sm.Wait()
+	err := sm.processPreparedAgentEvent(context.Background(), execution, client, repository,
+		preparedAgentEvent{event: event, durableEvent: durableAgentEvent(execution, event)}, 0)
 	if !errors.Is(err, projectionErr) {
 		t.Fatalf("error = %v, want projection error", err)
 	}
-	if len(acknowledger.acknowledged) != 0 {
-		t.Fatalf("acknowledged = %v, want no acknowledgments", acknowledger.acknowledged)
+
+	sm.ackMu.Lock()
+	workers := len(sm.ackWorkers)
+	sm.ackMu.Unlock()
+	if workers != 0 {
+		t.Fatal("failed projection scheduled an acknowledgement")
 	}
+
 }
 
 func TestDurableAgentEventEffectReadFailureBlocksProcessing(t *testing.T) {
@@ -371,14 +390,14 @@ func TestDurableAgentEventAdmissionProjectsOpaquePayload(t *testing.T) {
 		DeliverySubmissionID: "submission-1",
 	}
 
-	process, err := sm.receiveDurableAgentEvent(context.Background(), execution, event, repository)
+	process, err := sm.receiveDurableAgentDeliveryEvent(context.Background(), durableAgentEvent(execution, event), repository)
 	if err != nil {
 		t.Fatalf("receive durable event: %v", err)
 	}
 	if !process {
 		t.Fatal("first durable event was not admitted")
 	}
-	if err := sm.projectDurableAgentEvent(context.Background(), execution, event, repository); err != nil {
+	if err := sm.projectDurableAgentDeliveryEventWithEffect(context.Background(), durableAgentEvent(execution, event), repository, deliveryEffectForEvent(event)); err != nil {
 		t.Fatalf("project durable event: %v", err)
 	}
 	if len(repository.received) != 1 || len(repository.projected) != 1 {
@@ -397,7 +416,7 @@ func TestDurableAgentEventAdmissionProjectsOpaquePayload(t *testing.T) {
 	}
 
 	repository.cursor.UpdatedAt = time.Now()
-	process, err = sm.receiveDurableAgentEvent(context.Background(), execution, event, repository)
+	process, err = sm.receiveDurableAgentDeliveryEvent(context.Background(), durableAgentEvent(execution, event), repository)
 	if err != nil {
 		t.Fatalf("receive duplicate durable event: %v", err)
 	}
@@ -432,14 +451,24 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 	// must remain the record that gets projected and acknowledged.
 	execution.setPromptTurnID("turn-2")
 	acknowledger := &recordingAgentDeliveryAcknowledger{}
-	if err := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
-		context.Background(), durableEvent, event, repository, acknowledger, effect,
-	); err != nil {
+
+	boundExecution, client, acked := deliveryProjectionFixture(t, event, acknowledger)
+	boundExecution.setPromptTurnID("turn-2")
+	defer sm.Wait()
+	if err := sm.processPreparedAgentEvent(context.Background(), boundExecution, client, repository,
+		preparedAgentEvent{event: event, durableEvent: durableEvent, deliveryEffect: effect}, 0); err != nil {
 		t.Fatalf("project and acknowledge durable event: %v", err)
 	}
-	if len(acknowledger.acknowledged) != 1 {
-		t.Fatalf("acknowledged = %v, want one acknowledgment", acknowledger.acknowledged)
+
+	select {
+	case <-acked:
+	case <-time.After(3 * time.Second):
+		t.Fatal("admitted delivery was not acknowledged")
 	}
+	if len(acknowledger.acknowledged) != 1 {
+		t.Fatal("expected one acknowledgement")
+	}
+
 }
 
 func TestDeliveryEffectAllowsSuccessfulRetryAfterTerminalFailure(t *testing.T) {
@@ -507,4 +536,42 @@ func TestProjectionSettlesTerminalBeforeLifecycleCanSuppressCallback(t *testing.
 			}
 		})
 	}
+}
+
+func deliveryProjectionFixture(t *testing.T, event agentctl.AgentEvent, ack *recordingAgentDeliveryAcknowledger) (*AgentExecution, *agentctl.Client, <-chan struct{}) {
+	t.Helper()
+	acked := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(journal.RecoveryDescriptor{
+				StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+				SessionID:         "session-1", IncarnationID: "owner", HarnessGeneration: 1, StreamID: event.DeliveryStreamID,
+				Stream: &journal.Stream{SessionID: "session-1", IncarnationID: "owner", HarnessGeneration: 1, StreamID: event.DeliveryStreamID, HighWater: event.DeliverySequence},
+			})
+			return
+		}
+		var request struct {
+			Sequence uint64 `json:"sequence"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if err := ack.AcknowledgeDelivery(r.Context(), event.DeliveryStreamID, request.Sequence); err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+		acked <- struct{}{}
+	}))
+	t.Cleanup(server.Close)
+	endpoint, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(endpoint.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := agentctl.NewClient(endpoint.Hostname(), port, newTestLogger())
+	execution := &AgentExecution{ID: "projection-test", SessionID: "session-1", DeliveryMode: DurableDeliveryV1, DeliveryStreamID: event.DeliveryStreamID, DeliveryIncarnationID: "owner", DeliveryHarnessGeneration: 1, agentctl: client}
+	return execution, client, acked
 }

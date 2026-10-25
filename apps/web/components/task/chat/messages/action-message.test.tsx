@@ -698,7 +698,7 @@ describe("ActionMessage recovery settlement", () => {
 });
 
 describe("ActionMessage active legacy recovery ownership", () => {
-  it("keeps an active legacy recovery row compact when the owner has no stamp", () => {
+  it("keeps the error and details readable when the recovery owner has no mounted card", () => {
     const legacyMessage = recoveryMessage();
     legacyMessage.id = "legacy-recovery-owner";
     legacyMessage.metadata = {
@@ -741,9 +741,11 @@ describe("ActionMessage active legacy recovery ownership", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
-      "This failure is explained in the recovery card above.",
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(RECOVERY_MESSAGE);
+    expect(screen.getByTestId("session-recovery-history-details").textContent).toContain(
+      "The provider request failed.",
     );
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
     expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
   });
 });
@@ -775,6 +777,7 @@ describe("ActionMessage historical typed recovery evidence", () => {
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
     const first = recoveryHistoryMessage("failure-first");
     first.created_at = "2026-09-29T09:00:00Z";
+    first.content = "The provider rejected the saved session. token=private-preview-value";
     first.metadata = {
       ...(first.metadata as Record<string, unknown>),
       phase: "bootstrap",
@@ -786,13 +789,13 @@ describe("ActionMessage historical typed recovery evidence", () => {
           code: "model_unavailable",
           reason: "requested_not_advertised",
           requested_model: "first-model",
-          detail: "The saved model was not advertised.",
         },
       ],
       error_output: "token=old-private-value",
     };
     const second = recoveryHistoryMessage("failure-second");
     second.id = "recovery-second";
+    second.content = first.content;
     second.metadata = {
       ...(second.metadata as Record<string, unknown>),
       phase: "bootstrap",
@@ -841,7 +844,10 @@ describe("ActionMessage historical typed recovery evidence", () => {
     expect(displayed).toContain("Attempt: resume-1");
     expect(displayed).toContain("Requested model: first-model");
     expect(displayed).toContain("Phase: bootstrap");
+    expect(displayed).toContain("The provider rejected the saved session.");
     expect(displayed).not.toContain("old-private-value");
+    expect(displayed).not.toContain("private-preview-value");
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
     fireEvent.click(screen.getAllByRole("button", { name: "Copy details" })[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
   });

@@ -23,11 +23,19 @@ type retainedDeliveryTestManager struct {
 
 func (m *retainedDeliveryTestManager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
-	dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string,
+	dispatchOnly bool, beforeAdmission func(context.Context, string, []v1.MessageAttachment) error, onDispatched func(), submissionID string,
 ) (*executor.PromptResult, error) {
 	m.submissionID = submissionID
-	m.onSubmission(ctx, submissionID)
-	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched)
+	admit := func(ctx context.Context, prompt string, attachments []v1.MessageAttachment) error {
+		if beforeAdmission != nil {
+			if err := beforeAdmission(ctx, prompt, attachments); err != nil {
+				return err
+			}
+		}
+		m.onSubmission(ctx, submissionID)
+		return nil
+	}
+	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, admit, onDispatched)
 }
 
 func TestRetainedContinuationPersistsSubmissionBeforeDispatch(t *testing.T) {

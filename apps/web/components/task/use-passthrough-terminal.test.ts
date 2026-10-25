@@ -1,5 +1,7 @@
+import { act, renderHook } from "@testing-library/react";
+import type { FitAddon } from "@xterm/addon-fit";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildTerminalWsUrl } from "./use-passthrough-terminal";
+import { buildTerminalWsUrl, useFitAndResize } from "./use-passthrough-terminal";
 import {
   computeCanConnect,
   computeTerminalPaneState,
@@ -125,6 +127,30 @@ describe("buildTerminalWsUrl", () => {
   });
 });
 
+describe("useFitAndResize", () => {
+  it("sends a valid initial size when a forced resize precedes panel layout", () => {
+    const container = document.createElement("div");
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      width: 0,
+      height: 0,
+    } as DOMRect);
+    const terminal = { cols: 80, rows: 24, refresh: vi.fn() } as unknown as Terminal;
+    const sendResize = vi.fn();
+    const options = {
+      xtermRef: { current: terminal },
+      fitAddonRef: { current: { fit: vi.fn() } as unknown as FitAddon },
+      terminalRef: { current: container },
+      lastDimensionsRef: { current: { cols: 0, rows: 0 } },
+      sendResize,
+    };
+
+    const { result } = renderHook(() => useFitAndResize(options));
+    act(() => result.current(true));
+
+    expect(sendResize).toHaveBeenCalledWith(80, 24);
+  });
+});
+
 describe("startReconnectLoop", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -205,35 +231,39 @@ describe("startReconnectLoop one-shot terminal completion", () => {
     vi.useRealTimers();
   });
 
-  it("stops retrying after the backend reports a completed initial command", () => {
-    vi.useFakeTimers();
+  it.each(["initial_command_completed", "environment_not_found"])(
+    "stops retrying after %s",
+    (reason) => {
+      vi.useFakeTimers();
 
-    const connectWebSocket = vi.fn(({ onSocketClose }) => {
-      onSocketClose({ code: 1000, reason: "initial_command_completed" } as CloseEvent);
-    });
-    const onDisconnected = vi.fn();
-    const stop = startReconnectLoop({
-      environmentId: "env-1",
-      wsBaseUrl: WS_BASE_URL,
-      mode: "shell",
-      terminalId: "shell-1",
-      label: undefined,
-      terminal: { reset: vi.fn() } as unknown as Terminal,
-      fitAndResize: vi.fn(),
-      wsRef: { current: null },
-      attachAddonRef: { current: null },
-      onConnected: vi.fn(),
-      onDisconnected,
-      connectWebSocket,
-    });
+      const connectWebSocket = vi.fn(({ onSocketClose }) => {
+        onSocketClose({ code: 1000, reason } as CloseEvent);
+      });
+      const onDisconnected = vi.fn();
+      const stop = startReconnectLoop({
+        environmentId: "env-1",
+        wsBaseUrl: WS_BASE_URL,
+        mode: "shell",
+        terminalId: "shell-1",
+        label: undefined,
+        terminal: { reset: vi.fn() } as unknown as Terminal,
+        fitAndResize: vi.fn(),
+        wsRef: { current: null },
+        attachAddonRef: { current: null },
+        onConnected: vi.fn(),
+        onDisconnected,
+        connectWebSocket,
+      });
 
-    vi.advanceTimersByTime(150);
-    vi.advanceTimersByTime(10_000);
+      vi.advanceTimersByTime(150);
+      vi.advanceTimersByTime(10_000);
 
-    expect(connectWebSocket).toHaveBeenCalledTimes(1);
-    expect(onDisconnected).toHaveBeenCalledTimes(1);
-    stop();
-  });
+      expect(connectWebSocket).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledTimes(1);
+      expect(onDisconnected).toHaveBeenCalledWith({ code: 1000, reason });
+      stop();
+    },
+  );
 
   it("continues retrying for other normal WebSocket closes", () => {
     vi.useFakeTimers();
@@ -339,6 +369,9 @@ describe("isEnvironmentEnded", () => {
 // actively false, and hides anything written into the pane behind it. "Ended"
 // has to outrank "connecting", or the user is told the opposite of the truth.
 describe("computeTerminalPaneState", () => {
+  it("shows confirmed removal even when cached workspace state says ready", () => {
+    expect(computeTerminalPaneState("shell", false, false, true, true)).toBe("ended");
+  });
   it("reports ended instead of connecting when the session is over", () => {
     expect(computeTerminalPaneState("shell", true, false)).toBe("ended");
   });

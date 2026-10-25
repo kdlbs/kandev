@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { officeTopbarTitle } from "../../helpers/office-topbar";
 import type { OfficeApiClient } from "../../helpers/office-api-client";
 
 /**
@@ -35,14 +36,6 @@ async function seededAgentName(officeApi: OfficeApiClient, agentId: string): Pro
 }
 
 test.describe("Routines UI", () => {
-  test("routine created via API appears in page", async ({ testPage, officeApi, officeSeed }) => {
-    await officeApi.createRoutine(officeSeed.workspaceId, {
-      name: "E2E Test Routine",
-    });
-    await testPage.goto("/office/routines");
-    await expect(testPage.getByText("E2E Test Routine")).toBeVisible({ timeout: 10_000 });
-  });
-
   // A paused routine's cron-suppression behavior is covered by Go unit
   // tests; this spec covers only the UI surfaces the frontend owns: the
   // row reflects the paused status, and "Run Now" from either surface is
@@ -242,6 +235,7 @@ test.describe("Routines UI", () => {
     const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
       name,
+      description: "Check system status",
       assignee_agent_profile_id: officeSeed.agentId,
       concurrency_policy: "always_create",
       catch_up_policy: "skip_missed",
@@ -252,9 +246,18 @@ test.describe("Routines UI", () => {
     })) as { id: string };
     expect(routine.id).toBeTruthy();
 
+    expect((routine as { id: string; name?: string }).name).toBe(name);
+    const { routines } = (await officeApi.listRoutines(officeSeed.workspaceId)) as {
+      routines: Array<Record<string, unknown>>;
+    };
+    expect(Array.isArray(routines)).toBe(true);
+    expect(routines.length).toBeGreaterThan(0);
+    expect(routines.some((entry) => entry.id === routine.id && entry.name === name)).toBe(true);
     await testPage.goto("/office/routines");
+    await expect(officeTopbarTitle(testPage)).toHaveText(/Routines/i, { timeout: 10_000 });
     const row = testPage.getByTestId(`routine-row-${routine.id}`);
     await expect(row).toBeVisible({ timeout: 10_000 });
+    await expect(row.getByText(name, { exact: true })).toBeVisible();
     // AC-OFFICE-ROUTINE-WIRE-003.1/.6: routine-row.tsx's own snake_case
     // fallbacks are gone; these now render through the normalized model.
     await expect(row.getByText(agentName, { exact: true })).toBeVisible();

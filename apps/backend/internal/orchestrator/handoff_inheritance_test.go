@@ -82,6 +82,9 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
 	ctx := context.Background()
+	if err := repo.CreateExecutor(ctx, &models.Executor{ID: "exec-1", Name: "Docker", Type: models.ExecutorTypeLocalDocker}); err != nil {
+		t.Fatalf("create executor: %v", err)
+	}
 	now := time.Now().UTC()
 
 	ws := &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now}

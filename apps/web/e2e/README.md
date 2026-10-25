@@ -255,7 +255,7 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 ### Duration-aware CI sharding
 
 CI creates an ephemeral manifest for each cohort from the current test catalog.
-The normal cohort has 14 shards and runs `chromium` plus `mobile-chrome`; the
+The normal cohort has 28 shards and runs `chromium` plus `mobile-chrome`; the
 container cohort has 6 shards and runs `containers`. The independent
 `kubernetes-compat` matrix is deliberately excluded from both catalogs. The manifest assigns
 project/file units with a deterministic longest-processing-time planner. Matrix
@@ -272,6 +272,20 @@ multiplier. If the artifact is missing, the planner records
 The runner validates the manifest against the checkout before launching
 Playwright. A missing, stale, overlapping, or incomplete manifest is a hard
 failure; it cannot silently fall back to ordinal sharding.
+
+Concurrent processes within a planned shard receive separate, invocation-owned
+Playwright transform caches. The supervisor removes only those caches after all
+children close, including failed children; an inherited `PWTEST_CACHE_DIR` and
+other runner invocations remain untouched.
+
+Build collects the native inventory once and includes `native-catalog.json`
+in the manifest artifact. CI parents verify its checkout, run and successful
+Build attempt, then validate their complete manifest without importing every
+spec again. Rerunning a consumer retains the original successful producer
+attempt. Local runs still collect the current working tree natively.
+The required report compares every actual project, owning spec and native test
+ID with that catalog, retaining skips and retries while rejecting missing,
+extra or duplicated attempts. A missing or stale CI catalog fails the run.
 
 To dry-run the planner locally:
 
@@ -322,8 +336,8 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
-that fails and then passes never fails the build. The **E2E flake rate** section
+CI keeps three retries for diagnostics and sets `E2E_FAIL_ON_FLAKY=1`, so a test
+that fails and then passes still fails the build. The **E2E flake rate** section
 of the `e2e-report` job summary makes that number visible without downloading
 anything. It reports, for the run:
 
@@ -396,7 +410,9 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 
 Every Playwright worker gets:
 
-- A unique backend port in `BACKEND_BASE_PORT + workerIndex` (default `18080+`).
+- A backend port owned by the shard offset and stable `parallelIndex` slot
+  (default `18080+`). Replacement workers reuse that slot after teardown;
+  increasing `workerIndex` values never move into a sibling shard's ports.
 - A unique frontend port in `FRONTEND_BASE_PORT + workerIndex` (default `13000+`).
 - A fresh tmpdir (`HOME`, `KANDEV_HOME_DIR`, worktree base, repo clone base — all under that tmpdir).
 - A unique agentctl instance port range (`30001 + E2E_PORT_OFFSET * 1000 + workerIndex * 200`).
@@ -435,6 +451,13 @@ because the backend round trip that would flip it was late. Raising the number
 buys time, it does not remove the race, and when it does fail it tells you
 nothing about what was missing. Three of the four flakes measured in one recent
 green CI run were exactly this, with budgets of 5s, 10s and 30s.
+
+A mock turn that must remain active across a restart can use
+`e2e:await_file("/absolute/release-marker")` between its started and completed
+messages. Put the unique marker under the worker's `backend.tmpDir`, write it
+only after the in-flight assertions, and also release it in `finally`. The
+wait honors prompt cancellation; the worker's temp-directory cleanup owns the
+marker. The survival restart specs demonstrate this controlled completion.
 
 `helpers/causal-waits.ts` has one primitive per transport the app actually uses.
 Arm the wait **before** the action, await it after, then assert the UI with its
@@ -787,12 +810,19 @@ for a result it could never receive.
 
 ## CI
 
-`.github/workflows/e2e-tests.yml` defines two test cohorts and a report job:
+`.github/workflows/e2e-tests.yml` builds the test runtime, runs the test cohorts,
+and joins their required results:
 
-- `e2e` — a 14-entry matrix executing the generated normal manifests.
+- `build` — builds the Linux browser prerequisites and generates manifests.
+- `helper_compile` — compiles the remaining helper platforms and diagnostic
+  commands in parallel, and remains required by the report gate.
+- `e2e` — a 28-entry matrix executing the generated normal manifests.
 - `e2e-containers` — a 6-entry matrix executing the generated container
   manifests and requiring Docker. A shard assigned `tests/kubernetes/**`
   installs checksum-pinned Kind/kubectl, then performs exact-name teardown.
+  Shared Kubernetes control-plane files are scheduled together to reuse their
+  worker-scoped Kind cluster. The worker-image lifecycle file owns one existing
+  container job; per-test cleanup and optional scenario gates remain.
 - `e2e-kubernetes-compatibility` — a two-version matrix running the single
   API-only compatibility smoke on Kubernetes `v1.34.8` and `v1.36.1`.
 - `e2e-report` — merges blob reports, publishes timing/retry artifacts, and
@@ -800,6 +830,32 @@ for a result it could never receive.
 
 The build job uploads `e2e-shard-manifests` for the current run. Both cohorts
 upload blob reports that `e2e-report` merges into a single HTML artifact.
+Container global setup prepares one canonical helper manifest for the invocation;
+each worker still validates its identity and digest and owns a private bundle
+and helper cache. Global teardown removes the shared temporary manifest.
+
+Normal CI jobs request up to four independent Playwright processes through
+`E2E_RUNNER_PROCESSES`. Each keeps one worker and a disjoint set of whole files.
+Planned execution reserves two GiB, then budgets two GiB per process from the
+lower of host available memory and the current cgroup's remaining memory.
+Four processes require at least ten GiB available and four CPUs. Smaller CPU
+hosts retain one spare core; unknown resources select one process. Container
+jobs always use one. The managed local runner retains its separate maximum of
+three shards and its existing six/twelve-GiB thresholds. Set
+`E2E_RUNNER_PROCESSES=1` to compare or restore serial planned execution without
+changing the manifest or test selection.
+Separate port slots, result directories and blob files preserve isolation
+across project changes and retries. All children finish before the parent
+writes its single metadata record; a child failure or missing CI report fails
+the job.
+
+Normal CI jobs retain optional `e2e-resources-<shard>` snapshots and print
+`e2e_resources` shell timing in the test-step log. Raw cgroup counters are the
+CPU-use authority because shell timing can miss orphaned descendants. Memory
+peak includes container setup; missing counters remain unknown. Resource
+artifacts never replace native blob reports or their missing-report checks.
+The four-process request is a measured rollout, not evidence by itself that
+full CI meets its elapsed-time target.
 
 Keep the default at `workers: 1` until the controlled worker-concurrency
 experiment shows a repeatable wall-time improvement without retries. Record
@@ -849,3 +905,56 @@ skips the suite; skips and test discovery do not count as execution acceptance.
 ### Original-artifact retention rollback evidence
 
 The frozen format-1 rollback case in `tests/session/delivery-retention.spec.ts` is optional for the current retention issue fix. It reports a skip when `KANDEV_RETENTION_COMPAT_BINARY` is absent; the required suite still exercises current delivery cleanup, saved-history recovery and provider continuation on desktop and mobile. When the original binary is supplied, the test verifies its fixed hash and retains all rollback/new-write/deletion/forward-upgrade assertions. A skip is not original rollback acceptance. The 2026-10-11 user-directed scope change is recorded in `docs/plans/backend-agent-delivery-retention/task-08-integration-and-storage.md`; historical benchmark failures remain labelled there.
+
+## Release upgrade rehearsal
+
+Run this suite only through the **Release upgrade regression** GitHub Actions
+workflow on main. It runs after main pushes, nightly, or through **Run workflow**
+with main selected. The optional `baseline` input accepts `latest` (default) or
+an exact published Stable tag such as `v0.97.0`. It does not run for pull requests.
+
+After the workflow has landed on main, it can also be dispatched with:
+
+```bash
+gh workflow run upgrade-regression.yml --ref main -f baseline=latest
+```
+
+Do not run the upgrade runner, release preparation, or upgrade Playwright
+projects on a local machine. They compile multiple runtimes and start a full
+application/database/browser installation. Entry points require GitHub Actions
+metadata for main and refuse local execution. The ordinary E2E projects exclude
+these scenarios, and the managed runner rejects a local upgrade project before
+building artifacts or probing Docker. There is no local override flag.
+
+CI resolves the latest published Stable once and shares its verified archive
+and exact candidate commit across SQLite desktop, PostgreSQL 16 lifecycle, and
+SQLite phone jobs. Each job has its own hosted runner, disposable data and one
+Playwright worker. The released backend and matching agentctl create the seed
+before the candidate opens the database. Its deterministic mock provider is
+built from the release's source commit. No `_test` routes or direct database
+writes seed tasks. Production profile defaults remain selected, with explicit
+mock/process/permission overrides recorded in the manifest.
+
+The suite checks preservation, SQLite backup and integrity, PostgreSQL
+relationships/constraints, replay, pending start, old-conversation recovery,
+follow-up, new task execution, stop/resume, workflow profile switching,
+completion, archive and unarchive. Archive cleanup must finish before unarchive;
+this does not test immediate unarchive racing a running cleanup job. Desktop
+and phone checks also render preserved history and the plan and send a follow-up
+through the existing UI. Real providers and remote executors are outside this
+suite's compatibility claim.
+
+Every required scenario must run exactly once and pass. Skips, absent scenarios,
+worker errors and failed attempts fail the job. No retries are configured.
+Failure uploads retain the manifest, semantic snapshots, process/runtime logs,
+JUnit/JSON reports and Playwright traces for 14 days. Owned runtime processes,
+fixture storage and PostgreSQL services are cleaned up on failure too.
+
+The frozen SQL fixtures under backend store conformance remain independent
+historical migration gates. They do not substitute for this live rehearsal.
+
+The upgrade workflow's **Summary** tab shows the Stable release and source commit,
+verified archive digest, candidate commit, and planned matrix. Each database/browser
+job adds its actual test list, statuses, durations, and artifact name, including
+failure and missing-report cases. These summaries are published even when an
+acquisition, setup, or test step fails. The job's result remains the acceptance gate.

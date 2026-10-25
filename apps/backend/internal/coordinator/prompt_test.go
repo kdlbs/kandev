@@ -17,8 +17,9 @@ func TestStandingInstructions(t *testing.T) {
 		for _, want := range []string{
 			"Acme Workspace", "ws-1", "Ops",
 			"proposal tools available in this conversation",
-			"A human must decide each proposal",
-			"never applied automatically",
+			"A human must decide each proposal that requires approval",
+			"manager-configured permissions",
+			"Only the tool guard",
 			"get_coordinator_item_kandev",
 			"[workflow:<id>]",
 			"list_workflow_steps_kandev",
@@ -63,7 +64,7 @@ func TestStandingInstructions(t *testing.T) {
 		instructions := StandingInstructions("Acme", "ws-1", "Ops", "")
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				tools := " " + strings.Join(ToolNames(tc.p, tc.phase), " ") + " "
+				tools := " " + strings.Join(ToolNames(tc.p, tc.phase, false), " ") + " "
 				for _, want := range tc.want {
 					if !strings.Contains(tools, " "+want+" ") {
 						t.Errorf("ToolNames() = %q, missing %q", tools, want)

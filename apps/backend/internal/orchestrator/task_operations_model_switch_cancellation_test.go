@@ -146,7 +146,7 @@ func newQueuedModelSwitchPauseFixture(
 	if err != nil || !ok || queued == nil {
 		t.Fatalf("reserve queued prompt: queued=%+v ok=%v err=%v", queued, ok, err)
 	}
-	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, queued.ID, queued)
+	reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, queued.ID, queued)
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
@@ -257,7 +257,7 @@ func TestResumeAttempt_ModelSwitchFallbackCancellationBeforeInitialPromptAccepta
 	}
 	svc.invalidateResumeAttempt(sessionID)
 	svc.cleanupCancelledResumeAttempt(attempt)
-	if err := beforeInitialAdmission(); !errors.Is(err, ErrResumeAttemptCancelled) {
+	if err := beforeInitialAdmission(t.Context(), "model-switch prompt", nil); !errors.Is(err, ErrResumeAttemptCancelled) {
 		t.Fatalf("late initial-prompt admission error = %v, want cancelled resume attempt", err)
 	}
 	if onFailure != nil {
@@ -312,7 +312,7 @@ func TestPromptTask_ModelSwitchFallbackRejectsAdmissionAfterCompletedPause(t *te
 	}
 	generationBefore := fixture.manager.currentPromptGeneration.Load()
 	providerPromptCalls := 0
-	admissionErr := beforeAdmission()
+	admissionErr := beforeAdmission(ctx, "model-switch prompt", nil)
 	if admissionErr == nil {
 		providerPromptCalls++
 		fixture.manager.currentPromptGeneration.Add(1)

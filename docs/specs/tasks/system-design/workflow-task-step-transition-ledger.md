@@ -190,6 +190,22 @@ This spec registers exactly two keys: `turn.workflow_step_id_at_start`
 - The value is a workflow step ID. It is not resolved to a step name; step names
   are mutable and the ID is the join key.
 
+### Canonical output turns
+
+`canonicalDeliveryTurnTx` also creates real task turns. Its deterministic
+`agent-delivery-turn-<stream>-<sequence>` identity does not exempt it from the
+turn-start stamp. Text/reasoning projection and foreground shell-start projection
+share this creator. Requested turns and existing open turns retain their metadata;
+replay never repairs an old turn by assigning the task's later step.
+
+The [completion design](workflow-explicit-completion-signal.md#durable-output-turn-attribution)
+defines atomic step/entry reads, delivery transaction rollback, and PostgreSQL
+contention retry for this creator. That contract is stronger than telemetry-only
+best effort: durable output can retry, while an unstamped committed turn cannot
+safely authorize completion. Ordinary `CreateTurnWithStepStamp` degradation
+remains unchanged. No backfill, new activation marker, or schema migration is
+introduced by this repair.
+
 ## API surface
 
 **None.** This feature adds no HTTP route, no WebSocket event, no MCP tool, and
@@ -291,7 +307,7 @@ database access already has it.
 | Task has no workflow step (detached) | `to_*` NULL with trigger `workflow_detached`; the stamp key is absent from new turns. |
 | Task is deleted | Rows cascade away with the task. Kandev prefers archive over delete, and archived tasks retain their rows; a deleted task's step history is gone by design and is not recoverable. |
 | Session is deleted | `session_id` becomes `NULL`; the row survives, because the transition was a task-level fact. |
-| Slice 1: the task row cannot be read when a turn starts | The turn is still created; the stamp key is absent. Turn creation MUST NOT fail because telemetry could not be resolved. |
+| Slice 1: the task row cannot be read when a telemetry-only turn starts | The turn is still created; the stamp key is absent. Turn creation MUST NOT fail because telemetry could not be resolved. |
 
 ## Persistence guarantees
 

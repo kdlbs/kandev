@@ -22,6 +22,7 @@ import {
   type ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import {
   type MessageListHandle,
   type LastPromptEdge,
@@ -772,6 +773,7 @@ type TaskChatPanelProps = {
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId?: string | null;
   taskId?: string | null;
+  workspaceId?: string | null;
   /**
    * Task this panel belongs to, independent of whether it has a session yet.
    * Only the status row uses it, so a task with no session still shows its
@@ -780,6 +782,7 @@ type TaskChatPanelProps = {
    */
   statusTaskId?: string | null;
   onOpenFile?: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
   /** Callback to open a file at a specific line (for comment clicks) */
@@ -1217,6 +1220,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   taskId: taskIdHint = null,
   statusTaskId = null,
   onOpenFile,
+  onOpenHistoricalDiff,
   showRequestChangesTooltip = false,
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
@@ -1582,6 +1586,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                   sessionState={session?.state}
                   worktreePath={getSessionWorkspacePath(session)}
                   onOpenFile={onOpenFile}
+                  onOpenHistoricalDiff={onOpenHistoricalDiff}
                   dividerBeforeItemKey={dividerBeforeItemKey}
                   lastPromptMessageId={lastPromptMessageId}
                   lastPromptMessage={lastPromptMessage}

@@ -143,5 +143,5 @@ func TestAskUserQuestionPublishesAndReturnsStructuredOutput(t *testing.T) {
 	assert.Equal(t, "q1_opt1", answer["selected_option"])
 	content, ok := result.Content[0].(mcplib.TextContent)
 	require.True(t, ok)
-	assert.JSONEq(t, `{"q1":{"selected_option":"q1_opt1"}}`, content.Text)
+	assert.JSONEq(t, `{"q1":{"selected_option":"q1_opt1","selected_label":"Postgres"}}`, content.Text)
 }

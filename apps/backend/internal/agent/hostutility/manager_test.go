@@ -3,6 +3,7 @@ package hostutility
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -129,54 +130,77 @@ func (r profilePromptResolver) Resolve(context.Context, string) (*settingsmodels
 }
 
 func TestExecuteProfilePromptForwardsProviderGatewayAuth(t *testing.T) {
-	log := newTestLogger(t)
-	reg := registry.NewRegistry(log)
-	const agentType = "codex-acp"
-	ia := &installedInferenceAgent{id: agentType}
-	require.NoError(t, reg.Register(ia))
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprint("empty_environment=", empty), func(t *testing.T) {
+			log := newTestLogger(t)
+			reg := registry.NewRegistry(log)
+			const agentType = "codex-acp"
+			ia := &installedInferenceAgent{id: agentType}
+			require.NoError(t, reg.Register(ia))
 
-	var received agentctlutil.PromptRequest
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		if r.URL.Path != "/api/v1/inference/prompt" {
-			http.NotFound(w, r)
-			return
-		}
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
-		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.PromptResponse{Success: true, Response: "ok"}))
-	}))
-	t.Cleanup(server.Close)
-	host, port := serverHostPort(t, server)
-	parentTmpDir := t.TempDir()
-	workDir := filepath.Join(parentTmpDir, agentType)
-	require.NoError(t, os.MkdirAll(workDir, 0o755))
+			var received agentctlutil.PromptRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/identity" {
+					_, _ = w.Write([]byte(`{"capabilities":["launch-wrapper.v1"]}`))
+					return
+				}
+				if r.URL.Path == "/health" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if r.URL.Path != "/api/v1/inference/prompt" {
+					http.NotFound(w, r)
+					return
+				}
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+				w.Header().Set("Content-Type", "application/json")
+				require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.PromptResponse{Success: true, Response: "ok"}))
+			}))
+			t.Cleanup(server.Close)
+			host, port := serverHostPort(t, server)
+			parentTmpDir := t.TempDir()
+			workDir := filepath.Join(parentTmpDir, agentType)
+			require.NoError(t, os.MkdirAll(workDir, 0o755))
 
-	mgr := NewManager(reg, host, port, nil, log)
-	mgr.SetProfileResolver(profilePromptResolver{profile: &settingsmodels.AgentProfile{
-		ID: "profile-1", AgentID: agentType, ProviderKind: settingsmodels.ProviderKindOpenAICompatible,
-		Model: "gateway-model",
-	}})
-	mgr.SetProviderGatewayAuthResolver(func(context.Context, string, string) (*acpprovider.GatewayAuth, string, string, error) {
-		gateway := acpprovider.BuildGatewayAuth("gateway", "Kandev", "http://localhost:20128/v1", "secret")
-		return &gateway, "OPENAI_API_KEY", "secret", nil
-	})
-	mgr.instances[agentType] = &instance{
-		agentType: agentType,
-		workDir:   workDir,
-		client:    agentctlclient.NewClient(host, port, log),
+			mgr := NewManager(reg, host, port, nil, log)
+			mgr.SetProfileResolver(profilePromptResolver{profile: &settingsmodels.AgentProfile{
+				ID: "profile-1", AgentID: agentType, ProviderKind: settingsmodels.ProviderKindOpenAICompatible,
+				Model: "gateway-model", CommandPrefix: "independent-wrapper --",
+				EnvVars: []settingsmodels.ProfileEnvVar{{Key: "WRAPPER_SECRET", SecretID: "secret-id"}},
+			}})
+			mgr.SetProfileEnvironmentResolver(func(_ context.Context, name string, values []settingsmodels.ProfileEnvVar) (map[string]string, error) {
+				require.Equal(t, agentType, name)
+				require.Equal(t, []settingsmodels.ProfileEnvVar{{Key: "WRAPPER_SECRET", SecretID: "secret-id"}}, values)
+				if empty {
+					return nil, nil
+				}
+				return map[string]string{"WRAPPER_SECRET": "resolved-wrapper-value"}, nil
+			})
+			mgr.SetProviderGatewayAuthResolver(func(context.Context, string, string) (*acpprovider.GatewayAuth, string, string, error) {
+				gateway := acpprovider.BuildGatewayAuth("gateway", "Kandev", "http://localhost:20128/v1", "secret")
+				return &gateway, "OPENAI_API_KEY", "secret", nil
+			})
+			mgr.instances[agentType] = &instance{
+				agentType: agentType,
+				workDir:   workDir,
+				client:    agentctlclient.NewClient(host, port, log),
+			}
+			mgr.parentTmpDir = parentTmpDir
+
+			_, err := mgr.ExecuteProfilePrompt(context.Background(), "profile-1", "hello")
+			require.NoError(t, err)
+			require.NotNil(t, received.InferenceConfig)
+			if !empty {
+				require.Equal(t, "resolved-wrapper-value", received.InferenceConfig.Env["WRAPPER_SECRET"])
+			}
+			require.Equal(t, []string{"independent-wrapper", "--"}, received.InferenceConfig.LaunchWrapper.Argv)
+			require.Empty(t, received.InferenceConfig.CommandPrefix)
+			require.Equal(t, "secret", received.InferenceConfig.Env["OPENAI_API_KEY"])
+			require.NotNil(t, received.InferenceConfig.ProviderGatewayAuth)
+			require.Equal(t, "gateway", received.InferenceConfig.ProviderGatewayAuth.MethodID)
+
+		})
 	}
-	mgr.parentTmpDir = parentTmpDir
-
-	_, err := mgr.ExecuteProfilePrompt(context.Background(), "profile-1", "hello")
-	require.NoError(t, err)
-	require.NotNil(t, received.InferenceConfig)
-	require.Equal(t, "secret", received.InferenceConfig.Env["OPENAI_API_KEY"])
-	require.NotNil(t, received.InferenceConfig.ProviderGatewayAuth)
-	require.Equal(t, "gateway", received.InferenceConfig.ProviderGatewayAuth.MethodID)
 }
 
 func TestRefreshWithCommandUsesOverrideAndPreservesCacheOnAuthFailure(t *testing.T) {

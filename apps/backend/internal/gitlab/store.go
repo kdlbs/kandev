@@ -50,6 +50,9 @@ func NewStore(db, ro *sqlx.DB) (*Store, error) {
 	if err := s.createTables(); err != nil {
 		return nil, fmt.Errorf("create gitlab tables: %w", err)
 	}
+	if err := s.migrateExecutorCreators(); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 

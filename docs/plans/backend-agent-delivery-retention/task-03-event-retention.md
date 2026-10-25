@@ -118,3 +118,25 @@ All retention test groups were listed before selecting them. The PostgreSQL DSN 
 
 
 Task 08 follow-up, 2026-10-10: the original staged-write receipts above remain historical. Direct retirement is now planned only for the validated contiguous replay-expired prefix. All budget-loaded raw candidates retain independent hash/type/byte checks; a protected gap keeps later compact hashes replayable. Existing hash/payload failure hooks remain validation boundaries even when no intermediate UPDATE is needed. Follow-up trigger RED failed on four SQLite/PostgreSQL legacy/hash-v1 cases (7.224s); first race GREEN passed (6.769s) and expanded crash/reopen/barrier/replay/bounds/hash/cache GREEN passed (69.383s). Scoped lint and SQL guard passed. Task 08 retains ownership of final timing and storage gates.
+
+### PostgreSQL MVCC fixture correction
+
+Retry PR CI head `10bf0f42`, PostgreSQL 16 job `114742917054`, failed only
+`TestDeliveryRetentionPostgresMVCCAndMonotonicCheckpoint`: its first retention
+commit returned a context deadline error. The fixture held the bounded writer
+transaction at `after_retired_cursor` while another goroutine performed three
+independent reader roundtrips. That test-only pause consumes the production
+250 ms admission budget and adds scheduler/network latency to a correctness
+assertion. PostgreSQL 18 and the other backend jobs passed; no production
+corruption was established by this failure.
+
+The independent reader now captures payload, cursor and effect count in one
+MVCC statement inside the pre-commit failpoint, then lets the writer commit
+without an artificial release-channel wait. The captured uncommitted-state
+assertions, subsequent committed-state assertions, both competing one-row
+workers and monotonic checkpoint assertion remain unchanged. The original
+two-second boundary timeout and all production budgets remain unchanged. A
+test-owned cancellable context bounds cleanup after a failed boundary wait.
+A contained SQLite WAL proof checks the exact query's before/after snapshot
+values; it does not establish PostgreSQL timing or full-package correctness.
+Full hosted PostgreSQL and race verification of this correction is pending.

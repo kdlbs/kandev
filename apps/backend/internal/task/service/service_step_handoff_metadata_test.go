@@ -136,6 +136,78 @@ func TestProtectedTaskMetadataForCreateRejectsStepHandoffCarry(t *testing.T) {
 	}
 }
 
+func TestProtectedTaskMetadataForCreateRejectsAutomationStartOwnership(t *testing.T) {
+	metadata := map[string]interface{}{
+		"ordinary":                         "keep",
+		models.MetaKeyAutomationStartOwned: true,
+	}
+
+	for _, trustedHandoff := range []bool{false, true} {
+		created := protectedTaskMetadataForCreate(metadata, trustedHandoff)
+		if _, ok := created[models.MetaKeyAutomationStartOwned]; ok {
+			t.Fatalf("trustedHandoff=%v: metadata kept caller-supplied %s", trustedHandoff, models.MetaKeyAutomationStartOwned)
+		}
+		if got := created["ordinary"]; got != "keep" {
+			t.Fatalf("trustedHandoff=%v: ordinary metadata = %v, want keep", trustedHandoff, got)
+		}
+	}
+}
+
+func TestBuildTaskStampsAutomationStartOwnershipOnlyFromInternalField(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	ctx := context.Background()
+
+	forged := svc.buildTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "forged",
+		Metadata: map[string]interface{}{models.MetaKeyAutomationStartOwned: true},
+	}, "")
+	if models.AutomationStartOwned(forged.Metadata) {
+		t.Fatal("a create request's metadata must not reserve the task's start")
+	}
+
+	owned := svc.buildTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "automation", AutomationStartOwned: true, AutomationStartOwner: "admitted-run",
+	}, "")
+	if !models.AutomationStartOwned(owned.Metadata) {
+		t.Fatalf("automation create metadata = %v, want %s=true", owned.Metadata, models.MetaKeyAutomationStartOwned)
+	}
+	if owner := owned.Metadata[models.MetaKeyAutomationStartOwned]; owner != "admitted-run" {
+		t.Fatalf("initial start owner = %v, want admitted-run", owner)
+	}
+}
+
+func TestUpdateTaskMetadataPreservesAutomationStartOwnership(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-owned", Name: "Owned workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	for _, task := range []*models.Task{
+		{ID: "task-owned", Metadata: map[string]interface{}{models.MetaKeyAutomationStartOwned: true}},
+		{ID: "task-plain"},
+	} {
+		task.WorkspaceID, task.Title, task.Priority = "ws-owned", task.ID, "medium"
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask %s: %v", task.ID, err)
+		}
+	}
+
+	owned, err := svc.UpdateTaskMetadata(ctx, "task-owned", map[string]interface{}{"ordinary": "new"})
+	if err != nil {
+		t.Fatalf("UpdateTaskMetadata owned: %v", err)
+	}
+	if !models.AutomationStartOwned(owned.Metadata) {
+		t.Fatal("an ordinary metadata update must not release the automation start reservation")
+	}
+	plain, err := svc.UpdateTaskMetadata(ctx, "task-plain", map[string]interface{}{models.MetaKeyAutomationStartOwned: true})
+	if err != nil {
+		t.Fatalf("UpdateTaskMetadata plain: %v", err)
+	}
+	if models.AutomationStartOwned(plain.Metadata) {
+		t.Fatal("an ordinary metadata update must not reserve a task's start")
+	}
+}
+
 func TestUpdateTaskMetadataPreservesTaskHandoffRecords(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

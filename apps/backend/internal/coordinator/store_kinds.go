@@ -24,13 +24,13 @@ func (s *Store) SetOutcomeFenced(ctx context.Context, id, token, outcomeJSON str
 // CompleteKindTx marks an approving proposal (fenced by token) approved,
 // recording the target task and, when non-empty, outcomeJSON. A nil outcome
 // leaves a from_step_id written earlier in place.
-func (s *Store) CompleteKindTx(ctx context.Context, exec coordinatorExec, id, token, taskID, outcomeJSON string, now time.Time) (bool, error) {
+func (s *Store) CompleteKindTx(ctx context.Context, exec coordinatorExec, id, token, targetTaskID, outcomeJSON string, now time.Time) (bool, error) {
 	res, err := exec.ExecContext(ctx, s.db.Rebind(`
 		UPDATE coordinator_proposals
-		SET status = ?, task_id = ?, outcome_json = CASE WHEN ? = '' THEN outcome_json ELSE ? END,
+		SET status = ?, target_task_id = NULLIF(?, ''), outcome_json = CASE WHEN ? = '' THEN outcome_json ELSE ? END,
 		    claim_token = NULL, updated_at = ?
 		WHERE id = ? AND status = ? AND claim_token = ?`),
-		string(ProposalStatusApproved), taskID, outcomeJSON, outcomeJSON, now.UTC(),
+		string(ProposalStatusApproved), targetTaskID, outcomeJSON, outcomeJSON, now.UTC(),
 		id, string(ProposalStatusApproving), token)
 	if err != nil {
 		return false, fmt.Errorf("complete proposal: %w", err)

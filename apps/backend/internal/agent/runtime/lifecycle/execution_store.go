@@ -369,6 +369,9 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if current.promptSettlementGeneration != 0 {
 		return 0, ErrPromptSettlementPending
 	}
+	if current.turnChangeCaptureGeneration != 0 {
+		return 0, ErrPromptSettlementPending
+	}
 	return beginExecutionPromptLocked(current), nil
 }
 
@@ -406,6 +409,7 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	execution.ProviderError = nil
 	execution.Status = v1.AgentStatusRunning
 	execution.resetActiveTool()
+	execution.armPromptActivity()
 	return execution.promptGeneration
 }
 
@@ -422,11 +426,12 @@ func (s *ExecutionStore) MarkPromptDispatched(executionID string, generation uin
 	if !exists {
 		return
 	}
-	if execution.promptGeneration != generation || execution.promptCompletionGeneration == generation {
+	if execution.promptGeneration != generation || execution.promptCompletionGeneration == generation ||
+		execution.dispatchedPromptGeneration == generation {
 		return
 	}
 	execution.dispatchedPromptGeneration = generation
-	execution.armPromptActivity()
+	execution.armAcceptedPromptActivity()
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.
@@ -452,6 +457,33 @@ func (s *ExecutionStore) WithLock(executionID string, fn func(execution *AgentEx
 		return ErrExecutionNotFound
 	}
 	fn(execution)
+	return nil
+}
+
+// WithPromptLifecycleLock executes fn with the execution's promptLifecycleMu
+// and then the store lock held, so fn may read and write prompt lifecycle
+// fields such as promptTurnID directly. The lock order matches BeginPrompt and
+// the completion claim: promptLifecycleMu is never acquired while the store
+// lock is held, because a completion handler that owns promptLifecycleMu and
+// waits for the store lock would otherwise deadlock every store reader.
+// Returns ErrExecutionNotFound when the ID is missing or was re-registered to a
+// different execution between the lookup and the store lock.
+func (s *ExecutionStore) WithPromptLifecycleLock(executionID string, fn func(execution *AgentExecution)) error {
+	execution, exists := s.Get(executionID)
+	if !exists {
+		return ErrExecutionNotFound
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, exists := s.executions[executionID]
+	if !exists || current != execution {
+		return ErrExecutionNotFound
+	}
+	fn(current)
 	return nil
 }
 

@@ -11,16 +11,19 @@ owners:
 
 ## Purpose
 
-The task and workflow system owns durable work items, task relationships,
-execution lifecycle, workflow steps, queued launches, and the contracts that
-move a task through its configured process.
+Owns durable work items, task relationships, execution lifecycle, workflow
+steps, queued launches, and task process contracts.
 
 ## Ownership
 
-This system owns task identity and metadata, task documents and attachments,
-parent and dependency relationships, task creation and launch behavior, task
+Owns task identity, metadata, [workspace discovery](requirements/workspace-search.md),
+documents, attachments, parent and dependency relationships, creation, launch,
 runtime state publication, workflow definitions and transitions, completion
-signals, and task-scoped scheduling contracts.
+signals, and task scheduling.
+
+Turn change sets bind immutable repository intervals to capture policy,
+historical content availability, and transcript anchors. Workspaces supply
+checkout identity; runtime supplies ordered executor access.
 
 ## Exclusions
 
@@ -92,6 +95,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Runtime Cleanup](requirements/runtime-cleanup.md)
 - [Managed Branch Compaction](requirements/managed-branch-compaction.md)
 - [Task Terminal Persistence](requirements/task-terminal-persistence.md)
+- [Terminal target lifecycle](requirements/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](requirements/runtime-state-publication-order.md)
 - [Session Delete Preserves Task Workspaces](requirements/session-delete-resource-cleanup.md)
 - [Task Cleanup Source Manifest](requirements/archive-source-manifest.md)
@@ -104,6 +108,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Actions Menu Action Outcomes](requirements/task-actions-menu-outcomes.md)
 - [Subtasks as Workflow Checklist](requirements/subtask-checklist.md)
 - [Subtask Completion Trigger](requirements/subtask-completion-trigger.md)
+- [Workflow PR Lifecycle Events](requirements/workflow-pr-lifecycle-events.md)
 - [Subtask detachment](requirements/subtask-detachment.md)
 - [Subtask re-parenting by drag and drop](requirements/subtask-reparenting-drag-drop.md)
 - [Task Subtree Controls](requirements/subtree-controls.md)
@@ -170,6 +175,7 @@ signals, and task-scoped scheduling contracts.
 - [External task ID idempotency operations](system-design/external-id-idempotency-operations.md)
 - [External task ID idempotency](system-design/external-id-idempotency.md)
 - [Task model unification](system-design/model-unification.md)
+- [Workflow PR Lifecycle Events](system-design/workflow-pr-lifecycle-events.md)
 - [MCP Tool Name Stability](system-design/mcp-tool-name-stability.md)
 - [MCP workspace modes](system-design/mcp-workspace-mode.md)
 - [Remote Contribution Tasks](system-design/remote-contribution-tasks.md)
@@ -194,6 +200,7 @@ signals, and task-scoped scheduling contracts.
 - [Managed Branch Compaction](system-design/managed-branch-compaction.md)
 - [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
+- [Terminal target lifecycle](system-design/terminal-target-lifecycle.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)
 - [Resume prompt queue](system-design/resume-prompt-queue.md)

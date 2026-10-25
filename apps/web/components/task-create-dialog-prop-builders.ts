@@ -142,6 +142,10 @@ export function buildDialogFormBodyProps(
     onRetryWorkflowAgentOverrides: () => setup.refreshWorkspaceSnapshots(true),
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
+    mcpDefinitions: setup.mcpDefinitions,
+    mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
+    mcpInheritedSelections: setup.mcpInheritedSelections,
+    initialWorkspaceLayoutMode: setup.initialWorkspaceLayoutMode,
   };
 }
 
@@ -189,7 +193,8 @@ export function buildDialogFooterProps(
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
       setup.savedBaseSubmitBlockedReason ??
-      workflowAgentOverridesBlockedReason,
+      workflowAgentOverridesBlockedReason ??
+      setup.executorOwnershipBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

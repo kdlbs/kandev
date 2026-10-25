@@ -103,6 +103,9 @@ type capturedPrompt struct {
 // transientRetryEntry tracks one session's in-progress retry loop: the current
 // attempt count and the cancel func for the armed backoff timer.
 type transientRetryEntry struct {
+	retryAt            time.Time
+	policy             transientRetryPolicy
+	waitForWindow      bool
 	attempt            int
 	mode               string
 	continuationPolicy continuationPolicy
@@ -196,6 +199,9 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	if data.SessionID == "" {
 		return false
 	}
+	if s.automationOwnsRetrySession(ctx, data.TaskID, data.SessionID) {
+		return false
+	}
 
 	noticeState, releaseNoticeState := s.acquireTransientRetryNoticeState(data.SessionID)
 	noticeState.mu.Lock()
@@ -226,6 +232,8 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		noticeState.mu.Unlock()
 		releaseNoticeState()
 		s.logger.Debug("refusing automatic transient retry without safe prompt-attempt evidence",
+			zap.Any("capacity_continuation", data.CapacityContinuation),
+			zap.Bool("pre_result_safe", s.promptAttemptPreResultSafe(data)),
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID),
@@ -245,36 +253,44 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		releaseNoticeState()
 		return false
 	}
-	attempt := s.nextTransientAttemptLocked(data.SessionID)
-	if attempt > transientMaxAttempts {
+	now := s.transientRetryNow()
+	retainedRuntime := s.retainedRuntimeRetryForFailure(ctx, data)
+	policy := capacityRetryPolicy(classified, retainedRuntime, previousEntry, now)
+	if !policy.windowEndsAt.IsZero() && (classified.Code != routingerr.CodeModelCapacity || retainedRuntime == nil) {
 		noticeState.mu.Unlock()
 		releaseNoticeState()
-		s.logger.Warn("transient retry budget exhausted; falling through to recovery banner",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Int("attempts", attempt-1))
+		return false
+	}
+	attempt := s.nextTransientAttemptLocked(data.SessionID)
+	if attempt > policy.maxAttempts() || policy.expired(now) {
+		noticeState.mu.Unlock()
+		releaseNoticeState()
 		s.resetTransientRetry(data.SessionID)
 		return false
 	}
-
-	now := time.Now().UTC()
-	delay := transientRetryDelayFor(classified, attempt, now)
+	delay := policy.delay(classified, attempt, now)
 	retryAt := now.Add(delay)
+	waitForWindow := !policy.windowEndsAt.IsZero() && !retryAt.Before(policy.windowEndsAt)
+	if waitForWindow {
+		retryAt = policy.windowEndsAt
+		delay = retryAt.Sub(now)
+	}
 	s.logger.Info("scheduling transient provider-error retry",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
 		zap.Int("attempt", attempt),
-		zap.Int("max_attempts", transientMaxAttempts),
+		zap.Int("max_attempts", policy.maxAttempts()),
 		zap.Duration("delay", delay))
 
 	data.RecoveryMode = mode
-	retainedRuntime := s.retainedRuntimeRetryForFailure(ctx, data)
 	// Emit the yellow status (against the failed turn) before completing it.
-	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
 	// Reserve the next timer while the notice lifecycle is still serialized. A
 	// concurrent failure can replace this reservation, but cannot arm it until
 	// its own failed turn has been parked.
 	entry := s.reserveTransientRetryWithMetadataLocked(noticeState, data.SessionID, attempt, func(entry *transientRetryEntry) {
+		entry.policy = policy
+		entry.retryAt = retryAt
+		entry.waitForWindow = waitForWindow
 		entry.mode = mode
 		entry.continuation = binding
 		if binding != nil {
@@ -289,6 +305,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		}
 		entry.retainedRuntime = retainedRuntime
 	})
+	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
 	noticeState.mu.Unlock()
 	releaseNoticeState()
 
@@ -404,6 +421,7 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 	if previous, ok := s.transientRetries.Load(sessionID); ok {
 		if previous, ok := previous.(*transientRetryEntry); ok {
 			previous.mu.Lock()
+			entry.policy = previous.policy
 			entry.started = previous.started
 			entry.mode, entry.continuationPolicy, entry.continuation = previous.mode, previous.continuationPolicy, previous.continuation
 			entry.providerID, entry.modelID = previous.providerID, previous.modelID
@@ -432,19 +450,13 @@ func (s *Service) armTransientRetryEntryLocked(
 // runTransientRetry waits out the backoff (or cancellation) then re-drives the
 // turn. Mirrors the clarification-watchdog goroutine ownership pattern.
 func (s *Service) runTransientRetry(retryCtx context.Context, taskID, sessionID, execID string, entry *transientRetryEntry, delay time.Duration) {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-retryCtx.Done():
+	if !s.waitTransientRetry(retryCtx, entry, delay) || retryCtx.Err() != nil {
 		return
-	case <-timer.C:
-		// Only fire if this entry is still the active one for the session.
-		if cur, ok := s.transientRetries.Load(sessionID); !ok || cur != entry || !entry.claim() {
-			return
-		}
-		s.retryTransientPrompt(retryCtx, taskID, sessionID, execID)
 	}
+	if cur, ok := s.transientRetries.Load(sessionID); !ok || cur != entry || !entry.claim() {
+		return
+	}
+	s.retryTransientPrompt(retryCtx, taskID, sessionID, execID)
 }
 
 // retryTransientPrompt re-drives the failed turn after backoff. The failed
@@ -457,10 +469,18 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	if ctx.Err() != nil {
 		return
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		s.resetTransientRetry(sessionID)
+		return
+	}
 	var retryEntry *transientRetryEntry
 	if value, ok := s.transientRetries.Load(sessionID); ok {
 		if entry, ok := value.(*transientRetryEntry); ok {
 			retryEntry = entry
+			if disposition := entry.pendingStopDisposition(s.transientRetryNow()); disposition != "" {
+				s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, disposition)
+				return
+			}
 			if entry.mode == recoveryModeContinue {
 				s.retryInterruptedContinuation(ctx, taskID, sessionID, execID, entry)
 				return
@@ -497,6 +517,11 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		case retainedRuntimeRetryUsable:
 			s.retryRetainedRuntimePrompt(ctx, taskID, sessionID, retryEntry, cp)
 			return
+		case retainedRuntimeRetryLost:
+			if !retryEntry.policy.windowEndsAt.IsZero() {
+				s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, retryEntry, "refused")
+				return
+			}
 		case retainedRuntimeRetryBlocked:
 			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, retryEntry, "refused")
 			return

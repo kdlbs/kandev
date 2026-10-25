@@ -15,7 +15,7 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isOrphanMoveTarget } from "@/components/kanban/swimlane-orphan-display";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { beginCrossStepMove } from "./cross-step-move-ownership";
 import { classifyDrop } from "@/lib/kanban/drop-classification";
 import { useStepReorder } from "@/hooks/domains/kanban/use-step-reorder";
 import { getTaskMoveErrorMessage } from "@/components/task/task-move-error-message";
@@ -43,42 +43,22 @@ export function useCrossStepMove(workflowId: string, onMoveError?: (error: MoveT
     async (taskId: string, targetStepId: string, task: Task) => {
       const state = store.getState();
       const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
+      const originalTask = snapshot?.tasks.find((item) => item.id === taskId);
+      if (!snapshot || !originalTask || originalTask.workflowStepId === targetStepId) return;
 
-      const originalStepId = task.workflowStepId;
-
-      // The server always computes a cross-step arrival's position itself
-      // (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: it sorts last in the
-      // destination), so there is no locally-computed position to apply
-      // here — the eventual task.updated/task.moved event carries the real
-      // one. Until then the card just needs to show the right step.
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId } : t,
-        ),
-      });
-
+      const ownership = beginCrossStepMove(store, workflowId, taskId, targetStepId, originalTask);
       try {
         await moveTaskById(taskId, {
           workflow_id: workflowId,
           workflow_step_id: targetStepId,
         });
+        ownership.succeed();
       } catch (error) {
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          // Revert only this task's optimistic step change, not the whole
-          // array: a concurrent update to another task while this move was
-          // in flight must survive the rollback.
-          store.getState().setWorkflowSnapshot(workflowId, {
-            ...currentSnapshot,
-            tasks: currentSnapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-              t.id === taskId ? { ...t, workflowStepId: originalStepId } : t,
-            ),
-          });
-        }
+        ownership.rollback();
         const message = getTaskMoveErrorMessage(error, t("task:taskMoveErrorGeneric"), t);
         onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
+      } finally {
+        ownership.dispose();
       }
     },
     [workflowId, store, moveTaskById, onMoveError],

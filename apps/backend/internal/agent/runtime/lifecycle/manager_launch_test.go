@@ -27,6 +27,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -95,7 +96,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-123")
@@ -104,7 +105,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=false with ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverFalse}
 		req := &LaunchRequest{ACPSessionID: "sess-123"}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag, got: %s", cmds.initial)
@@ -115,7 +116,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=true with empty ACPSessionID omits --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: &canRecoverTrue}
 		req := &LaunchRequest{ACPSessionID: ""}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.False(t, strings.Contains(cmds.initial, "--resume"),
 			"expected no --resume flag when ACPSessionID is empty, got: %s", cmds.initial)
@@ -124,7 +125,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	t.Run("CanRecover=nil (default true) with ACPSessionID includes --resume", func(t *testing.T) {
 		ag := &resumeTestAgent{canRecover: nil}
 		req := &LaunchRequest{ACPSessionID: "sess-456"}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), req, nil, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.Contains(t, cmds.initial, "--resume")
 		require.Contains(t, cmds.initial, "sess-456")
@@ -186,7 +187,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 			if tt.name == "opencode" {
 				want = strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().NativeCommand().Args(), " ")
 			}
-			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
+			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, agentruntime.RuntimeStandalone, true)
 			require.NoError(t, err)
 			require.Equal(t, want, cmds.initial)
 		})
@@ -197,12 +198,12 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	// binary-first pattern as CodeNomad), and falls back to the managed npx
 	// runtime when it is absent (containers, remotes, fresh hosts).
 	t.Run("opencode-native", func(t *testing.T) {
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), agentruntime.RuntimeStandalone, true)
 		require.NoError(t, err)
 		require.Equal(t, "opencode acp --print-logs", cmds.initial)
 	})
 	t.Run("opencode-npx-fallback", func(t *testing.T) {
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		want := strings.Join(agents.NewOpenCodeACP().ManagedNPMRuntime().CachedACPCommand().Args(), " ")
 		require.Equal(t, want, cmds.initial)
@@ -240,7 +241,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: "--add-dir /shared", Enabled: true},  // must be split
 			},
 		}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 
 		require.Contains(t, cmds.initial, "--allow-all-tools")
@@ -258,7 +259,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 				{Flag: `--broken "unterminated`, Enabled: true},
 			},
 		}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		// The bad flag is dropped entirely; the launch still produces the
 		// agent's base command so a user with a typo still gets their task
@@ -267,7 +268,7 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 
 	t.Run("nil profile produces bare command", func(t *testing.T) {
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -282,9 +283,10 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p1",
 			CommandPrefix: "greywall --",
 		}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- copilot --acp", cmds.initial)
+		require.Equal(t, "copilot --acp", cmds.initial)
+		require.Equal(t, []string{"greywall", "--"}, cmds.wrapper.Argv)
 	})
 
 	t.Run("prefix precedes appended cli flags", func(t *testing.T) {
@@ -293,14 +295,14 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- copilot --acp --allow-all-tools", cmds.initial)
+		require.Equal(t, "copilot --acp --allow-all-tools", cmds.initial)
 	})
 
 	t.Run("empty prefix leaves the command unwrapped", func(t *testing.T) {
 		profile := &AgentProfileInfo{ProfileID: "p3"}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
@@ -310,7 +312,7 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			ProfileID:     "p4",
 			CommandPrefix: `greywall "unterminated`,
 		}
-		_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, false)
+		_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, ag, agentruntime.RuntimeStandalone, false)
 		require.Error(t, err, "a configured prefix that cannot be resolved must abort the launch")
 	})
 
@@ -327,9 +329,9 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 			CommandPrefix: "greywall --",
 			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
 		}
-		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, continueAgent, false)
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, profile, continueAgent, agentruntime.RuntimeStandalone, false)
 		require.NoError(t, err)
-		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
+		require.Equal(t, "amp threads continue --allow-all-tools", cmds.continue_)
 	})
 }
 
@@ -383,7 +385,7 @@ func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, false)
+			_, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, agentruntime.RuntimeStandalone, false)
 			require.Error(t, err)
 		})
 	}
@@ -1726,41 +1728,46 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsProjectionPolicy())
 	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
 	require.GreaterOrEqual(t, len(got.AgentArgs), 2, "promotion must populate structured argv")
-	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.AgentArgs[:2],
-		"promotion must preserve the prefix argv token containing spaces")
+	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.LaunchWrapper.Argv,
+		"promotion must preserve the separate wrapper token containing spaces")
 	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
 func TestLaunch_PromotesWorkspaceOnlyExecutionWithInitialPrompt(t *testing.T) {
-	mgr := newTestManager(t)
-	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
-		ProfileID: "profile-prompt",
-		AgentName: "auggie",
-	}}
+	for _, workspaceHadPredecessor := range []bool{false, true} {
+		t.Run("workspace_had_predecessor_"+strconv.FormatBool(workspaceHadPredecessor), func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+				ProfileID: "profile-prompt",
+				AgentName: "auggie",
+			}}
 
-	existing := &AgentExecution{
-		ID:             "exec-workspace-only-prompt",
-		SessionID:      "session-prompt",
-		TaskID:         "task-prompt",
-		AgentProfileID: "profile-prompt",
+			existing := &AgentExecution{
+				ID:               "exec-workspace-only-prompt",
+				SessionID:        "session-prompt",
+				TaskID:           "task-prompt",
+				AgentProfileID:   "profile-prompt",
+				isResumedSession: workspaceHadPredecessor,
+			}
+			require.NoError(t, mgr.executionStore.Add(existing))
+
+			attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
+			got, err := mgr.Launch(context.Background(), &LaunchRequest{
+				TaskID:          existing.TaskID,
+				SessionID:       existing.SessionID,
+				AgentProfileID:  existing.AgentProfileID,
+				TaskDescription: "start the requested work",
+				TurnID:          "turn-initial",
+				Attachments:     []MessageAttachment{attachment},
+			})
+			require.NoError(t, err)
+			require.Same(t, existing, got)
+			require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
+			require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
+			require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
+		})
 	}
-	require.NoError(t, mgr.executionStore.Add(existing))
-
-	attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
-	got, err := mgr.Launch(context.Background(), &LaunchRequest{
-		TaskID:          existing.TaskID,
-		SessionID:       existing.SessionID,
-		AgentProfileID:  existing.AgentProfileID,
-		TaskDescription: "start the requested work",
-		TurnID:          "turn-initial",
-		Attachments:     []MessageAttachment{attachment},
-	})
-	require.NoError(t, err)
-	require.Same(t, existing, got)
-	require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
-	require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
-	require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
 }
 
 func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {

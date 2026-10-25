@@ -122,6 +122,17 @@ Supported remote executors instead detach host transport and preserve remote age
 Startup must first authenticate and adopt a surviving remote execution; native restore is reserved for confirmed process termination.
 For an exact local predecessor, a terminal row can lack its former PID. If row liveness is unknown, the pinned authenticated runtime identity may prove that the old process and its owned descendants have terminated.
 This proof applies only to the matching standalone execution. A live process, mismatched owner, incomplete identity, or failed inspection blocks restoration; remote rows never use this local proof.
+On macOS, process birth time, process group, and the numeric OS session ID form
+that identity. Kernel session pointers are redacted and are not ownership
+evidence; older birth tokens with a zero or nonzero pointer suffix remain
+readable. An empty PID query reported as `EIO` requires an independent `ESRCH`
+absence check. After the session leader exits, every non-zombie descendant in
+its numeric session must also have exited before restoration; enumeration or
+identity errors keep recovery blocked. Revalidate each enumerated birth time and
+process group against its current PID before accepting session membership.
+Numeric session membership alone does not authorize orphan cleanup after the
+leader exits, because a session ID may have been reused; without retained
+descendant birth evidence, macOS containment refuses to signal those processes.
 Audit proxy teardown and executor-specific stop paths, including Sprites, so preserving an environment cannot mask a stopped agent.
 Explicit Stop and authorized archive/reset/delete cleanup remain separate from backend shutdown.
 

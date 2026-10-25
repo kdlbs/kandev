@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -29,7 +31,7 @@ const (
 // capability's three closed fail-open paths. The third, zero configured
 // policies, is closed by gate 5 (REQ-OFFICE-BUDGET-003's built-in default).
 func (si *SchedulerIntegration) admitRun(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 ) bool {
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 
@@ -126,7 +128,7 @@ func (si *SchedulerIntegration) admitRun(
 // AC-OFFICE-BUDGET-005.4 degraded-window counter still fires at most once
 // per run even when both gate 4 and gate 5 saw a degraded window.
 func (si *SchedulerIntegration) admitDefaultCeilingGate(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	provenance shared.RunProvenance, result models.PreLaunchResult, degradedAdmitted bool, now time.Time,
 ) bool {
 	if provenance != shared.RunProvenanceUnattended || result.WorkspaceDailyBlockingSuperseded {
@@ -158,7 +160,7 @@ func (si *SchedulerIntegration) admitDefaultCeilingGate(
 // degradation also fired, keeps the existing budget_blocked outcome and
 // action, with the degradation flag carried on the entry alone.
 func (si *SchedulerIntegration) finishPolicyBlock(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance, p *models.PreLaunchPolicyResult,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance, p *models.PreLaunchPolicyResult,
 ) bool {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.clearAgentWorking(ctx, agent.ID, run.ID)
@@ -203,7 +205,7 @@ func (si *SchedulerIntegration) finishPolicyBlock(
 // -- mirroring cancelStaleRun's release/cancel/publish/log sequence. Always
 // returns false.
 func (si *SchedulerIntegration) cancelBudgetRun(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	reason, action string, extraFields map[string]string,
 ) bool {
 	si.releaseCheckoutIfNeeded(ctx, run)
@@ -345,7 +347,7 @@ func (c budgetDeferralCause) failedAction() string {
 // "" for every cause but budgetDeferralUnevaluatedPolicy. Always returns
 // false: every call site uses it as `return si.admitBudgetDeferral(...)`.
 func (si *SchedulerIntegration) admitBudgetDeferral(
-	ctx context.Context, run *models.Run, agent *models.AgentInstance,
+	ctx context.Context, run *runsmodels.Run, agent *models.AgentInstance,
 	cause budgetDeferralCause, policyID string,
 ) bool {
 	si.releaseCheckoutIfNeeded(ctx, run)
@@ -401,7 +403,7 @@ func (si *SchedulerIntegration) admitBudgetDeferral(
 // gate 1 (agent found but WorkspaceID == ""), the other branch of the same
 // disposition; unlike cancelBudgetRun's other callers, no agent is
 // available here, so the activity entry carries no workspace scope.
-func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, run *models.Run) {
+func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, run *runsmodels.Run) {
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 	incBudgetCancelledNoWorkspace(provenance)
 	si.cleanupWorkspaceLookupRun(ctx, run)
@@ -432,7 +434,7 @@ func (si *SchedulerIntegration) cancelUnresolvableAgentRun(ctx context.Context, 
 // here (the lookup itself is what failed), so the activity entry carries
 // no workspace scope. The run may still own a checkout from an earlier
 // routed launch, so this path releases run-owned state before retrying.
-func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context, run *models.Run) {
+func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context, run *runsmodels.Run) {
 	provenance := shared.ClassifyRunProvenance(run.Reason)
 	si.cleanupWorkspaceLookupRun(ctx, run)
 
@@ -482,7 +484,7 @@ func (si *SchedulerIntegration) deferWorkspaceLookupFailure(ctx context.Context,
 // was requeued after launch. The owner-scoped release is a no-op when this
 // attempt never held a checkout, so a lookup failure cannot steal another
 // run's lock.
-func (si *SchedulerIntegration) cleanupWorkspaceLookupRun(ctx context.Context, run *models.Run) {
+func (si *SchedulerIntegration) cleanupWorkspaceLookupRun(ctx context.Context, run *runsmodels.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	if run != nil {
 		si.svc.clearAgentWorking(ctx, run.AgentProfileID, run.ID)

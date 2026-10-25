@@ -94,8 +94,33 @@ func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEvent
 	return classified != nil && classified.Code == routingerr.CodeModelCapacity &&
 		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
 		data.PromptFailureDisposition.Valid() && data.OwnerKind == queueStatusScopeTask &&
-		!data.DynamicRouteAttempt && data.CapacityContinuation.SafeFor(data.PromptGeneration) &&
+		!data.DynamicRouteAttempt &&
+		(data.CapacityContinuation.SafeFor(data.PromptGeneration) || s.capacityContinuationRetryHasEvidence(data)) &&
 		data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
+}
+
+// An admitted continuation may fail before doing new work. Keep its bound
+// continuation instruction instead of replaying the original completed request.
+func (s *Service) capacityContinuationRetryHasEvidence(data watcher.AgentEventData) bool {
+	snapshot := data.CapacityContinuation
+	if snapshot == nil || !snapshot.EvidenceComplete || snapshot.PromptGeneration != data.PromptGeneration ||
+		!supportsCapacityContinuation(snapshot.Support) || capacityContinuationHasUnsafeWork(snapshot) ||
+		!s.promptAttemptPreResultSafe(data) {
+		return false
+	}
+	value, ok := s.transientRetries.Load(data.SessionID)
+	if !ok {
+		return false
+	}
+	entry, ok := value.(*transientRetryEntry)
+	if !ok || entry.mode != recoveryModeContinue || entry.continuationPolicy != continuationPolicyCapacityLive ||
+		entry.continuation == nil || entry.retainedRuntime == nil {
+		return false
+	}
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.started > 0 && entry.acceptedExecution == data.AgentExecutionID &&
+		entry.acceptedGeneration == data.PromptGeneration
 }
 
 func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {

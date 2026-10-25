@@ -81,7 +81,11 @@ func retentionEventPayloadSupported(eventType string, terminal bool) bool {
 	}
 	switch eventType {
 	case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeToolCall, streams.EventTypeToolUpdate,
-		streams.EventTypePlan, streams.EventTypeAgentPlan:
+		streams.EventTypePlan, streams.EventTypeAgentPlan, streams.EventTypeShellOutputUpdate:
+		return true
+	case streams.EventTypeAgentCapabilities, streams.EventTypeSessionStatus, streams.EventTypeAvailableCommands,
+		streams.EventTypeSessionMode, streams.EventTypeSessionModels, streams.EventTypeSessionInfo,
+		streams.EventTypeContextWindow, streams.EventTypeMCPAttachment, streams.EventTypeTurnStarted:
 		return true
 	default:
 		return false

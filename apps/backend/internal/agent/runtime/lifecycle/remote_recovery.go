@@ -340,6 +340,9 @@ func (m *Manager) proveRecoveredRemoteInstance(ctx context.Context, entry *remot
 		ri.InstanceID != entry.record.AgentExecutionID || ri.TaskID != entry.record.TaskID {
 		return errors.New("runtime returned a different persisted remote execution identity")
 	}
+	if entry.snapshot.IsPassthrough && ri.RuntimeName == agentruntime.RuntimeSSH {
+		return m.captureRemotePassthroughEvidence(ctx, ri)
+	}
 	if entry.snapshot.RecoverySourcePresent {
 		if ri.expectedDeliveryStreamID != "" && ri.expectedDeliveryStreamID != entry.snapshot.RecoveryStreamID {
 			return errors.New("remote recovery stream expectation changed")
@@ -384,6 +387,7 @@ func (m *Manager) prepareRecoveredRemoteExecution(
 		WorkspaceID:           snapshot.TaskWorkspaceID,
 		TaskEnvironmentID:     snapshot.TaskEnvironmentID,
 		AgentProfileID:        profileID,
+		IsPassthrough:         snapshot.IsPassthrough,
 		ExecutorType:          getMetadataString(metadata, MetadataKeyExecutorType),
 		ContainerID:           ri.ContainerID,
 		ContainerIP:           ri.ContainerIP,
@@ -401,6 +405,10 @@ func (m *Manager) prepareRecoveredRemoteExecution(
 	}
 	if execution.TaskID == "" || execution.SessionID == "" || execution.ID == "" {
 		return nil, errors.New("remote recovery execution identity is incomplete")
+	}
+	execution.restoreIdleActivity(record.Metadata)
+	if snapshot.IsPassthrough && ri.remotePassthroughSnapshot != nil {
+		m.adoptRemotePassthrough(execution, *ri.remotePassthroughSnapshot)
 	}
 	execution.setSessionInitialized(true)
 	execution.setRuntimeEnvironment(ri.Env)
@@ -623,6 +631,11 @@ func (m *Manager) finishTrackedRemoteExecution(
 		releaseClient()
 	}
 	m.completeRemoteRecovery(entry)
+	if execution.IsPassthrough && isSSHPassthrough(execution) {
+		m.connectPassthroughServices(ctx, execution)
+		m.observeRemotePassthrough(execution)
+		return
+	}
 	if reconnectStreams && m.streamManager != nil {
 		go m.streamManager.ReconnectAll(execution)
 	}

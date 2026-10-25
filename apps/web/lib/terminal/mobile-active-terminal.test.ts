@@ -1,34 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setActiveTerminalSender, getActiveTerminalSender } from "./mobile-active-terminal";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getActiveTerminalSender, setActiveTerminalSender } from "./mobile-active-terminal";
 
-describe("mobile active terminal sender registry", () => {
-  beforeEach(() => {
-    setActiveTerminalSender(null);
-  });
+beforeEach(() => setActiveTerminalSender(null));
 
-  it("returns null when no sender is registered", () => {
-    expect(getActiveTerminalSender()).toBeNull();
-  });
-
-  it("returns the registered sender", () => {
+describe("mobile terminal ownership", () => {
+  it("does not send keys to another session", () => {
     const sender = vi.fn();
-    setActiveTerminalSender(sender);
-    expect(getActiveTerminalSender()).toBe(sender);
-    sender("hi");
-    expect(sender).toHaveBeenCalledWith("hi");
+    setActiveTerminalSender(sender, "first-session");
+    expect(getActiveTerminalSender("second-session")).toBeNull();
+    expect(getActiveTerminalSender("first-session")).toBe(sender);
   });
 
-  it("replaces a previously registered sender", () => {
-    const a = vi.fn();
-    const b = vi.fn();
-    setActiveTerminalSender(a);
-    setActiveTerminalSender(b);
-    expect(getActiveTerminalSender()).toBe(b);
-  });
-
-  it("clears the sender when null is set", () => {
-    setActiveTerminalSender(vi.fn());
-    setActiveTerminalSender(null);
-    expect(getActiveTerminalSender()).toBeNull();
+  it("keeps a successor sender when an old terminal releases ownership", () => {
+    const release = setActiveTerminalSender(vi.fn(), "session");
+    const successor = vi.fn();
+    setActiveTerminalSender(successor, "session");
+    expect(typeof release).toBe("function");
+    release();
+    expect(getActiveTerminalSender("session")).toBe(successor);
   });
 });

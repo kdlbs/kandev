@@ -1,8 +1,18 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test as base, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
+
+const test = base.extend({
+  prCapture: async ({ testPage }, use, testInfo) => {
+    const capture = new PrAssetCapture(testPage, testInfo.file, { captureKey: testInfo.title });
+    await use(capture);
+    capture.flush();
+  },
+});
 
 const MR_IID = 411;
 
@@ -73,6 +83,7 @@ test.describe("mobile GitLab MR status chip", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "Mobile MR chip");
@@ -82,6 +93,28 @@ test.describe("mobile GitLab MR status chip", () => {
     await session.waitForLoad();
 
     await expect(session.mrStatusChip()).toBeVisible({ timeout: 15_000 });
+    // @covers AC-UI-COMPOSER-ACTION-WRAP-001.7
+    for (const width of [393, 767, 800, 320]) {
+      await testPage.setViewportSize({ width, height: 851 });
+      await expect
+        .poll(async () => {
+          const box = await session.mrStatusChip().boundingBox();
+          return box ? Math.min(box.width, box.height) : 0;
+        })
+        .toBeGreaterThanOrEqual(44);
+      expect(
+        await session.mrStatusChip().evaluate((chip) => {
+          const box = chip.getBoundingClientRect();
+          return chip.contains(
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+          );
+        }),
+      ).toBe(true);
+    }
+    await waitForFiniteAnimations(session.chatStatusBar());
+    await prCapture.screenshot("mobile-gitlab-composer-target", {
+      caption: "GitLab composer status keeps a 44px touch target on a 320px phone",
+    });
     await session.tapMRStatusChip();
 
     const drawer = session.mrStatusChipDrawer();
@@ -91,5 +124,37 @@ test.describe("mobile GitLab MR status chip", () => {
     await session.mrStatusChipDrawerClose().click();
     await expect(drawer).toBeHidden({ timeout: 5_000 });
     await expect(session.mrStatusChip()).toBeFocused();
+  });
+
+  test("keeps narrow fine-pointer targets large and desktop chips compact", async ({
+    desktopTestPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "Responsive MR chip");
+    await desktopTestPage.setViewportSize({ width: 393, height: 851 });
+    await desktopTestPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(desktopTestPage);
+    await session.waitForLoad();
+    const chip = session.mrStatusChip();
+    await expect(chip).toBeVisible();
+    await expect
+      .poll(async () => {
+        const box = await chip.boundingBox();
+        return box ? Math.min(box.width, box.height) : 0;
+      })
+      .toBeGreaterThanOrEqual(44);
+    await chip.hover();
+    await expect(session.mrStatusChipPopoverInner()).toBeVisible();
+    await desktopTestPage.mouse.move(0, 0);
+    await expect(session.mrStatusChipPopoverInner()).toBeHidden();
+    await desktopTestPage.setViewportSize({ width: 1280, height: 900 });
+    await expect.poll(async () => (await chip.boundingBox())?.height ?? 100).toBeLessThan(44);
+    await waitForFiniteAnimations(session.chatStatusBar());
+    await prCapture.screenshot("desktop-gitlab-composer-target", {
+      page: desktopTestPage,
+      caption: "GitLab composer status retains compact sizing on a desktop",
+    });
   });
 });

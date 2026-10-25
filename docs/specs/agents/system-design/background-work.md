@@ -153,8 +153,32 @@ Represent this as terminal `ended` with `outcome_known=false` and render
 On backend start or transport loss, previously live inspection rows become
 unknown with controls disabled. Resume queries only the owning session's provider,
 reconciles stable bindings, and replaces capabilities for the new connection.
-Event-only providers remain unknown until fresh evidence. Browser disconnection
-alone does not imply provider disconnection. Session reset/deletion fences its
+Event-only providers remain unknown until fresh evidence.
+The end of the owning agent process is termination evidence for every
+non-terminal row of its session. Terminal session transitions, successful idle
+suspension, completed teardown, and startup reconciliation attempt settlement
+only when the runtime liveness probe confirms no live process. A live process or
+failed probe leaves work open; terminal session state and stop acknowledgement
+alone are not process-termination evidence. Successful stop evidence is bound to
+the exact execution in the durable runtime record; a delayed predecessor
+completion cannot settle work owned by a retained successor. Generic recovery
+cleanup may preserve a remote process even when it returns success, so it uses
+the same liveness and retained-owner guards as startup. These paths never launch
+an agent. Settlement holds the existing session lifecycle fence shared by launch
+and resume through the database commit. Teardown callbacks wait for that fence;
+state-change hooks that may already hold it attempt settlement without waiting.
+An execution identity change during the process probe invalidates the observation.
+
+Workload and run settlement commits in one database transaction, with PostgreSQL
+session-scoped transaction advisory locking shared by run observations. Only
+committed workload observations are returned for publication. Startup discovery
+also includes open runs under terminal parents, so older partial settlements
+remain repairable. Delayed non-terminal observations cannot reopen terminal
+parents or runs, including runs first observed after their parent ended. Late
+terminal provider observations may still supply the actual outcome and exit code.
+A provider that never reports completion, such as Claude's detached shells today,
+therefore cannot leave rows running past verified process termination. Browser
+disconnection alone does not imply provider disconnection. Session reset/deletion fences its
 incarnation before clearing client state; late events cannot recreate it.
 
 Persist row updates before emitting `task_session.background_work.updated` through

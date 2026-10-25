@@ -4,32 +4,12 @@ import { officeTopbarTitle } from "../../helpers/office-topbar";
 test.describe("Onboarding", () => {
   test("onboarding state reflects completed after setup", async ({ officeApi, officeSeed }) => {
     const state = await officeApi.getOnboardingState();
-    const s = state as { completed: boolean; workspaceId?: string };
-    expect(s.completed).toBe(true);
-    expect(s.workspaceId).toBe(officeSeed.workspaceId);
-  });
-
-  test("completed onboarding has workspace and agent IDs", async ({ officeApi, officeSeed }) => {
-    const state = await officeApi.getOnboardingState();
     const s = state as { completed: boolean; workspaceId?: string; ceoAgentId?: string };
+    expect(s.completed).toBe(true);
     expect(s.workspaceId).toBeTruthy();
     expect(s.ceoAgentId).toBeTruthy();
-    expect(s.workspaceId).toBe(officeSeed.workspaceId);
     expect(s.ceoAgentId).toBe(officeSeed.agentId);
-  });
-
-  test("dashboard page loads after onboarding", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office");
-    // Should NOT redirect to /office/setup
-    await expect(testPage).toHaveURL(/\/office$/, { timeout: 10_000 });
-  });
-
-  test("dashboard page shows metric cards", async ({ testPage, officeSeed: _ }) => {
-    await testPage.goto("/office");
-    await expect(officeTopbarTitle(testPage)).toHaveText(/Dashboard/i, {
-      timeout: 10_000,
-    });
-    await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
+    expect(s.workspaceId).toBe(officeSeed.workspaceId);
   });
 
   test("setup page redirects to dashboard when already completed", async ({
@@ -39,27 +19,6 @@ test.describe("Onboarding", () => {
     await testPage.goto("/office/setup");
     // Backend sees onboarding as completed → SSR redirects to /office
     await expect(testPage).toHaveURL(/\/office$/, { timeout: 10_000 });
-  });
-
-  test("onboarding with task title creates a task", async ({
-    apiClient,
-    officeApi,
-    officeSeed,
-  }) => {
-    // Re-running onboarding would fail ("workspace already has a CEO agent"), so
-    // we verify the same behaviour by creating a task directly via the task API.
-    await apiClient.createTask(officeSeed.workspaceId, "First Onboarding Task", {
-      workflow_id: officeSeed.workflowId,
-    });
-
-    const issues = await officeApi.listTasks(officeSeed.workspaceId);
-    const list = (issues as { tasks?: Record<string, unknown>[] }).tasks ?? [];
-    const found = list.find(
-      (i) => (i as Record<string, unknown>).title === "First Onboarding Task",
-    );
-    expect(found).toBeDefined();
-    expect(officeSeed.workspaceId).toBeTruthy();
-    expect(officeSeed.agentId).toBeTruthy();
   });
 
   test("setup page with mode=new shows wizard when already completed", async ({

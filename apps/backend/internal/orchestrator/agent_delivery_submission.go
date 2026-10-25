@@ -154,14 +154,14 @@ func (s *Service) deliveryCapabilityForExecution(
 		}, false
 	}
 	peerVersion := capability.Version
-	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
+	if journal.SupportsDeliveryVersion(peerVersion) && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
 		// Supported peers without retained storage use legacy delivery;
 		// unresolved work still blocks that negotiation.
 		peerVersion = 0
 	}
 	return agentruntime.NegotiateDurableDelivery(
 		journal.StorageCapability{
-			Version: journal.CurrentVersion,
+			Version: journal.CurrentProtocolVersion,
 			Durable: true,
 		},
 		peerVersion,
@@ -279,7 +279,7 @@ func (s *Service) resolvePendingDeliveryProtocol(
 		return messagequeue.DeliveryProtocolLegacy, nil
 	case agentruntime.DurableDeliveryV1:
 		if decision.Reason == durableDeliveryUnresolvedReason {
-			return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+			return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 		}
 		return messagequeue.DeliveryProtocolV1, nil
 	default:
@@ -300,7 +300,7 @@ func (s *Service) validateV1DeliveryProtocol(
 		return "", s.deliveryRecoveryError(ctx, sessionID, reason)
 	}
 	if decision.Reason == durableDeliveryUnresolvedReason {
-		return "", s.deliveryRecoveryError(ctx, sessionID, decision.Reason)
+		return s.reconcileUnresolvedDeliveryProtocol(ctx, sessionID, executionID)
 	}
 	return messagequeue.DeliveryProtocolV1, nil
 }

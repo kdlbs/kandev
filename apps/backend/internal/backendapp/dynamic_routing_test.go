@@ -5,9 +5,36 @@ import (
 	"errors"
 	"testing"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile(t *testing.T) {
+	ctx := context.Background()
+	_, profileRepo, repo := openTasklessDynamicRepo(t)
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-1", WorkspaceID: "workspace-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "workspace-1", WorkflowID: "workflow-1", Title: "Task", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", AgentProfileID: "concrete-profile",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	_, err := loadDynamicRouteActionSession(ctx, repo, profileRepo, &agentruntime.ProfileExecutionResolver{}, "session-1")
+	if !errors.Is(err, orchestrator.ErrRouteActionRequiresDynamicProfile) {
+		t.Fatalf("loadDynamicRouteActionSession error = %v, want non-dynamic profile rejection", err)
+	}
+}
 
 func TestRepairDynamicRouteAfterLaunchFailureSurfacesMarkerError(t *testing.T) {
 	session := &models.TaskSession{

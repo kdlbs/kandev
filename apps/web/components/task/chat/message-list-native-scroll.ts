@@ -84,6 +84,28 @@ export function resolvePaginationStopReason(
   return boundaryUnchanged ? "visible-boundary-unchanged" : "visible-boundary-added";
 }
 
+type TranscriptScrollGeometry = {
+  scrollTop: number;
+  scrollHeight: number;
+};
+
+function readTranscriptScrollGeometry(element: HTMLElement): TranscriptScrollGeometry {
+  return { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight };
+}
+
+export function shouldPreserveFollowOnScroll(
+  previous: TranscriptScrollGeometry,
+  current: TranscriptScrollGeometry,
+): boolean {
+  const scrollTopDelta = current.scrollTop - previous.scrollTop;
+  if (Math.abs(scrollTopDelta) <= 2) return true;
+  const contentDelta = current.scrollHeight - previous.scrollHeight;
+  return (
+    (contentDelta > 0 || (contentDelta < 0 && scrollTopDelta < 0)) &&
+    Math.abs(scrollTopDelta) <= Math.abs(contentDelta) + 2
+  );
+}
+
 function resolvePaginationSettleReason(
   result: LazyLoadSentinelSettleResult,
   boundaryUnchanged: boolean,
@@ -653,13 +675,43 @@ function useFollowIntent({
   isNearBottomRef: React.RefObject<boolean>;
   cancelMotion: () => void;
 }) {
-  const resyncIsNearBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || !isVisibleRef.current || isAnimating()) return;
-    isNearBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
-    if (isNearBottomRef.current) userReading.current = false;
-  }, [scrollRef, isAnimating, userReading]);
+  const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const recordGeometry = () => {
+      lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
+    };
+    recordGeometry();
+    const observer = new ResizeObserver(recordGeometry);
+    const content = element.querySelector("[data-chat-content]");
+    if (content) observer.observe(content);
+    return () => observer.disconnect();
+  }, [scrollRef]);
+  const resyncIsNearBottom = useCallback(
+    (preserveFollow = false) => {
+      const el = scrollRef.current;
+      if (!el || !isVisibleRef.current || isAnimating()) return;
+      const currentGeometry = readTranscriptScrollGeometry(el);
+      const previousGeometry = lastScrollGeometryRef.current;
+      lastScrollGeometryRef.current = currentGeometry;
+      // Content reflow cannot revoke bottom-follow without reader input.
+      // Explicit navigation releases still reconcile against the actual geometry.
+      if (
+        preserveFollow &&
+        isNearBottomRef.current &&
+        !userReading.current &&
+        previousGeometry &&
+        shouldPreserveFollowOnScroll(previousGeometry, currentGeometry)
+      ) {
+        return;
+      }
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
+      if (isNearBottomRef.current) userReading.current = false;
+    },
+    [scrollRef, isVisibleRef, isAnimating, userReading, isNearBottomRef],
+  );
   const markNotNearBottom = useCallback(() => {
     cancelMotion();
     isNearBottomRef.current = false;
@@ -801,7 +853,7 @@ function usePersistedTranscriptScroll({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: string | null;
   storeApi: ReturnType<typeof useAppStoreApi>;
-  resyncIsNearBottom: () => void;
+  resyncIsNearBottom: (preserveFollow?: boolean) => void;
   enabled: boolean;
   isWorking: boolean;
   isVisible: boolean;
@@ -867,7 +919,7 @@ function usePersistedTranscriptScroll({
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
       if (!isVisibleRef.current || latestSessionIdRef.current !== sessionId) return;
-      resyncIsNearBottom();
+      resyncIsNearBottom(enabled);
       // A layout change can clamp a disabled transcript's scrollTop and emit a
       // native scroll event. Only adopt an offset when a recent user gesture
       // explains the movement; otherwise the layout effect must restore the
@@ -2250,6 +2302,10 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       onPositionClaim: claimProgrammaticPosition,
       startAlignedTargetRef,
     });
+  const prepareOlderPage = useCallback(() => {
+    beginOlderLoad();
+    resyncIsNearBottom();
+  }, [beginOlderLoad, resyncIsNearBottom]);
   const scrollToLatest = useScrollToLatestAction({
     scrollRef,
     sessionId,
@@ -2273,7 +2329,7 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       isRestoringLayout,
       placementLatches,
     },
-    beginOlderLoad,
+    prepareOlderPage,
   );
 
   return {
