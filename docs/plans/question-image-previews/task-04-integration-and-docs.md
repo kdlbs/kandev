@@ -412,3 +412,34 @@ the exact case in `tests/system/storage-maintenance.spec.ts` and
 `tests/session/port-forward-dialog.spec.ts`. Logs:
 `/tmp/question-images-checks/kandev-run.e2e.k2iLii0M.log` and
 `/tmp/question-images-checks/kandev-run.e2e.LvjkqAIm.log`. Changed-file ESLint passed.
+
+
+### Preserve preload rejection and diagnostic collection time
+
+Workflow [40204675811](https://github.com/kdlbs/kandev/actions/runs/40204675811)
+finished with 4,244 first-attempt passes, two flaky cases, and 40 skips. The full
+118-report audit found only the Settings recovery and diagnostic ZIP failures.
+The previous storage cleanup and port clock corrections passed.
+
+The Settings failure exposed a production error in the first reload attempt.
+The Vite helper returns undefined when its preload event is canceled. React can
+consume that result before navigation completes and report an unrelated module
+TypeError. The listener now preserves the original rejection while retaining the
+verified storage marker and one-reload limit. Four updated unit cases failed
+before the correction. All nine preload recovery cases passed after it. The
+[deployment recovery ADR](../../decisions/2026-07-27-spa-failure-containment-and-deployment-recovery.md)
+and its plan now record this amendment to the original completed work order.
+
+The diagnostic ZIP failure spent 27.5 seconds in setup, then had only 13.9 seconds
+to wait for a download. Backend collection intentionally takes 15 seconds. The
+test's 45-second override ended the test before collection could finish. Removing
+that override restores the standard 60-second suite budget. Production collection
+time and archive assertions remain unchanged. Both original cases passed three
+local runs, which does not invalidate the CI timing evidence.
+
+The corrected full SPA and Logs specs passed all 18 cases under two CPUs and
+one worker, with retries disabled: `--project chromium
+tests/layout/spa-resilience.spec.ts tests/system/logs-page.spec.ts --retries=0
+--repeat-each=3`. Log: `/tmp/question-images-checks/kandev-run.e2e.Upf8Xaqm.log`.
+The fresh E2E browser build, changed-file lint, documentation catalog,
+specification lint, and work-order coverage passed. No user-facing copy changed.
