@@ -791,8 +791,6 @@ test.describe("Session tab management — bulk removal", () => {
         { timeout: 30_000 },
       )
       .toBe(true);
-    await testPage.reload();
-    await session.waitForLoad();
     await expect(session.sessionTabBySessionId(recreatedSessionId)).toBeVisible();
     await session.sessionTabBySessionId(recreatedSessionId).click({ button: "right" });
     await session.contextMenuItem("Delete").click();

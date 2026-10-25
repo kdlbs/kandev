@@ -204,7 +204,12 @@ export function useEnsureTaskSession(
   /* eslint-disable react-hooks/set-state-in-effect -- ensuring a session is a side effect; status mirrors that external work */
   useEffect(() => {
     if (!canEnsure || !taskId || !isLoaded) return;
-    if (sessions.length > 0) return;
+    if (sessions.length > 0) {
+      // An observed session ends the previous empty-task attempt, even when
+      // another client created it. Its later removal can start a new attempt.
+      launchedKeyRef.current = null;
+      return;
+    }
     // Wait for the workflow steps to resolve before deciding the gate. This
     // branch does NOT latch, so a later steps hydration re-runs the effect
     // with the correct isFinalStep value (fixes late-hydration auto-start).
