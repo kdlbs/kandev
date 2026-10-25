@@ -1,7 +1,7 @@
 ---
 id: "03-projection"
 title: "Bounded queue recovery: projection"
-status: in_progress
+status: done
 wave: 3
 depends_on: ["02-read"]
 plan: plan.md
@@ -31,4 +31,4 @@ cd apps/backend && go test -count=1 ./internal/orchestrator/messagequeue -run 'T
 ```
 
 ## Risks and results
-Census ownership confirmed and serialized hooks granted. Source implementation/checks are recorded in plan.md. PostgreSQL execution and independent verdicts remain pending. No overlap edits before ownership confirmation.
+Terminal/child projection source passed focused memory, SQLite, and task-owned PostgreSQL 16.15 race checks at `56a5f0e4`; distinct Review and QA passed that exact candidate. A later PR correction handles queue shrinkage during cursor continuation and needs delta verification. Current-session census projection remains with task `ca015838`; release acceptance is pending.

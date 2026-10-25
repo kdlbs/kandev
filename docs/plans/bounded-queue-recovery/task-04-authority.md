@@ -1,7 +1,7 @@
 ---
 id: "04-authority"
 title: "Bounded queue recovery: authority"
-status: in_progress
+status: done
 wave: 4
 depends_on: ["03-projection"]
 plan: plan.md
@@ -33,4 +33,4 @@ cd apps/backend && go test -count=1 ./internal/mcp/handlers -run 'Test(QueueReco
 ```
 
 ## Risks and results
-Census ownership confirmed and serialized hooks granted. Source implementation/checks are recorded in plan.md. PostgreSQL execution and independent verdicts remain pending. No overlap edits before ownership confirmation.
+Terminal and direct-child authority passed focused authenticated and negative-boundary tests at `56a5f0e4`, including cross-task denial; distinct Review and QA passed that exact candidate with task-owned PostgreSQL 16.15 parity. PR corrections require delta verification. Census authority remains with task `ca015838`; release acceptance is pending.

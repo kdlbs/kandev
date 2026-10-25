@@ -162,11 +162,14 @@ func decodeRecoveryCursor(raw string, manifest *QueueRecoveryManifest, entries [
 	if err := decoder.Decode(new(interface{})); err != io.EOF {
 		return start, ErrInvalidRecoveryPage
 	}
-	if cursor.Version != 1 || cursor.Identity != start.Identity || cursor.WorkspaceID != start.WorkspaceID || cursor.Index < 0 || cursor.Index > len(entries) || cursor.Offset < 0 {
+	if cursor.Version != 1 || cursor.Identity != start.Identity || cursor.WorkspaceID != start.WorkspaceID || cursor.Index < 0 || cursor.Offset < 0 {
 		return start, ErrInvalidRecoveryPage
 	}
 	if cursor.Digest != start.Digest {
 		return start, ErrRecoveryChanged
+	}
+	if cursor.Index > len(entries) {
+		return start, ErrInvalidRecoveryPage
 	}
 	if err := validateRecoveryOffset(cursor, entries); err != nil {
 		return start, err

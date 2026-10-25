@@ -12,7 +12,13 @@ Task: 07b423a1-d52e-40a4-8815-23f6841dbfa9
 Session: 904c6405-23d6-4d5c-b7b6-ede866ddd11f
 Parent: a68df3ae-aaf5-4591-a46d-9d73db62e46d
 Handoff: owner-local-platform-fixes-20261011-v1
-Status: implementation in progress. Source checks recorded below; independent gates pending.
+Status: bounded terminal/child reader source verified at `56a5f0e4df07c7d07035f904eee6e2297d4ccb22`; PR correction and delivery remain in progress. Current-session census is owned by task `ca015838`; merge, release, and unmodified-artifact acceptance remain pending.
+
+## Current source verification receipt (2026-10-25)
+
+The `56a5f0e4` candidate passed focused race tests across messagequeue, MCP handlers/server, and the task SQLite repository with a task-owned PostgreSQL 16.15 fixture. MAIN recorded 71 passes, 0 failures, 0 skips; distinct QA session `83cc39fe-8a6d-46a8-8ef2-b2b37bc2c361` recorded 70 passes, 0 failures, 0 skips, including PostgreSQL parity and authenticated MCP forwarding. Independent Review session `890a748e-aa2d-4602-a82b-a45d2f3003c9` passed that exact candidate with no findings. The PostgreSQL fixture was isolated, synthetic, and stopped after verification. These are source/test receipts, not merge, CI, published-artifact, or overlay-removal evidence.
+
+Subsequent PR feedback identified a stale-cursor classification defect and weak no-write assertion; corrections are being verified on a later candidate. The `56a5f0e4` verdicts remain tied to that SHA and require delta review before they apply to the correction.
 Design checklist: complete and approved. Implementation, independent verification and delivery use the work packets below.
 
 ## 1. Problem & Constraints
@@ -153,7 +159,7 @@ Approved user implementation turn. Current main advanced to 1bba2c18b2c0142474b5
 
 
 
-## Current source validation receipt
+## Historical source validation receipt (before the PostgreSQL fixture)
 
 Branch: feature/bounded-queue-recovery-main. Immutable base: 1bba2c18b2c0142474b5f0f8b7f51ec1af109691.
 

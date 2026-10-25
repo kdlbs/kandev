@@ -31,4 +31,4 @@ git diff --check
 ```
 
 ## Risks and results
-Census ownership confirmed and serialized hooks granted. Source implementation/checks are recorded in plan.md. PostgreSQL execution and independent verdicts remain pending. No overlap edits before ownership confirmation.
+Source verification at `56a5f0e4` passed task-owned PostgreSQL 16.15 race checks and distinct Review/QA, as recorded in plan.md. PR feedback corrections now require a new exact-head verdict. Canonical PR #4427 remains the delivery vehicle; current-session census is owned by task `ca015838`. Exact-head CI, merge/release identity, and isolated unmodified-artifact acceptance remain pending.

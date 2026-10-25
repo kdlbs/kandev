@@ -1,7 +1,7 @@
 ---
 id: "05-mcp"
 title: "Bounded queue recovery: mcp"
-status: in_progress
+status: done
 wave: 5
 depends_on: ["04-authority"]
 plan: plan.md
@@ -30,4 +30,4 @@ cd apps/backend && go test -count=1 ./internal/mcp/server ./internal/mcp/handler
 ```
 
 ## Risks and results
-Census ownership confirmed and serialized hooks granted. Source implementation/checks are recorded in plan.md. PostgreSQL execution and independent verdicts remain pending. No overlap edits before ownership confirmation.
+Authenticated MCP inventory/body forwarding and profile/raw-dispatch boundaries passed focused tests at `56a5f0e4`; distinct Review and QA passed that exact candidate with task-owned PostgreSQL 16.15 parity. PR corrections require delta verification. Census registration remains with task `ca015838`; release acceptance is pending.

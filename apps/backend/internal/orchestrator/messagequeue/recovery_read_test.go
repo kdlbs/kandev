@@ -2,8 +2,10 @@ package messagequeue
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +46,7 @@ func TestRecoveryReadPreservesQueueAndGeneration(t *testing.T) {
 			require.NoError(t, repo.InsertForSession(ctx, identity, entry, 0))
 			before, err := repo.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
-			generation := recoveryWriteCounter(t, repo)
+			generation := recoveryStateFingerprint(t, repo)
 			observer := requireRecoveryObserver(t, repo)
 			for range 2 {
 				snapshot, err := observer.RecoveryRead(ctx, identity)
@@ -57,28 +59,64 @@ func TestRecoveryReadPreservesQueueAndGeneration(t *testing.T) {
 			after, err := repo.ListBySession(ctx, identity.SessionID)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			require.Equal(t, generation, recoveryWriteCounter(t, repo))
+			require.Equal(t, generation, recoveryStateFingerprint(t, repo))
 		})
 	}
 }
 
-func recoveryWriteCounter(t *testing.T, repo Repository) interface{} {
+func recoveryStateFingerprint(t *testing.T, repo Repository) interface{} {
 	t.Helper()
 	switch r := repo.(type) {
 	case *memoryRepository:
-		return []interface{}{reflect.ValueOf(r.statusGeneration).Len(), r.statusGeneration["session"], len(r.identities)}
+		encoded, err := json.Marshal([]interface{}{r.entries, r.statusGeneration, r.identities, r.autoRun, r.autoRunIncarnation})
+		require.NoError(t, err)
+		digest := sha256.Sum256(encoded)
+		return hex.EncodeToString(digest[:])
 	case *sqliteRepository:
-		if r.db.DriverName() != "pgx" {
-			var n int64
-			require.NoError(t, r.db.Get(&n, "SELECT total_changes()"))
-			return n
+		hash := sha256.New()
+		encoder := json.NewEncoder(hash)
+		for _, table := range []string{"queued_messages", "queue_session_state", "tasks", "task_sessions"} {
+			require.NoError(t, encoder.Encode(table))
+			rows, err := r.db.Queryx("SELECT * FROM " + table + " ORDER BY 1")
+			require.NoError(t, err)
+			for rows.Next() {
+				row := map[string]interface{}{}
+				require.NoError(t, rows.MapScan(row))
+				require.NoError(t, encoder.Encode(row))
+			}
+			require.NoError(t, rows.Err())
+			require.NoError(t, rows.Close())
 		}
-		var n int64
-		require.NoError(t, r.db.Get(&n, "SELECT COALESCE(SUM(status_generation), 0) FROM queue_session_state"))
-		return n
+		return hex.EncodeToString(hash.Sum(nil))
 	}
 	t.Fatal("unsupported recovery fixture")
 	return nil
+}
+
+func TestRecoveryStateFingerprintDetectsQueueRowMutation(t *testing.T) {
+	for _, factory := range []recoveryFactory{{"sqlite", newTestSQLiteRepo}, {"postgres", newTestPostgresRepo}} {
+		t.Run(factory.name, func(t *testing.T) {
+			repo := factory.new(t)
+			identity := QueueSessionIdentity{"task", "session", "incarnation"}
+			seedQueueSessionIdentity(t, repo, identity)
+			require.NoError(t, repo.InsertForSession(context.Background(), identity, &QueuedMessage{ID: "entry", TaskID: "task", SessionID: "session", Content: "before", QueuedAt: time.Now().UTC()}, 0))
+			before := recoveryStateFingerprint(t, repo)
+			sqlRepo := repo.(*sqliteRepository)
+			_, err := sqlRepo.db.Exec(`UPDATE queued_messages SET content = 'after' WHERE id = 'entry'`)
+			require.NoError(t, err)
+			require.NotEqual(t, before, recoveryStateFingerprint(t, repo))
+			for _, statement := range []string{
+				`UPDATE queue_session_state SET auto_run = 0 WHERE session_id = 'session'`,
+				`UPDATE tasks SET archived_at = CURRENT_TIMESTAMP WHERE id = 'task'`,
+				`UPDATE task_sessions SET task_id = 'other' WHERE id = 'session'`,
+			} {
+				before = recoveryStateFingerprint(t, repo)
+				_, err = sqlRepo.db.Exec(statement)
+				require.NoError(t, err)
+				require.NotEqual(t, before, recoveryStateFingerprint(t, repo), statement)
+			}
+		})
+	}
 }
 
 // @covers AC-TASKS-QUEUE-RECOVERY-001.5
@@ -88,11 +126,11 @@ func TestRecoveryReadRejectsWrongIncarnationWithoutBinding(t *testing.T) {
 			repo := factory.new(t)
 			identity := QueueSessionIdentity{"task", "session", "incarnation"}
 			seedQueueSessionIdentity(t, repo, identity)
-			before := recoveryWriteCounter(t, repo)
+			before := recoveryStateFingerprint(t, repo)
 			identity.SessionIncarnationID = "foreign"
 			_, err := requireRecoveryObserver(t, repo).RecoveryRead(context.Background(), identity)
 			require.ErrorIs(t, err, ErrSessionIdentityMismatch)
-			require.Equal(t, before, recoveryWriteCounter(t, repo))
+			require.Equal(t, before, recoveryStateFingerprint(t, repo))
 		})
 	}
 }
@@ -106,11 +144,11 @@ func TestRecoveryReadRejectsOversizeSource(t *testing.T) {
 			seedQueueSessionIdentity(t, repo, identity)
 			entry := &QueuedMessage{ID: "entry", SessionID: "session", TaskID: "task", Content: strings.Repeat("x", 16*1024*1024+1), QueuedBy: QueuedByUser, QueuedAt: time.Now().UTC()}
 			require.NoError(t, repo.InsertForSession(context.Background(), identity, entry, 0))
-			before := recoveryWriteCounter(t, repo)
+			before := recoveryStateFingerprint(t, repo)
 			got, err := requireRecoveryObserver(t, repo).RecoveryRead(context.Background(), identity)
 			require.Error(t, err)
 			require.Empty(t, got.Entries)
-			require.Equal(t, before, recoveryWriteCounter(t, repo))
+			require.Equal(t, before, recoveryStateFingerprint(t, repo))
 		})
 	}
 }
@@ -147,11 +185,11 @@ func TestRecoveryReadRejectsEntryCap(t *testing.T) {
 				entry := &QueuedMessage{ID: fmt.Sprintf("entry-%d", i), SessionID: "session", TaskID: "task", QueuedBy: QueuedByUser, QueuedAt: time.Now().UTC()}
 				require.NoError(t, repo.InsertForSession(context.Background(), identity, entry, 0))
 			}
-			before := recoveryWriteCounter(t, repo)
+			before := recoveryStateFingerprint(t, repo)
 			snapshot, err := requireRecoveryObserver(t, repo).RecoveryRead(context.Background(), identity)
 			require.Error(t, err)
 			require.Empty(t, snapshot.Entries)
-			require.Equal(t, before, recoveryWriteCounter(t, repo))
+			require.Equal(t, before, recoveryStateFingerprint(t, repo))
 		})
 	}
 }
@@ -166,13 +204,13 @@ func TestRecoveryReadBatchRejectsStaleWithoutPartialResult(t *testing.T) {
 				RecoveryReadBatch(context.Context, []QueueSessionIdentity) ([]RepositorySnapshot, error)
 			})
 			require.True(t, ok, "atomic bounded inventory observer required")
-			before := recoveryWriteCounter(t, repo)
+			before := recoveryStateFingerprint(t, repo)
 			stale := identity
 			stale.SessionIncarnationID = "foreign"
 			got, err := reader.RecoveryReadBatch(context.Background(), []QueueSessionIdentity{identity, stale})
 			require.Error(t, err)
 			require.Empty(t, got)
-			require.Equal(t, before, recoveryWriteCounter(t, repo))
+			require.Equal(t, before, recoveryStateFingerprint(t, repo))
 		})
 	}
 }

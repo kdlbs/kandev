@@ -1,7 +1,7 @@
 ---
 id: "02-read"
 title: "Bounded queue recovery: read"
-status: in_progress
+status: done
 wave: 2
 depends_on: ["01-contract"]
 plan: plan.md
@@ -33,4 +33,4 @@ cd apps/backend && go test -race -count=1 ./internal/orchestrator/messagequeue -
 ```
 
 ## Risks and results
-Census ownership confirmed and serialized hooks granted. Source implementation/checks are recorded in plan.md. PostgreSQL execution and independent verdicts remain pending. No overlap edits before ownership confirmation.
+Bounded read source passed memory, SQLite, and task-owned PostgreSQL 16.15 focused race checks at `56a5f0e4`; distinct Review and QA passed that exact candidate. The current PR correction strengthens the no-write test fingerprint and needs delta verification. Census delivery remains with task `ca015838`; release acceptance is pending.

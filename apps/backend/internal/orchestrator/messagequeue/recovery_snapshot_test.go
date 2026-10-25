@@ -80,6 +80,25 @@ func TestRecoverySnapshotRejectsChangedAndPinnedDigest(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestRecoverySnapshotReportsChangedWhenQueueShrinksPastCursor(t *testing.T) {
+	repo := NewMemoryRepository()
+	identity := QueueSessionIdentity{"task", "session", "incarnation"}
+	seedQueueSessionIdentity(t, repo, identity)
+	for _, id := range []string{"first", "second"} {
+		require.NoError(t, repo.InsertForSession(context.Background(), identity, &QueuedMessage{ID: id, TaskID: "task", SessionID: "session", Content: strings.Repeat("x", 1024), QueuedAt: time.Now().UTC()}, 0))
+	}
+	service := NewService(repo, 0, logger.Default())
+	first, err := recoveryPageCall(t, service, identity, "", 1024, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, first.NextCursor)
+	_, err = repo.DeleteAllBySessionForIdentity(context.Background(), identity)
+	require.NoError(t, err)
+
+	page, err := recoveryPageCall(t, service, identity, first.NextCursor, 1024, "")
+	require.ErrorIs(t, err, ErrRecoveryChanged)
+	require.Nil(t, page)
+}
+
 func TestRecoverySnapshotBodyHash(t *testing.T) {
 	repo := NewMemoryRepository()
 	identity := QueueSessionIdentity{"task", "session", "incarnation"}

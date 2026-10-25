@@ -42,12 +42,13 @@ completion flag. Keep entry identities when reconstructing empty or identical
 message bodies. Attachment and delivery evidence is hashed, without exposing
 attachment bytes, paths or metadata payloads.
 
-The default body budget is 65,536 UTF-8 bytes; `max_body_bytes` accepts
-1,024 through 262,144. Source limits are 256 sessions, 1,024 entries per session,
-16 MiB source payload per session and 32 MiB per inventory. Pages have at most
-256 fragments and 2 MiB serialized output, including WebSocket response and
-MCP tool-result wrappers (transport framing is excluded). Cursors are at most 4 KiB. Oversized
-inventories fail instead of returning a misleading partial receipt.
+Limits:
+
+- Body budget: default 65,536 UTF-8 bytes. `max_body_bytes` accepts 1,024 through 262,144.
+- Source: 256 sessions, 1,024 entries per session, 16 MiB source payload per session, and 32 MiB per inventory.
+- Page: at most 256 fragments and 2 MiB serialized output, including WebSocket response and MCP tool-result wrappers. Transport framing is excluded.
+- Cursor: at most 4 KiB.
+- Oversized inventories fail instead of returning a misleading partial receipt.
 
 These readers preserve queue contents, order, claims, policy and generations.
 They do not consume, acknowledge, replay or transfer work. An empty FIFO does
