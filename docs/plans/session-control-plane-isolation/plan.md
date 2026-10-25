@@ -26,7 +26,7 @@ task `ff57f168-9eff-4d0f-9e75-ddaaca481c2a`).
 
 ## Verification
 
-`(cd apps/backend && go test ./internal/agentctl/... ./internal/agent/runtime/lifecycle/... ./internal/orchestrator/executor/... ./internal/task/handlers/... -count=1)`
+`(cd apps/backend && go test ./internal/agentctl/... ./internal/agent/runtime/lifecycle/... ./internal/orchestrator/executor/... ./internal/secrets/... -count=1)`
 `bash scripts/lint-go-changed <changed-go-files>`
 
 ## Risks
@@ -34,4 +34,5 @@ task `ff57f168-9eff-4d0f-9e75-ddaaca481c2a`).
 - Every supported agent must carry a header; Task 01 inventories them first. Cursor and Pi fail closed until the deferred follow-up lands.
 - Lost derivation key replaces retained instances.
 - The first required-capability addition interrupts every retained local control server once on upgrade.
-- Each adopting path (local, remote recovery, Kubernetes reattach, SSH resume) needs the shared verifier (task 01).
+- Each in-scope adopting path (local, remote recovery for Sprites, remote Docker and plugin) needs the shared verifier (task 01). Kubernetes and SSH retained-instance reuse fails closed until follow-up `5c04885e-9899-4db6-992d-241cacd90dba`; custom TUI agents fail closed with Cursor and Pi.
+- A regenerated `master.key` replaces the session key and relaunches retained sessions.

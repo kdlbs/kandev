@@ -34,10 +34,7 @@ ownership semantics are unchanged
 
 ## Token derivation, nonce and key
 
-The instance ID stays the create request `ID`: the execution ID for every
-executor type except a Kubernetes or SSH resume that reuses the retained agentctl
-instance and its recorded ID (`MetadataKeyKubernetesAgentctlInstanceID`,
-`executor_kubernetes_environment.go`; `resumedSSHAgentctlInstanceID`, `executor_ssh.go`). It is also the `X-Instance-ID` header that
+The instance ID stays the create request `ID`, the execution ID. It is also the `X-Instance-ID` header that
 `instanceIDGuard` checks and the key recovery uses to rebuild `StandaloneInstanceID`;
 changing it would be a recovery refactor this capability does not need. Recovery reuses an
 execution ID for a replacement, so the ID alone cannot make tokens distinct: each create
@@ -63,17 +60,22 @@ clones `ExecutorRunning.Metadata` carries it onto the new value: standalone crea
 (`executor_standalone.go`), the Kubernetes recovery clone (`executor_kubernetes_recovery.go`),
 idle parking (`manager_idle_parking.go`), and reconnect and remote-status updates
 (`manager_remote_status.go`). A table test runs one record through each writer and asserts the
-key is unchanged. On a Kubernetes or SSH resume that keeps the retained instance, the previous
-record's nonce is set explicitly on the new request metadata and the adoption check below
-decides whether the token still matches; on a mismatch the instance is deleted and recreated
-with a fresh nonce.
+key is unchanged. The nonce set on the create request is the one minted for that attempt and is written
+after every other metadata merge, so a value copied from a sibling or prior record (the Kubernetes
+task environment record clones instance metadata) is overwritten.
 
 The key is 32 random bytes in `internal/secrets`, whose store interface gains a
 create-if-absent operation (one transaction; the loser of a race rereads the winner's key).
 It uses the fixed install-wide ID `kandev-session-mcp-key-v1`, is excluded from every
 user-facing list, read, update and delete path (Build chooses the mechanism; a store test
-observes it), and a read or decrypt failure yields `mcp_token_key_unavailable`, never a
-regeneration, which would silently orphan every retained instance. A restored older key is
+observes it), and replacement is automatic only for a key that cannot be decrypted or is not 32 bytes
+(typically after `master.key` was regenerated): a startup step, run before any recovery pass, and the
+launch path both call one single-flight ensure-key function that replaces such a row atomically
+(compare-and-swap on the stored row) and logs `mcp_token_key_replaced` once at WARN. Every retained
+instance then mismatches and its session relaunches; a relaunch that fails carries that code first in
+its error text. `master.key` handling is unchanged (the provider already regenerates a missing file;
+an unreadable file stays an error). A store I/O failure yields `mcp_token_key_unavailable` for that
+launch only. Recovery reads the key without creating or replacing it. A restored older key is
 detected like a lost one.
 
 The create request carries the token on the authenticated control channel (the
@@ -109,13 +111,14 @@ control-server level (`RequiredSurvivalCapabilities`, `capability_incompatible`,
    its sessions resume on a fresh control server. That install-wide interruption is accepted
    because a retained old server would otherwise keep serving MCP unauthenticated; the public
    executors documentation notes it. No new copy.
-2. Per-instance mismatch (lost or restored key, missing nonce, changed backend
+2. Per-instance mismatch (lost or replaced key, missing nonce, changed backend
    port, a retained remote agentctl from an older build). One verifier runs on every
-   path that adopts an instance this launch did not create: the local adoption in
-   `manager_lifecycle.go`, `processRecoveredRemoteInstance` (`remote_recovery.go`), the
-   Kubernetes `reattachKubernetesAgentctl` and the SSH resume reuse
-   (`newResumedAgentctlClient`). Build enumerates any other reattach site (Sprites, remote Docker,
-   plugin) and a table test covers one per executor type. The verifier reads the instance's
+   path that adopts an instance this launch did not create: the local adoption
+   (`StandaloneExecutor.RecoverInstancesDetailed` and the manager consumer loop in
+   `manager_lifecycle.go`) and `processRecoveredRemoteInstance` (`remote_recovery.go`) for Sprites,
+   remote Docker and plugin records. Build enumerates any other such site and a table test covers one
+   per executor type. Kubernetes and SSH are deferred executors: no verifier site is added for
+   them (below). The verifier reads the instance's
    `/identity` through the client. Remote and launch-path reads use a 5 second timeout and up to
    three attempts, one second apart. The local adoption runs concurrently (at most 8 instances)
    with a 2 second timeout and up to two attempts 500 ms apart, so the pass fits the 30 second
@@ -127,25 +130,42 @@ control-server level (`RequiredSurvivalCapabilities`, `capability_incompatible`,
      retry.
    - 404 (the instance ID guard after a port was reused): absent, omitted from the recovered
      set, nothing deleted. Every retention-capable build serves `/identity`.
-   - 401, 403, any other 4xx, exhausted attempts, a nil client, a cancelled context, or a
-     key read or decrypt failure: unknown outcome, never a mismatch and never a delete. A key
-     failure logs `mcp_token_key_unavailable` at WARN. Recovery reads the key and never creates
-     it: key not found means a lost key and every retained instance mismatches.
+   - 401, 403, any other 4xx, a 3xx or non-200 2xx, exhausted attempts, a nil client, a
+     cancelled context, or a key read failure other than not-found or undecryptable: unknown
+     outcome, never a mismatch and never a delete (the failure logs `mcp_token_key_unavailable` at
+     WARN). A key that is not found or cannot be decrypted, or is not 32 bytes, is a mismatch.
    On a mismatch the verifier deletes the instance with the precondition set to the
-   `mcp_token_fingerprint` observed on it (none when the body had no usable fingerprint; the
-   delete is then unconditional, pinned by `X-Instance-ID`), so a replacement that took
-   the ID meanwhile survives, and omits it from the recovered set. A launch-path adoption (resume
-   reuse) then falls to the existing recreate path with a fresh nonce; unknown outcome fails the
-   launch through the launch-failure path with `instance_exists` at the start of the text, deleting
-   nothing, and the session stays resumable. A failed delete is retried three times, one second
-   apart; if it still fails the instance stays unregistered with a WARN and the next recovery pass
-   repeats the check. Until deleted, a replacement create gets 409 `instance_exists`.
-   Unknown outcome on recovery: the remote path reports `RecoveryOutcomeUnknown`, keeps the
-   record and retries through the existing remote retry path. The local adoption has no retry
-   loop: the instance stays unregistered with a WARN and the next backend start repeats the check.
+   `mcp_token_fingerprint` observed on it (none when the body had no string fingerprint; the
+   delete is then unconditional and addressed by the instance ID in the path), so a replacement
+   that took the ID meanwhile survives, and omits it from the recovered set. A failed delete is
+   retried three times, one second apart; if it still fails the instance stays unregistered with
+   a WARN and the next recovery pass repeats the check. Until deleted, a replacement create gets
+   409 `instance_exists`; the launch fails through the launch-failure path.
+   Unknown outcome: the control route `POST /api/v1/instances/:id/mcp-token/revoke` (authenticated
+   control channel, idempotent, no body) clears the instance's in-memory token, so the guard
+   answers every MCP route 503 `mcp_token_unconfigured` and a later `/identity` shows no
+   fingerprint, which the next pass classifies as a mismatch. The backend calls it up to three
+   times, one second apart, then logs a WARN; the next pass repeats verify and revoke. The
+   instance is otherwise left to the survival rules exactly as today (SURVIVAL-003.7/002.15 stop
+   an instance that is not re-tracked at the recovery deadline; this design adds no stop or
+   retention rule). The remote path reports `RecoveryOutcomeUnknown`, keeps the record and
+   retries through the existing remote retry path; the local adoption has no retry loop. A launch
+   that needs the unknown instance fails with `instance_exists` at the start of the text and the
+   session stays resumable. Residual, accepted: while both `/identity` and the control channel
+   are unreachable the token is still required, the backend registers no stream for the
+   instance, and the revoke repeats at the next pass.
+   Deferred executors (Kubernetes, SSH): until the follow-up lands, a path that would adopt or
+   reuse a retained instance (recovery records, resume reuse, `reattachKubernetesAgentctl`,
+   `connectKubernetesRefresh`, `connectRestartedKubernetesAgentctl`, shared-environment
+   adoption, `newResumedAgentctlClient`) does not adopt it. It calls the revoke route, deletes
+   nothing (so no remote process is orphaned) and fails the launch with `mcp_token_unsupported`,
+   cause `retained_instance_deferred`. A fresh create there is unchanged: it mints a nonce, sends
+   the token and passes the AC-001.13 check. A refused session resumes once the instance is
+   reaped idle (default one hour); a create meanwhile gets 409 `instance_exists`.
    For a remote executor the expected upstream fingerprint is always empty (no upstream is sent).
-   For Kandev-deployed helpers replacement is self-sufficient: SSH and Sprites compare the uploaded binary's SHA-256 on every non-resumed create and
-   upload a stale one (`executor_ssh.go` `CreateInstance`, `uploadAgentctl` in
+   Kandev-deployed helpers are replaced without operator action: SSH compares the uploaded
+   binary's SHA-256 on every non-resumed create and uploads a stale one (`executor_ssh.go`);
+   Sprites uploads the binary on every create (`uploadAgentctl`,
    `executor_sprites_operations.go`). Operator-pinned images (Kubernetes, remote Docker) need the
    operator to update them; until then every launch there fails with `mcp_token_unsupported`.
    A new agentctl under an older backend answers MCP routes 503 `mcp_token_unconfigured`; the
@@ -194,7 +214,7 @@ stub MCP HTTP server, is driven and the test observes the `Authorization` header
 `/message` or `/mcp` request) or, where the agent cannot be driven in a test, the emitted
 `session/new` frame or file plus a cited vendor document or source line stating it forwards
 configured MCP headers; a frame or file alone does not qualify. An agent not in the list, or
-whose evidence shows the header dropped, or whose Kandev entry is written into a workspace file (Cursor, Pi, custom TUI strategies; deferred), launches with `mcp_token_carrier_unavailable`: the
+whose evidence shows the header dropped, or whose Kandev entry is written into a workspace file (Cursor, Pi, and any custom TUI agent whose strategy writes an entry, whatever the strategy key; deferred; strategy `none` writes no entry and is unchanged), launches with `mcp_token_carrier_unavailable`: the
 fail-closed default, so an unverified agent never gets an unauthenticated Kandev entry. An agent
 whose adapter rewrites ACP MCP entries into its own configuration (Muse writes a temporary
 overlay, `muse_acp.go`) is verified through that overlay, and Build adds it as a row under the
@@ -233,7 +253,8 @@ means. agentctl already holds the token from the create request and sets the var
 that is Codex behavior and is not asserted (AC-001.7).
 
 Cause tokens for `mcp_token_carrier_unavailable` (AC-001.15): `agent_not_verified`,
-`workspace_file_carrier_deferred`, `codex_wrapper`, `codex_version`, `codex_probe_failed`.
+`workspace_file_carrier_deferred`, `custom_tui_deferred`, `codex_wrapper`, `codex_version`, `codex_probe_failed`.
+Cause for `mcp_token_unsupported` on a deferred executor: `retained_instance_deferred`.
 
 Managed policy: `canonicalManagedMCPServers` and `injectedKandevMCPConfigured`
 (`agentctl/server/process/managed_tool_policy.go`, `manager_permission_policy.go`)
@@ -317,9 +338,14 @@ instance is idempotent.
 
 User-visible outcome of a typed launch failure: the code and one fixed English diagnostic
 sentence travel in the session's existing launch-failure error (no new translated copy). The
-public executors documentation names the three codes and the action: update the agentctl that
-serves the executor (operator-pinned Kubernetes and remote Docker images), or repair the secret
-store (check it and restore the install's database backup). Each `mcp_token_carrier_unavailable` cause is named with its action.
+public executors documentation names the four codes (`mcp_token_carrier_unavailable`, `mcp_token_unsupported`,
+`mcp_token_key_unavailable`, `mcp_token_key_replaced`), each cause and its action: update the agentctl that serves
+the executor (operator-pinned Kubernetes and remote Docker images); retry after a store outage; the one-time
+control-server restart on upgrade; that Cursor, Pi and custom TUI agents are unavailable and Kubernetes and SSH
+sessions cannot reuse a retained instance (`retained_instance_deferred`) until the deferred follow-ups land; a
+refused resume (retry after the next recovery pass or the idle reaper); the upgrade order (backend before
+operator-pinned agentctl images); that a regenerated `master.key` replaces the session key and relaunches
+retained sessions; and the `missing` refusal log line for troubleshooting.
 
 ## Bind decision
 
@@ -335,7 +361,7 @@ its start, and records its ID in the task plan.
 ## No kill switch
 
 The capability ships default-on with no runtime flag: a switch that disables token
-enforcement is the bypass it removes, the launch-failing paths are limited to the three typed
+enforcement is the bypass it removes, the launch-failing paths are limited to the typed
 codes, and the only safe rollback is a revert.
 
 ## Work orders

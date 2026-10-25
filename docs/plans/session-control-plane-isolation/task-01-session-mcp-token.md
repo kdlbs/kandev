@@ -40,15 +40,16 @@ Derive, inject, carry and enforce the per-instance token on /mcp, /sse, /message
 
 - Backend HMAC derivation over instance ID plus a persisted per-create nonce; key in the secret store (create-if-absent, hidden from user secret paths); create-request field.
 - agentctl guard outside activity accounting, 503 when unset, header redaction (request logs and the ACP frame debug log), /identity capability and fingerprint.
-- `session_mcp_token` in survival capabilities (first addition to the required set); one verifier on every path that adopts an instance (local adoption, `processRecoveredRemoteInstance`, Kubernetes `reattachKubernetesAgentctl`, SSH resume reuse; table test per executor type) with the local and remote timing, retry and unknown-outcome rules; mismatch deletes the instance with the fingerprint observed on its `/identity` as the `X-Expected-Token-Fingerprint` precondition (header absent = unconditional delete).
-- Nonce persisted as `mcp_token_nonce` in both metadata key maps, skipped by the `prior.Metadata` merge, carried by every `ExecutorRunning.Metadata` writer (table test); Kubernetes and SSH resume that keeps the retained instance; 409 `instance_exists` and `instance_cleaning_up` mapping with the backend retry.
-- Carriers for ACP, Codex (native and passthrough with version gate, variable set by agentctl in the Codex process) and Claude/OpenCode passthrough via the private `TempConfigPath` file; Cursor, Pi and custom TUI fail closed (`workspace_file_carrier_deferred`); Codex variable never in `PassthroughArtifacts.Env`.
+- `session_mcp_token` in survival capabilities (first addition to the required set); one verifier on every path that adopts an instance (local adoption, `processRecoveredRemoteInstance` for Sprites, remote Docker and plugin; table test per executor type) with the local and remote timing, retry and unknown-outcome rules; the unknown outcome calls the new `POST /api/v1/instances/:id/mcp-token/revoke` control route (agentctl clears the in-memory token, so MCP answers 503); Kubernetes and SSH retained-instance reuse is refused with `mcp_token_unsupported` / `retained_instance_deferred` after a revoke; mismatch deletes the instance with the fingerprint observed on its `/identity` as the `X-Expected-Token-Fingerprint` precondition (header absent = unconditional delete).
+- Nonce persisted as `mcp_token_nonce` in both metadata key maps, skipped by the `prior.Metadata` merge, carried by every `ExecutorRunning.Metadata` writer (table test), with the nonce minted for the create written after every other merge so a copied sibling value is overwritten; 409 `instance_exists` and `instance_cleaning_up` mapping with the backend retry.
+- Carriers for ACP, Codex (native and passthrough with version gate, variable set by agentctl in the Codex process) and Claude/OpenCode passthrough via the private `TempConfigPath` file; Cursor, Pi and custom TUI fail closed (`workspace_file_carrier_deferred`, `custom_tui_deferred`); Codex variable never in `PassthroughArtifacts.Env`.
+- Single-flight ensure-key that replaces an undecryptable or wrong-length key at startup (before recovery) and at launch, logging `mcp_token_key_replaced`.
 - Typed launch failures with `cause` tokens, unknown-outcome delete-by-ID, public docs for the three codes, causes, upgrade order and stuck-resume outcome.
 - Bind decision: file the local-only follow-up card (REQ-003) with the EMBARGO section verbatim and record its ID in the task plan.
 
 ## Exclusions
 
-Broker relay, executor routes, workspace-file carriers.
+Broker relay, executor routes, workspace-file carriers, Kubernetes and SSH retained-instance adoption (follow-up `5c04885e-9899-4db6-992d-241cacd90dba`).
 
 ## Acceptance
 
