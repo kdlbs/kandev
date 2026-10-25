@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-parallelize-overview-measurements", "03-disk-capacity-progress", "04-workspace-dependency-cleanup"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-overview-parallel-scan.md"
+spec: "../../specs/system-page/requirements/storage-overview-parallel-scan.md"
 ---
 
 # Task 02: Validate storage scan and idle behavior

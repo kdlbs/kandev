@@ -20,9 +20,9 @@ test.describe("Kanban topbar utilities", () => {
     const settingsMode = testPage.getByTestId("app-sidebar-settings-mode");
     await expect(settingsMode).toBeVisible();
 
-    // Clicking a settings leaf navigates to its /settings/... page. Pick a row
-    // from the static two-level menu: `flat` is the default mode and renders no
-    // branches, so workspace-nested leaves are not there to click.
+    // Clicking a settings leaf navigates to its /settings/... page. Pick a
+    // top-level row from the Settings tree; this route does not depend on a
+    // nested branch.
     await settingsMode.getByRole("link", { name: "Task Behavior" }).click();
     await expect(testPage).toHaveURL(/\/settings\/preferences\/task-behavior$/);
 

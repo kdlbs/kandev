@@ -57,9 +57,8 @@ function TerminalSlot({
   useEffect(() => {
     if (!isActive || !ws || ws.readyState !== WebSocket.OPEN) return;
     const sender = (data: string) => ws.send(new TextEncoder().encode(data));
-    setActiveTerminalSender(sender);
-    return () => setActiveTerminalSender(null);
-  }, [isActive, terminal.id, ws]);
+    return setActiveTerminalSender(sender, sessionId);
+  }, [isActive, terminal.id, sessionId, ws]);
 
   return (
     <div
@@ -75,7 +74,6 @@ function TerminalSlot({
         autoFocus={isActive}
         disableWebgl
         manualInputRouting
-        enableTouchScroll
         onXtermReady={setXterm}
         onWsReady={handleWsReady}
       />

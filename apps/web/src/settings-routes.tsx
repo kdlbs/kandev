@@ -1,17 +1,18 @@
-import { useEffect, useRef, type ReactNode } from "react";
+/* eslint-disable max-lines -- the settings route table is one public dispatch boundary. */
+
+import type { ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentsBrowsePage from "@/app/settings/agents/browse/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
 import AgentProfileRoute from "@/app/settings/agents/[agentId]/profiles/[profileId]/page";
-import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
 import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ExecutorsPage from "@/app/settings/executors/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import KubernetesExecutorPage from "@/app/settings/executors/k8s/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
@@ -20,33 +21,44 @@ import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
+import WorkspaceMCPServersPage from "@/app/settings/workspace/[id]/mcp-servers/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import {
   AppearanceSettings,
   KeyboardShortcutsSettings,
 } from "@/components/settings/general-settings";
 import { SettingsIndex } from "@/components/settings/settings-index";
+import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
-import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
+import {
+  SettingsRedirect,
+  SettingsRouteFallback,
+  useRememberSettingsPath,
+} from "./settings-route-helpers";
+import { renderWorkspaceCoordinatorRoute } from "./settings-routes.coordinators";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
+import { PluginShortcutsCard } from "@/components/settings/plugins/plugin-shortcuts-card";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { TerminalEditorsSettings } from "@/components/settings/terminal-editors-settings";
 import { AboutSettings } from "@/components/settings/system/about-settings";
 import { ApiTokens } from "@/components/settings/account/api-tokens";
 import { SecuritySettings } from "@/components/settings/account/security-settings";
 import { UsersTable } from "@/components/settings/system/users-table";
-import { DataStorageSettings } from "@/components/settings/system/data-storage-settings";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
 import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
+import { OrganizationsPage } from "@/components/settings/system/organizations/organizations-page";
+import { UnitsPage } from "@/components/settings/units/units-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { StorageSettings } from "@/components/settings/system/storage-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -60,6 +72,7 @@ import {
   KEYBOARD_SHORTCUTS_SETTINGS_HREF,
   LAYOUTS_SETTINGS_HREF,
   NOTIFICATIONS_SETTINGS_HREF,
+  SIDEBAR_LAYOUT_TAB_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/preferences";
@@ -75,47 +88,22 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
-import {
-  fetchUserSettings,
-  listAgentDiscovery,
-  listAgents,
-  listAvailableAgents,
-  listExecutors,
-} from "@/lib/api/domains/settings-api";
-import { listWorkspaces } from "@/lib/api/domains/workspace-api";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
   matchSingle,
   matchDouble,
   normalizeSettingsPath,
   safeDecodePathSegment,
 } from "@/lib/routing/path";
-import {
-  mapWorkspaceItem,
-  promoteLegacyWorkspaceSelection,
-  readActiveWorkspaceCookie,
-  resolveSettingsActiveWorkspaceId,
-} from "@/lib/routing/route-bootstrap";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { HydrationState } from "@/lib/state/store";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
 import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 import {
   WorkspaceRepositoriesRoute,
   WorkspaceWorkflowsRoute,
 } from "./settings-routes.workspace-data";
+import { SettingsRouteBootstrap } from "./settings-routes.bootstrap";
 
 type RouteRenderer = () => ReactNode;
-type SettingsInitialStateData = {
-  workspaces: ListWorkspacesResponse["workspaces"];
-  executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
-  agents: Awaited<ReturnType<typeof listAgents>>["agents"];
-  discoveryAgents: Awaited<ReturnType<typeof listAgentDiscovery>>["agents"];
-  availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
-  availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
-  userSettingsResponse: UserSettingsResponse | null;
-};
 
 const licenseEntries = licenses as LicenseEntry[];
 
@@ -131,6 +119,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/preferences/notifications": () => <NotificationsSettings />,
   "/settings/preferences/task-behavior": () => <TaskBehaviorSettings />,
   "/settings/preferences/terminal-editors": () => <TerminalEditorsSettings />,
+  "/settings/sidebar": () => <SettingsRedirect to={SIDEBAR_LAYOUT_TAB_HREF} />,
   // Legacy /settings/general paths, one redirect per page that lived there.
   "/settings/general": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
   "/settings/general/appearance": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
@@ -195,16 +184,27 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <AboutSettings licenses={licenseEntries} />
     </SystemRouteShell>
   ),
-  "/settings/system/data-storage": () => (
-    <SystemRouteShell
-      titleKey="system:navDataStorage"
-      descriptionKey="system:dataStoragePageDescription"
-    >
-      <DataStorageSettings />
+  "/settings/system/data-storage": () => <DataLogsSettings />,
+  "/settings/system/backups": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-backups`}
+    />
+  ),
+  "/settings/system/database": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-database`}
+    />
+  ),
+  "/settings/units": () => (
+    <SystemRouteShell titleKey="settings:unitsTitle" descriptionKey="settings:unitsDescription">
+      <UnitsPage />
     </SystemRouteShell>
   ),
-  "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
-  "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/organizations": () => (
+    <SystemRouteShell titleKey="orgs:navOrganizations" descriptionKey="orgs:description">
+      <OrganizationsPage />
+    </SystemRouteShell>
+  ),
   "/settings/system/feature-toggles": () => (
     <SystemRouteShell
       titleKey="system:navFeatureToggles"
@@ -214,7 +214,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => <SettingsRedirect to={SYSTEM_ABOUT_SETTINGS_HREF} />,
-  "/settings/system/logs": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/logs": () => (
+    <SettingsRedirect to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=logs#setting-system-logs`} />
+  ),
   "/settings/system/message-queue": () => <SettingsRedirect to={TASK_BEHAVIOR_SETTINGS_HREF} />,
   "/settings/system/status": () => (
     <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
@@ -226,7 +228,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/storage": () => <StorageSettings />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
@@ -301,10 +303,14 @@ function renderDynamicSettingsRoute(pathname: string) {
 
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
-    // A plugin-authored settings route registered at exactly this path
-    // (registry.registerSettingsRoute) wins over the first-party detail
-    // page, so a plugin can fully replace its own settings surface.
-    return renderPluginSettingsRoute(pathname) ?? <PluginDetailPage pluginId={pluginId} />;
+    const pluginRoute = renderPluginSettingsRoute(pathname);
+    // A plugin may replace its detail content, but host-owned personal
+    // shortcuts remain reachable beside that contribution.
+    return pluginRoute ? (
+      <PluginRootSettingsRoute pluginId={pluginId}>{pluginRoute}</PluginRootSettingsRoute>
+    ) : (
+      <PluginDetailPage pluginId={pluginId} />
+    );
   }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
@@ -319,49 +325,70 @@ function renderDynamicSettingsRoute(pathname: string) {
     return <AgentSetupPage />;
   }
 
+  const executorRoute = renderExecutorSettingsRoute(pathname);
+  if (executorRoute) return executorRoute;
+
+  return null;
+}
+
+function PluginRootSettingsRoute({
+  pluginId,
+  children,
+}: {
+  pluginId: string;
+  children: ReactNode;
+}) {
+  const { items } = usePlugins();
+  const plugin = items.find((candidate) => candidate.id === pluginId);
+  return (
+    <div className="min-w-0 space-y-6">
+      {children}
+      {plugin && <PluginShortcutsCard plugin={plugin} plugins={items} />}
+    </div>
+  );
+}
+
+function renderExecutorSettingsRoute(pathname: string): ReactNode {
   const executorProfile = matchDouble(
     pathname,
     /^\/settings\/executor\/([^/]+)\/profile\/([^/]+)$/,
   );
   if (executorProfile) {
     const [id, profileId] = executorProfile;
-    return <ProfileDetailPage executorId={id} profileId={profileId} />;
+    return <LegacyExecutorSettingsRoute executorId={id} profileId={profileId} />;
   }
 
   const executorId = matchSingle(pathname, /^\/settings\/executor\/([^/]+)$/);
   if (executorId && executorId !== "new") {
-    return <ExecutorEditPage executorId={executorId} />;
+    return <LegacyExecutorSettingsRoute executorId={executorId} />;
   }
-
   const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
-  if (profileId) {
-    return <ProfileEditPage profileId={profileId} />;
-  }
-
+  if (profileId) return <ProfileEditPage profileId={profileId} />;
   const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
-  if (executorType) {
-    return <CreateProfilePage executorType={executorType} />;
-  }
-
+  if (executorType) return <CreateProfilePage executorType={executorType} />;
   const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);
-  if (sshExecutorId) {
-    return <SSHExecutorPage executorId={sshExecutorId} />;
-  }
-
-  return null;
+  if (sshExecutorId) return <SSHExecutorPage executorId={sshExecutorId} />;
+  const kubernetesExecutorId = matchSingle(pathname, /^\/settings\/executors\/k8s\/([^/]+)$/);
+  return kubernetesExecutorId ? <KubernetesExecutorPage executorId={kubernetesExecutorId} /> : null;
 }
 
 // One component per workspace sub-page tab. A lookup rather than a ternary
 // chain: the nested version pushed the enclosing matcher over both the
 // cyclomatic and cognitive complexity limits.
 // Keep in step with the alternation in the sub-page pattern below.
-type WorkspaceSubpageSection = "repositories" | "workflows" | "automations" | "secrets";
+type WorkspaceSubpageSection =
+  | "repositories"
+  | "workflows"
+  | "automations"
+  | "secrets"
+  | "mcp-servers";
 
 const WORKSPACE_SUBPAGE_PAGES: Record<WorkspaceSubpageSection, (id: string) => ReactNode> = {
   repositories: (id) => <WorkspaceRepositoriesRoute workspaceId={id} />,
   workflows: (id) => <WorkspaceWorkflowsRoute workspaceId={id} />,
   automations: (id) => <AutomationsPage workspaceId={id} />,
   secrets: (id) => <SecretsSettings scope="workspace" workspaceId={id} />,
+  "mcp-servers": (id) => <WorkspaceMCPServersPage workspaceId={id} />,
 };
 
 function renderWorkspaceIntegrationRoute(match: RegExpMatchArray): ReactNode {
@@ -416,9 +443,25 @@ function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
     return renderWorkspaceAutomationRoute(workspaceAutomation[0], workspaceAutomation[1]);
   }
 
+  const workspaceCoordinator = matchDouble(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators\/([^/]+)$/,
+  );
+  if (workspaceCoordinator) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinator[0], workspaceCoordinator[1]);
+  }
+
+  const workspaceCoordinatorsList = matchSingle(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators$/,
+  );
+  if (workspaceCoordinatorsList) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinatorsList, null);
+  }
+
   const workspaceSubpage = matchDouble(
     pathname,
-    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets)$/,
+    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets|mcp-servers)$/,
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
@@ -513,112 +556,5 @@ function UpdatesRoute() {
       </p>
       <UpdatesCard />
     </SystemRouteShell>
-  );
-}
-
-function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
-  const store = useAppStoreApi();
-  const bootstrappedRef = useRef(false);
-
-  useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-    let cancelled = false;
-
-    async function bootstrap() {
-      const initialState = await loadSettingsInitialState();
-      if (!cancelled && Object.keys(initialState).length > 0) {
-        store.getState().hydrate(initialState);
-      }
-    }
-
-    void bootstrap();
-    return () => {
-      cancelled = true;
-      bootstrappedRef.current = false;
-    };
-  }, [pathname, store]);
-
-  return null;
-}
-
-async function loadSettingsInitialState(): Promise<HydrationState> {
-  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
-    await Promise.all([
-      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-      fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    ]);
-
-  return buildSettingsInitialStateForRoute({
-    workspaces: workspaces.workspaces,
-    executors: executors.executors,
-    agents: agents.agents,
-    discoveryAgents: discovery.agents,
-    availableAgents: available.agents,
-    availableTools: available.tools ?? [],
-    userSettingsResponse,
-  });
-}
-
-export function buildSettingsInitialStateForRoute({
-  workspaces,
-  executors,
-  agents,
-  discoveryAgents,
-  availableAgents,
-  availableTools,
-  userSettingsResponse,
-}: SettingsInitialStateData): HydrationState {
-  const workspaceItems = workspaces.map(mapWorkspaceItem);
-  promoteLegacyWorkspaceSelection(workspaceItems);
-  const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
-    workspaceItems,
-    readActiveWorkspaceCookie(),
-    userSettingsResponse?.settings?.workspace_id ?? null,
-  );
-  const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
-
-  return {
-    workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
-    executors: { items: executors },
-    agentProfiles: {
-      items: agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: 0,
-    },
-    settingsAgents: { items: agents },
-    agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },
-    availableAgents: {
-      items: availableAgents,
-      tools: availableTools,
-      loading: false,
-      loaded: true,
-    },
-    settingsData: { executorsLoaded: true, agentsLoaded: true },
-    ...(mappedUserSettings.loaded
-      ? {
-          userSettings: {
-            ...mappedUserSettings,
-            workspaceId: activeWorkspaceId,
-          },
-        }
-      : {}),
-  };
-}
-
-function SettingsRouteFallback({ pathname }: { pathname: string }) {
-  return (
-    <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-      {/* `pathname` is a route string, never translated. */}
-      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
-        This settings route is handled by the SPA shell, but its dedicated client page is still
-        being ported: <span className="font-mono">{pathname}</span>
-      </Trans>
-    </div>
   );
 }

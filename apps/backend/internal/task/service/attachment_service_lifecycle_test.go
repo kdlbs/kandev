@@ -24,6 +24,12 @@ func newAttachmentTestService(t *testing.T) (*AttachmentService, *sqliterepo.Rep
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "ws-att", Name: "attachments"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	if err := repo.CreateTask(context.Background(), &models.Task{ID: "task-1", WorkspaceID: "ws-att", Title: "task one"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTask(context.Background(), &models.Task{ID: "task-2", WorkspaceID: "ws-att", Title: "task two"}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
 	root := t.TempDir()
 	auth := &recordingWorkspaceAuthorizer{}
 	svc, err := NewAttachmentService(repo, root, auth.authorize, accessTestLogger(t))
@@ -462,6 +468,59 @@ func TestAttachmentDeleteOnlyRemovesStagedRows(t *testing.T) {
 	}
 }
 
+func TestRestoreLaunchMessageAttachmentsReturnsClaimToStaging(t *testing.T) {
+	svc, repo, _, _ := newAttachmentTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-a"})
+	attachment := stageTestAttachment(t, svc, "owner-a", "trace.png", "image-bytes")
+
+	if err := svc.Claim(ctx, "owner-a", "ws-att", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("claim launch attachment: %v", err)
+	}
+	claimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read claimed attachment: %v", err)
+	}
+	if claimed.State != models.AttachmentStateClaimed || claimed.TaskID != "task-1" {
+		t.Fatalf("claim = state %q task %q, want claimed task-1", claimed.State, claimed.TaskID)
+	}
+
+	if err := svc.RestoreLaunchClaim(ctx, "owner-a", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("restore failed launch attachment: %v", err)
+	}
+	restored, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read restored attachment: %v", err)
+	}
+	if restored.State != models.AttachmentStateStaged || restored.TaskID != "" || restored.SessionID != "" {
+		t.Fatalf("restored attachment = %+v, want staged and unowned by a task", restored)
+	}
+	_, file, err := svc.Open(ctx, "owner-a", attachment.ID)
+	if err != nil {
+		t.Fatalf("open restored attachment: %v", err)
+	}
+	_ = file.Close()
+}
+
+func TestRestoreLaunchMessageAttachmentsDoesNotRestoreAnotherTaskClaim(t *testing.T) {
+	svc, repo, _, _ := newAttachmentTestService(t)
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "owner-a"})
+	attachment := stageTestAttachment(t, svc, "owner-a", "trace.png", "image-bytes")
+	if err := svc.Claim(ctx, "owner-a", "ws-att", "task-1", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("claim launch attachment: %v", err)
+	}
+
+	if err := svc.RestoreLaunchClaim(ctx, "owner-a", "task-2", "", []string{attachment.ID}); err != nil {
+		t.Fatalf("restore mismatched launch claim: %v", err)
+	}
+	stillClaimed, err := repo.GetMessageAttachment(ctx, attachment.ID)
+	if err != nil {
+		t.Fatalf("read attachment after mismatched restore: %v", err)
+	}
+	if stillClaimed.State != models.AttachmentStateClaimed || stillClaimed.TaskID != "task-1" {
+		t.Fatalf("mismatched restore changed claim: %+v", stillClaimed)
+	}
+}
+
 func TestAttachmentClaimAuthorizesWorkspace(t *testing.T) {
 	svc, repo, _, auth := newAttachmentTestService(t)
 	ctx := context.Background()
@@ -553,6 +612,37 @@ func TestAttachmentDeleteByTaskRemovesStagedAndClaimed(t *testing.T) {
 	}
 }
 
+func TestAttachmentDeleteByTaskRetainsRowsWhenBytesCannotBeRemoved(t *testing.T) {
+	svc, repo, root, _ := newAttachmentTestService(t)
+	const taskID = "task-attachment-delete"
+	attachment := stageTestAttachment(t, svc, "user-a", "blocked.png", "payload")
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: taskID, WorkspaceID: "ws-att", Title: "attachment delete",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := svc.Claim(context.Background(), "user-a", "ws-att", taskID, "sess-1", []string{attachment.ID}); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	path := filepath.Join(root, "attachments", attachment.StorageKey)
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove staged file: %v", err)
+	}
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("replace staged file with directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "nested"), []byte("keep"), 0o600); err != nil {
+		t.Fatalf("create non-empty directory: %v", err)
+	}
+
+	if err := svc.DeleteByTask(context.Background(), taskID); err == nil {
+		t.Fatal("DeleteByTask succeeded while attachment bytes could not be removed")
+	}
+	if _, err := repo.GetMessageAttachment(context.Background(), attachment.ID); err != nil {
+		t.Fatalf("attachment row was deleted despite byte cleanup failure: %v", err)
+	}
+}
+
 func TestAttachmentCleanupExpiredRemovesStagedBytes(t *testing.T) {
 	svc, repo, root, _ := newAttachmentTestService(t)
 	ctx := context.Background()
@@ -619,7 +709,17 @@ func (f *failingAttachmentRepo) DeleteClaimedMessageAttachments(context.Context,
 	return nil, f.err
 }
 
+func (f *failingAttachmentRepo) PrepareClaimedMessageAttachmentsForRelease(
+	context.Context, []string, string, string, string,
+) ([]*models.TaskMessageAttachment, error) {
+	return nil, f.err
+}
+
 func (f *failingAttachmentRepo) DeleteMessageAttachmentsByTask(context.Context, string) ([]*models.TaskMessageAttachment, error) {
+	return nil, f.err
+}
+
+func (f *failingAttachmentRepo) ListMessageAttachmentsByTask(context.Context, string) ([]*models.TaskMessageAttachment, error) {
 	return nil, f.err
 }
 

@@ -21,6 +21,11 @@ import {
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
 } from "@/components/github/my-github/search-bar";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 
 // `label` is PERSISTED as part of `StoredQueryPreset` (github_default_query_presets)
 // and is editable in the row below, so it must stay locale-neutral — see
@@ -56,7 +61,7 @@ function QueryRow({
       <div className="flex flex-col gap-0.5">
         <span className="text-[10px] text-muted-foreground">{t("github:label")}</span>
         <Input
-          className="h-8 w-36"
+          className={settingsControlClassName("w-36")}
           value={preset.label}
           data-settings-dirty={preset.label !== baseline?.label}
           placeholder={t("github:label")}
@@ -66,7 +71,7 @@ function QueryRow({
       <div className="flex flex-col gap-0.5 flex-1">
         <span className="text-[10px] text-muted-foreground">{t("github:query")}</span>
         <Input
-          className="h-8 font-mono text-xs"
+          className={settingsControlClassName("font-mono text-xs")}
           value={preset.filter}
           data-settings-dirty={preset.filter !== baseline?.filter}
           placeholder={t("github:queryExample", { query: "review-requested:@me is:open" })}
@@ -80,7 +85,7 @@ function QueryRow({
           onValueChange={(v) => onPatch({ group: v as "inbox" | "created" })}
         >
           <SelectTrigger
-            className="h-8 w-28 cursor-pointer"
+            className={settingsControlClassName("w-28 cursor-pointer")}
             data-settings-dirty={preset.group !== baseline?.group}
           >
             <SelectValue />
@@ -98,7 +103,7 @@ function QueryRow({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 cursor-pointer text-destructive mt-3.5"
+        className={controlSizingClassName("icon", "cursor-pointer text-destructive mt-3.5")}
         onClick={onRemove}
         aria-label={t("github:remove")}
       >
@@ -142,7 +147,7 @@ function QueryEditor({
           onRemove={() => remove(index)}
         />
       ))}
-      <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
+      <Button variant="outline" onClick={add} className={settingsActionClassName("cursor-pointer")}>
         <IconPlus className="h-3.5 w-3.5 mr-1" />
         {addLabel}
       </Button>

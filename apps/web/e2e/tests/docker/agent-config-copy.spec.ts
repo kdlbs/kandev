@@ -39,7 +39,7 @@ test.describe("Docker executor — portable agent configuration", () => {
       },
       prepare_script: "",
       cleanup_script: "",
-      env_vars: [],
+      env_vars: seedData.gitConfigEnvVars,
     });
 
     try {

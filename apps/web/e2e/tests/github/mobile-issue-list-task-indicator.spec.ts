@@ -37,10 +37,16 @@ test.describe("Mobile GitHub issue task indicator", () => {
     await github.goto();
     await github.mobileMenuButton.tap();
     await github.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
+    await github.mobileSidebar.getByRole("button", { name: "Done", exact: true }).tap();
 
     const row = testPage.locator(`[data-testid="issue-row"][data-issue-number="${number}"]`);
     const indicator = row.getByTestId("issue-row-task-indicator-single");
     await expect(indicator).toContainText("Mobile linked task", { timeout: 15_000 });
+    const actionBox = await row.getByRole("button", { name: "Task", exact: true }).boundingBox();
+    expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+    const indicatorBox = await indicator.boundingBox();
+    expect(indicatorBox!.height).toBeGreaterThanOrEqual(44);
+    await expect(indicator.getByTestId("task-row-step-title")).toBeVisible();
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

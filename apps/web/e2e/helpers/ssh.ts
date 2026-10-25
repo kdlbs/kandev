@@ -284,7 +284,7 @@ export function countSshdConnections(handle: SSHServerHandle): number {
 
 // --- internals ---
 
-function generateKeypair(identityFile: string): void {
+export function generateKeypair(identityFile: string): void {
   if (fs.existsSync(identityFile)) {
     fs.rmSync(identityFile, { force: true });
     fs.rmSync(`${identityFile}.pub`, { force: true });
@@ -326,11 +326,11 @@ export function execInContainer(handle: SSHServerHandle, argv: string[]): string
   return res.stdout;
 }
 
-function removeContainerIfExists(name: string): void {
+export function removeContainerIfExists(name: string): void {
   spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" });
 }
 
-function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
+export function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
   const deadline = Date.now() + timeoutMs;
   let lastErr = "";
   while (Date.now() < deadline) {
@@ -346,7 +346,7 @@ function waitForTCPOpen(host: string, port: number, timeoutMs = 30_000): void {
   throw new Error(`sshd at ${host}:${port} did not open within ${timeoutMs}ms: ${lastErr}`);
 }
 
-function scanHostFingerprint(host: string, port: number): string {
+export function scanHostFingerprint(host: string, port: number): string {
   // ssh-keyscan prints the host's public key on stdout; `# host SSH-2.0-...`
   // comment lines go to stderr. We retry briefly because the first scan can
   // race the container's first sshd accept.

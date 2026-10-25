@@ -4,10 +4,12 @@ import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconArrowRight, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { WebSocketRequestError } from "@/lib/ws/client";
+import { useComposerActivity } from "./composer-disclosure";
 
 const ROUTE_REASON_KEYS: Record<string, string> = {
   candidate_order: "dynamicRouteReasonCandidateOrder",
@@ -30,6 +32,12 @@ type RouteActionResult = {
   pending_outcome?: string;
 };
 
+function isRouteActionResult(value: unknown): value is RouteActionResult {
+  if (typeof value !== "object" || value === null) return false;
+  const result = value as Partial<RouteActionResult>;
+  return typeof result.route_generation === "number" && typeof result.state === "string";
+}
+
 async function applyRouteAction(
   session: TaskSession,
   action: RouteAction,
@@ -47,7 +55,11 @@ async function applyRouteAction(
       30000,
     );
     return result;
-  } catch {
+  } catch (error) {
+    if (error instanceof WebSocketRequestError && error.code === "CONFLICT") {
+      const route = error.details?.route;
+      return isRouteActionResult(route) ? route : null;
+    }
     return null;
   }
 }
@@ -67,7 +79,6 @@ function applyRouteActionResult(session: TaskSession, result: RouteActionResult)
     route_retry_ordinal: result.retry_ordinal,
     route_deadline: result.deadline,
     route_pending_outcome: result.pending_outcome,
-    updated_at: new Date().toISOString(),
   };
 }
 
@@ -140,7 +151,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("retry")}
         data-testid="dynamic-route-retry"
@@ -151,7 +162,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="default"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("skip")}
         data-testid="dynamic-route-try-next"
@@ -163,7 +174,6 @@ function DynamicRouteRecoveryActions({
         <Button
           type="button"
           variant="outline"
-          className="min-h-11 min-w-11"
           disabled={pendingAction !== null}
           onClick={() => onAction("cancel_wait")}
           data-testid="dynamic-route-cancel-wait"
@@ -174,7 +184,6 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="destructive"
-        className="min-h-11 min-w-11"
         disabled={pendingAction !== null}
         onClick={() => onAction("stop")}
         data-testid="dynamic-route-stop"
@@ -187,29 +196,35 @@ function DynamicRouteRecoveryActions({
 
 export function DynamicRouteRecovery({ session }: { session: TaskSession | null }) {
   const [pendingAction, setPendingAction] = useState<RouteAction | null>(null);
-  const updateSession = useAppStore((state) => state.setTaskSession);
+  const store = useAppStoreApi();
 
   const handleAction = useCallback(
     async (action: RouteAction) => {
       if (!session) return;
+      const before = store.getState().taskSessions.items[session.id];
+      if (!before) return;
       setPendingAction(action);
-      const result = await applyRouteAction(session, action);
+      const result = await applyRouteAction(before, action);
       setPendingAction(null);
-      if (result) {
-        updateSession(applyRouteActionResult(session, result));
-      }
+      const current = store.getState().taskSessions.items[session.id];
+      if (!result || !current) return;
+      // Action replies have no revision within a generation. A later session
+      // projection owns that generation, including a retry that already failed.
+      if (current !== before && (current.route_generation ?? -1) >= result.route_generation) return;
+      store.getState().setTaskSession(applyRouteActionResult(current, result));
     },
-    [session, updateSession],
+    [session, store],
   );
 
-  if (
-    !session ||
-    !session.route_state ||
-    !["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
-      session.route_state,
-    ) ||
-    session.route_generation === undefined
-  ) {
+  const visible =
+    Boolean(
+      session?.route_state &&
+      ["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
+        session.route_state,
+      ),
+    ) && session?.route_generation !== undefined;
+  useComposerActivity({ required: visible });
+  if (!visible || !session) {
     return null;
   }
   const pendingWait =

@@ -8,7 +8,7 @@ depends_on:
   - "04-settings-explanation"
   - "05-changes-identity-disclosure"
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 06: Prove Credential Policy UX And Document The Boundary

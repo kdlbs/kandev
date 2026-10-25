@@ -1,6 +1,9 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const mockUnsubscribeSession = vi.hoisted(() => vi.fn());
+const mockSubscribeSession = vi.hoisted(() => vi.fn(() => mockUnsubscribeSession));
+
 const providerState = vi.hoisted(() => ({
   quickChat: {
     isOpen: true,
@@ -11,6 +14,7 @@ const providerState = vi.hoisted(() => ({
     activeTerminalTabId: null,
   },
   workspaces: { activeId: "ws-1" },
+  connection: { status: "disconnected" as "connected" | "disconnected" },
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -18,6 +22,9 @@ vi.mock("@/components/state-provider", () => ({
 }));
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: vi.fn() }));
 vi.mock("@/hooks/use-quick-chat-resync", () => ({ useQuickChatResync: vi.fn() }));
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ subscribeSession: mockSubscribeSession }),
+}));
 vi.mock("./quick-chat-modal", () => ({ QuickChatModal: () => null }));
 
 import { captureQuickChatLauncherFocus } from "./quick-chat-focus";
@@ -25,6 +32,10 @@ import { QuickChatProvider } from "./quick-chat-provider";
 
 afterEach(() => {
   cleanup();
+  providerState.quickChat.isOpen = true;
+  providerState.connection.status = "disconnected";
+  mockSubscribeSession.mockClear();
+  mockUnsubscribeSession.mockClear();
   vi.unstubAllGlobals();
 });
 
@@ -51,5 +62,24 @@ describe("QuickChatProvider focus contract", () => {
     );
 
     expect(document.activeElement).toBe(launcher);
+  });
+  it("keeps Quick Chat sessions subscribed after the modal closes", () => {
+    providerState.connection.status = "connected";
+    const { rerender } = render(
+      <QuickChatProvider>
+        <button type="button">launch</button>
+      </QuickChatProvider>,
+    );
+
+    expect(mockSubscribeSession).toHaveBeenCalledWith("chat-1");
+
+    providerState.quickChat.isOpen = false;
+    rerender(
+      <QuickChatProvider>
+        <button type="button">launch</button>
+      </QuickChatProvider>,
+    );
+
+    expect(mockUnsubscribeSession).not.toHaveBeenCalled();
   });
 });

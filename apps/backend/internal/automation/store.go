@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	executoridentity "github.com/kandev/kandev/internal/executors/identity"
 	"strings"
 	"time"
 
@@ -15,13 +17,15 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // Store provides SQLite persistence for automations.
 type Store struct {
-	db *sqlx.DB // writer
-	ro *sqlx.DB // reader
+	db                   *sqlx.DB // writer
+	ro                   *sqlx.DB // reader
+	launchIdentityGuards bool
 }
 
 // NewStore creates a new automation store and initializes the schema.
@@ -29,6 +33,9 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	s := &Store{db: writer, ro: reader}
 	if err := s.initSchema(); err != nil {
 		return nil, fmt.Errorf("automation schema init: %w", err)
+	}
+	if err := s.migrateExecutorCreators(); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -43,6 +50,15 @@ const createTablesSQL = `
 		workflow_step_id TEXT NOT NULL,
 		agent_profile_id TEXT NOT NULL,
 		executor_profile_id TEXT NOT NULL,
+		task_mode TEXT NOT NULL DEFAULT 'automation_run',
+		managed_owner_installation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_installation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_conversation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_plugin_id TEXT NOT NULL DEFAULT '',
+		managed_destination_instance_key TEXT NOT NULL DEFAULT '',
+		managed_destination_revision INTEGER NOT NULL DEFAULT 0,
+		resource_revision INTEGER NOT NULL DEFAULT 1,
+		repository_mode TEXT NOT NULL DEFAULT 'none',
 		repository_id TEXT NOT NULL DEFAULT '',
 		prompt TEXT DEFAULT '',
 		task_title_template TEXT DEFAULT '',
@@ -55,7 +71,11 @@ const createTablesSQL = `
 		execution_mode TEXT NOT NULL DEFAULT 'task',
 		enabled BOOLEAN DEFAULT 1,
 		max_concurrent_runs INTEGER DEFAULT 1,
+		continuation_policy TEXT NOT NULL DEFAULT 'new_task',
+		continuation_task_id TEXT DEFAULT '',
 		webhook_secret TEXT DEFAULT '',
+		retry_policy TEXT NOT NULL DEFAULT '{}',
+		automation_revision BIGINT NOT NULL DEFAULT 0,
 		last_triggered_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -66,6 +86,7 @@ const createTablesSQL = `
 		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
 		type TEXT NOT NULL,
 		config TEXT NOT NULL DEFAULT '{}',
+		trigger_revision BIGINT NOT NULL DEFAULT 0,
 		enabled BOOLEAN DEFAULT 1,
 		last_evaluated_at DATETIME,
 		created_at DATETIME NOT NULL,
@@ -80,16 +101,121 @@ const createTablesSQL = `
 		trigger_id TEXT NOT NULL,
 		trigger_type TEXT NOT NULL,
 		task_id TEXT DEFAULT '',
+		managed_conversation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_installation_id TEXT NOT NULL DEFAULT '',
+		managed_destination_plugin_id TEXT NOT NULL DEFAULT '',
+		managed_destination_instance_key TEXT NOT NULL DEFAULT '',
+		managed_destination_revision INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL,
 		dedup_key TEXT DEFAULT '',
 		trigger_data TEXT NOT NULL DEFAULT '{}',
 		error_message TEXT DEFAULT '',
+		session_id TEXT DEFAULT '',
+		turn_id TEXT DEFAULT '',
+		thread_action TEXT DEFAULT '',
+		thread_reason TEXT DEFAULT '',
+		display_title TEXT DEFAULT '',
+		dedup_reason TEXT DEFAULT '',
+		repository_reason TEXT DEFAULT '',
+		managed_input_id TEXT NOT NULL DEFAULT '',
+		delivery_status TEXT NOT NULL DEFAULT '',
+		managed_delivery_attempts INTEGER NOT NULL DEFAULT 0,
+		retry_group_id TEXT NOT NULL DEFAULT '',
+		retry_parent_run_id TEXT NOT NULL DEFAULT '',
+		attempt_number BIGINT NOT NULL DEFAULT 1,
+		retry_state TEXT NOT NULL DEFAULT 'none',
+		retry_scheduled_at DATETIME,
+		retry_claimed_at DATETIME,
+		retry_claim_expires_at DATETIME,
+		retry_claim_token TEXT NOT NULL DEFAULT '',
+		retry_group_generation BIGINT NOT NULL DEFAULT 0,
+		retry_cancelled_at DATETIME,
+		retry_base_title TEXT NOT NULL DEFAULT '',
+		retry_failure_phase TEXT NOT NULL DEFAULT '',
+		retry_failure_class TEXT NOT NULL DEFAULT '',
+		retry_task_intent_id TEXT NOT NULL DEFAULT '',
+		retry_policy_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_trigger_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_launch_config_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_launch_config_version BIGINT NOT NULL DEFAULT 1,
+		retry_resolved_prompt TEXT NOT NULL DEFAULT '',
+		retry_resolved_title TEXT NOT NULL DEFAULT '',
+		retry_resolved_trigger_timestamp DATETIME,
+		retry_continuation_snapshot TEXT NOT NULL DEFAULT '{}',
+		automation_revision BIGINT NOT NULL DEFAULT 0,
+		trigger_revision BIGINT NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_created_at ON automation_runs(created_at DESC);
+	CREATE TABLE IF NOT EXISTS automation_retry_groups (
+		id TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		trigger_id TEXT NOT NULL DEFAULT '',
+		trigger_ids TEXT NOT NULL DEFAULT '[]',
+		generation BIGINT NOT NULL DEFAULT 1,
+		state TEXT NOT NULL DEFAULT 'live',
+		superseded_by_run_id TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_automation_retry_groups_automation
+		ON automation_retry_groups(automation_id, state);
+
+	CREATE TABLE IF NOT EXISTS automation_run_task_intents (
+		intent_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		task_id TEXT,
+		state TEXT NOT NULL,
+		group_generation BIGINT NOT NULL DEFAULT 0,
+		automation_deleted_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_run_intents_run ON automation_run_task_intents(run_id);
+
+	CREATE TABLE IF NOT EXISTS automation_run_operations (
+		operation_id TEXT PRIMARY KEY,
+		intent_id TEXT NOT NULL REFERENCES automation_run_task_intents(intent_id),
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		group_generation BIGINT NOT NULL DEFAULT 0,
+		operation_kind TEXT NOT NULL,
+		state TEXT NOT NULL,
+		lease_token TEXT NOT NULL DEFAULT '',
+		lease_expires_at DATETIME,
+		external_task_id TEXT NOT NULL DEFAULT '',
+		external_session_id TEXT NOT NULL DEFAULT '',
+		external_turn_id TEXT NOT NULL DEFAULT '',
+		result_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(intent_id, group_generation, operation_kind)
+	);
+
+	CREATE TABLE IF NOT EXISTS automation_retry_outbox (
+		event_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		snapshot_version BIGINT NOT NULL DEFAULT 1,
+		payload_hash TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT 'pending',
+		lease_token TEXT NOT NULL DEFAULT '',
+		lease_expires_at DATETIME,
+		enqueued_at DATETIME,
+		acknowledged_at DATETIME,
+		attempts INTEGER NOT NULL DEFAULT 0,
+		safe_error TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS automation_retry_event_receipts (
+		event_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		snapshot_version BIGINT NOT NULL DEFAULT 1,
+		accepted_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_automation_retry_outbox_state ON automation_retry_outbox(state, lease_expires_at);
 	-- The summary query asks each automation for its newest run, ordered by
 	-- (created_at, id) — the ordering every run query uses. Without the
 	-- composite the per-automation lookup sorts that automation's whole run
@@ -102,36 +228,113 @@ const createTablesSQL = `
 		id TEXT PRIMARY KEY,
 		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
 		repository_id TEXT NOT NULL,
+		base_branch TEXT NOT NULL DEFAULT '',
 		position INTEGER NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		UNIQUE(automation_id, repository_id)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_automation_repositories_automation ON automation_repositories(automation_id);
+
+	CREATE TABLE IF NOT EXISTS automation_task_cleanup_jobs (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		automation_id TEXT NOT NULL,
+		last_error TEXT DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS automation_managed_schedule_operations (
+		operation_id TEXT PRIMARY KEY,
+		payload_digest TEXT NOT NULL,
+		automation_id TEXT NOT NULL,
+		operation TEXT NOT NULL,
+		resource_revision INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_automation_task_cleanup_jobs_due
+		ON automation_task_cleanup_jobs(updated_at, created_at);
 `
 
 // In-branch column additions. The canonical CREATE TABLE covers fresh
-// installs; these ALTERs cover DBs already initialised from an earlier
-// commit on this branch (the original PR #406 schema). SQLite returns a
-// duplicate-column error when the column already exists, which we swallow.
-//
-// automations.repository_id is retained as a legacy, write-once column: it
-// is never read or written by current code (repository selection now lives
-// in automation_repositories), but dropping a column referenced by two
-// FK-child tables (automation_triggers, automation_runs) under
-// foreign_keys=on would require table-recreate migration infrastructure
-// this package doesn't have yet. Every query that scans a full Automation
-// row uses the explicit automationColumns list, which omits it, so its
-// continued presence in the table is inert.
-//
-// migrateExecutionModeSQL still runs because the notice derivation in
-// automationColumns needs the column to exist on every DB it queries,
-// including one initialised before the column was ever added.
+// installs; these ALTERs cover DBs already initialized from an earlier
+// commit on this branch.
 const (
-	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
-	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
-	migrateRepositoryIDSQL  = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+	migrateTaskTitleSQL                         = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
+	migrateExecutionModeSQL                     = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
+	migrateRepositoryIDSQL                      = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
+	migrateContinuationPolicySQL                = `ALTER TABLE automations ADD COLUMN continuation_policy TEXT NOT NULL DEFAULT 'new_task'`
+	migrateContinuationTaskSQL                  = `ALTER TABLE automations ADD COLUMN continuation_task_id TEXT DEFAULT ''`
+	migrateTaskModeSQL                          = `ALTER TABLE automations ADD COLUMN task_mode TEXT NOT NULL DEFAULT 'automation_run'`
+	migrateRepositoryModeSQL                    = `ALTER TABLE automations ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'none'`
+	migrateManagedOwnerSQL                      = `ALTER TABLE automations ADD COLUMN managed_owner_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedInstallSQL                    = `ALTER TABLE automations ADD COLUMN managed_destination_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedConversationSQL               = `ALTER TABLE automations ADD COLUMN managed_destination_conversation_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedPluginSQL                     = `ALTER TABLE automations ADD COLUMN managed_destination_plugin_id TEXT NOT NULL DEFAULT ''`
+	migrateManagedInstanceSQL                   = `ALTER TABLE automations ADD COLUMN managed_destination_instance_key TEXT NOT NULL DEFAULT ''`
+	migrateManagedRevisionSQL                   = `ALTER TABLE automations ADD COLUMN managed_destination_revision INTEGER NOT NULL DEFAULT 0`
+	migrateAutomationRevisionSQL                = `ALTER TABLE automations ADD COLUMN resource_revision INTEGER NOT NULL DEFAULT 1`
+	migrateRepositoryBranchSQL                  = `ALTER TABLE automation_repositories ADD COLUMN base_branch TEXT NOT NULL DEFAULT ''`
+	migrateRunSessionSQL                        = `ALTER TABLE automation_runs ADD COLUMN session_id TEXT DEFAULT ''`
+	migrateRunManagedConversationSQL            = `ALTER TABLE automation_runs ADD COLUMN managed_conversation_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationInstallationSQL = `ALTER TABLE automation_runs ADD COLUMN managed_destination_installation_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationPluginSQL       = `ALTER TABLE automation_runs ADD COLUMN managed_destination_plugin_id TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationInstanceSQL     = `ALTER TABLE automation_runs ADD COLUMN managed_destination_instance_key TEXT NOT NULL DEFAULT ''`
+	migrateRunManagedDestinationRevisionSQL     = `ALTER TABLE automation_runs ADD COLUMN managed_destination_revision INTEGER NOT NULL DEFAULT 0`
+	migrateRunTurnSQL                           = `ALTER TABLE automation_runs ADD COLUMN turn_id TEXT DEFAULT ''`
+	migrateRunThreadActionSQL                   = `ALTER TABLE automation_runs ADD COLUMN thread_action TEXT DEFAULT ''`
+	migrateRunThreadReasonSQL                   = `ALTER TABLE automation_runs ADD COLUMN thread_reason TEXT DEFAULT ''`
+	migrateRunDisplayTitleSQL                   = `ALTER TABLE automation_runs ADD COLUMN display_title TEXT DEFAULT ''`
+	migrateRunDedupReasonSQL                    = `ALTER TABLE automation_runs ADD COLUMN dedup_reason TEXT DEFAULT ''`
+	migrateRunRepositoryReasonSQL               = `ALTER TABLE automation_runs ADD COLUMN repository_reason TEXT DEFAULT ''`
+	migrateRunManagedInputSQL                   = `ALTER TABLE automation_runs ADD COLUMN managed_input_id TEXT NOT NULL DEFAULT ''`
+	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
+	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
+	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
+	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
+	migrateTriggerRevisionSQL                   = `ALTER TABLE automation_triggers ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
 )
+
+const (
+	migrateRunRetryGroupIDSQL            = `ALTER TABLE automation_runs ADD COLUMN retry_group_id TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryParentIDSQL           = `ALTER TABLE automation_runs ADD COLUMN retry_parent_run_id TEXT NOT NULL DEFAULT ''`
+	migrateRunAttemptNumberSQL           = `ALTER TABLE automation_runs ADD COLUMN attempt_number BIGINT NOT NULL DEFAULT 1`
+	migrateRunRetryStateSQL              = `ALTER TABLE automation_runs ADD COLUMN retry_state TEXT NOT NULL DEFAULT 'none'`
+	migrateRunRetryScheduledAtSQL        = `ALTER TABLE automation_runs ADD COLUMN retry_scheduled_at {{timestamp}}`
+	migrateRunRetryClaimedAtSQL          = `ALTER TABLE automation_runs ADD COLUMN retry_claimed_at {{timestamp}}`
+	migrateRunRetryClaimExpiresAtSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_claim_expires_at {{timestamp}}`
+	migrateRunRetryClaimTokenSQL         = `ALTER TABLE automation_runs ADD COLUMN retry_claim_token TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryGenerationSQL         = `ALTER TABLE automation_runs ADD COLUMN retry_group_generation BIGINT NOT NULL DEFAULT 0`
+	migrateRunRetryCancelledAtSQL        = `ALTER TABLE automation_runs ADD COLUMN retry_cancelled_at {{timestamp}}`
+	migrateRunRetryBaseTitleSQL          = `ALTER TABLE automation_runs ADD COLUMN retry_base_title TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryFailurePhaseSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_failure_phase TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryFailureClassSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_failure_class TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryIntentIDSQL           = `ALTER TABLE automation_runs ADD COLUMN retry_task_intent_id TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryPolicySnapshotSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_policy_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryTriggerSnapshotSQL    = `ALTER TABLE automation_runs ADD COLUMN retry_trigger_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryLaunchSnapshotSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_launch_config_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryLaunchVersionSQL      = `ALTER TABLE automation_runs ADD COLUMN retry_launch_config_version BIGINT NOT NULL DEFAULT 1`
+	migrateRunRetryPromptSQL             = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_prompt TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryTitleSQL              = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_title TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryTriggerTimestampSQL   = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_trigger_timestamp {{timestamp}}`
+	migrateRunRetryContinuationSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_continuation_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryAutomationRevisionSQL = `ALTER TABLE automation_runs ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
+	migrateRunRetryTriggerRevisionSQL    = `ALTER TABLE automation_runs ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
+)
+
+// migrateRunDedupUniqueIndexSQL backstops admitTriggerLocked's check-then-insert
+// admission with a real constraint: idx_automation_runs_dedup (above) is a
+// plain index, so two instances racing the same dedup key can both pass
+// HasRunWithDedupKey and both CreateRun. CREATE INDEX IF NOT EXISTS is
+// idempotent on its own, so this runs as a plain statement rather than
+// through the ADD COLUMN migration list. It must run after
+// dedupeAutomationRunDuplicateKeys, which clears any duplicate the
+// unconstrained window already produced — otherwise this statement itself
+// fails on exactly the database it exists to protect.
+const migrateRunDedupUniqueIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_dedup_unique
+	ON automation_runs(automation_id, dedup_key) WHERE dedup_key != ''`
 
 // automationColumns is the explicit column list for every query that scans a
 // full Automation row. Spelled out rather than `SELECT *` because the table
@@ -147,20 +350,183 @@ const (
 // automation used to put a card on the board", for a migration notice that
 // closes once. Projecting the mode itself would hand every future caller a
 // mode to branch on, and the whole point of withdrawing it is that no firing
-// path has one. See docs/specs/office/automations-settings.md § Migration.
-const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
-	agent_profile_id, executor_profile_id, prompt, task_title_template,
-	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at,
+// path has one. See docs/specs/office/requirements/automations-settings.md § Migration.
+const automationColumns = `created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
+	agent_profile_id, executor_profile_id, task_mode, managed_owner_installation_id,
+	managed_destination_installation_id, managed_destination_conversation_id,
+	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
+	resource_revision, repository_mode, prompt, task_title_template,
+	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
+	retry_policy, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL+retryLaunchTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
-	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // duplicate-column on existing DBs
-	s.db.Exec(migrateRepositoryIDSQL)  //nolint:errcheck // duplicate-column on existing DBs
-	return s.backfillLegacyRepositoryIDs()
+	migrate := db.NewRequiredMigrateLogger(s.db, nil)
+	migrations := []struct {
+		name string
+		stmt string
+	}{
+		{"automation_webhook_receipts.attempt_count", `ALTER TABLE automation_webhook_receipts ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0`},
+		{"automation_webhook_receipts.next_attempt_at", `ALTER TABLE automation_webhook_receipts ADD COLUMN next_attempt_at BIGINT NOT NULL DEFAULT 0`},
+		{"automations.task_title_template", schemaSQLForDriver(migrateTaskTitleSQL, s.db.DriverName())},
+		{"automations.execution_mode", schemaSQLForDriver(migrateExecutionModeSQL, s.db.DriverName())},
+		{"automations.repository_id", schemaSQLForDriver(migrateRepositoryIDSQL, s.db.DriverName())},
+		{"automations.continuation_policy", schemaSQLForDriver(migrateContinuationPolicySQL, s.db.DriverName())},
+		{"automations.continuation_task_id", schemaSQLForDriver(migrateContinuationTaskSQL, s.db.DriverName())},
+		{"automations.task_mode", schemaSQLForDriver(migrateTaskModeSQL, s.db.DriverName())},
+		{"automations.repository_mode", schemaSQLForDriver(migrateRepositoryModeSQL, s.db.DriverName())},
+		{"automations.managed_owner_installation_id", schemaSQLForDriver(migrateManagedOwnerSQL, s.db.DriverName())},
+		{"automations.managed_destination_installation_id", schemaSQLForDriver(migrateManagedInstallSQL, s.db.DriverName())},
+		{"automations.managed_destination_conversation_id", schemaSQLForDriver(migrateManagedConversationSQL, s.db.DriverName())},
+		{"automations.managed_destination_plugin_id", schemaSQLForDriver(migrateManagedPluginSQL, s.db.DriverName())},
+		{"automations.managed_destination_instance_key", schemaSQLForDriver(migrateManagedInstanceSQL, s.db.DriverName())},
+		{"automations.managed_destination_revision", schemaSQLForDriver(migrateManagedRevisionSQL, s.db.DriverName())},
+		{"automations.resource_revision", schemaSQLForDriver(migrateAutomationRevisionSQL, s.db.DriverName())},
+		{"automation_repositories.base_branch", schemaSQLForDriver(migrateRepositoryBranchSQL, s.db.DriverName())},
+		{"automation_runs.session_id", schemaSQLForDriver(migrateRunSessionSQL, s.db.DriverName())},
+		{"automation_runs.managed_conversation_id", schemaSQLForDriver(migrateRunManagedConversationSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_installation_id", schemaSQLForDriver(migrateRunManagedDestinationInstallationSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_plugin_id", schemaSQLForDriver(migrateRunManagedDestinationPluginSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_instance_key", schemaSQLForDriver(migrateRunManagedDestinationInstanceSQL, s.db.DriverName())},
+		{"automation_runs.managed_destination_revision", schemaSQLForDriver(migrateRunManagedDestinationRevisionSQL, s.db.DriverName())},
+		{"automation_runs.turn_id", schemaSQLForDriver(migrateRunTurnSQL, s.db.DriverName())},
+		{"automation_runs.thread_action", schemaSQLForDriver(migrateRunThreadActionSQL, s.db.DriverName())},
+		{"automation_runs.thread_reason", schemaSQLForDriver(migrateRunThreadReasonSQL, s.db.DriverName())},
+		{"automation_runs.display_title", schemaSQLForDriver(migrateRunDisplayTitleSQL, s.db.DriverName())},
+		{"automation_runs.dedup_reason", schemaSQLForDriver(migrateRunDedupReasonSQL, s.db.DriverName())},
+		{"automation_runs.repository_reason", schemaSQLForDriver(migrateRunRepositoryReasonSQL, s.db.DriverName())},
+		{"automation_runs.managed_input_id", schemaSQLForDriver(migrateRunManagedInputSQL, s.db.DriverName())},
+		{"automation_runs.delivery_status", schemaSQLForDriver(migrateRunDeliveryStatusSQL, s.db.DriverName())},
+		{"automation_runs.managed_delivery_attempts", schemaSQLForDriver(migrateRunDeliveryAttemptsSQL, s.db.DriverName())},
+		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
+		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
+		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
+		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
+		{"automation_runs.retry_parent_run_id", schemaSQLForDriver(migrateRunRetryParentIDSQL, s.db.DriverName())},
+		{"automation_runs.attempt_number", schemaSQLForDriver(migrateRunAttemptNumberSQL, s.db.DriverName())},
+		{"automation_runs.retry_state", schemaSQLForDriver(migrateRunRetryStateSQL, s.db.DriverName())},
+		{"automation_runs.retry_scheduled_at", schemaSQLForDriver(migrateRunRetryScheduledAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claimed_at", schemaSQLForDriver(migrateRunRetryClaimedAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claim_expires_at", schemaSQLForDriver(migrateRunRetryClaimExpiresAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claim_token", schemaSQLForDriver(migrateRunRetryClaimTokenSQL, s.db.DriverName())},
+		{"automation_runs.retry_group_generation", schemaSQLForDriver(migrateRunRetryGenerationSQL, s.db.DriverName())},
+		{"automation_runs.retry_cancelled_at", schemaSQLForDriver(migrateRunRetryCancelledAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_base_title", schemaSQLForDriver(migrateRunRetryBaseTitleSQL, s.db.DriverName())},
+		{"automation_runs.retry_failure_phase", schemaSQLForDriver(migrateRunRetryFailurePhaseSQL, s.db.DriverName())},
+		{"automation_runs.retry_failure_class", schemaSQLForDriver(migrateRunRetryFailureClassSQL, s.db.DriverName())},
+		{"automation_runs.retry_task_intent_id", schemaSQLForDriver(migrateRunRetryIntentIDSQL, s.db.DriverName())},
+		{"automation_runs.retry_policy_snapshot", schemaSQLForDriver(migrateRunRetryPolicySnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_trigger_snapshot", schemaSQLForDriver(migrateRunRetryTriggerSnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_launch_config_snapshot", schemaSQLForDriver(migrateRunRetryLaunchSnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_launch_config_version", schemaSQLForDriver(migrateRunRetryLaunchVersionSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_prompt", schemaSQLForDriver(migrateRunRetryPromptSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_title", schemaSQLForDriver(migrateRunRetryTitleSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_trigger_timestamp", schemaSQLForDriver(migrateRunRetryTriggerTimestampSQL, s.db.DriverName())},
+		{"automation_runs.retry_continuation_snapshot", schemaSQLForDriver(migrateRunRetryContinuationSQL, s.db.DriverName())},
+		{"automation_runs.automation_revision", schemaSQLForDriver(migrateRunRetryAutomationRevisionSQL, s.db.DriverName())},
+		{"automation_runs.trigger_revision", schemaSQLForDriver(migrateRunRetryTriggerRevisionSQL, s.db.DriverName())},
+	}
+	for _, migration := range migrations {
+		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
+			return fmt.Errorf("required automation migration: %w", err)
+		}
+	}
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("required automation migration: %w", err)
+	}
+	if err := s.ensureRetryIndexes(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS automation_webhook_receipts_due ON automation_webhook_receipts(state,next_attempt_at,created_at,id)`); err != nil {
+		return err
+	}
+	if err := s.backfillLegacyRepositoryIDs(); err != nil {
+		return err
+	}
+	if err := s.backfillRepositoryModes(); err != nil {
+		return err
+	}
+	if err := s.releaseStaleFailedWebhookDedupKeys(); err != nil {
+		return err
+	}
+	if err := s.dedupeAutomationRunDuplicateKeys(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(migrateRunDedupUniqueIndexSQL, s.db.DriverName())); err != nil {
+		return fmt.Errorf("create automation_runs dedup unique index: %w", err)
+	}
+	if err := s.installRetryIdentityGuards(context.Background()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// releaseStaleFailedWebhookDedupKeys blanks the dedup_key of any webhook run
+// that failed before ever creating a task. MarkRunTerminal only performs this
+// release for a run transitioning to failed through that code path; a run
+// that reached "failed" on a database predating that release logic (or
+// predating the webhook trigger's dedup feature entirely) keeps its key
+// forever, since MarkRunTerminal's WHERE clause only matches rows still in
+// ("triggered", "task_created"). Left unfixed, migrateRunDedupUniqueIndexSQL
+// would let HasRunWithDedupKey treat that stale key as permanently taken,
+// silently skipping every future retry of an alert that never produced a
+// task. Runs a single time before the unique index exists to enforce it;
+// idempotent since a row with dedup_key already ” matches nothing further.
+func (s *Store) releaseStaleFailedWebhookDedupKeys() error {
+	_, err := s.db.Exec(s.db.Rebind(`
+		UPDATE automation_runs
+		SET dedup_key = ''
+		WHERE status = ?
+		  AND trigger_type = ?
+		  AND COALESCE(task_id, '') = ''
+		  AND dedup_key != ''`),
+		string(RunStatusFailed), string(TriggerTypeWebhook),
+	)
+	if err != nil {
+		return fmt.Errorf("release stale failed webhook dedup keys: %w", err)
+	}
+	return nil
+}
+
+// dedupeAutomationRunDuplicateKeys blanks dedup_key on every row but one for
+// each (automation_id, dedup_key) pair, so migrateRunDedupUniqueIndexSQL can
+// be created even on a database where the race it backstops already produced
+// a duplicate. Which row keeps the key is arbitrary — both already fired, so
+// nothing downstream depends on which survives — only that at most one does.
+// Idempotent: once no pair has more than one row, the select returns nothing.
+func (s *Store) dedupeAutomationRunDuplicateKeys() error {
+	type dupRow struct {
+		ID string `db:"id"`
+	}
+	var rows []dupRow
+	err := s.db.Select(&rows, `
+		SELECT id FROM automation_runs
+		WHERE dedup_key != ''
+		AND id NOT IN (
+			SELECT MIN(id) FROM automation_runs
+			WHERE dedup_key != ''
+			GROUP BY automation_id, dedup_key
+		)`)
+	if err != nil {
+		return fmt.Errorf("select duplicate dedup_key rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin dedup_key cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, row := range rows {
+		if _, err := tx.Exec(tx.Rebind(`UPDATE automation_runs SET dedup_key = '' WHERE id = ?`), row.ID); err != nil {
+			return fmt.Errorf("clear duplicate dedup_key for run %s: %w", row.ID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // backfillLegacyRepositoryIDs copies every non-empty legacy
@@ -175,8 +541,8 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 		CreatedAt    time.Time `db:"created_at"`
 	}
 	var rows []legacyRow
-	err := s.db.Select(&rows,
-		`SELECT id, repository_id, created_at FROM automations WHERE repository_id != ''`)
+	err := s.db.Select(&rows, s.db.Rebind(
+		`SELECT id, repository_id, created_at FROM automations WHERE repository_id != ''`))
 	if err != nil {
 		return fmt.Errorf("select legacy repository_id rows: %w", err)
 	}
@@ -190,9 +556,10 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, row := range rows {
-		_, err := tx.Exec(
-			`INSERT OR IGNORE INTO automation_repositories (id, automation_id, repository_id, position, created_at)
-			VALUES (?, ?, ?, 0, ?)`,
+		_, err := tx.Exec(tx.Rebind(
+			`INSERT INTO automation_repositories (id, automation_id, repository_id, position, created_at)
+			VALUES (?, ?, ?, 0, ?)
+			ON CONFLICT(automation_id, repository_id) DO NOTHING`),
 			uuid.New().String(), row.ID, row.RepositoryID, row.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("backfill automation_repositories for %s: %w", row.ID, err)
@@ -202,26 +569,82 @@ func (s *Store) backfillLegacyRepositoryIDs() error {
 		// repository from automation_repositories would resurrect it on
 		// the next boot's backfill pass (INSERT OR IGNORE only blocks
 		// exact re-insertion, not re-addition after deletion).
-		if _, err := tx.Exec(`UPDATE automations SET repository_id = '' WHERE id = ?`, row.ID); err != nil {
+		if _, err := tx.Exec(tx.Rebind(`UPDATE automations SET repository_id = '' WHERE id = ?`), row.ID); err != nil {
 			return fmt.Errorf("clear legacy repository_id for %s: %w", row.ID, err)
 		}
 	}
 	return tx.Commit()
 }
 
+// backfillRepositoryModes derives the mode from the explicit list. Empty
+// legacy workspace-default rows become repository-free; Kandev no longer
+// attaches the first workspace repository implicitly.
+func (s *Store) backfillRepositoryModes() error {
+	if _, err := s.db.Exec(`
+		UPDATE automations
+		SET repository_mode = 'selected'
+		WHERE repository_mode = 'workspace_default'
+		  AND EXISTS (
+			SELECT 1 FROM automation_repositories
+			WHERE automation_repositories.automation_id = automations.id
+		  )`); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE automations SET repository_mode = 'none' WHERE repository_mode = 'workspace_default'`)
+	return err
+}
+
 // --- Automation CRUD ---
 
 // CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
+	a.CreatedByUserID = executoridentity.CreatorUserID(ctx)
 	if a.ID == "" {
 		a.ID = uuid.New().String()
 	}
 	if a.WebhookSecret == "" {
 		a.WebhookSecret = generateSecret()
 	}
+	normalizedPolicy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return err
+	}
+	a.RetryPolicy = normalizedPolicy
+	policyJSON, err := json.Marshal(normalizedPolicy)
+	if err != nil {
+		return fmt.Errorf("encode retry policy: %w", err)
+	}
+	a.RetryPolicyJSON = string(policyJSON)
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
+	if a.ContinuationPolicy == "" {
+		a.ContinuationPolicy = ContinuationPolicyNewTask
+	}
+	if a.TaskMode == "" {
+		a.TaskMode = TaskModeAutomationRun
+	}
+	normalizeAutomationRepositories(a)
+	if a.RepositoryMode == "" {
+		if len(a.Repositories) > 0 {
+			a.RepositoryMode = RepositoryModeSelected
+		} else {
+			a.RepositoryMode = RepositoryModeNone
+		}
+	}
+	if err := validateManagedDestination(a.TaskMode, a.ManagedDestination); err != nil {
+		return err
+	}
+	setManagedDestinationColumns(a)
+	if a.ResourceRevision == 0 {
+		a.ResourceRevision = 1
+	}
+	if err := validateAutomationTarget(a.TaskMode, a.RepositoryMode, a.WorkflowID, a.RepositoryIDs); err != nil {
+		return err
+	}
+	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -236,22 +659,29 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	// indistinguishable from a pre-upgrade one, and the one-time notice would
 	// never stop being true. Empty means "no mode was ever chosen", which is
 	// the honest record for a row created after the choice was withdrawn.
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO automations (created_by_user_id, id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
-			prompt, task_title_template, execution_mode,
-			enabled, max_concurrent_runs,
-			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
+			task_mode, managed_owner_installation_id, managed_destination_installation_id,
+			managed_destination_conversation_id, managed_destination_plugin_id,
+			managed_destination_instance_key, managed_destination_revision, resource_revision,
+			repository_mode, prompt, task_title_template, execution_mode,
+			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
+			retry_policy, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), a.CreatedByUserID,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
+		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
+		a.ManagedDestinationConversationID, a.ManagedDestinationPluginID,
+		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, a.ResourceRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
-		a.Enabled, a.MaxConcurrentRuns,
-		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
+		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.ContinuationTaskID,
+		a.RetryPolicyJSON, a.AutomationRevision, a.WebhookSecret,
+		a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return err
 	}
-	if err := insertAutomationRepositories(ctx, tx, a.ID, a.RepositoryIDs); err != nil {
+	if err := insertAutomationRepositories(ctx, tx, a.ID, a.Repositories); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -260,13 +690,13 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 // insertAutomationRepositories inserts one automation_repositories row per
 // ID, preserving slice order via the position column. No-op for an empty
 // slice. Shared by CreateAutomation and UpdateAutomation's replace path.
-func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID string, repositoryIDs []string) error {
+func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID string, repositories []AutomationRepository) error {
 	now := time.Now().UTC()
-	for i, repositoryID := range repositoryIDs {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO automation_repositories (id, automation_id, repository_id, position, created_at)
-			VALUES (?, ?, ?, ?, ?)`,
-			uuid.New().String(), automationID, repositoryID, i, now)
+	for i, repository := range repositories {
+		_, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO automation_repositories (id, automation_id, repository_id, base_branch, position, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)`),
+			uuid.New().String(), automationID, repository.RepositoryID, repository.BaseBranch, i, now)
 		if err != nil {
 			return fmt.Errorf("insert automation_repositories: %w", err)
 		}
@@ -278,34 +708,52 @@ func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID
 // repository_ids hydrated.
 func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, error) {
 	var a Automation
-	err := s.ro.GetContext(ctx, &a, `SELECT `+automationColumns+` FROM automations WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &a, s.ro.Rebind(`SELECT `+automationColumns+` FROM automations WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	a.RetryPolicy, err = decodeRetryPolicy(a.RetryPolicyJSON)
+	if err != nil {
+		return nil, err
+	}
+	hydrateManagedDestination(&a)
 	triggers, err := s.ListTriggers(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("hydrate triggers: %w", err)
 	}
 	a.Triggers = triggers
-	repoIDs, err := s.listRepositoryIDsForAutomations(ctx, []string{id})
+	repositories, err := s.listRepositoriesForAutomations(ctx, []string{id})
 	if err != nil {
 		return nil, fmt.Errorf("hydrate repository_ids: %w", err)
 	}
-	a.RepositoryIDs = repoIDs[id]
+	a.Repositories = repositories[id]
+	a.RepositoryIDs = repositoryIDs(a.Repositories)
 	return &a, nil
+}
+
+func (s *Store) IsManagedConversationAutomation(ctx context.Context, id string) (bool, error) {
+	var taskMode TaskMode
+	err := s.ro.GetContext(ctx, &taskMode, s.ro.Rebind(`SELECT task_mode FROM automations WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return taskMode == TaskModeManagedConversation, nil
 }
 
 // listRepositoryIDsForAutomations batch-loads ordered repository_ids for
 // several automations at once, mirroring listTriggersForAutomations.
-func (s *Store) listRepositoryIDsForAutomations(ctx context.Context, automationIDs []string) (map[string][]string, error) {
+func (s *Store) listRepositoriesForAutomations(ctx context.Context, automationIDs []string) (map[string][]AutomationRepository, error) {
 	if len(automationIDs) == 0 {
-		return make(map[string][]string), nil
+		return make(map[string][]AutomationRepository), nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT automation_id, repository_id FROM automation_repositories
+		`SELECT automation_id, repository_id, base_branch FROM automation_repositories
 		WHERE automation_id IN (?) ORDER BY automation_id, position`, automationIDs)
 	if err != nil {
 		return nil, err
@@ -314,17 +762,21 @@ func (s *Store) listRepositoryIDsForAutomations(ctx context.Context, automationI
 	type row struct {
 		AutomationID string `db:"automation_id"`
 		RepositoryID string `db:"repository_id"`
+		BaseBranch   string `db:"base_branch"`
 	}
 	var rows []row
 	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
-	result := make(map[string][]string, len(automationIDs))
+	result := make(map[string][]AutomationRepository, len(automationIDs))
 	for _, id := range automationIDs {
-		result[id] = []string{}
+		result[id] = []AutomationRepository{}
 	}
 	for _, r := range rows {
-		result[r.AutomationID] = append(result[r.AutomationID], r.RepositoryID)
+		result[r.AutomationID] = append(result[r.AutomationID], AutomationRepository{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
 	}
 	return result, nil
 }
@@ -349,7 +801,7 @@ func (s *Store) ListEnabledByAgentProfile(ctx context.Context, agentProfileID st
 	var rows []AgentProfileBinding
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT id, name, workspace_id FROM automations
-		WHERE agent_profile_id = ? AND enabled = 1
+		WHERE agent_profile_id = ? AND enabled = TRUE
 		ORDER BY name
 	`), agentProfileID)
 	if err != nil {
@@ -377,8 +829,8 @@ func (s *Store) DisableByAgentProfile(ctx context.Context, agentProfileID string
 		return nil, nil
 	}
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE automations SET enabled = 0, updated_at = ?
-		WHERE agent_profile_id = ? AND enabled = 1
+		UPDATE automations SET enabled = FALSE, updated_at = ?
+		WHERE agent_profile_id = ? AND enabled = TRUE
 	`), time.Now().UTC(), agentProfileID)
 	if err != nil {
 		return nil, fmt.Errorf("disable automations for agent profile: %w", err)
@@ -390,8 +842,8 @@ func (s *Store) DisableByAgentProfile(ctx context.Context, agentProfileID string
 // repository_ids hydrated.
 func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
 	var automations []*Automation
-	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT `+automationColumns+` FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	err := s.ro.SelectContext(ctx, &automations, s.ro.Rebind(
+		`SELECT `+automationColumns+` FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`), workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -401,8 +853,8 @@ func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Aut
 // ListAllEnabled returns all enabled automations (across workspaces).
 func (s *Store) ListAllEnabled(ctx context.Context) ([]*Automation, error) {
 	var automations []*Automation
-	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT `+automationColumns+` FROM automations WHERE enabled = 1 ORDER BY created_at`)
+	err := s.ro.SelectContext(ctx, &automations, s.ro.Rebind(
+		`SELECT `+automationColumns+` FROM automations WHERE enabled = TRUE ORDER BY created_at`))
 	if err != nil {
 		return nil, err
 	}
@@ -423,21 +875,50 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 	if err != nil {
 		return fmt.Errorf("hydrate triggers: %w", err)
 	}
-	repoIDsByAutomation, err := s.listRepositoryIDsForAutomations(ctx, ids)
+	repositoriesByAutomation, err := s.listRepositoriesForAutomations(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("hydrate repository_ids: %w", err)
 	}
 	for _, a := range automations {
+		a.RetryPolicy, err = decodeRetryPolicy(a.RetryPolicyJSON)
+		if err != nil {
+			return fmt.Errorf("hydrate retry policy: %w", err)
+		}
 		a.Triggers = triggersByAutomation[a.ID]
-		a.RepositoryIDs = repoIDsByAutomation[a.ID]
+		a.Repositories = repositoriesByAutomation[a.ID]
+		a.RepositoryIDs = repositoryIDs(a.Repositories)
+		hydrateManagedDestination(a)
 	}
 	return nil
 }
 
-// UpdateAutomation applies partial updates to an automation. When
-// req.RepositoryIDs is non-nil, it atomically replaces the automation's
-// automation_repositories rows (nil means "leave unchanged"; an explicit
-// empty slice clears the list).
+func setManagedDestinationColumns(a *Automation) {
+	if a.ManagedDestination == nil {
+		a.ManagedDestinationPluginID = ""
+		a.ManagedDestinationInstanceKey = ""
+		a.ManagedDestinationRevision = 0
+		return
+	}
+	a.ManagedDestinationPluginID = a.ManagedDestination.PluginID
+	a.ManagedDestinationInstanceKey = a.ManagedDestination.InstanceKey
+	a.ManagedDestinationRevision = a.ManagedDestination.Revision
+}
+
+func hydrateManagedDestination(a *Automation) {
+	if a.ManagedDestinationPluginID == "" || a.ManagedDestinationInstanceKey == "" || a.ManagedDestinationRevision == 0 {
+		a.ManagedDestination = nil
+		return
+	}
+	a.ManagedDestination = &ManagedConversationDestination{
+		PluginID: a.ManagedDestinationPluginID, InstanceKey: a.ManagedDestinationInstanceKey,
+		Revision: a.ManagedDestinationRevision,
+	}
+}
+
+// UpdateAutomation applies partial updates to an automation. When repository
+// bindings or legacy repository IDs are non-nil, it atomically replaces the
+// automation_repositories rows. An explicit non-selected repository mode also
+// clears the rows when a partial client omits repository data.
 func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) error {
 	a, err := s.GetAutomation(ctx, id)
 	if err != nil {
@@ -447,6 +928,43 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return fmt.Errorf("automation not found: %s", id)
 	}
 	applyAutomationUpdate(a, req)
+	normalizedPolicy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return err
+	}
+	a.RetryPolicy = normalizedPolicy
+	policyJSON, err := json.Marshal(normalizedPolicy)
+	if err != nil {
+		return fmt.Errorf("encode retry policy: %w", err)
+	}
+	a.RetryPolicyJSON = string(policyJSON)
+	if a.ContinuationPolicy == "" {
+		a.ContinuationPolicy = ContinuationPolicyNewTask
+	}
+	if a.TaskMode == "" {
+		a.TaskMode = TaskModeAutomationRun
+	}
+	if err := validateManagedDestination(a.TaskMode, a.ManagedDestination); err != nil {
+		return err
+	}
+	setManagedDestinationColumns(a)
+	normalizeAutomationRepositories(a)
+	if a.RepositoryMode == "" {
+		if len(a.Repositories) > 0 {
+			a.RepositoryMode = RepositoryModeSelected
+		} else {
+			a.RepositoryMode = RepositoryModeNone
+		}
+	}
+	if err := validateAutomationTarget(a.TaskMode, a.RepositoryMode, a.WorkflowID, a.RepositoryIDs); err != nil {
+		return err
+	}
+	if a.ContinuationPolicy == ContinuationPolicyReuseThread && a.MaxConcurrentRuns <= 0 {
+		a.MaxConcurrentRuns = 1
+	}
+	if err := validateContinuationSettings(a.ContinuationPolicy, a.MaxConcurrentRuns); err != nil {
+		return err
+	}
 	a.UpdatedAt = time.Now().UTC()
 
 	tx, err := s.db.BeginTxx(ctx, nil)
@@ -455,25 +973,37 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
-			prompt = ?, task_title_template = ?,
-			enabled = ?, max_concurrent_runs = ?, updated_at = ?
-		WHERE id = ?`,
+			task_mode = ?, managed_owner_installation_id = ?, managed_destination_installation_id = ?,
+			managed_destination_conversation_id = ?, managed_destination_plugin_id = ?,
+			managed_destination_instance_key = ?, managed_destination_revision = ?, resource_revision = resource_revision + 1,
+			repository_mode = ?, prompt = ?, task_title_template = ?,
+			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
+			retry_policy = ?, automation_revision = automation_revision + 1, updated_at = ?
+		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
+		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
+		a.ManagedDestinationConversationID, a.ManagedDestinationPluginID,
+		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
-		a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
+		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
+		a.RetryPolicyJSON, a.UpdatedAt, id)
 	if err != nil {
 		return err
 	}
-	if req.RepositoryIDs != nil {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_repositories WHERE automation_id = ?`, id); err != nil {
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_repositories WHERE automation_id = ?`), id); err != nil {
 			return fmt.Errorf("clear automation_repositories: %w", err)
 		}
-		if err := insertAutomationRepositories(ctx, tx, id, req.RepositoryIDs); err != nil {
+		if err := insertAutomationRepositories(ctx, tx, id, a.Repositories); err != nil {
 			return err
+		}
+	} else if req.RepositoryMode != nil && *req.RepositoryMode != RepositoryModeSelected {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_repositories WHERE automation_id = ?`), id); err != nil {
+			return fmt.Errorf("clear automation_repositories for repository mode: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -498,6 +1028,51 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.ExecutorProfileID != nil {
 		a.ExecutorProfileID = *req.ExecutorProfileID
 	}
+	if req.TaskMode != nil {
+		a.TaskMode = *req.TaskMode
+		if a.TaskMode != TaskModeManagedConversation {
+			a.ManagedDestination = nil
+			a.ManagedOwnerInstallationID = ""
+			a.ManagedDestinationInstallationID = ""
+			a.ManagedDestinationConversationID = ""
+		}
+	}
+	if req.ManagedDestination != nil {
+		a.ManagedDestination = req.ManagedDestination
+	}
+	if req.ManagedDestination != nil || req.TaskMode != nil {
+		a.ManagedDestinationInstallationID = req.ManagedDestinationInstallationID
+		a.ManagedDestinationConversationID = req.ManagedDestinationConversationID
+	}
+	if req.RepositoryMode != nil {
+		a.RepositoryMode = *req.RepositoryMode
+		if a.RepositoryMode != RepositoryModeSelected && req.RepositoryIDs == nil && req.Repositories == nil {
+			a.Repositories = nil
+			a.RepositoryIDs = nil
+		}
+	}
+	if req.Repositories != nil {
+		a.Repositories = append([]AutomationRepository(nil), req.Repositories...)
+		a.RepositoryIDs = repositoryIDs(a.Repositories)
+		if req.RepositoryMode == nil {
+			if len(a.Repositories) > 0 {
+				a.RepositoryMode = RepositoryModeSelected
+			} else {
+				a.RepositoryMode = RepositoryModeNone
+			}
+		}
+	}
+	if req.RepositoryIDs != nil {
+		a.RepositoryIDs = append([]string(nil), req.RepositoryIDs...)
+		a.Repositories = repositoriesFromIDs(req.RepositoryIDs)
+		if req.RepositoryMode == nil {
+			if len(req.RepositoryIDs) > 0 {
+				a.RepositoryMode = RepositoryModeSelected
+			} else {
+				a.RepositoryMode = RepositoryModeNone
+			}
+		}
+	}
 	if req.Prompt != nil {
 		a.Prompt = *req.Prompt
 	}
@@ -510,18 +1085,356 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.TaskTitleTemplate != nil {
 		a.TaskTitleTemplate = *req.TaskTitleTemplate
 	}
+	if req.ContinuationPolicy != nil {
+		a.ContinuationPolicy = *req.ContinuationPolicy
+	}
+	if req.RetryPolicy != nil {
+		a.RetryPolicy = *req.RetryPolicy
+	}
+}
+
+func normalizeAutomationRepositories(a *Automation) {
+	if len(a.Repositories) == 0 && len(a.RepositoryIDs) > 0 {
+		a.Repositories = repositoriesFromIDs(a.RepositoryIDs)
+	}
+	a.RepositoryIDs = repositoryIDs(a.Repositories)
+}
+
+func repositoriesFromIDs(ids []string) []AutomationRepository {
+	result := make([]AutomationRepository, 0, len(ids))
+	for _, id := range ids {
+		result = append(result, AutomationRepository{RepositoryID: id})
+	}
+	return result
+}
+
+func repositoryIDs(repositories []AutomationRepository) []string {
+	result := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		result = append(result, repository.RepositoryID)
+	}
+	return result
 }
 
 // DeleteAutomation removes an automation and its triggers/runs (CASCADE).
 func (s *Store) DeleteAutomation(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE id = ?`, id)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET id = id WHERE id = ?`), id); err != nil {
+		return err
+	}
+	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// AutomationTaskCleanupJob is durable ownership for a hidden task whose
+// automation references have already been removed. The job deliberately has
+// no foreign key to the deleted automation: it must survive that deletion.
+type AutomationTaskCleanupJob struct {
+	TaskID       string    `db:"task_id" json:"task_id"`
+	WorkspaceID  string    `db:"workspace_id" json:"workspace_id"`
+	AutomationID string    `db:"automation_id" json:"automation_id"`
+	LastError    string    `db:"last_error" json:"last_error,omitempty"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// ListOpenRuns returns all admitted runs that still occupy an automation
+// concurrency slot. It is intentionally unbounded and server-only: cleanup
+// and startup reconciliation must not miss an old open run because a UI list
+// limit was applied.
+func (s *Store) ListOpenRuns(ctx context.Context, automationID string) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE automation_id = ? AND status IN (?, ?)
+		ORDER BY created_at ASC, id ASC`),
+		automationID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, err
+}
+
+// ListOpenRunsByTaskID includes observed task-operation ownership before binding.
+// Operation identities remain evidence, not accepted launch or terminal receipts.
+func (s *Store) ListOpenRunsByTaskID(ctx context.Context, taskID string) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT ar.* FROM automation_runs ar
+		WHERE ar.status IN (?, ?) AND (ar.task_id = ? OR
+		 (ar.retry_group_id <> '' AND COALESCE(ar.task_id,'') = '' AND EXISTS (
+		  SELECT 1 FROM automation_run_operations o WHERE o.run_id=ar.id
+		  AND o.group_generation=ar.retry_group_generation AND o.operation_kind=?
+		  AND o.external_task_id=?)))
+		ORDER BY ar.created_at ASC, ar.id ASC`),
+		string(RunStatusTriggered), string(RunStatusTaskCreated), taskID, retryTaskOperationKind, taskID)
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, err
+}
+
+// ListAllOpenRuns is the startup-reconciliation view. It includes disabled
+// automations because disabling a rule must not make an already-admitted run
+// disappear from recovery.
+func (s *Store) ListAllOpenRuns(ctx context.Context) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE status IN (?, ?)
+		ORDER BY automation_id, created_at ASC, id ASC`),
+		string(RunStatusTriggered), string(RunStatusTaskCreated))
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, err
+}
+
+// DeleteAutomationWithCleanup captures every task owned only by the
+// automation, inserts one durable cleanup job per task, and removes the
+// automation and its cascading references in one transaction. The caller must
+// stop live sessions before invoking this method.
+type automationCleanupOwner struct {
+	WorkspaceID        string `db:"workspace_id"`
+	ContinuationTaskID string `db:"continuation_task_id"`
+}
+
+func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, cleanupTaskIDs ...[]string) ([]string, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET id = id WHERE id = ?`), id); err != nil {
+		return nil, err
+	}
+	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
+		return nil, err
+	}
+
+	owner, found, err := loadAutomationCleanupOwner(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	var taskIDs []string
+	if len(cleanupTaskIDs) > 0 {
+		taskIDs = cleanupTaskIDs[0]
+	} else {
+		taskIDs, err = listAutomationCleanupTaskIDs(ctx, tx, id, owner.ContinuationTaskID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := insertAutomationCleanupJobs(ctx, tx, id, owner, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE id = ?`), id); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// ListAutomationTaskIDs returns the distinct task IDs currently owned by an
+// automation's runs plus its continuation pointer. The service uses the task
+// origin to keep visible normal tasks out of hidden-task cleanup jobs.
+func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string, error) {
+	var taskIDs []string
+	if err := s.ro.SelectContext(ctx, &taskIDs, s.ro.Rebind(
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''
+		 UNION
+		 SELECT DISTINCT o.external_task_id
+		 FROM automation_run_operations o
+		 JOIN automation_runs ar ON ar.id = o.run_id
+		 WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+		return nil, err
+	}
+	var continuationTaskID string
+	if err := s.ro.GetContext(ctx, &continuationTaskID, s.ro.Rebind(
+		`SELECT continuation_task_id FROM automations WHERE id = ?`), id); err == nil && continuationTaskID != "" {
+		taskIDs = append(taskIDs, continuationTaskID)
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return taskIDs, nil
+}
+
+func loadAutomationCleanupOwner(ctx context.Context, tx *sqlx.Tx, id string) (automationCleanupOwner, bool, error) {
+	var owner automationCleanupOwner
+	err := tx.GetContext(ctx, &owner, tx.Rebind(
+		`SELECT workspace_id, continuation_task_id FROM automations WHERE id = ?`), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return owner, false, nil
+	}
+	return owner, err == nil, err
+}
+func listAutomationCleanupTaskIDs(ctx context.Context, tx *sqlx.Tx, id, continuationTaskID string) ([]string, error) {
+	var taskIDs []string
+	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''
+		 UNION
+		 SELECT DISTINCT o.external_task_id
+		 FROM automation_run_operations o
+		 JOIN automation_runs ar ON ar.id = o.run_id
+		 WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
+		return nil, err
+	}
+	if continuationTaskID != "" {
+		taskIDs = append(taskIDs, continuationTaskID)
+	}
+	return taskIDs, nil
+}
+
+func insertAutomationCleanupJobs(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	automationID string,
+	owner automationCleanupOwner,
+	taskIDs []string,
+) ([]string, error) {
+	seen := make(map[string]struct{}, len(taskIDs))
+	jobs := make([]string, 0, len(taskIDs))
+	now := time.Now().UTC()
+	for _, taskID := range taskIDs {
+		if taskID == "" {
+			continue
+		}
+		if _, ok := seen[taskID]; ok {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		owned, err := automationCleanupTaskIsUnreferenced(ctx, tx, automationID, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			INSERT INTO automation_task_cleanup_jobs
+				(task_id, workspace_id, automation_id, last_error, created_at, updated_at)
+			VALUES (?, ?, ?, '', ?, ?)
+			ON CONFLICT(task_id) DO UPDATE SET
+				workspace_id = excluded.workspace_id,
+				automation_id = excluded.automation_id,
+				updated_at = excluded.updated_at`),
+			taskID, owner.WorkspaceID, automationID, now, now); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, taskID)
+	}
+	return jobs, nil
+}
+
+func automationCleanupTaskIsUnreferenced(ctx context.Context, tx *sqlx.Tx, automationID, taskID string) (bool, error) {
+	var refs int
+	if err := tx.GetContext(ctx, &refs, tx.Rebind(`
+		SELECT COUNT(*) FROM automation_runs
+		WHERE task_id = ? AND automation_id != ?`), taskID, automationID); err != nil {
+		return false, err
+	}
+	if refs > 0 {
+		return false, nil
+	}
+	var pointers int
+	if err := tx.GetContext(ctx, &pointers, tx.Rebind(`
+		SELECT COUNT(*) FROM automations
+		WHERE continuation_task_id = ? AND id != ?`), taskID, automationID); err != nil {
+		return false, err
+	}
+	return pointers == 0, nil
+}
+
+// IsTaskReferencedByOtherAutomation reports whether a task is still owned by
+// another run or continuation pointer. The caller holds the relevant
+// automation admission lock; this protects run/delete-all races within one
+// automation while the query protects cross-automation sharing.
+func (s *Store) IsTaskReferencedByOtherAutomation(ctx context.Context, automationID, taskID string) (bool, error) {
+	if taskID == "" {
+		return false, nil
+	}
+	var refs int
+	err := s.ro.GetContext(ctx, &refs, s.ro.Rebind(`
+		SELECT COUNT(*) FROM automation_runs
+		WHERE task_id = ? AND automation_id != ?`), taskID, automationID)
+	if err != nil {
+		return false, err
+	}
+	if refs > 0 {
+		return true, nil
+	}
+	var pointers int
+	err = s.ro.GetContext(ctx, &pointers, s.ro.Rebind(`
+		SELECT COUNT(*) FROM automations
+		WHERE continuation_task_id = ? AND id != ?`), taskID, automationID)
+	return pointers > 0, err
+}
+
+// IsTaskReferencedByRun reports whether another run in the same automation
+// owns the task. It is used when deleting one run from a shared thread.
+func (s *Store) IsTaskReferencedByRun(ctx context.Context, automationID, runID, taskID string) (bool, error) {
+	if taskID == "" {
+		return false, nil
+	}
+	var count int
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`
+		SELECT COUNT(*) FROM automation_runs
+		WHERE automation_id = ? AND id != ? AND task_id = ?`), automationID, runID, taskID)
+	return count > 0, err
+}
+
+// IsContinuationTask reports whether the automation currently protects the
+// task from run-row deletion.
+func (s *Store) IsContinuationTask(ctx context.Context, automationID, taskID string) (bool, error) {
+	var count int
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automations WHERE id = ? AND continuation_task_id = ?`), automationID, taskID)
+	return count > 0, err
+}
+
+func (s *Store) ListCleanupJobs(ctx context.Context) ([]*AutomationTaskCleanupJob, error) {
+	var jobs []*AutomationTaskCleanupJob
+	err := s.ro.SelectContext(ctx, &jobs, s.ro.Rebind(
+		`SELECT * FROM automation_task_cleanup_jobs ORDER BY created_at ASC, task_id ASC`))
+	return jobs, err
+}
+
+func (s *Store) DeleteCleanupJob(ctx context.Context, taskID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_task_cleanup_jobs WHERE task_id = ?`), taskID)
+	return err
+}
+
+func (s *Store) UpdateCleanupJobError(ctx context.Context, taskID, message string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_task_cleanup_jobs SET last_error = ?, updated_at = ? WHERE task_id = ?`),
+		message, time.Now().UTC(), taskID)
 	return err
 }
 
 // UpdateLastTriggered updates the last_triggered_at timestamp.
 func (s *Store) UpdateLastTriggered(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE automations SET last_triggered_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automations SET last_triggered_at = ?, updated_at = ? WHERE id = ?`),
 		t, time.Now().UTC(), id)
 	return err
 }
@@ -536,11 +1449,16 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 	now := time.Now().UTC()
 	t.CreatedAt = now
 	t.UpdatedAt = now
+	if t.TriggerRevision == 0 {
+		t.TriggerRevision = 1
+	}
 	t.ConfigJSON = string(t.Config)
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO automation_triggers (id, automation_id, type, config, enabled, last_evaluated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO automation_triggers
+			(id, automation_id, type, config, enabled, trigger_revision, last_evaluated_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.TriggerRevision,
+		t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
 	return err
 }
 
@@ -548,16 +1466,16 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 // the auth layer to authorize trigger mutations by workspace ownership.
 func (s *Store) GetTriggerAutomationID(ctx context.Context, triggerID string) (string, error) {
 	var automationID string
-	err := s.ro.GetContext(ctx, &automationID,
-		`SELECT automation_id FROM automation_triggers WHERE id = ?`, triggerID)
+	err := s.ro.GetContext(ctx, &automationID, s.ro.Rebind(
+		`SELECT automation_id FROM automation_triggers WHERE id = ?`), triggerID)
 	return automationID, err
 }
 
 // GetTrigger returns a single trigger, or nil when it no longer exists.
 func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	if err := s.ro.SelectContext(ctx, &triggers,
-		`SELECT * FROM automation_triggers WHERE id = ?`, id); err != nil {
+	if err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(
+		`SELECT * FROM automation_triggers WHERE id = ?`), id); err != nil {
 		return nil, err
 	}
 	if len(triggers) == 0 {
@@ -570,8 +1488,8 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, 
 // ListTriggers returns all triggers for an automation.
 func (s *Store) ListTriggers(ctx context.Context, automationID string) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	err := s.ro.SelectContext(ctx, &triggers,
-		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at`, automationID)
+	err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(
+		`SELECT * FROM automation_triggers WHERE automation_id = ? ORDER BY created_at, id`), automationID)
 	hydrateTriggers(triggers)
 	return triggers, err
 }
@@ -588,7 +1506,7 @@ func (s *Store) listTriggersForAutomations(ctx context.Context, automationIDs []
 		return make(map[string][]AutomationTrigger), nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT * FROM automation_triggers WHERE automation_id IN (?) ORDER BY created_at`, automationIDs)
+		`SELECT * FROM automation_triggers WHERE automation_id IN (?) ORDER BY created_at, id`, automationIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +1526,7 @@ func (s *Store) listTriggersForAutomations(ctx context.Context, automationIDs []
 // UpdateTrigger applies partial updates to a trigger.
 func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
 	var t AutomationTrigger
-	err := s.ro.GetContext(ctx, &t, `SELECT * FROM automation_triggers WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &t, s.ro.Rebind(`SELECT * FROM automation_triggers WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("trigger not found: %s", id)
 	}
@@ -622,34 +1540,37 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 		t.Enabled = *req.Enabled
 	}
 	t.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx,
-		`UPDATE automation_triggers SET config = ?, enabled = ?, updated_at = ? WHERE id = ?`,
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automation_triggers SET config = ?, enabled = ?, trigger_revision = trigger_revision + 1, updated_at = ? WHERE id = ?`),
 		t.ConfigJSON, t.Enabled, t.UpdatedAt, id)
 	return err
 }
 
 // DeleteTrigger removes a trigger.
 func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_triggers WHERE id = ?`), id)
 	return err
 }
 
-// UpdateTriggerEvaluatedAt sets the last_evaluated_at timestamp.
+// UpdateTriggerEvaluatedAt sets the evaluation timestamp without changing the
+// configuration timestamp. UpdatedAt is a lifecycle fence for bindings and
+// must move only when trigger configuration changes.
 func (s *Store) UpdateTriggerEvaluatedAt(ctx context.Context, id string, t time.Time) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE automation_triggers SET last_evaluated_at = ?, updated_at = ? WHERE id = ?`,
-		t, time.Now().UTC(), id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automation_triggers SET last_evaluated_at = ? WHERE id = ?`),
+		t, id)
 	return err
 }
 
 // ListEnabledTriggersByType returns enabled triggers of a specific type (across all enabled automations).
 func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType TriggerType) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger
-	err := s.ro.SelectContext(ctx, &triggers, `
+	err := s.ro.SelectContext(ctx, &triggers, s.ro.Rebind(`
 		SELECT t.* FROM automation_triggers t
 		JOIN automations a ON a.id = t.automation_id
-		WHERE t.type = ? AND t.enabled = 1 AND a.enabled = 1
-		ORDER BY t.created_at ASC, t.id ASC`, string(triggerType))
+		WHERE t.type = ? AND t.enabled = TRUE AND a.enabled = TRUE
+        AND (t.type != 'scheduled' OR NOT EXISTS (SELECT 1 FROM automation_triggers p WHERE p.automation_id=t.automation_id AND p.type='plugin_event'))
+		ORDER BY t.created_at ASC, t.id ASC`), string(triggerType))
 	hydrateTriggers(triggers)
 	return triggers, err
 }
@@ -662,14 +1583,231 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.ID = uuid.New().String()
 	}
 	r.CreatedAt = time.Now().UTC()
+	if r.AttemptNumber == 0 {
+		r.AttemptNumber = 1
+	}
+	if r.RetryState == "" {
+		r.RetryState = RetryStateNone
+	}
+	if r.RetryLaunchConfigVersion == 0 {
+		r.RetryLaunchConfigVersion = 1
+	}
 	r.TriggerDataJSON = string(r.TriggerData)
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
-			dedup_key, trigger_data, error_message, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
-		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.CreatedAt)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		INSERT INTO automation_runs (
+			id, automation_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
+			error_message, session_id, turn_id, thread_action, thread_reason, display_title,
+			dedup_reason, repository_reason, managed_input_id, delivery_status, managed_delivery_attempts,
+			managed_conversation_id, managed_destination_installation_id, managed_destination_plugin_id,
+			managed_destination_instance_key, managed_destination_revision,
+			retry_group_id, retry_parent_run_id, attempt_number, retry_state, retry_scheduled_at,
+			retry_claimed_at, retry_claim_expires_at, retry_claim_token, retry_group_generation,
+			retry_cancelled_at, retry_base_title, retry_failure_phase, retry_failure_class,
+			retry_task_intent_id, retry_policy_snapshot, retry_trigger_snapshot,
+			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
+			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
+			automation_revision, trigger_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status, r.DedupKey,
+		r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID, r.ThreadAction, r.ThreadReason,
+		r.DisplayTitle, r.DedupReason, r.RepositoryReason, r.ManagedInputID, r.DeliveryStatus,
+		r.DeliveryAttempts, r.ManagedConversationID, r.ManagedDestinationInstallationID,
+		r.ManagedDestinationPluginID, r.ManagedDestinationInstanceKey, r.ManagedDestinationRevision,
+		r.RetryGroupID, r.RetryParentRunID, r.AttemptNumber, r.RetryState, r.RetryScheduledAt,
+		r.RetryClaimedAt, r.RetryClaimExpiresAt, r.RetryClaimToken, r.RetryGroupGeneration,
+		r.RetryCancelledAt, r.RetryBaseTitle, r.RetryFailurePhase, r.RetryFailureClass,
+		r.RetryTaskIntentID, r.RetryPolicySnapshot, r.RetryTriggerSnapshot,
+		r.RetryLaunchConfigSnapshot, r.RetryLaunchConfigVersion, r.RetryResolvedPrompt,
+		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot,
+		r.AutomationRevision, r.TriggerRevision, r.CreatedAt)
 	return err
+}
+
+// AdoptTriggeredRun upgrades the admission row for callers that still report
+// an outcome through RecordRun without carrying the new run ID. It is keyed by
+// the dedup key and only touches an unbound triggered row, so it cannot rewrite
+// a different firing or a terminal history row.
+func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, error) {
+	if r == nil || r.DedupKey == "" {
+		return false, nil
+	}
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET task_id = ?, status = ?, trigger_data = ?, error_message = ?,
+			session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, display_title = ?,
+			repository_reason = ?
+		WHERE id = (
+			SELECT id FROM automation_runs
+			WHERE automation_id = ? AND dedup_key = ? AND status = ?
+			ORDER BY created_at DESC, id DESC LIMIT 1
+		) AND status = ?`),
+		r.TaskID, r.Status, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
+		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.RepositoryReason,
+		r.AutomationID, r.DedupKey, string(RunStatusTriggered), string(RunStatusTriggered))
+	if err != nil {
+		return false, err
+	}
+	affected, _ := res.RowsAffected()
+	return affected > 0, nil
+}
+
+// BindRunTask records the task created for an admitted run while leaving the
+// run in triggered state. This closes the task ownership gap before the agent
+// session is ready, so a failed launch can still settle the exact run.
+// repositoryReason is the webhook repository-selector disposition token (see
+// event_handlers_automation.go's token catalog); empty when a repository was
+// bound or none was declared.
+func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason string) error {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET task_id = ?, repository_reason = ?
+		WHERE id = ? AND status = ? AND (
+			retry_group_id = '' OR EXISTS (
+				SELECT 1 FROM automation_retry_groups rg
+				JOIN automations a ON a.id = automation_runs.automation_id
+				WHERE rg.id = automation_runs.retry_group_id
+					AND rg.generation = automation_runs.retry_group_generation
+					AND rg.state = ? AND a.enabled = TRUE
+			)
+		)`), taskID, repositoryReason, runID, string(RunStatusTriggered), RetryGroupLive)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		var existing struct {
+			Status RunStatus `db:"status"`
+			TaskID string    `db:"task_id"`
+		}
+		if lookupErr := s.db.GetContext(ctx, &existing, s.db.Rebind(`SELECT status, task_id FROM automation_runs WHERE id = ?`), runID); lookupErr == nil &&
+			existing.Status == RunStatusTaskCreated && existing.TaskID == taskID {
+			return nil
+		}
+		var groupID string
+		if lookupErr := s.db.GetContext(ctx, &groupID, s.db.Rebind(`SELECT retry_group_id FROM automation_runs WHERE id = ?`), runID); lookupErr == nil && groupID != "" {
+			return ErrRetryGenerationMismatch
+		}
+		return fmt.Errorf("automation run %s is not an admitted triggered run", runID)
+	}
+	if err := s.bindRetryIntentTask(ctx, runID, taskID, retryIntentCreated); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),
+		taskID, time.Now().UTC(), automationID)
+	return err
+}
+
+// BindRun attaches the exact session and turn after dispatch and makes the run
+// task_created. The identity is kept on the row so shared-task completion can
+// never settle a different firing.
+func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs
+		SET task_id = ?, session_id = ?, turn_id = ?,
+			thread_action = CASE WHEN status = ? THEN ? ELSE thread_action END,
+			thread_reason = CASE WHEN status = ? THEN ? ELSE thread_reason END,
+			status = ?
+		WHERE id = ? AND (
+			(status = ? AND (task_id = '' OR task_id = ?)
+				AND (session_id = '' OR session_id = ?) AND (turn_id = '' OR turn_id = ?))
+			OR (status = ? AND task_id = ? AND session_id = ? AND turn_id = ?)
+		) AND (
+			retry_group_id = '' OR EXISTS (
+				SELECT 1 FROM automation_retry_groups rg
+				JOIN automations a ON a.id = automation_runs.automation_id
+				WHERE rg.id = automation_runs.retry_group_id
+					AND rg.generation = automation_runs.retry_group_generation
+					AND rg.state = ? AND a.enabled = TRUE
+			)
+		)`),
+		taskID, sessionID, turnID, string(RunStatusTriggered), action,
+		string(RunStatusTriggered), reason, string(RunStatusTaskCreated),
+		runID, string(RunStatusTriggered), taskID, sessionID, turnID, string(RunStatusTaskCreated),
+		taskID, sessionID, turnID, RetryGroupLive)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return ErrRetryGenerationMismatch
+	}
+	if err := s.bindRetryIntentTask(ctx, runID, taskID, retryIntentBound); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarkRunTerminal settles one exact run. Empty session/turn arguments are
+// allowed only for a pre-dispatch failure; once both are known they must match
+// the persisted binding.
+//
+// A webhook run that settles as failed without ever having created a task
+// releases its dedup key in the same statement (dedup_key = ” under a bound
+// CASE), so a retried delivery isn't permanently blocked by a firing that
+// never produced anything. The predicate is the task, not the status: a run
+// that DID create a task (BindRunTask leaves it "triggered" until the task
+// exists) keeps its key even if the task's own run later fails. The CASE's
+// right-hand-side column references (status, trigger_type, task_id) read the
+// pre-update row, so this is race-free without a second round trip. Scoped
+// to trigger_type = 'webhook' only — github_pr_merged's blanking stays in
+// its own separate code path (recordSkippedTrigger, recordFailedRun) and is
+// untouched here.
+func (s *Store) MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status RunStatus, errMsg string) error {
+	query := `UPDATE automation_runs SET status = ?, error_message = ?,
+		dedup_key = CASE
+			WHEN ? = ? AND trigger_type = ? AND COALESCE(task_id, '') = ''
+			THEN '' ELSE dedup_key
+		END
+		WHERE id = ? AND status IN (?, ?)
+  AND (retry_group_id = '' OR EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = automation_runs.id AND p.version IN (1, -1)))`
+	args := []any{
+		string(status), errMsg,
+		string(status), string(RunStatusFailed), string(TriggerTypeWebhook),
+		runID, string(RunStatusTriggered), string(RunStatusTaskCreated),
+	}
+	if sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
+	}
+	if turnID != "" {
+		query += ` AND turn_id = ?`
+		args = append(args, turnID)
+	}
+	{
+		query += ` AND NOT EXISTS (SELECT 1 FROM automation_retry_launches l WHERE l.run_id = automation_runs.id AND l.state <> ?)`
+		args = append(args, RetryLaunchStopped)
+	}
+
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("automation run %s does not match the requested terminal binding", runID)
+	}
+	return nil
+}
+
+// MarkRunTerminalByBinding settles a run using the exact task/session/turn
+// triple observed by lifecycle completion. It is used by shared tasks where
+// several runs intentionally point at one task and session.
+func (s *Store) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status RunStatus, errMsg string) error {
+	if taskID == "" || sessionID == "" || turnID == "" {
+		return fmt.Errorf("exact automation run binding is required")
+	}
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE task_id = ? AND session_id = ? AND turn_id = ? AND status = ? AND NOT EXISTS (SELECT 1 FROM automation_retry_launches l WHERE l.run_id = automation_runs.id AND l.state <> 'stopped') AND (retry_group_id = '' OR EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = automation_runs.id AND p.version IN (1, -1)))`),
+		string(status), errMsg, taskID, sessionID, turnID, string(RunStatusTaskCreated))
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("no open automation run matches task/session/turn binding")
+	}
+
+	return nil
 }
 
 // MarkRunFailedByTaskID flips the most recent task_created run for a task
@@ -678,6 +1816,21 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 // dead. No-op if no matching run is found.
 func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
 	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
+}
+
+// MarkDeferredRunFailedByTaskID closes an unbound run when its queued task is deleted.
+// This update does not take the automation lock because task deletion can run
+// inside automation cleanup that already holds that lock.
+func (s *Store) MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE task_id = ? AND status = ?
+			AND COALESCE(session_id, '') = '' AND COALESCE(turn_id, '') = '' AND (retry_group_id = '' OR EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = automation_runs.id AND p.version IN (1, -1)))`),
+		string(RunStatusFailed), errMsg, taskID, string(RunStatusTriggered))
+	return err
 }
 
 // MarkRunSucceededByTaskID flips the most recent task_created run for a task
@@ -692,15 +1845,114 @@ func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, stat
 	if taskID == "" {
 		return nil
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET status = ?, error_message = ?
 		WHERE id = (
 			SELECT id FROM automation_runs
 			WHERE task_id = ? AND status = ?
+   AND NOT EXISTS (SELECT 1 FROM automation_retry_launches l WHERE l.run_id = automation_runs.id AND l.state <> 'stopped') AND (retry_group_id = '' OR EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = automation_runs.id AND p.version IN (1, -1)))
 			ORDER BY created_at DESC LIMIT 1
-		)`,
+		)`),
 		string(status), errMsg, taskID, string(RunStatusTaskCreated))
 	return err
+}
+
+func encodeRetryHistoryCursor(createdAt time.Time, id string) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "|" + id
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeRetryHistoryCursor(cursor string) (time.Time, string, error) {
+	if cursor == "" {
+		return time.Time{}, "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	parts := strings.SplitN(string(raw), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil || parts[1] == "" {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	return createdAt, parts[1], nil
+}
+
+func (s *Store) ListRetryHistory(ctx context.Context, automationID, cursor string, limit int) (*RetryHistoryPage, error) {
+	return s.listRetryHistory(ctx, "automation:"+automationID, cursor, limit,
+		`SELECT rg.* FROM automation_retry_groups rg WHERE rg.automation_id = ?`,
+		[]any{automationID},
+		`SELECT rg.* FROM automation_retry_groups rg WHERE rg.automation_id = ?`,
+		[]any{automationID})
+}
+
+func (s *Store) ListWorkspaceRetryHistory(ctx context.Context, workspaceID, cursor string, limit int) (*RetryHistoryPage, error) {
+	return s.listRetryHistory(ctx, "workspace:"+workspaceID, cursor, limit,
+		`SELECT rg.* FROM automation_retry_groups rg JOIN automations a ON a.id = rg.automation_id WHERE a.workspace_id = ?`,
+		[]any{workspaceID},
+		`SELECT rg.* FROM automation_retry_groups rg JOIN automations a ON a.id = rg.automation_id WHERE a.workspace_id = ?`,
+		[]any{workspaceID})
+}
+
+func (s *Store) listRetryHistory(
+	ctx context.Context,
+	scope, cursor string,
+	limit int,
+	pageQuery string,
+	pageArgs []any,
+	highWaterQuery string,
+	highWaterArgs []any,
+) (*RetryHistoryPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
+	after, afterID, err := decodeRetryHistoryCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if !after.IsZero() {
+		pageQuery += ` AND (rg.created_at < ? OR (rg.created_at = ? AND rg.id < ?))`
+		pageArgs = append(pageArgs, after, after, afterID)
+	}
+	pageQuery += ` ORDER BY rg.created_at DESC, rg.id DESC LIMIT ?`
+	pageArgs = append(pageArgs, limit+1)
+	var groups []RetryGroup
+	if err := s.ro.SelectContext(ctx, &groups, s.ro.Rebind(pageQuery), pageArgs...); err != nil {
+		return nil, err
+	}
+	page := &RetryHistoryPage{Scope: scope, Items: []*RetryHistoryAttempt{}}
+	if len(groups) > limit {
+		last := groups[limit-1]
+		page.NextCursor = encodeRetryHistoryCursor(last.CreatedAt, last.ID)
+		groups = groups[:limit]
+	}
+	for _, group := range groups {
+		runs, err := s.listRetryGroupRuns(ctx, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		var triggerIDs []string
+		_ = json.Unmarshal([]byte(group.TriggerIDsJSON), &triggerIDs)
+		page.Items = append(page.Items, &RetryHistoryAttempt{
+			RetryGroupID: group.ID, TriggerIDs: triggerIDs, Attempts: runs,
+			Completed: group.State == RetryGroupCompleted,
+		})
+	}
+	var highWater RetryGroup
+	if err := s.ro.GetContext(ctx, &highWater, s.ro.Rebind(highWaterQuery+" ORDER BY rg.created_at DESC, rg.id DESC LIMIT 1"), highWaterArgs...); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	} else {
+		page.HighWaterMark = encodeRetryHistoryCursor(highWater.CreatedAt, highWater.ID)
+	}
+	return page, nil
 }
 
 // ListRuns returns recent runs for an automation. A task_created run whose
@@ -715,6 +1967,9 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 	if limit <= 0 {
 		limit = 50
 	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
 	runs, err := s.listRunsWithTaskState(ctx, automationID, limit)
 	if db.IsMissingTableError(err) {
 		runs, err = s.listRunsRaw(ctx, automationID, limit)
@@ -723,9 +1978,142 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 		return nil, err
 	}
 	for _, r := range runs {
+		if r.RetryState == RetryStateCancelled {
+			r.Status = RunStatusCancelled
+		}
 		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
 	}
+	if err := s.hydrateRunSummaries(ctx, runs); err != nil {
+		return nil, err
+	}
 	return runs, nil
+}
+func (s *Store) ListRunPage(ctx context.Context, automationID, cursor string, limit int) (*AutomationRunsPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
+	after, afterID, err := decodeRetryHistoryCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT` + runTaskStateColumnsSQL + `
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ?`
+	args := append(runTaskStateArgs(), automationID)
+	if cursor != "" {
+		query += ` AND (ar.created_at < ? OR (ar.created_at = ? AND ar.id < ?))`
+		args = append(args, after, after, afterID)
+	}
+	query += ` ORDER BY ` + runOrderSQL("ar") + ` LIMIT ?`
+	args = append(args, limit+1)
+	var runs []*AutomationRun
+	err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(query), args...)
+	if db.IsMissingTableError(err) {
+		query = `SELECT * FROM automation_runs WHERE automation_id = ?`
+		args = []any{automationID}
+		if cursor != "" {
+			query += ` AND (created_at < ? OR (created_at = ? AND id < ?))`
+			args = append(args, after, after, afterID)
+		}
+		query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = append(args, limit+1)
+		err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(query), args...)
+	}
+	if err != nil {
+		return nil, err
+	}
+	page := &AutomationRunsPage{Items: runs}
+	if len(runs) > limit {
+		last := runs[limit-1]
+		page.NextCursor = encodeRetryHistoryCursor(last.CreatedAt, last.ID)
+		page.Items = runs[:limit]
+	}
+	for _, run := range page.Items {
+		if run.RetryState == RetryStateCancelled {
+			run.Status = RunStatusCancelled
+		}
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	if err := s.hydrateRunSummaries(ctx, page.Items); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+// maxRunsLimit caps the per-automation run history for the same reason the
+// workspace feed is capped: a client should not be able to pull unbounded
+// historical transcript metadata in one request.
+const maxRunsLimit = 200
+
+// runSummaryRow is the newest agent message for one exact turn.
+type runSummaryRow struct {
+	TurnID  string         `db:"turn_id"`
+	Summary sql.NullString `db:"summary"`
+}
+
+// hydrateRunSummaries replaces the task-level fallback summary with the
+// message from the exact turn bound to a run. Reused tasks can contain several
+// turns, so looking only at task_id can show a later firing's result for an
+// earlier run. Runs without a turn binding retain the legacy task-level query.
+// Bound runs are hydrated in one set-based query because these lists are also
+// used by live polling and can contain hundreds of runs.
+func (s *Store) hydrateRunSummaries(ctx context.Context, runs []*AutomationRun) error {
+	turnIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		if run.TurnID != "" {
+			turnIDs = append(turnIDs, run.TurnID)
+		}
+	}
+	if len(turnIDs) == 0 {
+		return nil
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(turnIDs)), ",")
+	args := make([]any, len(turnIDs))
+	for i, turnID := range turnIDs {
+		args[i] = turnID
+	}
+	var summaries []runSummaryRow
+	err := s.ro.SelectContext(ctx, &summaries, s.ro.Rebind(`
+		SELECT m.turn_id, substr(m.content, 1, 280) AS summary
+		FROM task_session_messages m
+		WHERE m.turn_id IN (`+placeholders+`)
+		  AND m.author_type = 'agent' AND m.type = 'message'
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_session_messages newer
+			WHERE newer.turn_id = m.turn_id
+			  AND newer.author_type = 'agent' AND newer.type = 'message'
+				AND (newer.created_at > m.created_at OR
+					(newer.created_at = m.created_at AND newer.id > m.id))
+			)`), args...)
+	if db.IsMissingTableError(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, run := range runs {
+		if run.TurnID != "" {
+			run.Summary = ""
+		}
+	}
+	byTurn := make(map[string]string, len(summaries))
+	for _, summary := range summaries {
+		if summary.Summary.Valid {
+			byTurn[summary.TurnID] = summary.Summary.String
+		}
+	}
+	for _, run := range runs {
+		if summary, ok := byTurn[run.TurnID]; ok {
+			run.Summary = summary
+		}
+	}
+	return nil
 }
 
 // runTaskStateColumnsSQL is the read-time projection of a run, shared
@@ -770,6 +2158,7 @@ const runTaskStateColumnsSQL = `
 		-- that dead-ends; the derived cancelled status below already says why.
 		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,
 		CASE
+			WHEN ar.retry_state = ? THEN ?
 			WHEN ar.status = ? AND t.id IS NULL THEN ?
 			WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
 			WHEN ar.status = ? AND EXISTS (
@@ -778,7 +2167,19 @@ const runTaskStateColumnsSQL = `
 			) THEN ?
 			ELSE ar.status
 		END AS status,
-		ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at,
+		ar.dedup_key, ar.trigger_data, ar.error_message,
+		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
+		ar.dedup_reason, ar.repository_reason,
+		ar.managed_conversation_id, ar.managed_destination_installation_id,
+		ar.managed_destination_plugin_id, ar.managed_destination_instance_key, ar.managed_destination_revision,
+		ar.managed_input_id, ar.delivery_status, ar.managed_delivery_attempts,
+		ar.retry_group_id, ar.retry_parent_run_id, ar.attempt_number, ar.retry_state,
+		ar.retry_scheduled_at, ar.retry_claimed_at, ar.retry_group_generation,
+		ar.retry_cancelled_at, ar.retry_failure_phase, ar.retry_failure_class,
+		ar.retry_policy_snapshot, ar.retry_trigger_snapshot, ar.retry_resolved_prompt,
+		ar.retry_resolved_title, ar.retry_resolved_trigger_timestamp,
+		ar.automation_revision, ar.trigger_revision,
+		ar.created_at,
 		COALESCE((
 			SELECT substr(m.content, 1, 280) FROM task_session_messages m
 			WHERE m.task_id = ar.task_id
@@ -790,17 +2191,18 @@ const runTaskStateColumnsSQL = `
 		-- rather than sending the reader to the task page, and the chat panel is
 		-- driven by a session id, not a task id — resolving it here keeps that
 		-- one query instead of one per run on the client.
-		COALESCE((
+		COALESCE(NULLIF(ar.session_id, ''), (
 			SELECT ts.id FROM task_sessions ts
-			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1
 			LIMIT 1
-		), '') AS session_id`
+		), ar.session_id, '') AS session_id`
 
 // runTaskStateArgs binds the placeholders in runTaskStateColumnsSQL, in
 // order. Kept next to the SQL so a new WHEN can't be added without the
 // matching argument being obvious.
 func runTaskStateArgs() []any {
 	return []any{
+		string(RetryStateCancelled), string(RunStatusCancelled),
 		string(RunStatusTaskCreated), string(RunStatusCancelled),
 		string(RunStatusTaskCreated), string(RunStatusArchived),
 		string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled), string(RunStatusCancelled),
@@ -809,22 +2211,52 @@ func runTaskStateArgs() []any {
 
 func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`
 		FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE ar.automation_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		append(runTaskStateArgs(), automationID, limit)...)
 	return runs, err
 }
 
 func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs,
-		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(
+		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`),
 		automationID, limit)
 	return runs, err
+}
+
+func (s *Store) listRetryGroupRuns(ctx context.Context, groupID string) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT`+runTaskStateColumnsSQL+`
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.retry_group_id = ?
+		ORDER BY ar.attempt_number ASC, ar.id ASC`),
+		append(runTaskStateArgs(), groupID)...)
+	if db.IsMissingTableError(err) {
+		err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+			SELECT * FROM automation_runs
+			WHERE retry_group_id = ?
+			ORDER BY attempt_number ASC, id ASC`), groupID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if run.RetryState == RetryStateCancelled {
+			run.Status = RunStatusCancelled
+		}
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	if err := s.hydrateRunSummaries(ctx, runs); err != nil {
+		return nil, err
+	}
+	return runs, nil
 }
 
 // maxWorkspaceRunsLimit caps the workspace-wide feed. Unlike ListRuns, which
@@ -855,9 +2287,23 @@ func (s *Store) ListWorkspaceRuns(ctx context.Context, workspaceID string, limit
 		return nil, err
 	}
 	for _, r := range runs {
+		if r.RetryState == RetryStateCancelled {
+			r.Status = RunStatusCancelled
+		}
 		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
 	}
+	if err := s.hydrateWorkspaceRunSummaries(ctx, runs); err != nil {
+		return nil, err
+	}
 	return runs, nil
+}
+
+func (s *Store) hydrateWorkspaceRunSummaries(ctx context.Context, runs []*WorkspaceAutomationRun) error {
+	plain := make([]*AutomationRun, len(runs))
+	for i := range runs {
+		plain[i] = &runs[i].AutomationRun
+	}
+	return s.hydrateRunSummaries(ctx, plain)
 }
 
 func (s *Store) listWorkspaceRunsWithTaskState(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
@@ -865,14 +2311,14 @@ func (s *Store) listWorkspaceRunsWithTaskState(ctx context.Context, workspaceID 
 	// automation is gone can't be attributed to anything the reader can
 	// open, and the ON DELETE CASCADE means it shouldn't exist anyway.
 	var runs []*WorkspaceAutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`,
 			a.name AS automation_name
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE a.workspace_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		append(runTaskStateArgs(), workspaceID, limit)...)
 	return runs, err
 }
@@ -918,14 +2364,29 @@ func (s *Store) listSummaries(ctx context.Context, scope string, arg any) ([]*Au
 	if err != nil {
 		return nil, err
 	}
+	boundRuns := make([]*AutomationRun, len(rows))
+	automationIDs := make([]string, len(rows))
+	for i := range rows {
+		boundRuns[i] = &rows[i].AutomationRun
+		automationIDs[i] = rows[i].AutomationID
+	}
+	if err := s.hydrateRunSummaries(ctx, boundRuns); err != nil {
+		return nil, err
+	}
+	pendingByAutomation, err := s.PendingRetrySummaries(ctx, automationIDs)
+	if err != nil {
+		return nil, err
+	}
 	summaries := make([]*AutomationSummary, 0, len(rows))
 	for _, row := range rows {
 		run := row.AutomationRun
 		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+		pending := pendingByAutomation[run.AutomationID]
 		summaries = append(summaries, &AutomationSummary{
-			AutomationID: run.AutomationID,
-			OpenRuns:     row.OpenRuns,
-			LastRun:      &run,
+			AutomationID:   run.AutomationID,
+			OpenRuns:       row.OpenRuns,
+			LastRun:        &run,
+			PendingRetries: pending,
 		})
 	}
 	return summaries, nil
@@ -952,8 +2413,8 @@ var openRunsSubquerySQL = `(
 // means the row that leads the feed rather than an arbitrary tie-break.
 var latestRunPerAutomationSQL = `ar.id = (
 			SELECT ar2.id FROM automation_runs ar2
-			WHERE ar2.automation_id = ar.automation_id
-			ORDER BY ` + runOrderSQL("ar2") + ` LIMIT 1
+		WHERE ar2.automation_id = ar.automation_id
+		ORDER BY ` + runOrderSQL("ar2") + ` LIMIT 1
 		)`
 
 func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]summaryRow, error) {
@@ -961,13 +2422,13 @@ func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]s
 	args := runTaskStateArgs()
 	args = append(args, openRunArgs()...)
 	args = append(args, arg)
-	err := s.ro.SelectContext(ctx, &rows, `
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT`+runTaskStateColumnsSQL+`,
 			`+openRunsSubquerySQL+`
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL),
 		args...)
 	return rows, err
 }
@@ -978,26 +2439,26 @@ func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]s
 // open count is a plain status match.
 func (s *Store) selectSummariesRaw(ctx context.Context, scope string, arg any) ([]summaryRow, error) {
 	var rows []summaryRow
-	err := s.ro.SelectContext(ctx, &rows, `
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT ar.*, (
-			SELECT COUNT(*) FROM automation_runs aro
-			WHERE aro.automation_id = ar.automation_id AND aro.status = ?
+		SELECT COUNT(*) FROM automation_runs aro
+			WHERE aro.automation_id = ar.automation_id AND aro.status IN (?, ?)
 		) AS open_runs
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
-		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
-		string(RunStatusTaskCreated), arg)
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL),
+		string(RunStatusTriggered), string(RunStatusTaskCreated), arg)
 	return rows, err
 }
 
 func (s *Store) listWorkspaceRunsRaw(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
 	var runs []*WorkspaceAutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
 		SELECT ar.*, a.name AS automation_name
 		FROM automation_runs ar
 		JOIN automations a ON a.id = ar.automation_id
 		WHERE a.workspace_id = ?
-		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`),
 		workspaceID, limit)
 	return runs, err
 }
@@ -1008,8 +2469,8 @@ func (s *Store) HasRunWithDedupKey(ctx context.Context, automationID, dedupKey s
 		return false, nil
 	}
 	var count int
-	err := s.ro.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND dedup_key = ?`,
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND dedup_key = ?`),
 		automationID, dedupKey)
 	return count > 0, err
 }
@@ -1042,12 +2503,17 @@ func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, 
 // open set instead of erroring. See listRunsWithTaskState for why the current
 // (is_primary) session's state, not the task's own state, is the cancellation
 // signal, and why NOT EXISTS rather than a LEFT JOIN.
-const openRunPredicateSQL = `ar.status = ?
-		AND t.id IS NOT NULL AND t.archived_at IS NULL
-		AND NOT EXISTS (
+
+const openRunPredicateSQL = `(
+  EXISTS (SELECT 1 FROM automation_retry_launches l WHERE l.run_id = ar.id AND l.state <> 'stopped')
+  OR (ar.retry_group_id <> '' AND ar.status IN ('triggered', 'task_created') AND NOT EXISTS (SELECT 1 FROM automation_retry_launch_protocols p WHERE p.run_id = ar.id AND p.version IN (1, -1)))
+  OR ar.status = ?
+		OR (ar.status = ? AND t.id IS NOT NULL AND t.archived_at IS NULL
+			AND NOT EXISTS (
 			SELECT 1 FROM task_sessions ts
-			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
-		)`
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+			)
+		))`
 
 // openRunPredicateAliased is the same predicate under different table aliases,
 // for the summary query where it nests inside a statement already using ar/t.
@@ -1068,32 +2534,35 @@ func runOrderSQL(alias string) string {
 
 // openRunArgs binds openRunPredicateSQL's placeholders, in order.
 func openRunArgs() []any {
-	return []any{string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled)}
+	return []any{
+		string(RunStatusTriggered), string(RunStatusTaskCreated),
+		string(taskmodels.TaskSessionStateCancelled),
+	}
 }
 
 func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count, `
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(`
 		SELECT COUNT(*) FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE ar.automation_id = ? AND `+openRunPredicateSQL,
+		WHERE ar.automation_id = ? AND `+openRunPredicateSQL),
 		append([]any{automationID}, openRunArgs()...)...)
 	return count, err
 }
 
 func (s *Store) countActiveRunsRaw(ctx context.Context, automationID string) (int, error) {
 	var count int
-	err := s.ro.GetContext(ctx, &count,
-		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status = ?`,
-		automationID, string(RunStatusTaskCreated))
+	err := s.ro.GetContext(ctx, &count, s.ro.Rebind(
+		`SELECT COUNT(*) FROM automation_runs WHERE automation_id = ? AND status IN (?, ?)`),
+		automationID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	return count, err
 }
 
 // GetRun returns a single run by ID, or nil if not found.
 func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
 	var r AutomationRun
-	err := s.ro.GetContext(ctx, &r,
-		`SELECT * FROM automation_runs WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &r, s.ro.Rebind(
+		`SELECT * FROM automation_runs WHERE id = ?`), id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -1106,48 +2575,152 @@ func (s *Store) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
 
 // DeleteRun removes a single run row.
 func (s *Store) DeleteRun(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET id = id WHERE id = (SELECT automation_id FROM automation_runs WHERE id = ?)`), id); err != nil {
+		return err
+	}
+	if err := requireResolvedRetryLaunches(ctx, tx, "run_id", id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automation_runs WHERE id = ?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// ListRunTaskIDs returns all non-empty task_id values for an automation's runs.
-// Used by DeleteAllRuns so the service can clean up tasks before purging rows.
+// GetCommittedRetryTaskID returns the provider task identity committed for one
+// retry run before the run row could be bound to it.
+func (s *Store) GetCommittedRetryTaskID(ctx context.Context, runID string) (string, error) {
+	var taskID string
+	err := s.ro.GetContext(ctx, &taskID, s.ro.Rebind(`
+		SELECT external_task_id FROM automation_run_operations
+		WHERE run_id = ? AND operation_kind = ? AND state = ? AND external_task_id != ''
+		ORDER BY updated_at DESC LIMIT 1`),
+		runID, retryTaskOperationKind, retryOperationCommitted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return taskID, err
+}
+
+// ListRunTaskIDs returns all task identities owned by an automation's runs,
+// including provider identities committed or ambiguously accepted before retry
+// binding completed. Used by DeleteAllRuns before purging run rows.
 func (s *Store) ListRunTaskIDs(ctx context.Context, automationID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids,
-		`SELECT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`,
-		automationID)
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`
+		SELECT DISTINCT task_id FROM automation_runs
+		WHERE automation_id = ? AND task_id != ''
+		UNION
+		SELECT DISTINCT o.external_task_id
+		FROM automation_run_operations o
+		JOIN automation_runs ar ON ar.id = o.run_id
+		WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`),
+		automationID, automationID, retryTaskOperationKind,
+		retryOperationCommitted, retryOperationAmbiguous)
 	return ids, err
 }
 
-// DeleteAllRuns removes every run row for an automation.
+// DeleteAllRuns removes every run row and retry ledger entry for an automation.
 func (s *Store) DeleteAllRuns(ctx context.Context, automationID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, automationID)
-	return err
+	return s.ClearContinuationAndDeleteAllRuns(ctx, automationID)
+}
+
+// ClearContinuationAndDeleteAllRuns atomically releases the reusable task
+// pointer with the run rows and retry ledger entries it protects. The service
+// performs task cleanup before calling this method, while holding the
+// automation admission lock.
+func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automationID string) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockRetryAutomation(ctx, tx, automationID); err != nil {
+		return err
+	}
+	if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", automationID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`), time.Now().UTC(), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_retry_event_receipts
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_retry_outbox
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_run_operations
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_run_task_intents
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_runs WHERE automation_id = ?`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_retry_groups WHERE automation_id = ?`), automationID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteAutomationsByWorkspace removes all automations (and their triggers/runs) for a workspace.
 // Used by e2e reset.
 func (s *Store) DeleteAutomationsByWorkspace(ctx context.Context, workspaceID string) (int, error) {
-	// Get automation IDs first for cascade cleanup.
-	var ids []string
-	if err := s.ro.SelectContext(ctx, &ids,
-		`SELECT id FROM automations WHERE workspace_id = ?`, workspaceID); err != nil {
-		return 0, err
-	}
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	for _, id := range ids {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_triggers WHERE automation_id = ?`, id)
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM automation_runs WHERE automation_id = ?`, id)
-	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM automations WHERE workspace_id = ?`, workspaceID)
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automations SET id = id WHERE workspace_id = ?`), workspaceID); err != nil {
+		return 0, err
+	}
+	var ids []string
+	if err := tx.SelectContext(ctx, &ids, tx.Rebind(`SELECT id FROM automations WHERE workspace_id = ? ORDER BY id`), workspaceID); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := requireResolvedRetryLaunches(ctx, tx, "automation_id", id); err != nil {
+			return 0, err
+		}
+		for _, query := range []string{`DELETE FROM automation_triggers WHERE automation_id = ?`, `DELETE FROM automation_runs WHERE automation_id = ?`} {
+			if _, err := tx.ExecContext(ctx, tx.Rebind(query), id); err != nil {
+				return 0, err
+			}
+		}
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM automations WHERE workspace_id = ?`), workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	return dialect.MustRenderSchema(driver, schema)
 }
 
 // generateSecret creates a random hex string for webhook authentication.

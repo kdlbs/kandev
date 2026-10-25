@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -25,6 +26,12 @@ import (
 // status snapshots for a single session when the underlying status hasn't
 // changed. Writes still happen immediately when the status hash changes.
 const gitSnapshotPersistInterval = 30 * time.Second
+
+const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
+
+const gitSnapshotStatusReady = "ready"
+
+const automaticPermissionMessageWriteMaxAttempts = 3
 
 // gitSnapshotCacheMaxEntries bounds the in-memory throttle map so a long-lived
 // backend with many sessions can't grow it without limit. When the cache is
@@ -42,9 +49,10 @@ type gitSnapshotCacheEntry struct {
 	lastWrite time.Time
 }
 
-// gitSnapshotCache throttles per-session writes to the live git snapshot cache
-// table. It is process-local — first event after a restart will rewrite the
-// row, which is fine because UpsertLatestLiveGitSnapshot is idempotent.
+// gitSnapshotCache throttles writes to the live git snapshot cache per
+// environment and repository. It is process-local — first event after a
+// restart will rewrite the row, which is fine because
+// UpsertLatestLiveGitSnapshot is idempotent.
 type gitSnapshotCache struct {
 	mu      sync.Mutex
 	byID    map[string]gitSnapshotCacheEntry
@@ -62,18 +70,23 @@ func newGitSnapshotCache() *gitSnapshotCache {
 // happen on hash change, or when the previous write is older than
 // gitSnapshotPersistInterval (defensive: makes the cache eventually consistent
 // even if hashing misses something).
-func (c *gitSnapshotCache) shouldWrite(sessionID, hash string, now time.Time) bool {
+func (c *gitSnapshotCache) shouldWrite(taskEnvironmentID, repositoryName, hash string, now time.Time) bool {
+	key := gitSnapshotCacheKey(taskEnvironmentID, repositoryName)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	prev, ok := c.byID[sessionID]
+	prev, ok := c.byID[key]
 	if ok && prev.hash == hash && now.Sub(prev.lastWrite) < gitSnapshotPersistInterval {
 		return false
 	}
 	if !ok && c.maxSize > 0 && len(c.byID) >= c.maxSize {
 		c.evictOldestLocked()
 	}
-	c.byID[sessionID] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
+	c.byID[key] = gitSnapshotCacheEntry{hash: hash, lastWrite: now}
 	return true
+}
+
+func gitSnapshotCacheKey(taskEnvironmentID, repositoryName string) string {
+	return taskEnvironmentID + "\x00" + repositoryName
 }
 
 // evictOldestLocked drops the entry with the oldest lastWrite. Caller must
@@ -93,20 +106,26 @@ func (c *gitSnapshotCache) evictOldestLocked() {
 	}
 }
 
-// forget removes a session's cached entry. Called when a session is deleted
-// so the cache doesn't retain stale state for sessions that will never
-// receive another git event.
-func (c *gitSnapshotCache) forget(sessionID string) {
+// forget removes every cached repository entry for an environment. Called
+// when an environment is deleted so the cache doesn't retain stale state for
+// workspaces that will never receive another git event.
+func (c *gitSnapshotCache) forget(taskEnvironmentID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byID, sessionID)
+	prefix := taskEnvironmentID + "\x00"
+	for key := range c.byID {
+		if strings.HasPrefix(key, prefix) {
+			delete(c.byID, key)
+		}
+	}
 }
 
 func gitStatusHash(s *lifecycle.GitStatusData) string {
 	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d",
+	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s|%s|%s|%s|%s|%s|%t|%s|%d|%d|%d|%d|%d|%d",
 		s.RepositoryName, s.Branch, s.RemoteBranch, s.HeadCommit, s.BaseCommit,
 		s.ComparisonTarget, s.ComparisonStatus, s.ComparisonErrorCode,
+		s.StatusState, s.FilesComplete, s.DetailState, s.TrackerEpoch, s.SnapshotRevision,
 		s.Ahead, s.Behind, s.BranchAdditions, s.BranchDeletions)
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -153,10 +172,13 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 			zap.String("task_id", data.TaskID))
 		return
 	}
+	if data.TaskEnvironmentID == "" {
+		data.TaskEnvironmentID, _ = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+	}
 
 	// Forward status_update event to WebSocket subject for frontend
 	// The frontend uses this for real-time updates during active sessions
-	if s.eventBus != nil {
+	if s.eventBus != nil && data.TaskEnvironmentID != "" {
 		event := bus.NewEvent(events.GitWSEvent, "orchestrator", &data)
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
@@ -165,7 +187,9 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 	s.syncPRWatchBranch(ctx, data.TaskID, data.SessionID, data.Status.RepositoryName, data.Status.Branch)
 
 	// Push detection: when ahead goes from >0 to 0, a push happened
-	s.trackPushAndAssociatePR(ctx, data)
+	if gitStatusDetailsAreKnown(data.Status) {
+		s.trackPushAndAssociatePR(ctx, data)
+	}
 
 	// Persist a throttled cache of the live status so the sidebar diff badge
 	// works for tasks whose executor isn't currently running (and across
@@ -174,30 +198,42 @@ func (s *Service) handleGitStatusUpdate(ctx context.Context, data watcher.GitEve
 }
 
 // persistGitStatusSnapshot writes a single cached "live monitor" snapshot per
-// session, throttled by gitSnapshotCache. The cached row is read by
+// environment, throttled by gitSnapshotCache. The cached row is read by
 // appendDBSnapshotGitStatus when no live execution is available.
 func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.GitEventData) {
 	if s.repo == nil || data.SessionID == "" || data.Status == nil {
 		return
 	}
+	if !gitStatusDetailsAreKnown(data.Status) {
+		return
+	}
 	if s.gitSnapshotCache == nil {
 		return
 	}
+	taskEnvironmentID := data.TaskEnvironmentID
+	if taskEnvironmentID == "" {
+		var ok bool
+		taskEnvironmentID, ok = s.resolveGitSnapshotEnvironmentID(ctx, data.SessionID)
+		if !ok {
+			return
+		}
+	}
 	hash := gitStatusHash(data.Status)
-	if !s.gitSnapshotCache.shouldWrite(data.SessionID, hash, time.Now()) {
+	if !s.gitSnapshotCache.shouldWrite(taskEnvironmentID, data.Status.RepositoryName, hash, time.Now()) {
 		return
 	}
 
 	st := data.Status
 	snapshot := &models.GitSnapshot{
-		SessionID:    data.SessionID,
-		Branch:       st.Branch,
-		RemoteBranch: st.RemoteBranch,
-		HeadCommit:   st.HeadCommit,
-		BaseCommit:   st.BaseCommit,
-		Ahead:        st.Ahead,
-		Behind:       st.Behind,
-		Files:        nil, // intentional: badge only needs totals
+		TaskEnvironmentID: taskEnvironmentID,
+		SessionID:         data.SessionID,
+		Branch:            st.Branch,
+		RemoteBranch:      st.RemoteBranch,
+		HeadCommit:        st.HeadCommit,
+		BaseCommit:        st.BaseCommit,
+		Ahead:             st.Ahead,
+		Behind:            st.Behind,
+		Files:             nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
 			"repository_name":       st.RepositoryName,
 			"branch_additions":      st.BranchAdditions,
@@ -211,13 +247,40 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 			"untracked":             st.Untracked,
 			"renamed":               st.Renamed,
 			"timestamp":             data.Timestamp,
+			"status_state":          gitSnapshotStatusReady,
+			"files_complete":        false,
+			"detail_state":          gitSnapshotStatusReady,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Debug("failed to persist live git snapshot",
+			zap.String("task_environment_id", taskEnvironmentID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
 	}
+}
+
+func gitStatusDetailsAreKnown(status *lifecycle.GitStatusData) bool {
+	return status != nil && (status.StatusState == "" || status.StatusState == gitSnapshotStatusReady) &&
+		(status.DetailState == "" || status.DetailState == gitSnapshotStatusReady)
+}
+
+func (s *Service) resolveGitSnapshotEnvironmentID(ctx context.Context, sessionID string) (string, bool) {
+	if s.repo == nil || sessionID == "" {
+		return "", false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to resolve git snapshot environment",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return "", false
+	}
+	if session == nil || session.TaskEnvironmentID == "" {
+		s.logger.Debug("skipping git snapshot without task environment",
+			zap.String("session_id", sessionID))
+		return "", false
+	}
+	return session.TaskEnvironmentID, true
 }
 
 // pushTrackerUnsynced is the pushTracker sentinel for "no upstream
@@ -291,17 +354,109 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // called verbatim for every non-GitLab (including unknown/legacy-empty
 // provider) repository — this passes the shared repository identity into the
 // existing provider-specific path. Extracted from trackPushAndAssociatePR to
-// keep that function inside the statement budget.
+// keep that function inside the statement budget. The taskID the write lands
+// under may be redirected away from the observing task; see
+// resolveEffectivePushTaskID.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	// Identity (owner/name/repositoryID) MUST resolve against the observing
+	// task, not the redirected one: the physical checkout, session, and
+	// task_repositories rows belong to whichever task's session actually saw
+	// the push (a subtask sharing a parent's worktree still has its own
+	// session row). Only the write destination below is redirected.
 	identity := s.resolvePushRepositoryIdentity(ctx, sessionID, taskID, repositoryName)
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, identity.repositoryID)
 	if identity.provider == gitlabProviderName {
-		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+		s.detectPushAndAssociateMRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
 		return
 	}
 	if s.githubService == nil {
 		return
 	}
-	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, taskID, repositoryName, branch, identity)
+	s.detectPushAndAssociatePRWithIdentity(ctx, sessionID, effectiveTaskID, repositoryName, branch, identity)
+}
+
+// resolveEffectivePushTaskID redirects a push-detected PR/MR association from
+// the observing task to its workspace-group owner task. A subtask sharing its
+// parent's worktree via inherit_parent/shared_group workspace modes observes
+// the SAME branch pushes as every other member of the group, so writing the
+// association under the observing task's own ID binds one PR/MR to several
+// unrelated tasks (the group owner plus whichever subtasks happened to be
+// running when the push landed). Falls back to the original taskID — leaving
+// the pre-fix behavior for that call — when there is no active group, the
+// repo doesn't support group lookups, the lookup fails, the resolved owner
+// task can't be loaded or is archived (an archived owner is not a valid
+// association target), or the owner task doesn't hold repositoryID itself
+// (redirecting would make the downstream write get rejected by
+// validateTaskRepositoryID and dropped — see associatePRWithTask — which is
+// worse than leaving the association under the observing task). repositoryID
+// may be "" (identity couldn't be resolved yet); the ownership check is
+// skipped in that case, matching validateTaskRepositoryID's own no-op on an
+// empty repositoryID.
+//
+// This is the single boundary every watch-creation and association call site
+// routes through — dispatchPushDetection, ensureSessionPRWatch,
+// CheckSessionPR, buildTaskBranchList (feeding the poller's
+// reconcileWatches), and resetPRWatchForBranchSwitch — so no
+// member-attributed github_pr_watches row is ever created and the poller's
+// own AssociatePRWithTask(watch.TaskID, ...) writes under the
+// already-redirected task.
+type sessionWorkspaceGroupOwnerResolver interface {
+	GetWorkspaceGroupOwnerTaskIDForSession(ctx context.Context, taskID, sessionID string) (string, error)
+}
+
+func (s *Service) resolveEffectivePushTaskIDForSession(
+	ctx context.Context, sessionID, taskID, repositoryID string,
+) string {
+	if taskID == "" {
+		return taskID
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return taskID
+	}
+	var ownerTaskID string
+	var err error
+	if sessionID != "" {
+		if sessionResolver, ok := any(store).(sessionWorkspaceGroupOwnerResolver); ok {
+			ownerTaskID, err = sessionResolver.GetWorkspaceGroupOwnerTaskIDForSession(ctx, taskID, sessionID)
+		} else {
+			// Keep compatibility with repository test doubles and older adapters.
+			ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+		}
+	} else {
+		ownerTaskID, err = store.GetWorkspaceGroupOwnerTaskID(ctx, taskID)
+	}
+	if err != nil || ownerTaskID == "" || ownerTaskID == taskID {
+		return taskID
+	}
+	ownerTask, err := s.repo.GetTask(ctx, ownerTaskID)
+	if err != nil || ownerTask == nil || ownerTask.ArchivedAt != nil {
+		return taskID
+	}
+	if repositoryID != "" && !s.taskHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
+		return taskID
+	}
+	s.logger.Info("redirecting push-detected PR/MR association to workspace group owner",
+		zap.String("from_task_id", taskID),
+		zap.String("to_task_id", ownerTaskID))
+	return ownerTaskID
+}
+
+// taskHoldsRepository reports whether taskID has a task_repositories row for
+// repositoryID. Used by resolveEffectivePushTaskID to avoid redirecting into
+// a write that validateTaskRepositoryID would reject and associatePRWithTask
+// would then silently drop.
+func (s *Service) taskHoldsRepository(ctx context.Context, store repoStore, taskID, repositoryID string) bool {
+	taskRepos, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return false
+	}
+	for _, tr := range taskRepos {
+		if tr != nil && tr.RepositoryID == repositoryID {
+			return true
+		}
+	}
+	return false
 }
 
 type pushRepositoryIdentity struct {
@@ -663,37 +818,144 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		return
 	}
 
-	s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	// New agentctl instances leave the request pending until the backend has
+	// claimed its durable decision. Older instances can still send a record of
+	// an approval they already delivered.
+	autoCandidate := data.AutoApprovedOptionID != "" && data.AutoApprovalPending
+	autoApproved := data.AutoApprovedOptionID != "" && !autoCandidate
+	var decision *models.PermissionDecision
+	if autoApproved {
+		decision = permissionDecisionFromEvent(data)
+	}
+	if !autoApproved && !autoCandidate {
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+	}
 
+	turnID := s.getActiveTurnID(data.TaskSessionID)
+	permissionStored := false
 	if s.messageCreator != nil {
-		_, err := s.messageCreator.CreatePermissionRequestMessage(
-			ctx,
-			data.TaskID,
-			data.TaskSessionID,
-			data.PendingID,
-			data.ToolCallID,
-			data.Title,
-			s.getActiveTurnID(data.TaskSessionID),
-			data.Options,
-			data.ActionType,
-			data.ActionDetails,
-		)
+		attempts := 0
+		var err error
+	permissionWrite:
+		for attempt := 1; attempt <= automaticPermissionMessageWriteMaxAttempts; attempt++ {
+			attempts = attempt
+			_, err = s.messageCreator.CreatePermissionRequestMessage(
+				ctx,
+				data.TaskID,
+				data.TaskSessionID,
+				data.RequestID,
+				data.PendingID,
+				data.ToolCallID,
+				data.Title,
+				turnID,
+				data.Options,
+				data.ActionType,
+				data.ActionDetails,
+				decision,
+			)
+			if err == nil || (!autoApproved && !autoCandidate) || attempts == automaticPermissionMessageWriteMaxAttempts {
+				break
+			}
+			timer := time.NewTimer(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				err = ctx.Err()
+				break permissionWrite
+			case <-timer.C:
+			}
+		}
 		if err != nil {
-			s.logger.Error("failed to create permission request message",
+			message := "failed to create permission request message"
+			fields := []zap.Field{
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID),
-				zap.Error(err))
+				zap.Error(err),
+			}
+			if decision != nil {
+				message = "failed to persist automatic permission decision"
+				fields = append(fields,
+					zap.Int("attempts", attempts),
+					zap.String("option_id", decision.OptionID),
+					zap.String("option_kind", decision.OptionKind),
+					zap.String("source", decision.Source),
+				)
+			}
+			s.logger.Error(message, fields...)
+			if autoCandidate {
+				s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+				return
+			}
 		} else {
+			permissionStored = true
 			s.logger.Debug("created permission request message",
 				zap.String("task_id", data.TaskID),
 				zap.String("pending_id", data.PendingID))
 		}
+	} else if autoCandidate {
+		s.logger.Error("cannot persist automatic permission candidate without a message creator",
+			zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID))
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+		return
+	} else if decision != nil {
+		s.logger.Error("cannot persist automatic permission decision without a message creator",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.String("request_id", data.RequestID),
+			zap.String("pending_id", data.PendingID),
+			zap.String("option_id", decision.OptionID),
+			zap.String("option_kind", decision.OptionKind),
+			zap.String("source", decision.Source))
+	}
+
+	if autoCandidate {
+		_, err := s.ResolveAgentPermission(ctx, ResolveAgentPermissionRequest{
+			TaskID: data.TaskID, SessionID: data.TaskSessionID,
+			RequestID: data.RequestID, PendingID: data.PendingID,
+			OptionID: data.AutoApprovedOptionID, Source: models.PermissionSourceAutoApprove,
+		})
+		if err != nil {
+			s.logger.Error("failed to resolve automatic permission decision",
+				zap.String("task_id", data.TaskID), zap.String("pending_id", data.PendingID), zap.Error(err))
+			s.setSessionWaitingForInput(ctx, data.TaskID, data.TaskSessionID)
+		}
+		return
+	}
+	if autoApproved {
+		return
+	}
+
+	if permissionStored && s.unattendedPermissionHandler != nil {
+		s.unattendedPermissionHandler(ctx, data.TaskID, data.TaskSessionID, data.PendingID, turnID)
 	}
 
 	// Automation tasks are hidden from the kanban, so there is no UI for the
 	// user to answer a permission prompt. Auto-reject and mark the run failed
 	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
+}
+
+func permissionDecisionFromEvent(data watcher.PermissionRequestData) *models.PermissionDecision {
+	kind := data.AutoApprovedOptionKind
+	if kind == "" {
+		for _, option := range data.Options {
+			optionID, _ := option["option_id"].(string)
+			optionKind, _ := option["kind"].(string)
+			if optionID == data.AutoApprovedOptionID {
+				kind = optionKind
+				break
+			}
+		}
+	}
+	source := data.AutoApprovalSource
+	if source == "" {
+		source = streams.PermissionDecisionSourceAutoApprove
+	}
+	return &models.PermissionDecision{
+		OptionID:   data.AutoApprovedOptionID,
+		OptionKind: kind,
+		Source:     source,
+	}
 }
 
 // failAutomationRunOnPermission checks whether the permission request belongs
@@ -716,19 +978,18 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 
 	// Use rejected=true so the backend persists "rejected" status. cancelled is
 	// also true here because the session is going to be marked failed anyway.
-	optionID := pickRejectOption(data.Options)
-	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
+	if err := s.cancelAgentPermission(ctx, ResolveAgentPermissionRequest{
+		TaskID: data.TaskID, SessionID: data.TaskSessionID, RequestID: data.RequestID,
+		PendingID: data.PendingID, Source: models.PermissionSourceAutomation,
+	}); err != nil {
 		s.logger.Warn("failed to auto-reject permission for automation run",
 			zap.String("task_id", data.TaskID),
 			zap.String("pending_id", data.PendingID),
 			zap.Error(err))
 	}
 
-	errMsg := fmt.Sprintf("Permission required: %s — automation runs cannot answer prompts", data.Title)
-	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
-		s.logger.Warn("failed to mark automation run failed after permission prompt",
-			zap.String("task_id", data.TaskID), zap.Error(err))
-	}
+	errMsg := fmt.Sprintf("permission required: %s; automation runs cannot answer prompts", data.Title)
+	s.markAutomationRunTerminal(ctx, data.TaskID, false, errMsg)
 }
 
 // pickRejectOption returns the first option_id with a reject-kind, or "" if
@@ -1005,8 +1266,9 @@ func (s *Service) resetPRWatchForBranchSwitch(ctx context.Context, taskID, sessi
 	if workspaceID == "" {
 		return
 	}
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
 	if _, err := s.githubService.EnsurePRWatchForWorkspace(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner, repoName, newBranch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, owner, repoName, newBranch,
 	); err != nil {
 		s.logger.Error("failed to add PR watch after branch switch",
 			zap.String("session_id", sessionID), zap.String("new_branch", newBranch),

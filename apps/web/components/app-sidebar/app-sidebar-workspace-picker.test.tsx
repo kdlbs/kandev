@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { StartupPage } from "@/lib/types/http-user-settings";
+import {
+  clearNavigationBlockerForTests,
+  setNavigationBlocker,
+} from "@/lib/routing/navigation-guard";
 
 // The sidebar write path scopes names with the API-origin port; pin it so the
 // captured write assertions are deterministic.
@@ -7,10 +12,11 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://localhost:8443" }),
 }));
 
-const navigationMock = vi.hoisted(() => ({ push: vi.fn() }));
+const navigationMock = vi.hoisted(() => ({ push: vi.fn(), pathname: "/" }));
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: navigationMock.push }),
+  usePathname: () => navigationMock.pathname,
 }));
 
 // Radix dropdown primitives rely on pointer/portal behaviour that jsdom doesn't
@@ -42,11 +48,16 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
+const WORKSPACE_TRIGGER = "sidebar-workspace-trigger";
+const DEFAULT_WORKSPACE_NAME = "Default Workspace";
+const KANBAN_WORKSPACE_HOME = "/?home=overview&workspaceId=w1";
+
 const storeState = {
-  features: { office: false },
+  features: { office: false, integratedControl: false },
+  userSettings: { startupPage: "task_overview" as StartupPage },
   workspaces: {
     items: [
-      { id: "w1", name: "Default Workspace", office_workflow_id: "" },
+      { id: "w1", name: DEFAULT_WORKSPACE_NAME, office_workflow_id: "" },
       { id: "w2", name: "Office Workspace", office_workflow_id: "wf-office" },
       { id: "w3", name: "Alternate Workspace", office_workflow_id: "" },
     ],
@@ -65,10 +76,15 @@ let cookieDescriptor: PropertyDescriptor | undefined;
 
 function resetWorkspaceSelectTest() {
   navigationMock.push = vi.fn();
+  navigationMock.pathname = "/";
+  storeState.features.integratedControl = false;
   storeState.features.office = false;
+  storeState.userSettings.startupPage = "task_overview";
   storeState.workspaces.activeId = "w1";
-  storeState.setActiveWorkspace = vi.fn();
   storeState.resetKanbanWorkspaceContext = vi.fn();
+  storeState.setActiveWorkspace = vi.fn(() => {
+    storeState.resetKanbanWorkspaceContext();
+  });
   cookieWrites = [];
   cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
   Object.defineProperty(document, "cookie", {
@@ -81,6 +97,9 @@ function resetWorkspaceSelectTest() {
 }
 
 function cleanupWorkspaceSelectTest() {
+  storeState.features.integratedControl = false;
+  navigationMock.pathname = "/";
+  clearNavigationBlockerForTests();
   if (cookieDescriptor) {
     Object.defineProperty(document, "cookie", cookieDescriptor);
   }
@@ -97,6 +116,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
   beforeEach(() => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
+    storeState.userSettings.startupPage = "task_overview";
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -170,6 +190,24 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(navigationMock.push).not.toHaveBeenCalled();
   });
 
+  it("waits for the navigation guard before changing the active workspace", () => {
+    let proceed: (() => void) | undefined;
+    const unregister = setNavigationBlocker((intent) => {
+      proceed = intent.proceed;
+    });
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+    expect(cookieWrites).toEqual([]);
+
+    proceed?.();
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
+    unregister();
+  });
+
   it("clears stale kanban context and routes to another kanban workspace with office disabled", () => {
     storeState.features.office = false;
     render(<AppSidebarWorkspacePicker />);
@@ -177,11 +215,28 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
 
     expect(storeState.resetKanbanWorkspaceContext).toHaveBeenCalledOnce();
-    expect(storeState.resetKanbanWorkspaceContext.mock.invocationCallOrder[0]).toBeLessThan(
-      storeState.setActiveWorkspace.mock.invocationCallOrder[0],
-    );
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w3");
+  });
+
+  // Contract coverage for the saved Home default on workspace selection.
+  it("uses the Threads default in the selected workspace", () => {
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/threads?workspace=w3");
+  });
+
+  it("keeps Office priority over the Threads default", () => {
+    storeState.features.office = true;
+    storeState.userSettings.startupPage = "threads";
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(OFFICE_WORKSPACE_ITEM));
+
+    expect(navigationMock.push).toHaveBeenCalledWith("/office?workspaceId=w2");
   });
 
   it("calls onActionComplete when selecting a different workspace", () => {
@@ -205,7 +260,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w1"))).toBe(false);
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith(KANBAN_WORKSPACE_HOME);
   });
 
   it("navigates to the office workspace when the office feature is enabled", () => {
@@ -231,7 +286,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w1"))).toBe(false);
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace_8443=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith(KANBAN_WORKSPACE_HOME);
   });
 });
 
@@ -244,7 +299,7 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     storeState.workspaces.activeId = "w1";
     render(<AppSidebarWorkspacePicker />);
 
-    expect(screen.getByTestId("sidebar-workspace-trigger").textContent).not.toContain("Kanban");
+    expect(screen.getByTestId(WORKSPACE_TRIGGER).textContent).not.toContain("Kanban");
     expect(screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent).toContain("Kanban");
     expect(screen.getByTestId(OFFICE_WORKSPACE_ITEM).textContent).toContain("Office");
   });
@@ -255,7 +310,7 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
 
     const activeRow = screen.getByTestId(KANBAN_WORKSPACE_ITEM).textContent ?? "";
     expect(activeRow).toContain("Active");
-    expect(activeRow.indexOf("Active")).toBeGreaterThan(activeRow.indexOf("Default Workspace"));
+    expect(activeRow.indexOf("Active")).toBeGreaterThan(activeRow.indexOf(DEFAULT_WORKSPACE_NAME));
     expect(activeRow.indexOf("Active")).toBeLessThan(activeRow.indexOf("Kanban"));
   });
 
@@ -271,9 +326,9 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
   it("renders the trigger as an obvious selector", () => {
     render(<AppSidebarWorkspacePicker />);
 
-    const trigger = screen.getByTestId("sidebar-workspace-trigger");
+    const trigger = screen.getByTestId(WORKSPACE_TRIGGER);
     expect(trigger.getAttribute("aria-label")).toBe("Switch workspace");
-    expect(trigger.textContent).toContain("Default Workspace");
+    expect(trigger.textContent).toContain(DEFAULT_WORKSPACE_NAME);
     expect(screen.getByTestId("sidebar-workspace-trigger-chevron")).not.toBeNull();
   });
 
@@ -288,7 +343,7 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
     // one selection path as any other pick; the store action ignores a
     // no-op change, so there is no reason for this branch to skip it.
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith(KANBAN_WORKSPACE_HOME);
   });
 
   it("does not route when selecting the active office workspace", () => {
@@ -362,5 +417,45 @@ describe("AppSidebarWorkspacePicker — controlled open state", () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(menuOpenState()).toBe("false");
+  });
+});
+
+describe("AppSidebarWorkspacePicker — integrated control admission", () => {
+  beforeEach(resetWorkspaceSelectTest);
+  afterEach(cleanupWorkspaceSelectTest);
+
+  it("keeps ordinary active-workspace behavior on a control URL when the flag is off", () => {
+    navigationMock.pathname = "/control/overview";
+    render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.queryByTestId("workspace-picker-integrated-control")).toBeNull();
+    expect(screen.getByTestId(WORKSPACE_TRIGGER).textContent).toContain(DEFAULT_WORKSPACE_NAME);
+    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("enters opted-in control without changing the ordinary active workspace", () => {
+    storeState.features.integratedControl = true;
+    const onActionComplete = vi.fn();
+    render(<AppSidebarWorkspacePicker onActionComplete={onActionComplete} />);
+
+    fireEvent.click(screen.getByTestId("workspace-picker-integrated-control"));
+    expect(navigationMock.push).toHaveBeenCalledExactlyOnceWith("/control");
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(storeState.resetKanbanWorkspaceContext).not.toHaveBeenCalled();
+    expect(storeState.workspaces.activeId).toBe("w1");
+    expect(onActionComplete).toHaveBeenCalledOnce();
+  });
+
+  it("leaves control for the original active workspace when its row is selected", () => {
+    storeState.features.integratedControl = true;
+    navigationMock.pathname = "/control/history";
+    render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.getByTestId(WORKSPACE_TRIGGER).textContent).toContain("Integrated control");
+    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledExactlyOnceWith("w1");
+    expect(navigationMock.push).toHaveBeenCalledExactlyOnceWith(KANBAN_WORKSPACE_HOME);
   });
 });

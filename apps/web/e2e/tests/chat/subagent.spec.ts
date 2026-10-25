@@ -71,11 +71,16 @@ test.describe("Subagent card", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    const sessionId = task.session_id ?? task.primary_session_id;
+    expect(sessionId).toBeTruthy();
+    if (!sessionId) throw new Error("agent task did not return a session id");
+    await waitForPersistedSubagentMetrics(apiClient, sessionId);
+
     // The dedicated subagent card renders, not the generic tool_call row.
     // Assert exactly one so an accidental duplicate render fails the test
     // rather than being masked by .first().
     const cards = session.chat.locator('[data-testid="subagent-card"]');
-    await expect(cards).toHaveCount(1);
+    await expect(cards).toHaveCount(1, { timeout: 30_000 });
     const card = cards.first();
     await expect(card).toBeVisible();
 
@@ -87,15 +92,6 @@ test.describe("Subagent card", () => {
       "Explore the codebase",
     );
 
-    // Chat idle means the outer turn is no longer streaming. The nested
-    // subagent completion event can still be hydrating into the card. Wait for
-    // the persisted message that causes the metadata row before checking the
-    // rendered consequence.
-    const sessionId = task.session_id ?? task.primary_session_id;
-    expect(sessionId).toBeTruthy();
-    if (!sessionId) throw new Error("agent task did not return a session id");
-    await waitForPersistedSubagentMetrics(apiClient, sessionId);
-
     const metadata = card.locator('[data-testid="subagent-meta"]');
     // A live update may have been missed while the page was hydrating. Once
     // the backend state is present, one reload rehydrates the authoritative
@@ -106,6 +102,10 @@ test.describe("Subagent card", () => {
       await session.waitForChatIdle({ timeout: 15_000 });
     }
     await expect(metadata).toBeVisible();
+    // Successful completion: identity chips stay, Working is gone, a check remains.
+    await expect(card.getByRole("status", { name: "Loading" })).toHaveCount(0);
+    await expect(card.getByText("Working...")).toHaveCount(0);
+    await expect(card.getByLabel("Completed")).toHaveCount(1);
     await expect(card.locator('[data-testid="subagent-meta-duration"]')).toContainText("2.2s");
     await expect(card.locator('[data-testid="subagent-meta-tokens"]')).toContainText("9,987");
     await expect(card.locator('[data-testid="subagent-meta-tools"]')).toContainText("3 tools");

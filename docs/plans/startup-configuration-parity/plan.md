@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/startup-configuration-parity.md
+spec: docs/specs/platform/requirements/startup-configuration-parity.md
 decision: docs/decisions/2026-08-20-startup-configuration-source-parity.md
 created: 2026-08-20
 status: complete

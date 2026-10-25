@@ -4,20 +4,27 @@ import type { ConnectionStatus } from "@/lib/types/connection";
 import { createAppStore } from "@/lib/state/store";
 import { useWebSocket } from "./use-websocket";
 
+const TEST_WEBSOCKET_URL = "ws://kandev.test/ws";
+
 const mocks = vi.hoisted(() => ({
+  clients: [] as Array<{
+    disconnect: ReturnType<typeof vi.fn>;
+    subscribeUser: ReturnType<typeof vi.fn>;
+  }>,
   onStatusChange: null as ((status: ConnectionStatus) => void) | null,
 }));
 
 vi.mock("@/lib/ws/client", () => ({
   WebSocketClient: class {
-    constructor(_url: string, onStatusChange: (status: ConnectionStatus) => void) {
-      mocks.onStatusChange = onStatusChange;
-    }
-
-    connect = vi.fn();
     disconnect = vi.fn();
+    connect = vi.fn();
     subscribeUser = vi.fn();
     on = vi.fn(() => vi.fn());
+
+    constructor(_url: string, onStatusChange: (status: ConnectionStatus) => void) {
+      mocks.onStatusChange = onStatusChange;
+      mocks.clients.push(this);
+    }
   },
 }));
 
@@ -29,6 +36,7 @@ vi.mock("@/lib/debug/log", () => ({ createDebugLogger: () => vi.fn() }));
 
 describe("useWebSocket", () => {
   afterEach(() => {
+    mocks.clients = [];
     mocks.onStatusChange = null;
     vi.useRealTimers();
   });
@@ -36,7 +44,7 @@ describe("useWebSocket", () => {
   it("reflects a sustained WebSocket outage in the UI store and clears on reconnect", () => {
     vi.useFakeTimers();
     const store = createAppStore();
-    const { unmount } = renderHook(() => useWebSocket(store, "ws://kandev.test/ws"));
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
 
     act(() => {
       mocks.onStatusChange?.("reconnecting");
@@ -70,4 +78,50 @@ describe("useWebSocket", () => {
     expect(store.getState().connection.issueSeverity).toBe("none");
     unmount();
   });
+
+  it("reconnects when the authenticated identity changes", () => {
+    const store = createAppStore();
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
+
+    act(() => {
+      store.getState().setAuthState({
+        mode: "enabled",
+        authenticated: true,
+        user: {
+          id: "user-1",
+          email: "user@example.test",
+          display_name: "User",
+          role: "member",
+          status: "active",
+        },
+      });
+    });
+
+    expect(mocks.clients).toHaveLength(2);
+    expect(mocks.clients[0].disconnect).toHaveBeenCalledOnce();
+    unmount();
+  });
+
+  it("registers the user subscription once per client", () => {
+    const store = createAppStore();
+    const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
+    const client = mocks.clients[0];
+
+    act(() => {
+      mocks.onStatusChange?.("connected");
+      mocks.onStatusChange?.("connected");
+    });
+
+    expect(client.subscribeUser).toHaveBeenCalledOnce();
+    unmount();
+  });
+});
+
+it("invalidates saved prompts when a connection is restored", () => {
+  const store = createAppStore();
+  store.getState().setPrompts([]);
+  const { unmount } = renderHook(() => useWebSocket(store, TEST_WEBSOCKET_URL));
+  act(() => mocks.onStatusChange?.("connected"));
+  expect(store.getState().prompts.loaded).toBe(false);
+  unmount();
 });

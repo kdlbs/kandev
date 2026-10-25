@@ -53,10 +53,7 @@ export function IntegrationCursorPagination({
                 if (!previousDisabled) onPrevious();
               }}
               aria-disabled={previousDisabled}
-              className={cn(
-                "min-h-11 cursor-pointer sm:min-h-9",
-                previousDisabled && "pointer-events-none opacity-50",
-              )}
+              className={cn("cursor-pointer", previousDisabled && "pointer-events-none opacity-50")}
             />
           </PaginationItem>
           <PaginationItem>
@@ -67,10 +64,7 @@ export function IntegrationCursorPagination({
                 if (!nextDisabled) onNext();
               }}
               aria-disabled={nextDisabled}
-              className={cn(
-                "min-h-11 cursor-pointer sm:min-h-9",
-                nextDisabled && "pointer-events-none opacity-50",
-              )}
+              className={cn("cursor-pointer", nextDisabled && "pointer-events-none opacity-50")}
             />
           </PaginationItem>
         </PaginationContent>

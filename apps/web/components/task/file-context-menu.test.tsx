@@ -1,7 +1,16 @@
 import React, { act } from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
+
+const DELETE_INLINE_CONFIRM_ID = "file-delete-inline-confirmation";
+const DELETE_CONFIRM_ID = "file-delete-confirm";
+
+const responsive = vi.hoisted(() => ({ isFinePointer: true, isMobile: false }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => responsive,
+}));
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -13,9 +22,11 @@ vi.mock("@/components/toast-provider", () => ({
 // raw `ns:key` and the assertions then only prove the stub works.
 
 import { FileContextMenu, TreeNodeName, useFileRename } from "./file-context-menu";
+import { FileTreeNodeTouchActions } from "./file-browser-parts";
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
+const DELETE_CONFIRM_POPOVER_ID = "file-delete-confirm-popover";
 const RENAME_ROW = "rename-row";
 const FOCUS_ANCHOR = "focus-anchor";
 const BULK_TREE: FileTreeNode = {
@@ -31,7 +42,46 @@ const BULK_TREE: FileTreeNode = {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  responsive.isFinePointer = true;
+  responsive.isMobile = false;
   vi.useRealTimers();
+});
+
+it("hands phone file deletion from the touch menu to a named sheet without replacing its trigger", async () => {
+  responsive.isMobile = true;
+  responsive.isFinePointer = false;
+  const onDeleteFile = vi.fn().mockResolvedValue(true);
+  render(
+    <FileContextMenu
+      node={FILE_NODE}
+      tree={FILE_NODE}
+      setTree={vi.fn()}
+      onDeleteFile={onDeleteFile}
+      onStartRename={vi.fn()}
+    >
+      <div data-testid="phone-file-row">
+        <span>{FILE_NODE.name}</span>
+        <FileTreeNodeTouchActions node={FILE_NODE} showTouchActions />
+      </div>
+    </FileContextMenu>,
+  );
+  const trigger = screen.getByTestId("file-tree-node-actions");
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+  const sheet = await screen.findByRole("dialog", { name: "Delete README.md" });
+  expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+  expect(within(sheet).queryByText("README.md", { selector: "p" })).toBeNull();
+  expect(trigger.isConnected).toBe(true);
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.queryByTestId(DELETE_INLINE_CONFIRM_ID)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  expect(onDeleteFile).not.toHaveBeenCalled();
+  fireEvent.pointerDown(trigger);
+  fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+  fireEvent.click(await screen.findByTestId(DELETE_CONFIRM_ID));
+  await waitFor(() => expect(onDeleteFile).toHaveBeenCalledExactlyOnceWith(FILE_NODE.path));
 });
 
 function openMenu(triggerTestId: string) {
@@ -61,16 +111,20 @@ function BulkDeleteHarness({ onDeleteFile }: { onDeleteFile: (path: string) => P
   );
 }
 
-function RenameHarness() {
+function RenameHarness({
+  onRenameFile = vi.fn().mockResolvedValue(true),
+}: {
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+}) {
   const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
-  const rename = useFileRename(FILE_NODE, tree, setTree, vi.fn().mockResolvedValue(true));
+  const rename = useFileRename(FILE_NODE, tree, setTree, onRenameFile);
 
   return (
     <FileContextMenu
       node={FILE_NODE}
       tree={tree}
       setTree={setTree}
-      onRenameFile={vi.fn().mockResolvedValue(true)}
+      onRenameFile={onRenameFile}
       onStartRename={rename.handleStartRename}
     >
       <div data-testid={RENAME_ROW}>
@@ -190,6 +244,24 @@ describe("FileContextMenu rename", () => {
     expect(document.activeElement).toBe(input);
     expect((input as HTMLInputElement).selectionStart).toBe(0);
     expect((input as HTMLInputElement).selectionEnd).toBe(FILE_NODE.name.length);
+  });
+
+  it("commits a changed name when the input blurs before the focus handoff delay", async () => {
+    vi.useFakeTimers();
+    const onRenameFile = vi.fn().mockResolvedValue(true);
+    render(<RenameHarness onRenameFile={onRenameFile} />);
+
+    openMenu(RENAME_ROW);
+    fireEvent.click(screen.getByText("Rename"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "renamed.md" } });
+    fireEvent.blur(input, { relatedTarget: document.body });
+
+    expect(onRenameFile).toHaveBeenCalledExactlyOnceWith(FILE_NODE.path, "renamed.md");
   });
 });
 
@@ -323,6 +395,60 @@ describe("FileContextMenu chat context item", () => {
 });
 
 describe("FileContextMenu bulk deletion", () => {
+  it.each([
+    ["file", FILE_NODE],
+    ["folder", DIR_NODE],
+  ] as const)("uses local confirmation for one %s", async (_kind, node) => {
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(
+      <FileContextMenu
+        node={node}
+        tree={node}
+        setTree={() => {}}
+        onDeleteFile={onDeleteFile}
+        onStartRename={() => {}}
+      >
+        <div data-testid="single-delete-row">row</div>
+      </FileContextMenu>,
+    );
+
+    openMenu("single-delete-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(onDeleteFile).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeTruthy());
+    const confirmation = screen.getByTestId(DELETE_CONFIRM_POPOVER_ID);
+    if (node.is_dir) {
+      expect(confirmation.textContent).toContain("This will permanently delete src");
+    } else {
+      expect(confirmation.textContent).toContain("This will permanently delete README.md");
+      expect(confirmation.textContent).not.toContain("file inside it");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull());
+    expect(onDeleteFile).not.toHaveBeenCalled();
+
+    openMenu("single-delete-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId(DELETE_CONFIRM_ID)).toBeTruthy());
+    fireEvent.click(screen.getByTestId(DELETE_CONFIRM_ID));
+
+    await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(node.path));
+  });
+
+  it("keeps a multi-selection in the scope-explaining modal", () => {
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(<BulkDeleteHarness onDeleteFile={onDeleteFile} />);
+
+    openMenu("bulk-row");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete 2 items" }));
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull();
+  });
+
   it("keeps failed paths visible after a partial deletion failure", async () => {
     const onDeleteFile = vi.fn(async (path: string) => path === "a.txt");
     render(<BulkDeleteHarness onDeleteFile={onDeleteFile} />);
@@ -335,4 +461,104 @@ describe("FileContextMenu bulk deletion", () => {
     await waitFor(() => expect(screen.getByTestId("tree-paths").textContent).toBe("b.txt"));
     expect(screen.getByTestId("tree-paths").textContent).not.toContain("a.txt");
   });
+});
+
+describe("FileContextMenu touch actions", () => {
+  it("keeps the touch trigger mounted while coarse-pointer deletion uses a sheet", async () => {
+    responsive.isFinePointer = false;
+    const onDeleteFile = vi.fn().mockResolvedValue(true);
+    render(
+      <FileContextMenu
+        node={FILE_NODE}
+        tree={FILE_NODE}
+        setTree={() => {}}
+        onDeleteFile={onDeleteFile}
+        onStartRename={() => {}}
+      >
+        <div data-testid="touch-delete-row">
+          <FileTreeNodeTouchActions node={FILE_NODE} showTouchActions />
+        </div>
+      </FileContextMenu>,
+    );
+
+    const trigger = screen.getByTestId("file-tree-node-actions");
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(screen.getByTestId("file-tree-touch-delete"));
+
+    const sheet = await screen.findByRole("dialog", { name: "Delete README.md" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(trigger.isConnected).toBe(true);
+    expect(screen.queryByTestId(DELETE_INLINE_CONFIRM_ID)).toBeNull();
+    expect(screen.queryByTestId(DELETE_CONFIRM_POPOVER_ID)).toBeNull();
+    expect(onDeleteFile).not.toHaveBeenCalled();
+    expect(within(sheet).getAllByRole("button")).toHaveLength(2);
+
+    fireEvent.click(within(sheet).getByTestId(DELETE_CONFIRM_ID));
+    await waitFor(() => expect(onDeleteFile).toHaveBeenCalledWith(FILE_NODE.path));
+  });
+});
+
+describe("FileContextMenu upload guard", () => {
+  const UPLOAD_LABEL = "Upload files here";
+  const ROW = "upload-guard-row";
+
+  function renderFor(node: FileTreeNode, selectedCount = 1) {
+    const onUploadFilesHere = vi.fn();
+    render(
+      <FileContextMenu
+        node={node}
+        tree={node}
+        setTree={vi.fn()}
+        onDeleteFile={vi.fn().mockResolvedValue(true)}
+        onUploadFilesHere={onUploadFilesHere}
+        onStartRename={vi.fn()}
+        selectedCount={selectedCount}
+        selectedPaths={selectedCount > 1 ? new Set(["a.txt", "b.txt"]) : undefined}
+      >
+        <div data-testid={ROW}>row</div>
+      </FileContextMenu>,
+    );
+    openMenu(ROW);
+    return { onUploadFilesHere };
+  }
+
+  it("offers upload on a folder and targets that folder", async () => {
+    const { onUploadFilesHere } = renderFor(DIR_NODE);
+
+    const item = await screen.findByRole("menuitem", { name: UPLOAD_LABEL });
+    fireEvent.click(item);
+    await waitFor(() => expect(onUploadFilesHere).toHaveBeenCalledWith("src"));
+  });
+
+  it("is absent for a file, the exact inverse of the download guard", async () => {
+    renderFor(FILE_NODE);
+
+    await screen.findByRole("menuitem", { name: "Delete" });
+    expect(screen.queryByRole("menuitem", { name: UPLOAD_LABEL })).toBeNull();
+  });
+
+  it("is absent for a multi-selection, which has no single destination", async () => {
+    renderFor(DIR_NODE, 2);
+
+    await waitFor(() => expect(screen.queryAllByRole("menuitem").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("menuitem", { name: UPLOAD_LABEL })).toBeNull();
+  });
+});
+
+// @covers AC-UI-EDIT-FOCUS-001.1
+it("keeps a file rename open when the document loses focus", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  const onRenameFile = vi.fn().mockResolvedValue(true);
+  render(<RenameHarness onRenameFile={onRenameFile} />);
+  openMenu(RENAME_ROW);
+  fireEvent.click(screen.getByText("Rename"));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const input = screen.getByRole("textbox") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "unfinished.md" } });
+  fireEvent.blur(input);
+  expect(onRenameFile).not.toHaveBeenCalled();
+  expect(input.isConnected).toBe(true);
 });

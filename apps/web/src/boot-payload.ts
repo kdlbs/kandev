@@ -1,7 +1,14 @@
-import type { AppState } from "@/lib/state/store";
+import type { HydrationState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
-import type { Repository, RepositorySet, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type {
+  Repository,
+  RepositoryBranchPolicy,
+  RepositorySet,
+  Task,
+  Workflow,
+  WorkflowStep,
+} from "@/lib/types/http";
 import type { ActivePlugin } from "@/lib/plugins/types";
 
 export type { ActivePlugin };
@@ -16,6 +23,7 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  bootId?: string;
   lspAutoInstallPreferenceLanguages?: string[];
   debug?: boolean;
   /**
@@ -33,6 +41,10 @@ export type BootRuntime = {
    * which never renders through the shell.
    */
   titlePrefix?: string;
+  /** True only when the Tauri shell launched the backend with its picker bridge. */
+  nativeFolderPickerAvailable?: boolean;
+  /** True when the backend was launched by the desktop shell. */
+  desktopRuntime?: boolean;
 };
 
 export type BootRouteData = {
@@ -43,6 +55,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
   };
   tasksPage?: {
     activeWorkspaceId?: string | null;
@@ -50,6 +63,7 @@ export type BootRouteData = {
     steps?: WorkflowStep[];
     repositories?: Repository[];
     repositorySets?: RepositorySet[];
+    repositoryBranchPolicies?: RepositoryBranchPolicy[];
     tasks?: Task[];
     total?: number;
     tasksListSort?: string;
@@ -57,12 +71,18 @@ export type BootRouteData = {
   };
 };
 
+export type BootEntityGraph = {
+  tasks?: Record<string, unknown>;
+  sessions?: Record<string, unknown>;
+};
+
 export type BootPayload = {
   version?: number;
   route?: BootRoute;
   runtime?: BootRuntime;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
   routeData?: BootRouteData;
+  entities?: BootEntityGraph;
   plugins?: ActivePlugin[];
   /** Replayable per-boot CSRF/accidental-mutation interlock; not authentication. */
   interimSettingsInterlockToken?: string;
@@ -81,15 +101,142 @@ export function readBootPayload(win: Window = window): BootPayload {
     (win as BootWindow).__KANDEV_DEBUG = true;
   }
 
+  const version = typeof payload.version === "number" ? payload.version : undefined;
+  const rawInitialState = isRecord(payload.initialState) ? payload.initialState : {};
+  const rawRouteData = isRecord(payload.routeData) ? payload.routeData : undefined;
+  const entities = readEntityGraph(payload.entities);
+  const normalized =
+    version === 2 && entities
+      ? expandBootEntityGraph(rawInitialState, rawRouteData, entities)
+      : { initialState: rawInitialState, routeData: rawRouteData };
+
   return {
-    version: typeof payload.version === "number" ? payload.version : undefined,
+    version,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
     runtime,
-    initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
-    routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
+    initialState: normalized.initialState as HydrationState,
+    routeData: normalized.routeData as BootRouteData | undefined,
+    entities,
     plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
     interimSettingsInterlockToken: readNonEmptyString(payload.interimSettingsInterlockToken),
   };
+}
+
+function readEntityGraph(value: unknown): BootEntityGraph | undefined {
+  if (!isRecord(value)) return undefined;
+  const tasks = isRecord(value.tasks) ? value.tasks : {};
+  const sessions = isRecord(value.sessions) ? value.sessions : {};
+  return { tasks, sessions };
+}
+
+function expandBootEntityGraph(
+  initialState: Record<string, unknown>,
+  routeData: Record<string, unknown> | undefined,
+  entities: BootEntityGraph,
+) {
+  return {
+    initialState: expandBootNode(initialState, entities, ["initialState"]) as Record<
+      string,
+      unknown
+    >,
+    routeData: routeData
+      ? (expandBootNode(routeData, entities, ["routeData"]) as Record<string, unknown>)
+      : undefined,
+  };
+}
+
+function expandBootNode(value: unknown, entities: BootEntityGraph, path: string[] = []): unknown {
+  if (Array.isArray(value)) return value.map((entry) => expandBootNode(entry, entities, path));
+  if (!isRecord(value)) return value;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    const reference = expandBootReference(key, child, path, entities);
+    if (reference) result[reference.key] = reference.value;
+    else result[key] = expandBootNode(child, entities, [...path, key]);
+  }
+  return result;
+}
+
+function expandBootReference(
+  key: string,
+  value: unknown,
+  path: string[],
+  entities: BootEntityGraph,
+): { key: string; value: unknown } | undefined {
+  return (
+    expandTaskReference(key, value, path, entities.tasks ?? {}) ??
+    expandSessionReference(key, value, path.at(-1) ?? "", entities.sessions ?? {})
+  );
+}
+
+function expandTaskReference(
+  key: string,
+  value: unknown,
+  path: string[],
+  tasks: Record<string, unknown>,
+): { key: string; value: unknown } | undefined {
+  if (key === "taskIds" && isBootTaskListPath(path) && Array.isArray(value)) {
+    return { key: "tasks", value: expandTaskIDs(value, tasks) };
+  }
+  if (key === "taskId" && isBootTaskDetailPath(path) && typeof value === "string" && tasks[value]) {
+    return { key: "task", value: tasks[value] };
+  }
+  return undefined;
+}
+
+function isBootTaskListPath(path: string[]): boolean {
+  const initialStatePath =
+    path.slice(0, 3).join(".") === "routeData.taskDetail.initialState" ? path.slice(2) : path;
+  return (
+    initialStatePath.join(".") === "initialState.kanban" ||
+    path.join(".") === "routeData.tasksPage" ||
+    (initialStatePath.length === 4 &&
+      initialStatePath.slice(0, 3).join(".") === "initialState.kanbanMulti.snapshots")
+  );
+}
+
+function isBootTaskDetailPath(path: string[]): boolean {
+  return (
+    path.join(".") === "routeData.taskDetail" ||
+    path.join(".") === "routeData.taskDetail.sidebarTaskPage.entries"
+  );
+}
+
+function expandSessionReference(
+  key: string,
+  value: unknown,
+  parentKey: string,
+  sessions: Record<string, unknown>,
+): { key: string; value: unknown } | undefined {
+  if (parentKey === "taskSessions" && key === "sessionIds" && Array.isArray(value)) {
+    return { key: "items", value: expandSessionItems(value, sessions) };
+  }
+  if (parentKey === "taskSessionsByTask" && key === "sessionIdsByTask" && isRecord(value)) {
+    return { key: "itemsByTaskId", value: expandSessionLists(value, sessions) };
+  }
+  return undefined;
+}
+
+function expandTaskIDs(ids: unknown[], tasks: Record<string, unknown>) {
+  return ids.flatMap((id) => (typeof id === "string" && tasks[id] ? [tasks[id]] : []));
+}
+
+function expandSessionItems(ids: unknown[], sessions: Record<string, unknown>) {
+  return Object.fromEntries(
+    ids.flatMap((id) => (typeof id === "string" && sessions[id] ? [[id, sessions[id]]] : [])),
+  );
+}
+
+function expandSessionLists(value: Record<string, unknown>, sessions: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(value).map(([taskId, ids]) => [
+      taskId,
+      Array.isArray(ids)
+        ? ids.flatMap((id) => (typeof id === "string" && sessions[id] ? [sessions[id]] : []))
+        : [],
+    ]),
+  );
 }
 
 export function readInterimSettingsInterlockToken(): string | undefined {
@@ -160,11 +307,14 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    bootId: readNonEmptyString(value.bootId),
     lspAutoInstallPreferenceLanguages: readStringArray(value.lspAutoInstallPreferenceLanguages),
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
     titlePrefix: readString(value.titlePrefix),
+    nativeFolderPickerAvailable: value.nativeFolderPickerAvailable === true ? true : undefined,
+    desktopRuntime: value.desktopRuntime === true ? true : undefined,
   };
 }
 

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/browser-inspect-annotations-save/spec.md"
+spec: "../../specs/ui/requirements/browser-inspect-annotations-save.md"
 ---
 
 # Task 01: Preserve inspector pending state
@@ -44,7 +44,7 @@ Sequential. The test and the embedded script share the same behavior contract.
 
 ## Inputs
 
-- `docs/specs/browser-inspect-annotations-save/spec.md`, especially the Save,
+- `docs/specs/ui/requirements/browser-inspect-annotations-save.md`, especially the Save,
   Enter, and dismissal scenarios.
 - `docs/plans/browser-inspect-annotations-save/plan.md`.
 - Existing `closePopup`, `openCommentPopup`, `startPending`, and

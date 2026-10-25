@@ -149,14 +149,13 @@ function PrepareImportForm(props: {
       </div>
       <Field label={t("github:publicKandevUrl")} error={props.error}>
         <Input
-          className="h-11"
           type="url"
           placeholder="https://kandev.example.com"
           value={props.publicBaseUrl}
           onChange={(event) => props.onPublicBaseUrl(event.target.value)}
         />
       </Field>
-      <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
+      <Button type="submit" disabled={props.mutating} className="cursor-pointer">
         {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
         {t("github:generateSetupInstructions")}
       </Button>
@@ -193,14 +192,14 @@ function PreparedImportForm(props: PreparedImportProps) {
         update={props.update}
       />
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
+        <Button type="submit" disabled={props.mutating} className="cursor-pointer">
           {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
           {t("github:verifyAndImportApp")}
         </Button>
         <Button
           type="button"
           variant="outline"
-          className="h-11 cursor-pointer"
+          className="cursor-pointer"
           onClick={props.onStartOver}
         >
           {t("github:startOver")}

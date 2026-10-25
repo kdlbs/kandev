@@ -36,9 +36,10 @@ type WorkspaceSettings struct {
 }
 
 type GoCacheSettings struct {
-	Enabled     bool   `json:"enabled"`
-	MaxBytes    int64  `json:"max_bytes"`
-	AdoptedPath string `json:"adopted_path"`
+	Enabled               bool   `json:"enabled"`
+	MaxBytes              int64  `json:"max_bytes"`
+	AdoptedPath           string `json:"adopted_path"`
+	AllowCleanupWhileBusy bool   `json:"allow_cleanup_while_busy"`
 }
 
 type DockerSettings struct {
@@ -58,6 +59,7 @@ type StorageMaintenanceSettings struct {
 	QuarantineRetentionHours int               `json:"quarantine_retention_hours"`
 	Workspaces               WorkspaceSettings `json:"workspaces"`
 	KandevContainers         ResourceSettings  `json:"kandev_containers"`
+	TemporaryArtifacts       ResourceSettings  `json:"temporary_artifacts"`
 	GoCache                  GoCacheSettings   `json:"go_cache"`
 	Docker                   DockerSettings    `json:"docker"`
 }
@@ -70,6 +72,7 @@ func DefaultSettings() StorageMaintenanceSettings {
 		QuarantineRetentionHours: 168,
 		Workspaces:               WorkspaceSettings{Enabled: true},
 		KandevContainers:         ResourceSettings{Enabled: true},
+		TemporaryArtifacts:       ResourceSettings{Enabled: false},
 		GoCache: GoCacheSettings{
 			MaxBytes: 16106127360,
 		},

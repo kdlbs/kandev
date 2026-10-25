@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
+import { PortForwardingVisibilityContextProvider } from "../port-forwarding-visibility-provider";
 
 const PLUGIN_A = "plugin-a";
 const PLUGIN_B = "plugin-b";
@@ -109,6 +111,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="chat"
+        taskId="task-1"
         onPanelChange={onPanelChange}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -141,6 +144,7 @@ describe("SessionMobileBottomNav plugin panels", () => {
     render(
       <SessionMobileBottomNav
         activePanel="plugin:plugin-a:notes"
+        taskId="task-1"
         onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
@@ -150,38 +154,143 @@ describe("SessionMobileBottomNav plugin panels", () => {
     expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
   });
 
-  it("keeps the grouped Panels action active for Prompt history", () => {
-    render(
-      <SessionMobileBottomNav
-        activePanel="prompt-history"
-        onPanelChange={vi.fn()}
-        showPromptHistory
-        showStatus={false}
-        onOpenStatus={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
-  });
-});
-
-describe("SessionMobileBottomNav panel picker", () => {
-  it("offers Prompt history through the grouped Panels action", () => {
-    const onPanelChange = vi.fn();
+  it("does not evaluate task-panel visibility without a task", () => {
+    function Notes() {
+      return null;
+    }
+    const visible = vi.fn(() => true);
+    pluginRegistry.forPlugin(PLUGIN_A).registerTaskPanel({
+      id: "notes",
+      title: "Notes",
+      Component: Notes,
+      mobileEnabled: true,
+      visible,
+    });
 
     render(
       <SessionMobileBottomNav
         activePanel="chat"
-        onPanelChange={onPanelChange}
-        showPromptHistory
+        onPanelChange={vi.fn()}
         showStatus={false}
         onOpenStatus={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
-    fireEvent.click(screen.getByTestId("mobile-prompt-history-option"));
+    expect(visible).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Panels" })).toBeNull();
+  });
+});
 
-    expect(onPanelChange).toHaveBeenCalledWith("prompt-history");
+describe("SessionMobileBottomNav panel picker", () => {
+  // @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.2, .3, .9
+  it.each([false, true])(
+    "opens ports without toggling shortcut preference (enabled=%s)",
+    (enabled) => {
+      const setDialogOpen = vi.fn();
+      const togglePortForwarding = vi.fn();
+      const onPanelChange = vi.fn();
+      render(
+        <PortForwardingVisibilityContextProvider
+          value={{
+            enabled,
+            canToggle: true,
+            isUpdating: false,
+            dialogOpen: false,
+            setDialogOpen,
+            togglePortForwarding,
+          }}
+        >
+          <SessionMobileBottomNav
+            taskId="task-1"
+            sessionId="session-1"
+            activePanel="chat"
+            onPanelChange={onPanelChange}
+            showStatus={false}
+            onOpenStatus={vi.fn()}
+          />
+        </PortForwardingVisibilityContextProvider>,
+      );
+      expect(screen.queryByRole("button", { name: "Panels" })).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+      fireEvent.click(screen.getByRole("button", { name: "Port Forwarding" }));
+      expect(setDialogOpen).toHaveBeenCalledWith(true);
+      expect(togglePortForwarding).not.toHaveBeenCalled();
+      expect(onPanelChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      canToggle: false,
+      isUpdating: false,
+      description:
+        "Port forwarding requires an active, unarchived task session with a ready runtime.",
+    },
+    { canToggle: true, isUpdating: true, description: "Saving..." },
+  ])("explains disabled management ($description)", ({ canToggle, isUpdating, description }) => {
+    const setDialogOpen = vi.fn();
+    render(
+      <PortForwardingVisibilityContextProvider
+        value={{
+          enabled: false,
+          canToggle,
+          isUpdating,
+          dialogOpen: false,
+          setDialogOpen,
+          togglePortForwarding: vi.fn(),
+        }}
+      >
+        <SessionMobileBottomNav
+          taskId="task-1"
+          activePanel="chat"
+          onPanelChange={vi.fn()}
+          showStatus={false}
+          onOpenStatus={vi.fn()}
+        />
+      </PortForwardingVisibilityContextProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+    const action = screen.getByRole("button", { name: "Port Forwarding" });
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    const descriptionId = action.getAttribute("aria-describedby")!;
+    expect(document.getElementById(descriptionId)?.textContent).toBe(description);
+    fireEvent.click(action);
+    expect(setDialogOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("SessionMobileBottomNav canvas picker", () => {
+  it("offers applicable task canvases in the native picker", () => {
+    const onOpenCanvas = vi.fn();
+    const taskCanvas: Canvas = {
+      id: "canvas-1",
+      plugin_instance_id: "instance-1",
+      plugin_id: "plugin-1",
+      workspace_id: "workspace-1",
+      task_id: "task-1",
+      scope_kind: "task",
+      title: "Release board",
+      status: "active",
+      active_release_id: "release-1",
+      active_release_status: "valid",
+    };
+
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+        taskCanvases={[taskCanvas]}
+        onOpenCanvas={onOpenCanvas}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
+    const option = screen.getByTestId("mobile-canvas-option-canvas-1");
+    expect(option.className).toContain("min-h-11");
+    fireEvent.click(option);
+
+    expect(onOpenCanvas).toHaveBeenCalledWith("canvas-1");
   });
 });

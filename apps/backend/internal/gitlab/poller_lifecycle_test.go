@@ -51,11 +51,9 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 	if err := store.UpsertTaskMR(ctx, unsubscribed); err != nil {
 		t.Fatalf("seed unsubscribed MR: %v", err)
 	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-1", mrIdentity("group/subscribed", 1), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 
 	memBus := bus.NewMemoryEventBus(newTestLogger(t))
 	svc.SetEventBus(memBus)
@@ -128,13 +126,12 @@ func TestPoller_RunMRLifecycleSync_ErrorOnOneRowDoesNotAbortOthers(t *testing.T)
 	if err := store.UpsertTaskMR(ctx, ok); err != nil {
 		t.Fatalf("seed ok MR: %v", err)
 	}
-	for _, taskID := range []string{"task-1", "task-2"} {
-		if _, err := store.UpdateTaskMRAutomationOptions(ctx, taskID, TaskMRAutomationPatch{
-			PromptOnMerged: boolPtr(true),
-		}, nil); err != nil {
-			t.Fatalf("enable switch for %s: %v", taskID, err)
-		}
-	}
+	setMRSwitches(t, store, "task-1", mrIdentity("group/broken", 1), TaskMRAutomationSwitchPatch{
+		PromptOnMerged: boolPtr(true),
+	})
+	setMRSwitches(t, store, "task-2", mrIdentity("group/ok", 2), TaskMRAutomationSwitchPatch{
+		PromptOnMerged: boolPtr(true),
+	})
 
 	memBus := bus.NewMemoryEventBus(newTestLogger(t))
 	svc.SetEventBus(memBus)
@@ -194,11 +191,9 @@ func TestPoller_RunMRLifecycleSync_UsesStrictClient(t *testing.T) {
 	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "", "group/subscribed", 1)); err != nil {
 		t.Fatalf("seed subscribed MR: %v", err)
 	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-1", mrIdentity("group/subscribed", 1), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 
 	memBus := bus.NewMemoryEventBus(newTestLogger(t))
 	svc.SetEventBus(memBus)
@@ -260,11 +255,9 @@ func TestPoller_RunMRLifecycleSync_RejectsHostChangeSinceLink(t *testing.T) {
 	if err := store.UpsertTaskMR(ctx, linked); err != nil {
 		t.Fatalf("seed linked MR: %v", err)
 	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-1", mrIdentity("group/subscribed", 1), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 
 	memBus := bus.NewMemoryEventBus(newTestLogger(t))
 	svc.SetEventBus(memBus)
@@ -323,11 +316,9 @@ func TestPoller_RunMRLifecycleSync_ClearsRecoveredError(t *testing.T) {
 	if err := store.UpsertTaskMR(ctx, subscribed); err != nil {
 		t.Fatalf("seed MR: %v", err)
 	}
-	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+	setMRSwitches(t, store, "task-1", mrIdentity("group/subscribed", 1), TaskMRAutomationSwitchPatch{
 		PromptOnMerged: boolPtr(true),
-	}, nil); err != nil {
-		t.Fatalf("enable switch: %v", err)
-	}
+	})
 	if err := store.RecordTaskMRSyncError(ctx, "task-1", "", "group/subscribed", 1, "prior failure"); err != nil {
 		t.Fatalf("seed prior error: %v", err)
 	}

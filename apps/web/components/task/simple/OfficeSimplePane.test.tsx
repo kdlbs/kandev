@@ -1,12 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
+import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import type { Task, TaskSession } from "@/app/office/tasks/[id]/types";
 import {
   OfficeTopbarChromeProvider,
   useOfficeTopbarChrome,
 } from "@/app/office/components/office-topbar-context";
+
+vi.mock("@/lib/api/domains/kanban-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
+    "@/lib/api/domains/kanban-api",
+  );
+  return {
+    ...actual,
+    updateTask: vi.fn(),
+  };
+});
+
+const TITLE_HEADING_TESTID = "office-task-title";
+const TITLE_INPUT_TESTID = "office-task-title-input";
+const DESCRIPTION_READ_TESTID = "office-task-description";
+const DESCRIPTION_TEXTAREA_TESTID = "office-task-description-textarea";
+const SOME_DESCRIPTION = "Some description";
 
 const { CHAT_EDITABLE, CHAT_READONLY, CHAT_READONLY_TEST_ID } = vi.hoisted(() => ({
   CHAT_EDITABLE: "editable",
@@ -85,8 +102,14 @@ vi.mock("./chat-activity-tabs", () => ({
 }));
 
 import { OfficeSimplePane } from "./OfficeSimplePane";
+import { updateTask } from "@/lib/api/domains/kanban-api";
 
-afterEach(() => cleanup());
+const mockedUpdateTask = vi.mocked(updateTask);
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 const baseTask: Task = {
   id: "task-1",
@@ -136,6 +159,10 @@ const runningSession: TaskSession = {
   updatedAt: "2026-05-01T10:07:00Z",
 };
 
+function optimisticContextFor(task: Task) {
+  return { task, applyPatch: vi.fn(), restore: vi.fn() };
+}
+
 function TopbarActions() {
   const chrome = useOfficeTopbarChrome();
   return <>{chrome?.actions}</>;
@@ -145,8 +172,10 @@ function PaneHarness({ task, sessions }: { task: Task; sessions: TaskSession[] }
   return (
     <StateProvider>
       <OfficeTopbarChromeProvider>
-        <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
-        <TopbarActions />
+        <TaskOptimisticContextProvider value={optimisticContextFor(task)}>
+          <OfficeSimplePane task={task} comments={[]} activity={[]} sessions={sessions} />
+          <TopbarActions />
+        </TaskOptimisticContextProvider>
       </OfficeTopbarChromeProvider>
     </StateProvider>
   );
@@ -206,5 +235,75 @@ describe("OfficeSimplePane ExecutionIndicator wiring", () => {
     renderPane({ ...baseTask, status: "in_progress" }, []);
 
     expect(screen.getByTestId("execution-indicator").textContent).toBe("in_progress");
+  });
+});
+
+describe("OfficeSimplePane editor composition (AC-35, AC-57)", () => {
+  it("commits the title while a dirty description draft stays open with its draft intact (AC-35)", async () => {
+    mockedUpdateTask.mockResolvedValueOnce({
+      title: "New title",
+      updated_at: "2026-05-02T00:00:00Z",
+    } as never);
+    const task = { ...baseTask, description: SOME_DESCRIPTION };
+    renderPane(task, []);
+
+    fireEvent.click(screen.getByTestId(DESCRIPTION_READ_TESTID));
+    const textarea = screen.getByTestId(DESCRIPTION_TEXTAREA_TESTID) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Dirty draft" } });
+
+    fireEvent.doubleClick(screen.getByTestId(TITLE_HEADING_TESTID));
+    const titleInput = screen.getByTestId(TITLE_INPUT_TESTID);
+    fireEvent.change(titleInput, { target: { value: "New title" } });
+    await act(async () => {
+      fireEvent.keyDown(titleInput, { key: "Enter" });
+    });
+
+    expect(mockedUpdateTask).toHaveBeenCalledWith(task.id, { title: "New title" });
+    expect(screen.queryByTestId(TITLE_INPUT_TESTID)).toBeNull();
+    expect((screen.getByTestId(DESCRIPTION_TEXTAREA_TESTID) as HTMLTextAreaElement).value).toBe(
+      "Dirty draft",
+    );
+  });
+
+  it("closes the title editor and discards its draft when the description editor opens (AC-57)", () => {
+    const task = { ...baseTask, description: SOME_DESCRIPTION };
+    renderPane(task, []);
+
+    fireEvent.doubleClick(screen.getByTestId(TITLE_HEADING_TESTID));
+    const titleInput = screen.getByTestId(TITLE_INPUT_TESTID);
+    fireEvent.change(titleInput, { target: { value: "Uncommitted draft" } });
+
+    // Opening the description editor moves focus off the title input.
+    fireEvent.blur(titleInput);
+    fireEvent.click(screen.getByTestId(DESCRIPTION_READ_TESTID));
+
+    expect(screen.queryByTestId(TITLE_INPUT_TESTID)).toBeNull();
+    expect(screen.getByTestId(TITLE_HEADING_TESTID).textContent).toBe(task.title);
+    expect(screen.getByTestId(DESCRIPTION_TEXTAREA_TESTID)).toBeTruthy();
+    expect(mockedUpdateTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("OfficeSimplePane editors have no status/lifecycle/archived gate (AC-30, AC-47)", () => {
+  it("still opens the title and description editors when the task is cancelled with a failed session", () => {
+    const task = { ...baseTask, status: "cancelled" as const, description: SOME_DESCRIPTION };
+    renderPane(task, [completedSession, failedSession]);
+
+    fireEvent.doubleClick(screen.getByTestId(TITLE_HEADING_TESTID));
+    expect(screen.getByTestId(TITLE_INPUT_TESTID)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(DESCRIPTION_READ_TESTID));
+    expect(screen.getByTestId(DESCRIPTION_TEXTAREA_TESTID)).toBeTruthy();
+  });
+
+  it("still opens the title and description editors while a session is RUNNING on a done task", () => {
+    const task = { ...baseTask, status: "done" as const, description: SOME_DESCRIPTION };
+    renderPane(task, [runningSession]);
+
+    fireEvent.doubleClick(screen.getByTestId(TITLE_HEADING_TESTID));
+    expect(screen.getByTestId(TITLE_INPUT_TESTID)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(DESCRIPTION_READ_TESTID));
+    expect(screen.getByTestId(DESCRIPTION_TEXTAREA_TESTID)).toBeTruthy();
   });
 });

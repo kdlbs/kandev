@@ -1,12 +1,14 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
 
@@ -39,14 +41,24 @@ func (r *Registry) Load(s store.Store) error {
 	}
 
 	byID := make(map[string]*store.Record, len(records))
+	var migrationErrs []error
 	for _, rec := range records {
+		if rec.InstallationID == "" {
+			migrated := cloneRecord(rec)
+			migrated.InstallationID = uuid.NewString()
+			if err := s.Save(migrated); err != nil {
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+			} else {
+				rec = migrated
+			}
+		}
 		byID[rec.ID] = cloneRecord(rec)
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.byID = byID
-	return nil
+	r.mu.Unlock()
+	return errors.Join(migrationErrs...)
 }
 
 // Get returns a copy of the record for id, and whether it was found.
@@ -156,6 +168,7 @@ func (r *Registry) SetRuntimeState(id string, status Status, lastError string, l
 
 func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
+	clone.Manifest = rec.Clone()
 	if rec.AutoUpdate != nil {
 		autoUpdate := *rec.AutoUpdate
 		clone.AutoUpdate = &autoUpdate
@@ -178,6 +191,22 @@ func (r *Registry) activeRepositoryProviderOwner(provider, excludeID string) (st
 		}
 		for _, declared := range rec.RepositoryProviders {
 			if strings.EqualFold(strings.TrimSpace(declared), strings.TrimSpace(provider)) {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+func (r *Registry) activeExecutorProviderOwner(identity, excludeID string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for id, rec := range r.byID {
+		if id == excludeID || rec.Status != StatusActive {
+			continue
+		}
+		for _, declared := range rec.ExecutorProviders {
+			if ExecutorProviderIdentity(id, declared.Key) == identity {
 				return id, true
 			}
 		}

@@ -169,7 +169,9 @@ func TestGetPRFeedbackForWorkspace_CachedResponseDoesNotRewriteRow(t *testing.T)
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
 	seedTask(t, store, "task-1", false)
-	seedFeedbackTaskPR(t, store, "task-1", 2408, nil)
+	seedFeedbackTaskPR(t, store, "task-1", 2408, func(pr *TaskPR) {
+		pr.HeadSHA = feedbackSyncHead
+	})
 
 	mergedAt := time.Now().UTC().Add(-10 * time.Minute)
 	addMergedFeedbackPR(mockClient, 2408, mergedAt)
@@ -190,9 +192,14 @@ func TestGetPRFeedbackForWorkspace_CachedResponseDoesNotRewriteRow(t *testing.T)
 	}
 	writtenAt := first.LastSyncedAt
 	if writtenAt == nil {
-		t.Fatal("expected the first fetch to stamp last_synced_at")
+		t.Fatal("expected the prior status-sync timestamp to remain available")
 	}
 
+	// A cached response must not overwrite newer stored metadata.
+	first.PRTitle = "newer stored title"
+	if err := store.UpdateTaskPR(ctx, first); err != nil {
+		t.Fatalf("update stored title: %v", err)
+	}
 	// Cache hits must not touch the row at all.
 	if _, err := svc.GetPRFeedbackForWorkspace(
 		ctx, testWorkspaceID, "", feedbackSyncOwner, feedbackSyncRepo, 2408,
@@ -203,6 +210,9 @@ func TestGetPRFeedbackForWorkspace_CachedResponseDoesNotRewriteRow(t *testing.T)
 	if err != nil || after == nil {
 		t.Fatalf("GetTaskPRByRepoAndNumber: %v (row %+v)", err, after)
 	}
+	if after.PRTitle != "newer stored title" {
+		t.Fatalf("cached feedback overwrote newer stored title: %q", after.PRTitle)
+	}
 	if !timeEqual(after.LastSyncedAt, writtenAt) {
 		t.Errorf("cached feedback rewrote the row: last_synced_at %v -> %v", writtenAt, after.LastSyncedAt)
 	}
@@ -212,7 +222,7 @@ func TestGetPRFeedbackForWorkspace_CachedResponseDoesNotRewriteRow(t *testing.T)
 	// call above caused is already in the channel — a non-blocking read is
 	// exact here, with no sleep to go flaky under load.
 	//
-	// last_synced_at above is the assertion that actually catches a persist
+	// The stored title above is the assertion that actually catches a persist
 	// moved outside the fetch closure; this one is defence in depth. A
 	// redundant sync writes the row but re-derives identical field values, so
 	// SyncTaskPR's `changed` guard already suppresses the event — this pins

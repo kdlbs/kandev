@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-invalidate-reset-context-usage"]
 plan: "plan.md"
-spec: "../../specs/context-window-reset-freshness/spec.md"
+spec: "../../specs/ui/requirements/context-window-reset-freshness.md"
 ---
 
 # Task 02: Cover reset freshness end to end

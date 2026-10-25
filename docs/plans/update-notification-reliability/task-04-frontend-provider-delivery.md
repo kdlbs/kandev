@@ -8,7 +8,7 @@ depends_on:
   - "02-update-replay-and-wiring"
   - "03-native-permission-bridge"
 plan: "plan.md"
-spec: "../../specs/platform/notifications.md"
+spec: "../../specs/platform/requirements/notifications.md"
 ---
 
 # Task 04: Use Provider Settings and Preserve the In-App Update Indication

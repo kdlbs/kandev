@@ -23,6 +23,8 @@ import {
 } from "./use-processed-messages";
 
 const CURRENT_TURN_ID = "turn-current";
+const PROVISIONAL_ERROR_MESSAGE = "peer disconnected before response";
+const ERROR_OCCURRED_AT = "2026-06-14T10:05:00Z";
 
 function makeMessage(
   id: string,
@@ -416,8 +418,8 @@ describe("insertLastAgentErrorItem", () => {
     });
 
     const result = insertLastAgentErrorItem(items, "s1", {
-      message: "peer disconnected before response",
-      occurredAt: "2026-06-14T10:05:00Z",
+      message: PROVISIONAL_ERROR_MESSAGE,
+      occurredAt: ERROR_OCCURRED_AT,
     });
 
     expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice", "message"]);
@@ -425,8 +427,8 @@ describe("insertLastAgentErrorItem", () => {
 
   it("uses the notice as the only item when there are no messages", () => {
     const result = insertLastAgentErrorItem([], "s1", {
-      message: "peer disconnected before response",
-      occurredAt: "2026-06-14T10:05:00Z",
+      message: PROVISIONAL_ERROR_MESSAGE,
+      occurredAt: ERROR_OCCURRED_AT,
     });
 
     expect(result).toEqual([
@@ -444,8 +446,8 @@ describe("insertLastAgentErrorItem", () => {
     });
 
     const result = insertLastAgentErrorItem(items, "s1", {
-      message: "peer disconnected before response",
-      occurredAt: "2026-06-14T10:05:00Z",
+      message: PROVISIONAL_ERROR_MESSAGE,
+      occurredAt: ERROR_OCCURRED_AT,
     });
 
     expect(result.map((item) => item.type)).toEqual(["message", "agent_error_notice"]);

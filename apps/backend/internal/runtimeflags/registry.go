@@ -1,6 +1,26 @@
 package runtimeflags
 
-import "github.com/kandev/kandev/internal/common/config"
+import (
+	"runtime"
+
+	"github.com/kandev/kandev/internal/common/config"
+)
+
+// ReasonPlatformUnsupported is the stable, machine-readable reason code for a
+// flag that requires a host platform this install does not run on. The
+// frontend translates it; it is never shown to the operator as raw text.
+const ReasonPlatformUnsupported = "platform_unsupported"
+
+// agentSurvivalAvailability implements the platform scope decision in
+// system-design/agent-survival-across-restart-02.md: survival is supported on
+// macOS and Linux, and unavailable on Windows, where it would trade the
+// platform's kill-on-job-close safeguard for an untested adoption handshake.
+func agentSurvivalAvailability() (bool, string) {
+	if runtime.GOOS == "windows" {
+		return false, ReasonPlatformUnsupported
+	}
+	return true, ""
+}
 
 // runtimeFlagRegistration keeps the public metadata and the typed config
 // binding for a flag together. The function fields stay internal so the HTTP
@@ -17,8 +37,14 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	retiredAppStatusBarKey    = "features.appStatusBar"
-	retiredAppStatusBarEnvVar = "KANDEV_FEATURES_APP_STATUS_BAR"
+	keyCodexAppServer                             = "features.codexAppServer"
+	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
+	retiredAppStatusBarKey                        = "features.appStatusBar"
+	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey               = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar            = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	retiredProviderInterruptionContinuationKey    = "features.providerInterruptionContinuation"
+	retiredProviderInterruptionContinuationEnvVar = "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -28,9 +54,44 @@ const (
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
+	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
+	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
+	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.integratedControl",
+			EnvVar:          "KANDEV_FEATURES_INTEGRATED_CONTROL",
+			Kind:            KindFeature,
+			Label:           "Integrated control",
+			Description:     "Adds dedicated navigation across authorized workspaces, coordinators, and existing conversations.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Shows existing workspace and coordinator data. Conversation interaction retains native workspace permissions; navigation never starts an agent.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.IntegratedControl },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.IntegratedControl = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.lspBrowserContinuity",
+			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
+			Kind:            KindFeature,
+			Label:           "LSP browser continuity",
+			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:         "features.office",
@@ -47,6 +108,23 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.Office },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.Office = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.needsYouInbox",
+			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
+			Kind:        KindFeature,
+			Label:       "Inbox",
+			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "The Inbox is a new read surface plus a per-user dismiss/snooze sidecar; it never mutates " +
+				"the underlying clarification record. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.NeedsYouInbox },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.NeedsYouInbox = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -69,6 +147,44 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.canvases",
+			EnvVar:      "KANDEV_FEATURES_CANVASES",
+			Kind:        KindFeature,
+			Label:       "Agent-authored canvases",
+			Description: "Enables isolated agent-authored web application canvases for tasks and workspaces.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Canvas applications execute arbitrary packaged browser code in a sandboxed runtime and " +
+				"can access only explicitly granted Kandev data. Enable this only while reviewing the isolation, " +
+				"storage, and permission behavior of the experimental feature.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Canvases },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Canvases = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.multiTenancy",
+			EnvVar:      "KANDEV_FEATURES_MULTI_TENANCY",
+			Kind:        KindFeature,
+			Label:       "Organizations",
+			Description: "Adds organizations above users: every account belongs to exactly one org, and orgs cannot see each other's workspaces, tasks, or secrets. Requires Authentication & users.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Turning this ON puts every existing user, workspace and secret into a single default " +
+				"organization after restart, and adds an instance operator tier that manages organizations. " +
+				"It requires Authentication & users: with authentication off the instance refuses to start. " +
+				"Filesystem paths and agent CLI credentials are still shared across organizations, so this is " +
+				"an application-layer boundary, not a sandbox.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.MultiTenancy },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.MultiTenancy = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.dynamicAgentRouting",
 			EnvVar:      "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING",
 			Kind:        KindFeature,
@@ -83,6 +199,38 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicAgentRouting },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.DynamicAgentRouting = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyCodexAppServer,
+			EnvVar:          envCodexAppServer,
+			Kind:            KindFeature,
+			Label:           "Codex app server",
+			Description:     "Enables native Codex app-server profiles and conversations, separate from Codex ACP.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native Codex conversation and background lifecycle support is experimental. Keep Codex ACP for existing sessions and disable this flag if native sessions behave unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.agentBackgroundWork",
+			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
+			Kind:            KindFeature,
+			Label:           "Agent background work",
+			Description:     "Enables normalized background work tracking, interactive controls, and subagent observation.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Background work lifecycle management and UI inspection are experimental.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{
@@ -119,6 +267,94 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.agentSurvival",
+			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
+			Kind:        KindFeature,
+			Label:       "Agent survival across backend restart",
+			Description: "Lets a worktree or local-executor agent session survive a backend restart by adopting its still-running standalone control server instead of killing it.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Replaces the standalone control server's kill-on-restart safeguard with an adoption handshake. " +
+				"Enable it only after reviewing the recovery and ownership guarantees, since it changes what happens to an agent " +
+				"process when the backend restarts unexpectedly. Unavailable on Windows, where the removed safeguard is depended on.",
+			RestartRequired: true,
+			Mutable:         true,
+			Available:       agentSurvivalAvailability,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinator",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
+			Kind:        KindFeature,
+			Label:       "Workspace coordinators",
+			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Phase 1 only proposes unstarted tasks. With coordinator control enabled, approved resume or move proposals can start an agent on an existing task. " +
+				"A person must approve each proposal. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Coordinator },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Coordinator = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase2",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE2",
+			Kind:        KindFeature,
+			Label:       "Coordinator control",
+			Description: "Adds per-coordinator permissions, watches, standing orders, goals and an activity log on top of workspace coordinators. Requires Workspace coordinators.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Lets a coordinator act on existing tasks once a human grants the matching permission. Every action stays off until " +
+				"granted, and every attempt is recorded in the activity log. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase2 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase3",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE3",
+			Kind:        KindFeature,
+			Label:       "Coordinator autonomy",
+			Description: "Lets a coordinator run unattended within a spend ceiling and decide chosen proposal classes automatically. Requires Workspace coordinators and Coordinator control.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Lets a coordinator start turns and decide proposals without a human present, bounded by a spend ceiling and " +
+				"the permissions granted. Autonomy stays off per coordinator until enabled. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase3 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase3 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase31",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE31",
+			Kind:        KindFeature,
+			Label:       "Coordinator record and measure",
+			Description: "Adds pausing a coordinator, the Projects scope for Watches and the coordinator's read of its own turn history. Turns are recorded whether or not this is on. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Adds controls that stop an unattended coordinator turn and narrow what a coordinator can see and act on by project, " +
+				"plus a read-only turn-history tool. A paused coordinator stays paused and a stored Projects scope stays enforced while the controls are off. " +
+				"Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase31 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase31 = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

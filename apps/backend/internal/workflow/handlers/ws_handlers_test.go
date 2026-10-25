@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/events"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -184,6 +186,18 @@ func TestWSListHistoryAction(t *testing.T) {
 	}
 	requireWSError(t,
 		h.dispatch(t, ws.ActionWorkflowHistoryList, map[string]any{"session_id": 7}), ws.ErrorCodeBadRequest)
+
+	// The session access checker reports missing or foreign sessions with the
+	// task-domain sentinel, not workflow service.ErrNotVisible. The WS mapping
+	// must preserve the HTTP endpoint's 404 behavior for that error path.
+	h.service.SetSessionAccessChecker(func(context.Context, string) error {
+		return taskmodels.ErrTaskSessionNotFound
+	})
+	payload = requireWSError(t,
+		h.dispatch(t, ws.ActionWorkflowHistoryList, map[string]any{"session_id": "session-1"}), ws.ErrorCodeNotFound)
+	if payload.Message != notFoundMessage {
+		t.Errorf("message = %q, want %q", payload.Message, notFoundMessage)
+	}
 }
 
 // TestCreateStepsFromTemplate covers both transports of the template-apply

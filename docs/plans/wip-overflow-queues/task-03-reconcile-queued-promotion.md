@@ -6,7 +6,7 @@ wave: 3
 depends_on:
   - "02-implement-atomic-overflow-placement"
 plan: "plan.md"
-spec: "../../specs/tasks/wip-limit-pull-system.md"
+spec: "../../specs/tasks/system-design/wip-limit-pull-system.md"
 ---
 
 # Task 03: Reconcile Queued Promotion

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow-session-settings/spec.md"
+spec: "../../specs/tasks/requirements/workflow-session-settings.md"
 ---
 
 # Task 01: Add and Validate the Workflow Session-settings Contract

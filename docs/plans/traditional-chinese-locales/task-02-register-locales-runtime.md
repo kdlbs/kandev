@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/traditional-chinese-locales.md"
+spec: "../../specs/platform/requirements/traditional-chinese-locales.md"
 ---
 
 # Task 02: Register zh-tw and zh-hk in FE/BE runtime

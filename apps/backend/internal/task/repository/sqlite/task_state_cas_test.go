@@ -77,6 +77,40 @@ func TestUpdateTaskStateIfSessionState_SkipsArchivedTask(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskStateIfSessionState_DoesNotReopenCompletedTask(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-session-completed")
+	insertSession(t, repo, "session-completed", "task-session-completed", string(models.TaskSessionStateStarting))
+
+	if err := repo.UpdateTaskState(ctx, "task-session-completed", v1.TaskStateCompleted); err != nil {
+		t.Fatalf("seed COMPLETED: %v", err)
+	}
+	oldState, updated, err := repo.UpdateTaskStateIfSessionState(
+		ctx,
+		"task-session-completed",
+		"session-completed",
+		models.TaskSessionStateStarting,
+		v1.TaskStateInProgress,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if updated {
+		t.Fatal("completed task was reopened by a runtime state writer")
+	}
+	if oldState != v1.TaskStateCompleted {
+		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateCompleted)
+	}
+	task, err := repo.GetTask(ctx, "task-session-completed")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateCompleted {
+		t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateCompleted)
+	}
+}
+
 func TestUpdateTaskStateIfSessionState_UpdatesMatchingNonPrimarySession(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	ctx := context.Background()
@@ -172,6 +206,8 @@ func TestRestoreTaskMessageRollbackIfSessionState_RejectionDoesNotMutateCandidat
 		candidate,
 		"session-rollback-rejected",
 		models.TaskSessionStateRunning,
+		v1.TaskStateInProgress,
+		"current-step",
 	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
@@ -215,6 +251,8 @@ func TestRestoreTaskMessageRollbackIfSessionState_RestoresFieldsAndRunner(t *tes
 		candidate,
 		"session-rollback-success",
 		models.TaskSessionStateRunning,
+		v1.TaskStateInProgress,
+		"current-step",
 	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)

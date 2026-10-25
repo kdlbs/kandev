@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/mcp-tool-argument-validation.md
+spec: docs/specs/integrations/requirements/mcp-tool-argument-validation.md
 created: 2026-08-03
 status: done
 ---

@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-backend-title-lifecycle", "02-mcp-title-tool"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 03: Settings and task/subtask dialogs

@@ -1,20 +1,19 @@
 /** Section IDs used for both display and persistence keys in the AppSidebar. */
 export const APP_SIDEBAR_SECTION_IDS = {
   tasks: "tasks",
+  coordinators: "coordinators",
   automations: "automations",
   officeWork: "office-work",
   officeWorkspace: "office-workspace",
   projects: "projects",
   agents: "agents",
   integrations: "integrations",
+  canvases: "canvases",
   settings: "settings",
 } as const;
 
 export type AppSidebarSectionId =
   (typeof APP_SIDEBAR_SECTION_IDS)[keyof typeof APP_SIDEBAR_SECTION_IDS];
-
-export const APP_SIDEBAR_EXPANDED_WIDTH = 320;
-export const APP_SIDEBAR_COLLAPSED_WIDTH = 56;
 
 /**
  * Shared active/inactive classes for sidebar nav rows. The active state uses a

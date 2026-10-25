@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workflow-cycle-guardrails/spec.md
+spec: docs/specs/tasks/requirements/workflow-cycle-guardrails.md
 created: 2026-07-15
 status: complete
 ---

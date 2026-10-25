@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/acp-model-configuration-summary.md
+spec: docs/specs/ui/requirements/acp-model-configuration-summary.md
 decision: docs/decisions/2026-07-18-turn-configuration-snapshots.md
 created: 2026-07-18
 status: implemented

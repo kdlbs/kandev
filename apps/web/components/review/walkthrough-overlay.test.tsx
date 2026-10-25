@@ -264,7 +264,7 @@ describe("WalkthroughOverlay fine-pointer discard confirmation", () => {
 describe("WalkthroughOverlay coarse-pointer discard confirmation", () => {
   beforeEach(resetOverlayMocks);
 
-  it("morphs coarse-pointer discard into local touch actions", async () => {
+  it("shows a named phone sheet without replacing the walkthrough launcher", async () => {
     vi.mocked(useResponsiveBreakpoint).mockReturnValue(responsive(false));
     vi.mocked(getTaskWalkthrough).mockResolvedValue(walkthrough());
     renderOverlay();
@@ -274,11 +274,14 @@ describe("WalkthroughOverlay coarse-pointer discard confirmation", () => {
     fireEvent.click(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
 
     const confirmation = await screen.findByTestId(DISCARD_CONFIRMATION_TEST_ID);
+    expect(screen.getByRole("dialog").getAttribute("data-slot")).toBe("drawer-content");
+    expect(confirmation.textContent).toContain("Walkthrough");
+    expect(screen.getByTestId(DISCARD_BUTTON_TEST_ID).isConnected).toBe(true);
     expect(confirmation.getAttribute("role")).toBe("group");
     expect(screen.queryByRole(ALERT_DIALOG_ROLE)).toBeNull();
     expect(
       within(confirmation).getByRole("button", { name: DISCARD_BUTTON_NAME }).className,
-    ).toContain("h-11");
+    ).toContain("min-h-12");
   });
 
   it("restores focus to the coarse-pointer discard button after cancel", async () => {
@@ -301,7 +304,9 @@ describe("WalkthroughOverlay coarse-pointer discard confirmation", () => {
     );
     act(() => runAnimationFrame?.(0));
 
-    expect(document.activeElement).toBe(screen.getByTestId(DISCARD_BUTTON_TEST_ID));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByTestId(DISCARD_BUTTON_TEST_ID)),
+    );
   });
 });
 

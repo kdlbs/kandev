@@ -9,6 +9,7 @@ function makeHost(setIntegrationEnabled: PluginHostApi["setIntegrationEnabled"])
     pluginId: "plugin-a",
     React: {} as PluginHostApi["React"],
     jsx: {} as PluginHostApi["jsx"],
+    conversation: {} as PluginHostApi["conversation"],
     store: {
       getState: () => ({}) as never,
       setState: () => {},
@@ -87,5 +88,53 @@ describe("generationFencedHost integration state", () => {
       "workspace-1",
       true,
     );
+  });
+
+  it("returns inert conversation capabilities after generation revocation", async () => {
+    let current = true;
+    const host = makeHost(vi.fn() as PluginHostApi["setIntegrationEnabled"]);
+    const loadMore = vi.fn(async () => 1);
+    const retry = vi.fn();
+    host.conversation = {
+      useSessionMessages: () => ({
+        messages: [{ id: "message-1" }] as never,
+        loading: false,
+        hydrated: true,
+        loadingMore: false,
+        error: null,
+        hasMore: true,
+        removed: false,
+        loadMore,
+        retry,
+      }),
+      useSessionTurns: () => ({
+        turns: [{ id: "turn-1" }] as never,
+        loading: false,
+        hydrated: true,
+        error: null,
+        removed: false,
+        retry,
+      }),
+      useMessageFavorite: () => true,
+    };
+    const fenced = generationFencedHost(
+      host,
+      () => current,
+      new PluginLoadResources(host.pluginId),
+    );
+
+    expect(
+      fenced.conversation.useSessionMessages({ sessionId: "session-1" }).messages,
+    ).toHaveLength(1);
+    current = false;
+    const staleMessages = fenced.conversation.useSessionMessages({ sessionId: "session-1" });
+    const staleTurns = fenced.conversation.useSessionTurns("session-1");
+
+    expect(staleMessages.messages).toEqual([]);
+    expect(await staleMessages.loadMore()).toBe(0);
+    staleMessages.retry();
+    staleTurns.retry();
+    expect(retry).not.toHaveBeenCalled();
+    expect(fenced.conversation.useMessageFavorite("session-1", "message-1")).toBe(false);
   });
 });

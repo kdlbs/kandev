@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/executor-settings-card-spacing.md
+spec: docs/specs/ui/requirements/executor-settings-card-spacing.md
 created: 2026-08-03
 status: complete
 ---

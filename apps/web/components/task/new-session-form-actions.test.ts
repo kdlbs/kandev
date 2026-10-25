@@ -9,6 +9,16 @@ const mockLaunchSession = vi.fn();
 const mockBuildStartRequest = vi.fn();
 const mockToMessageAttachments = vi.fn();
 const mockHasPendingAttachmentUploads = vi.fn();
+const mockApplyAgentProfileRecentUse = vi.fn();
+const mockRecordRecentUse = vi.fn();
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: {
+      applyAgentProfileRecentUse: typeof mockApplyAgentProfileRecentUse;
+    }) => unknown,
+  ) => selector({ applyAgentProfileRecentUse: mockApplyAgentProfileRecentUse }),
+}));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: Parameters<typeof mockLaunchSession>) => mockLaunchSession(...args),
@@ -24,6 +34,10 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
     mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: (...args: Parameters<typeof mockToMessageAttachments>) =>
     mockToMessageAttachments(...args),
+}));
+
+vi.mock("@/lib/agent-profile-recent-use", () => ({
+  recordAgentProfileRecentUseBestEffort: (...args: unknown[]) => mockRecordRecentUse(...args),
 }));
 
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
@@ -253,6 +267,8 @@ describe("useSessionLaunchSubmit", () => {
     });
     mockToMessageAttachments.mockReturnValue(MESSAGE_ATTACHMENTS);
     mockLaunchSession.mockResolvedValue({ session_id: SESSION_ID });
+    mockRecordRecentUse.mockReset();
+    mockApplyAgentProfileRecentUse.mockReset();
   });
 
   it("creates a session and activates it with the typed prompt", async () => {
@@ -307,8 +323,50 @@ describe("useSessionLaunchSubmit", () => {
       mockSetActiveSession,
     );
     expect(mockOnClose).toHaveBeenCalled();
+    expect(mockRecordRecentUse).toHaveBeenCalledWith(
+      "task_session",
+      PROFILE_ID,
+      expect.any(Function),
+    );
     expect(mockSetIsCreating).toHaveBeenNthCalledWith(1, true);
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
+  });
+
+  it("passes session MCP additions to the launch request", async () => {
+    const promptRef = createPromptRef("hello");
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn();
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        mcpServerIds: ["mcp-server-1"],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      TASK_ID,
+      PROFILE_ID,
+      expect.objectContaining({ mcpServerIds: ["mcp-server-1"] }),
+    );
   });
 
   it("marks the picker profile explicit and labels the tab from the effective response profile", async () => {
@@ -355,6 +413,11 @@ describe("useSessionLaunchSubmit", () => {
       AGENT_PROFILE_B.label,
       undefined,
       mockSetActiveSession,
+    );
+    expect(mockRecordRecentUse).toHaveBeenCalledWith(
+      "task_session",
+      AGENT_PROFILE_B.id,
+      expect.any(Function),
     );
   });
 
@@ -518,6 +581,7 @@ describe("useSessionLaunchSubmit", () => {
       description: "launch failed",
       variant: "error",
     });
+    expect(mockRecordRecentUse).not.toHaveBeenCalled();
     expect(mockActivateSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });

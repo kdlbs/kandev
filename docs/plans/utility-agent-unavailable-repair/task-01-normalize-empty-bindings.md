@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agents/utility-agent-profiles.md"
+spec: "../../specs/agents/requirements/utility-agent-profiles.md"
 ---
 
 # Task 01: Normalize empty utility bindings
@@ -33,7 +33,7 @@ Repair legacy built-in rows before changing the settings save path.
 - **Dependencies:** None.
 - **Parallelism:** sequential.
 - **Inputs:** The legacy migration, failure-mode, persistence, and scenario sections in
-  `docs/specs/agents/utility-agent-profiles.md`, plus
+  `docs/specs/agents/requirements/utility-agent-profiles.md`, plus
   ADR-2026-08-12-empty-utility-bindings-inherit-default.
 - **Output contract:** Report files changed, the RED and GREEN test commands and results, idempotency
   evidence, preserved stale/custom behavior, and synchronized task/plan status.

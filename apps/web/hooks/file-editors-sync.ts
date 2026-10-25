@@ -10,6 +10,19 @@ import { updatePanelAfterSave } from "./use-file-save-delete";
 import type { FileInfo } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 
+function buildChangeFacetSignature(facet: FileInfo["staged_change"]): string {
+  if (!facet) return "";
+  return [
+    facet.status,
+    facet.is_symlink ?? "",
+    facet.additions ?? 0,
+    facet.deletions ?? 0,
+    facet.old_path ?? "",
+    facet.diff ?? "",
+    facet.diff_skip_reason ?? "",
+  ].join("\0");
+}
+
 /**
  * Builds a stable signature string from a file's git status entry. The hook
  * compares signatures across renders to decide whether the editor's content
@@ -19,11 +32,14 @@ export function buildGitFileSignature(file: FileInfo | undefined): string {
   if (!file) return "__clean__";
   return [
     file.status ?? "",
+    file.is_symlink ?? "",
     file.staged ? "1" : "0",
     String(file.additions ?? 0),
     String(file.deletions ?? 0),
     file.old_path ?? "",
     file.diff ?? "",
+    buildChangeFacetSignature(file.staged_change),
+    buildChangeFacetSignature(file.unstaged_change),
   ].join("|");
 }
 
@@ -34,7 +50,38 @@ export type SyncOpenFileArgs = {
   path: string;
   repo?: string;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  isCurrent: () => boolean;
 };
+
+const pendingRefreshes = new Map<string, symbol>();
+
+function captureRefreshOwner({ fileKey, path, repo, isCurrent }: SyncOpenFileArgs) {
+  const { api, openFiles } = useDockviewStore.getState();
+  const instanceId = openFiles.get(fileKey)?.instanceId;
+  const readBuffer = () => {
+    if (!isCurrent()) return;
+    const state = useDockviewStore.getState();
+    const file = state.openFiles.get(fileKey);
+    if (
+      state.api !== api ||
+      !instanceId ||
+      file?.instanceId !== instanceId ||
+      file.path !== path ||
+      file.repo !== repo
+    )
+      return;
+    return file;
+  };
+  if (!readBuffer()) return;
+  const token = Symbol();
+  pendingRefreshes.set(fileKey, token);
+  return {
+    readCurrent: () => (pendingRefreshes.get(fileKey) === token ? readBuffer() : undefined),
+    release: () => {
+      if (pendingRefreshes.get(fileKey) === token) pendingRefreshes.delete(fileKey);
+    },
+  };
+}
 
 /**
  * Re-fetches file content from the workspace and reconciles it with the open
@@ -46,68 +93,85 @@ export type SyncOpenFileArgs = {
  *  - Dirty buffer with different remote content: surfaces a "Reload" affordance
  *    via `hasRemoteUpdate` so the user explicitly chooses to clobber edits.
  */
-export async function syncOpenFileFromWorkspace({
-  client,
-  sessionId,
-  fileKey,
-  path,
-  repo,
-  updateFileState,
-}: SyncOpenFileArgs): Promise<void> {
-  if (!client) return;
+export async function syncOpenFileFromWorkspace(args: SyncOpenFileArgs): Promise<void> {
+  if (!args.client) return;
+  const owner = captureRefreshOwner(args);
+  if (!owner) return;
   try {
-    const response = await requestFileContent(client, sessionId, path, repo);
-    const latest = useDockviewStore.getState().openFiles.get(fileKey);
-    if (!latest) return;
-    // The tab may have been swapped to a different repo's file at the same path
-    // key while the fetch was in flight; the response is then for the old repo.
-    // Drop it rather than writing stale content into the new buffer.
-    if (latest.repo !== repo) return;
+    const response = await requestFileContent(args.client, args.sessionId, args.path, args.repo);
+    if (!owner.readCurrent()) return;
     const remoteHash = await calculateHash(response.content);
-
-    if (latest.isDirty) {
-      if (response.content === latest.content) {
-        updateFileState(fileKey, {
-          originalContent: response.content,
-          originalHash: remoteHash,
-          isDirty: false,
-          hasRemoteUpdate: false,
-          remoteContent: undefined,
-          remoteOriginalHash: undefined,
-        });
-        updatePanelAfterSave(path, latest.name, latest.repo);
-        return;
-      }
-      if (latest.hasRemoteUpdate && latest.remoteContent === response.content) return;
-      updateFileState(fileKey, {
-        hasRemoteUpdate: true,
-        remoteContent: response.content,
-        remoteOriginalHash: remoteHash,
-      });
-      return;
-    }
-
-    if (
-      latest.content === response.content &&
-      latest.originalHash === remoteHash &&
-      !latest.hasRemoteUpdate
-    ) {
-      return;
-    }
-
-    updateFileState(fileKey, {
-      content: response.content,
-      originalContent: response.content,
-      originalHash: remoteHash,
-      isDirty: false,
-      isBinary: response.is_binary,
-      hasRemoteUpdate: false,
-      remoteContent: undefined,
-      remoteOriginalHash: undefined,
-    });
+    publishWorkspaceContent(args, response, remoteHash, owner.readCurrent);
   } catch {
     // Ignore sync failures; user can continue editing.
+  } finally {
+    owner.release();
   }
+}
+
+function publishWorkspaceContent(
+  { fileKey, path, updateFileState }: SyncOpenFileArgs,
+  response: Awaited<ReturnType<typeof requestFileContent>>,
+  remoteHash: string,
+  readCurrent: () => FileEditorState | undefined,
+) {
+  const latest = readCurrent();
+  if (!latest) return;
+  const workspaceSnapshot = { content: response.content, hash: remoteHash };
+  if (latest.isDirty) {
+    if (response.content === latest.content) {
+      updateFileState(fileKey, {
+        workspaceSnapshot,
+        acceptedWorkspaceSnapshot: workspaceSnapshot,
+        resolvedPath: response.resolved_path,
+        originalContent: response.content,
+        originalHash: remoteHash,
+        isDirty: false,
+        hasRemoteUpdate: false,
+        remoteContent: undefined,
+        remoteOriginalHash: undefined,
+      });
+      if (readCurrent()) updatePanelAfterSave(path, latest.name, latest.repo);
+      return;
+    }
+    if (
+      latest.hasRemoteUpdate &&
+      latest.remoteContent === response.content &&
+      latest.resolvedPath === response.resolved_path
+    )
+      return;
+    updateFileState(fileKey, {
+      workspaceSnapshot,
+      resolvedPath: response.resolved_path,
+      hasRemoteUpdate: true,
+      remoteContent: response.content,
+      remoteOriginalHash: remoteHash,
+    });
+    return;
+  }
+
+  if (
+    latest.content === response.content &&
+    latest.originalHash === remoteHash &&
+    latest.resolvedPath === response.resolved_path &&
+    !latest.hasRemoteUpdate
+  ) {
+    return;
+  }
+
+  updateFileState(fileKey, {
+    workspaceSnapshot,
+    acceptedWorkspaceSnapshot: workspaceSnapshot,
+    resolvedPath: response.resolved_path,
+    content: response.content,
+    originalContent: response.content,
+    originalHash: remoteHash,
+    isDirty: false,
+    isBinary: response.is_binary,
+    hasRemoteUpdate: false,
+    remoteContent: undefined,
+    remoteOriginalHash: undefined,
+  });
 }
 
 export type OpenFileWorkspaceSyncParams = {
@@ -115,6 +179,7 @@ export type OpenFileWorkspaceSyncParams = {
   openFiles: Map<string, FileEditorState>;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
   gitFileSignaturesRef: React.MutableRefObject<Map<string, string>>;
 };
 
@@ -129,6 +194,7 @@ export function useOpenFileWorkspaceSync({
   openFiles,
   updateFileState,
   activeSessionIdRef,
+  activeEditorVisitRef,
   gitFileSignaturesRef,
 }: OpenFileWorkspaceSyncParams) {
   useEffect(() => {
@@ -141,7 +207,8 @@ export function useOpenFileWorkspaceSync({
   useEffect(() => {
     const client = getWebSocketClient();
     const sessionId = activeSessionIdRef.current;
-    if (!client || !sessionId) return;
+    const visit = activeEditorVisitRef.current;
+    if (!client || !sessionId || !visit) return;
 
     const gitFiles = gitStatus?.files ?? {};
     const sigMap = gitFileSignaturesRef.current;
@@ -166,7 +233,16 @@ export function useOpenFileWorkspaceSync({
         path: file.path,
         repo: file.repo,
         updateFileState,
+        isCurrent: () =>
+          activeSessionIdRef.current === sessionId && activeEditorVisitRef.current === visit,
       });
     }
-  }, [gitStatus, openFiles, updateFileState, activeSessionIdRef, gitFileSignaturesRef]);
+  }, [
+    gitStatus,
+    openFiles,
+    updateFileState,
+    activeSessionIdRef,
+    activeEditorVisitRef,
+    gitFileSignaturesRef,
+  ]);
 }

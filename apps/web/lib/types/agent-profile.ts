@@ -29,6 +29,7 @@ export type CLIFlag = {
 export type BillingType = "api_key" | "subscription";
 
 export type AgentProfileKind = "concrete" | "dynamic";
+export type MCPSelectionMode = "inherit" | "selected";
 
 export type DynamicErrorClass = "transient" | "hard";
 export type DynamicPolicyOutcome = "skip" | "stop";
@@ -50,10 +51,16 @@ export type DynamicErrorPolicy = {
   onExhausted: DynamicPolicyOutcome;
 };
 
+export type DynamicUnclassifiedPolicy = {
+  enabled: boolean;
+  consecutiveFailureThreshold: number;
+};
+
 export type DynamicAgentPolicy = {
   version: number;
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
+  unclassified: DynamicUnclassifiedPolicy;
 };
 
 export type DynamicAgentCandidate = {
@@ -120,6 +127,8 @@ export type AgentProfile = {
    * on, the fallbackModel field is hidden/ignored.
    */
   autoFallback?: boolean;
+  /** Require the configured model to be advertised and applied before prompting. */
+  requireExactModel?: boolean;
   /** Optional ACP session mode applied via `session/set_mode`. */
   mode?: string;
   /** Dynamic ACP session config options applied via `session/set_config_option`. */
@@ -136,9 +145,33 @@ export type AgentProfile = {
    * Shell-tokenised; empty means the agent runs directly.
    */
   commandPrefix?: string;
+  /**
+   * Provider routing. "" / "native" keeps the agent CLI's own provider
+   * configuration; "openai_compatible" makes Kandev inject providerBaseUrl and
+   * the key behind providerApiKeySecretId into the agent (9router, LiteLLM,
+   * vLLM, self-hosted OpenRouter, ...).
+   */
+  providerKind?: string;
+  /** Absolute http(s) endpoint root of the OpenAI-compatible provider. */
+  providerBaseUrl?: string;
+  /** Kandev global secret ID holding the provider bearer key. Never returned. */
+  providerApiKeySecretId?: string;
+  /**
+   * Computed at read time: true when this profile's agent advertises
+   * OpenAI-compatible provider support. Not persisted; never sent back.
+   */
+  providerSupported?: boolean;
   /** Environment variables injected when this profile starts an agent session. */
   envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
+  /** Reuse locally stored Cursor MCP OAuth credentials when this profile launches. */
+  cursorMcpAuthEnabled?: boolean;
+  /** Import local Cursor plugin MCP servers when this profile launches. */
+  cursorPluginsMcpEnabled?: boolean;
+  /** Use all imported MCP servers or only the profile's selected native IDs. */
+  mcpSelectionMode?: MCPSelectionMode;
+  /** Exact native MCP server IDs selected when mcpSelectionMode is selected. */
+  mcpSelectedServers?: string[];
   /**
    * False hides the profile from task/session creation pickers. Existing
    * sessions keep running and the profile stays editable in settings.
@@ -192,7 +225,10 @@ export type OfficeAgentProfile = AgentProfile &
       AgentProfile,
       "workspaceId" | "role" | "status" | "budgetMonthlyCents" | "maxConcurrentSessions"
     >
-  >;
+  > & {
+    /** Dynamic profile selected as this Office agent's authoritative execution route. */
+    executionAgentProfileId?: string;
+  };
 
 /**
  * Snake_case wire shape for HTTP request bodies sent to `POST/PATCH
@@ -211,14 +247,23 @@ export type AgentProfilePayload = {
   model: string;
   fallback_model?: string;
   auto_fallback?: boolean;
+  require_exact_model?: boolean;
   mode?: string;
   config_options?: Record<string, string>;
   allow_indexing: boolean;
   auto_approve: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  provider_kind?: string;
+  provider_base_url?: string;
+  provider_api_key_secret_id?: string;
+  provider_supported?: boolean;
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: MCPSelectionMode;
+  mcp_selected_servers?: string[];
   enabled?: boolean;
   user_modified?: boolean;
   created_at: string;
@@ -254,6 +299,10 @@ export type AgentProfilePayload = {
             max_wait_seconds: number;
           };
           on_exhausted: DynamicPolicyOutcome;
+        };
+        unclassified: {
+          enabled: boolean;
+          consecutive_failure_threshold: number;
         };
       };
       rules?: Record<string, string>;

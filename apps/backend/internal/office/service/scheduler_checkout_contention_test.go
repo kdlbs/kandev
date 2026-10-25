@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
@@ -42,7 +44,7 @@ func TestSchedulerTick_ContendedCheckoutRequeuesRun(t *testing.T) {
 		t.Fatalf("seed checkout: ok=%v err=%v", ok, err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-contended-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -230,7 +232,7 @@ func TestSchedulerTick_StaleContendedRunDoesNotStealADifferentAgentsLiveCheckout
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var staleRun models.Run
+	var staleRun runsmodels.Run
 	found := false
 	for _, r := range runs {
 		if r.ID == "run-stale-contended" {

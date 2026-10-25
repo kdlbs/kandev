@@ -559,21 +559,6 @@ func (c *MockClient) GetRepoFileContent(
 	return content, nil
 }
 
-func (c *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := []*Issue{}
-	for _, i := range c.issues {
-		out = append(out, i)
-	}
-	return out, nil
-}
-
-func (c *MockClient) ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
-	issues, _ := c.ListIssues(ctx, filter, customQuery)
-	return &IssueSearchPage{Issues: issues, TotalCount: len(issues), Page: page, PerPage: perPage}, nil
-}
-
 func (c *MockClient) SearchMRs(context.Context, string, string) ([]*MR, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { createRecentUseProfiles, seedTaskSessionRecency } from "./new-session-recency-helpers";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PROMPT_NAME = "e2e-new-agent-prompt";
@@ -22,7 +25,57 @@ test.describe("New session dialog", () => {
     }
   });
 
-  test("completed sessions replace the composer with a New Agent action", async ({
+  test("uses task-session recency for the Add Agent default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(300_000);
+    const { profileA, profileB } = await createRecentUseProfiles(apiClient);
+
+    try {
+      const { targetTaskId } = await seedTaskSessionRecency({
+        testPage,
+        apiClient,
+        seedData,
+        profileA,
+        profileB,
+      });
+      await testPage.goto(`/t/${targetTaskId}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+      await session.openNewSessionDialog();
+
+      const selector = session.newSessionDialogPage.agentSelector();
+      await expect(selector).toContainText(profileB.name);
+      await selector.click();
+      const options = session.newSessionDialogPage.agentOptions();
+      await expect(options.filter({ hasText: profileB.name })).toHaveCount(1);
+      await expect(options.first()).toContainText(profileB.name);
+      await testPage.keyboard.press("Escape");
+
+      await session.newSessionPromptInput().fill("/e2e:simple-message");
+      await session.newSessionStartButton().click();
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(targetTaskId);
+            return sessions.find((candidate) => candidate.agent_profile_id === profileB.id)
+              ?.agent_profile_id;
+          },
+          { timeout: 30_000, message: "Waiting for the recent profile session" },
+        )
+        .toBe(profileB.id);
+    } finally {
+      await apiClient.deleteAgentProfile(profileA.id, true).catch(() => undefined);
+      await apiClient.deleteAgentProfile(profileB.id, true).catch(() => undefined);
+    }
+  });
+
+  test("completed sessions show Resume and New Agent actions", async ({
     testPage,
     apiClient,
     seedData,
@@ -64,7 +117,8 @@ test.describe("New session dialog", () => {
     await expect(session.completedSessionNewAgentButton()).toHaveText("New Agent");
     await expect(session.activeChat().locator(".tiptap.ProseMirror")).not.toBeVisible();
     await expect(session.submitButton()).not.toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveText("Resume");
     await expect(session.recoveryFreshButton()).not.toBeVisible();
 
     await session.completedSessionNewAgentButton().click();
@@ -79,64 +133,6 @@ test.describe("New session dialog", () => {
       })
       .toBe(2);
     await expect(session.sessionTabByText("2")).toBeVisible({ timeout: 15_000 });
-  });
-
-  test("opens dialog from + menu and shows environment info", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-
-    // 1. Create task with first session via API
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "New Session Dialog Task",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // 2. Wait for first session to complete
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[0]?.state ?? "");
-        },
-        { timeout: 30_000, message: "Waiting for first session to finish" },
-      )
-      .toBe(true);
-
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("New Session Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    // Wait for first session's response to be visible (confirms session loaded)
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // 4. Open the + menu and click "New Session"
-    await session.openNewSessionDialog();
-
-    // 5. Verify dialog is visible with environment info
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
-    await expect(session.newSessionEnvironmentInfo()).toBeVisible();
-    await expect(session.newSessionPromptInput()).toBeVisible();
-    await expect(session.newSessionStartButton()).toBeVisible();
   });
 
   test("creates second session and new tab appears", async ({ testPage, apiClient, seedData }) => {
@@ -166,10 +162,11 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    const envBefore = await apiClient.getTaskEnvironment(task.id);
+    expect(envBefore).not.toBeNull();
 
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto(seedData.workflowId);
     const card = kanban.taskCardByTitle("Second Session Tab Task");
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
@@ -183,9 +180,23 @@ test.describe("New session dialog", () => {
       timeout: 15_000,
     });
 
-    // 4. Open the new session dialog
-    await session.openNewSessionDialog();
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+    await test.step("+ dropdown lists sessions with status and primary indicators", async () => {
+      await session.addPanelButton().click();
+      const sessionItems = session.sessionReopenItems();
+      await expect(sessionItems.first()).toBeVisible({ timeout: 5_000 });
+      await expect(sessionItems.first()).toContainText("#1");
+      await expect(testPage.getByText("Agents", { exact: true })).toBeVisible();
+      await testPage.keyboard.press("Escape");
+      await expect(sessionItems.first()).not.toBeVisible();
+    });
+
+    await test.step("opens dialog from + menu and shows environment info", async () => {
+      await session.openNewSessionDialog();
+      await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+      await expect(session.newSessionEnvironmentInfo()).toBeVisible();
+      await expect(session.newSessionPromptInput()).toBeVisible();
+      await expect(session.newSessionStartButton()).toBeVisible();
+    });
 
     // 5. Fill in prompt and submit
     await session.newSessionPromptInput().fill("/e2e:simple-message");
@@ -204,6 +215,89 @@ test.describe("New session dialog", () => {
     // 9. Verify the backend has two sessions
     const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
     expect(allSessions).toHaveLength(2);
+
+    await test.step("second session reuses same task environment", async () => {
+      await expect
+        .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+          timeout: 30_000,
+          message: "Waiting for second session to appear",
+        })
+        .toBe(2);
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      const envAfter = await apiClient.getTaskEnvironment(task.id);
+      expect(envAfter).not.toBeNull();
+      expect(envAfter!.id).toBe(envBefore!.id);
+      for (const current of sessions) {
+        expect(current.task_environment_id).toBe(envBefore!.id);
+      }
+    });
+  });
+
+  test("starts a second session with a staged attachment", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const prompt = "/e2e:simple-message";
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "New Session Attachment Task",
+      seedData.agentProfileId,
+      {
+        description: prompt,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for first session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.openNewSessionDialog();
+
+    fs.mkdirSync(testInfo.outputDir, { recursive: true });
+    const attachmentPath = path.join(testInfo.outputDir, "new-session-note.txt");
+    fs.writeFileSync(attachmentPath, "new session attachment body");
+    const dialog = session.newSessionDialog();
+    await dialog.locator('input[type="file"]').setInputFiles(attachmentPath);
+    await expect(dialog.getByText("new-session-note.txt", { exact: true })).toBeVisible();
+    await session.newSessionPromptInput().fill(prompt);
+    await session.newSessionStartButton().click();
+    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+    let secondSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const second = sessions.find((candidate) => candidate.id !== task.session_id);
+          secondSessionId = second?.id ?? "";
+          return DONE_STATES.includes(second?.state ?? "");
+        },
+        { timeout: 30_000, message: "Waiting for attached New Agent session" },
+      )
+      .toBe(true);
+
+    const { messages } = await apiClient.listSessionMessages(secondSessionId);
+    const userMessage = messages.find(
+      (message) => message.author_type === "user" && message.content.includes(prompt),
+    );
+    const attachments = userMessage?.metadata?.attachments;
+    expect(Array.isArray(attachments) ? attachments[0] : undefined).toMatchObject({
+      name: "new-session-note.txt",
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(
+      session.activeChat().getByText("new-session-note.txt", { exact: true }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("selects a saved prompt without submitting, then launches explicitly", async ({
@@ -265,82 +359,6 @@ test.describe("New session dialog", () => {
       .toBe(2);
   });
 
-  test("second session reuses same task environment", async ({ testPage, apiClient, seedData }) => {
-    test.setTimeout(120_000);
-
-    // 1. Create task with first session via API
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Env Reuse Dialog Task",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-
-    // 2. Wait for first session to complete
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[0]?.state ?? "");
-        },
-        { timeout: 30_000, message: "Waiting for first session to finish" },
-      )
-      .toBe(true);
-
-    // Capture the environment created by first session
-    const envBefore = await apiClient.getTaskEnvironment(task.id);
-    expect(envBefore).not.toBeNull();
-
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Env Reuse Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // 4. Create second session via the dialog
-    await session.openNewSessionDialog();
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
-    await session.newSessionPromptInput().fill("/e2e:simple-message");
-    await session.newSessionStartButton().click();
-    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
-
-    // 5. Wait for second session to complete
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.length;
-        },
-        { timeout: 30_000, message: "Waiting for second session to appear" },
-      )
-      .toBe(2);
-
-    // 6. Verify both sessions share the same task environment
-    const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
-    const envAfter = await apiClient.getTaskEnvironment(task.id);
-    expect(envAfter).not.toBeNull();
-    expect(envAfter!.id).toBe(envBefore!.id);
-
-    // Both sessions should reference the same environment
-    for (const s of allSessions) {
-      expect(s.task_environment_id).toBe(envBefore!.id);
-    }
-  });
-
   test("dialog cancel does not create a session", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
@@ -368,95 +386,46 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Cancel Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // 4. Open and cancel the dialog
-    await session.openNewSessionDialog();
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
-
-    // Type something to verify it doesn't accidentally submit
-    await session.newSessionPromptInput().fill("should not create");
-
-    // Click cancel
-    const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
-    await cancelBtn.click();
-
-    // 5. Verify dialog closed and no new session was created
-    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
-
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions).toHaveLength(1);
-  });
-
-  test("+ dropdown lists sessions with status and primary indicators", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(90_000);
-
-    // 1. Create task with first session via API
-    const task = await apiClient.createTaskWithAgent(
+    const { settings: priorSettings } = await apiClient.getUserSettings();
+    const otherWorkflow = await apiClient.createWorkflow(
       seedData.workspaceId,
-      "Session List Task",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
+      "Unrelated dialog workflow",
+      "simple",
     );
+    try {
+      await apiClient.saveUserSettings({ workflow_filter_id: otherWorkflow.id });
 
-    // 2. Wait for first session to complete
-    await expect
-      .poll(
-        async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return DONE_STATES.includes(sessions[0]?.state ?? "");
-        },
-        { timeout: 30_000, message: "Waiting for first session to finish" },
-      )
-      .toBe(true);
+      // 3. Navigate to the task
+      await testPage.goto(`/t/${task.id}`);
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 15_000,
+      });
 
-    const card = kanban.taskCardByTitle("Session List Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      // 4. Open and cancel the dialog
+      await session.openNewSessionDialog();
+      await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
 
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+      // Type something to verify it doesn't accidentally submit
+      await session.newSessionPromptInput().fill("should not create");
 
-    // 4. Open the + dropdown
-    await session.addPanelButton().click();
+      // Click cancel
+      const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
+      await cancelBtn.click();
 
-    // 5. Verify session item is visible with #1 label
-    const sessionItems = session.sessionReopenItems();
-    await expect(sessionItems.first()).toBeVisible({ timeout: 5_000 });
-    await expect(sessionItems.first()).toContainText("#1");
+      // 5. Verify dialog closed and no new session was created
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
 
-    // 6. Verify the "Agents" label is visible
-    const sessionsLabel = testPage.getByText("Agents", { exact: true });
-    await expect(sessionsLabel).toBeVisible();
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      expect(sessions).toHaveLength(1);
+    } finally {
+      await apiClient.saveUserSettings({
+        workflow_filter_id: priorSettings.workflow_filter_id ?? "",
+      });
+      await apiClient.deleteWorkflow(otherWorkflow.id);
+    }
   });
 });

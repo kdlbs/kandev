@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-mcp-creation-and-persistence"]
 plan: "plan.md"
-spec: "../../specs/tasks/remote-contribution-tasks.md"
+spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
 ---
 
 # Task 03: Runtime Contribution Materialization

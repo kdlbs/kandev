@@ -88,6 +88,8 @@ snapshot() {
       failed_checks: $f, pending_checks: $p, passed_check_count: $passed,
       check_count: ($passed + $failed + $pending),
       checks_head_sha: $head, checks_snapshot_complete: $complete,
+      terminal_checks: [],
+      required_status_checks: [], required_status_checks_known: true,
       approval_required_runs: [], unresolved_review_thread_count: 0,
       unresolved_threads: [], hidden_unresolved_threads: [],
       actionable_issue_comment_count: 0, errors: [],
@@ -98,7 +100,7 @@ snapshot() {
 run_await() {
   local dir=$1; shift
   FAKE_DIR="$dir" PR_AWAIT_PR_STATE="$dir/pr-state" PR_AWAIT_GH="$dir/gh" \
-    PR_AWAIT_SLEEP="$dir/sleep" \
+    PR_AWAIT_SLEEP="${PR_AWAIT_SLEEP_OVERRIDE:-$dir/sleep}" \
     PR_AWAIT_JQ="${PROBE_JQ:-$dir/jq-ok}" PR_AWAIT_PROBE_BASH="${PROBE_BASH:-$dir/bash-ok}" \
     "$SCRIPT" "$@"
 }
@@ -107,15 +109,100 @@ assert_json_envelope() {
   local name=$1 json=$2
   jq -e '
     (keys | sort) == [
-      "deadline_sec", "evidence_complete", "exit_code", "head_changes",
-      "interval_sec", "merge_state_status", "mergeable", "message", "mode",
-      "outcome", "polls", "pr", "summary", "toolchain", "waited_sec"
+      "check_count", "deadline_sec", "evidence_complete", "exit_code",
+      "failed_check_count", "finding_reasons", "head_changes", "interval_sec",
+      "merge_state_status", "mergeable", "message", "mode", "neutral_check_count",
+      "outcome", "passed_check_count", "pending_check_count", "polls", "pr",
+      "skipped_check_count", "summary", "toolchain", "waited_sec"
     ]
     and (.pr | type) == "number"
     and (.message == null or (.message | type) == "string")
     and (.summary == null or (.summary | type) == "object")
   ' <<<"$json" >/dev/null || fail "$name" "$json"
 }
+
+# --- final head observation rejects races after the embedded read ----------
+for mode in first-failure all-terminal; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  stale_failed=0; stale_pending=0
+  if [[ "$mode" == first-failure ]]; then
+    stale_failed=1; stale_pending=5
+  fi
+  snapshot "$d" 1 10 "$stale_failed" "$stale_pending" true aaaaaaaaaaaa \
+    '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}}'
+  snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb \
+    '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+  # The push happens after the embedded observation, during trailing reads.
+  printf '%s' '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}' >"$d/gh.json"
+  out="$(run_await "$d" 12 --mode "$mode" --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" == 0 && "$(jq -r '.summary.checks_head_sha' <<<"$out")" == bbbbbbbbbbbb ]] \
+    || fail "$mode must reject evidence superseded after the embedded observation" "$out"
+  pass "$mode rechecks the live head before trusting stopping evidence"
+done
+
+# --- pending polls reuse metadata; terminal polls recheck the live head -----
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"aaaaaaaaaaaa"}}'
+cp "$d/seq/1.json" "$d/seq/2.json"
+snapshot "$d" 3 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"aaaaaaaaaaaa"}}'
+cat >"$d/gh" <<'PENDINGGH'
+#!/usr/bin/env bash
+[[ "$(cat "$FAKE_DIR/counter")" -ge 3 ]] || exit 1
+printf 'called\n' >> "$FAKE_DIR/gh-calls"
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}'
+PENDINGGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "pending polls must work without a second API, got $rc" "$out"
+[[ "$(wc -l <"$d/gh-calls" | tr -d ' ')" == 2 ]] || fail "only terminal polls should recheck the head"
+[[ "$(jq -r '.polls' <<<"$out")" == 4 ]] || fail "embedded state must retain terminal confirmation" "$out"
+pass "pending polls avoid the extra API; terminal polls retain confirmation"
+
+# --- embedded metadata cannot make stale failures actionable ---------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 1 5 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+printf '%s' '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}' >"$d/gh.json"
+out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 && "$(jq -r '.summary.checks_head_sha' <<<"$out")" == bbbbbbbbbbbb ]] \
+  || fail "embedded state must discard the old head's failure" "$out"
+pass "embedded metadata discards superseded check evidence"
+
+# --- malformed embedded state uses the existing fail-closed fallback -------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":""}}'
+cat >"$d/gh" <<'UNAVAILABLEGH'
+#!/usr/bin/env bash
+exit 1
+UNAVAILABLEGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "malformed metadata and failed fallback must block" "$out"
+pass "malformed embedded metadata cannot prove the PR clean"
+
+for pr_status in CLOSED MERGED; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  merge_extra="$(jq -nc --arg state "$pr_status" '{merge_state:{state:$state,mergeable:"UNKNOWN",mergeStateStatus:"UNKNOWN",headRefOid:"aaaaaaaaaaaa"}}')"
+  snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa "$merge_extra"
+  out="$(run_await "$d" 12 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" == 3 && "$(jq -r '.outcome' <<<"$out")" == blocked-pr-state ]] \
+    || fail "embedded $pr_status state must stop even with pending checks" "$out"
+done
+pass "embedded closed and merged states stop monitoring"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","headRefOid":"aaaaaaaaaaaa"}}'
+printf '%s' '{"state":"OPEN","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","headRefOid":"aaaaaaaaaaaa"}' >"$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" == 1 && "$(jq -r '.mergeable' <<<"$out")" == CONFLICTING ]] \
+  || fail "embedded merge conflicts must remain findings" "$out"
+pass "embedded merge conflicts cannot become clean"
 
 # --- argument validation ---------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -175,8 +262,8 @@ snapshot "$d" 1 20 0 0 false
 snapshot "$d" 2 20 0 0 true
 out="$(run_await "$d" 12 --interval-sec 1 2>"$d/err")" && rc=0 || rc=$?
 [[ "$rc" -eq 0 ]] || fail "expected 0 after snapshot completed, got $rc" "$out"
-grep -q '2 poll' <<<"$out" || fail "should have polled twice, not stopped on the incomplete snapshot" "$out"
-pass "checks_snapshot_complete=false keeps waiting"
+grep -q '3 poll' <<<"$out" || fail "should confirm the terminal rollup after the incomplete snapshot" "$out"
+pass "checks_snapshot_complete=false and the first terminal snapshot keep waiting"
 
 # --- deadline ---------------------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -186,6 +273,50 @@ out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet 2>/dev/null)"
 grep -q 'STILL PENDING' <<<"$out" || fail "deadline should name pending checks" "$out"
 grep -q 'Pending 0' <<<"$out" || fail "deadline should list check names" "$out"
 pass "deadline exits 2 and names the pending checks"
+
+# --- strict-deadline holds a fixed-duration request after terminal CI --------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat >"$d/slow-sleep" <<'SLOWSLEEP'
+#!/usr/bin/env bash
+printf 'slept %s\n' "$1" >> "$FAKE_DIR/sleeps"
+/usr/bin/sleep "$1"
+SLOWSLEEP
+chmod +x "$d/slow-sleep"
+out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
+  run_await "$d" 12 --mode strict-deadline --interval-sec 1 --quiet --format json 2>/dev/null)" \
+  && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "strict-deadline clean terminal should exit 0, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'strict-terminal' ]] \
+  || fail "strict-deadline should report its fixed-duration terminal outcome" "$out"
+[[ "$(jq -r '.mode' <<<"$out")" == 'strict-deadline' ]] \
+  || fail "strict-deadline mode should be recorded" "$out"
+[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -ge 1 ]] \
+  || fail "strict-deadline should wait after terminal evidence" "$out"
+pass "strict-deadline holds a terminal-clean wait through its requested duration"
+
+# --- strict-deadline returns findings or pending work with distinct statuses -
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 1 0
+cat >"$d/slow-sleep" <<'SLOWSLEEP'
+#!/usr/bin/env bash
+/usr/bin/sleep "$1"
+SLOWSLEEP
+chmod +x "$d/slow-sleep"
+out="$(PR_AWAIT_DEADLINE_SEC=5 PR_AWAIT_SLEEP_OVERRIDE="$d/slow-sleep" \
+  run_await "$d" 12 --mode strict-deadline \
+  --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "strict-deadline terminal findings should exit 1, got $rc" "$out"
+[[ "$(jq -r '.summary.failed_checks | length' <<<"$out")" == '1' ]] \
+  || fail "strict-deadline should preserve terminal findings" "$out"
+pass "strict-deadline reports terminal findings as exit 1"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 0 1
+out="$(PR_AWAIT_DEADLINE_SEC=0 run_await "$d" 12 --mode strict-deadline \
+  --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "strict-deadline pending work should exit 2, got $rc" "$out"
+pass "strict-deadline reports pending work as exit 2"
 
 # --- approval-required is blocked, not green --------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -213,6 +344,16 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 1 ]] || fail "conflict should exit 1, got $rc" "$out"
 grep -q 'resolve the merge conflict' <<<"$out" || fail "conflict should lead the NEXT line" "$out"
 pass "a merge conflict is surfaced even when every check passed"
+
+# --- clean checks can still require human approval --------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED","headRefOid":"aaaaaaaaaaaa"}' > "$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "approval-gated clean checks should exit 0, got $rc" "$out"
+grep -q 'review: REVIEW_REQUIRED' <<<"$out" || fail "wait output should expose the review decision" "$out"
+grep -qi 'human approval is required' <<<"$out" || fail "wait output should distinguish the approval gate" "$out"
+pass "clean checks report the human approval gate without a code failure"
 
 # --- transient pr-state failures recover; sustained ones block --------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -282,8 +423,8 @@ d="$(make_tmp_dir)"; setup_fake "$d"
 for i in 1 2 3 4 5 6 7; do snapshot "$d" "$i" "$i" 0 $((8 - i)); done
 snapshot "$d" 8 20 0 0
 run_await "$d" 12 --interval-sec 1 --quiet >/dev/null 2>&1 || true
-[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 7 ]] || fail "expected 7 internal sleeps" "$(cat "$d/sleeps")"
-pass "eight polls happen inside a single invocation (7 internal sleeps, 0 caller round-trips)"
+[[ "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 8 ]] || fail "expected 8 internal sleeps" "$(cat "$d/sleeps")"
+pass "nine polls happen inside a single invocation (8 internal sleeps, 0 caller round-trips)"
 
 # --- P1: a snapshot carrying errors is never clean ---------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -295,6 +436,36 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 3 ]] || fail "errors in snapshot must not exit 0, got $rc" "$out"
 grep -q 'review_threads' <<<"$out" || fail "should name the failing source" "$out"
 pass "a pr-state snapshot with non-empty errors exits 3, never clean"
+
+# --- rate-limit evidence stops fixed-cadence polling ------------------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"errors":[{"source":"review_threads","message":"HTTP 429 Too Many Requests; Retry-After: 30; X-RateLimit-Reset: 123"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "a rate-limit snapshot should block, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-rate-limit' ]] \
+  || fail "a rate-limit snapshot should have a distinct outcome" "$out"
+grep -q 'Retry-After' <<<"$out" || fail "rate-limit headers should be preserved" "$out"
+[[ ! -e "$d/sleeps" || "$(wc -l < "$d/sleeps" | tr -d ' ')" -eq 0 ]] \
+  || fail "a rate-limit response must stop instead of polling at a fixed cadence"
+assert_json_envelope "rate-limit reports must use the JSON envelope" "$out"
+pass "rate-limit evidence stops polling and preserves retry guidance"
+
+# --- direct merge-state rate limits are detected from stderr ----------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0
+cat >"$d/gh" <<'RATEGH'
+#!/usr/bin/env bash
+printf 'HTTP 403 secondary rate limit; Retry-After: 45\n' >&2
+exit 1
+RATEGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "a direct rate-limit error should block, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-rate-limit' ]] \
+  || fail "a direct rate-limit error should have a distinct outcome" "$out"
+grep -q 'secondary rate limit' <<<"$out" || fail "direct rate-limit stderr should be retained" "$out"
+pass "direct merge-state rate limits are blocked with diagnostic stderr"
 
 # --- P1: a transient error that clears is fine ------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -605,8 +776,8 @@ for i in 1 2 3; do snapshot "$d" "$i" 0 0 0; done
 snapshot "$d" 4 20 0 0
 out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 0 ]] || fail "expected clean once checks appeared, got $rc" "$out"
-grep -q '4 poll' <<<"$out" || fail "must wait for checks to appear, not stop at the empty rollup" "$out"
-pass "an empty check rollup keeps waiting instead of reporting clean"
+grep -q '5 poll' <<<"$out" || fail "must wait for checks to appear and stabilize, not stop at the empty rollup" "$out"
+pass "an empty check rollup keeps waiting until the terminal rollup stabilizes"
 
 d="$(make_tmp_dir)"; setup_fake "$d"
 for i in 1 2 3 4 5; do snapshot "$d" "$i" 0 0 0; done
@@ -625,11 +796,93 @@ pass "a zero-check deadline is distinguished from a deadline with pending checks
 for conclusion in skipped neutral; do
   d="$(make_tmp_dir)"; setup_fake "$d"
   snapshot "$d" 1 0 0 0 true aaaaaaaaaaaa "{\"check_count\":1,\"terminal_conclusions\":[\"$conclusion\"]}"
-  out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
   [[ "$rc" -eq 0 ]] || fail "$conclusion-only check rollup should be terminal, got $rc" "$out"
   [[ "$(jq -r '.outcome' <<<"$out")" == 'terminal' ]] || fail "$conclusion-only rollup should emit terminal" "$out"
 done
 pass "skipped and neutral terminal checks do not look like an empty rollup"
+
+# --- a sparse non-empty rollup is provisional -------------------------------
+# Immediately after a push, GitHub can report a couple of terminal checks
+# before the rest of the required workflows materialize. A non-zero check count
+# must not be treated as proof that the rollup is complete.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 2 0 0 true aaaaaaaaaaaa
+snapshot "$d" 2 45 0 0 true aaaaaaaaaaaa
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "sparse rollup should settle to clean, got $rc" "$out"
+grep -q '45 passed' <<<"$out" || fail "must report the materialized full rollup, not the sparse one" "$out"
+grep -q '3 poll' <<<"$out" || fail "must confirm the expanded rollup before returning" "$out"
+pass "a sparse non-empty rollup stays provisional until the full set stabilizes"
+
+# The set of checks is logical state, not an API-order-sensitive sequence. A
+# reordered response must not reset the terminal confirmation streak.
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 2 0 0 true aaaaaaaaaaaa \
+  '{"successful_checks":[{"name":"check-b","workflow":"ci","status":"completed","conclusion":"success"},{"name":"check-a","workflow":"ci","status":"completed","conclusion":"success"}]}'
+snapshot "$d" 2 2 0 0 true aaaaaaaaaaaa \
+  '{"successful_checks":[{"name":"check-a","workflow":"ci","status":"completed","conclusion":"success"},{"name":"check-b","workflow":"ci","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "reordered terminal checks should settle clean, got $rc" "$out"
+grep -q '2 poll' <<<"$out" || fail "reordered terminal checks should not reset the confirmation streak" "$out"
+pass "terminal rollup fingerprint ignores API ordering"
+
+# --- required contexts prevent an optional-only rollup from becoming clean ---
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 1 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "an optional-only rollup must hit the deadline, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'deadline' ]] || fail "optional-only rollup outcome missing" "$out"
+grep -q 'E2E Tests Passed' <<<"$(jq -r '.summary.pending_checks[].name' <<<"$out")" \
+  || fail "missing required context should remain pending" "$out"
+pass "an optional-only rollup does not become clean while required contexts are absent"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3 4 5; do
+  snapshot "$d" "$i" 1 0 0 true aaaaaaaaaaaa \
+    '{"required_status_checks_known":false}'
+done
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "an unavailable required-status policy should block, got $rc" "$out"
+[[ "$(jq -r '.outcome' <<<"$out")" == 'blocked-required-statuses' ]] \
+  || fail "an unavailable required-status policy should report its blocked outcome" "$out"
+pass "an unavailable required-status policy never becomes clean"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+for i in 1 2 3; do
+  snapshot "$d" "$i" 1 0 0 true aaaaaaaaaaaa \
+    '{"required_status_checks_known":false}'
+done
+snapshot "$d" 4 1 0 0 true aaaaaaaaaaaa
+snapshot "$d" 5 1 0 0 true aaaaaaaaaaaa
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a recovered required-status policy should allow clean, got $rc" "$out"
+grep -q '5 poll' <<<"$out" || fail "policy recovery should be visible in the poll count" "$out"
+pass "a transient required-status policy failure recovers on a later snapshot"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+terminal_required='{"check_count":1,"required_status_checks":["Skipped required"],"required_status_checks_known":true,"terminal_checks":[{"name":"Skipped required","workflow":"ci","status":"completed","conclusion":"skipped"}]}'
+snapshot "$d" 1 0 0 0 true aaaaaaaaaaaa "$terminal_required"
+snapshot "$d" 2 0 0 0 true aaaaaaaaaaaa "$terminal_required"
+out="$(run_await "$d" 12 --interval-sec 1 --deadline-min 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a skipped required context should be terminal, got $rc" "$out"
+grep -q '0 pending' <<<"$out" || fail "a skipped required context must not be synthesized as pending" "$out"
+pass "skipped required contexts remain terminal instead of pending"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 1 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"}]}'
+snapshot "$d" 2 2 0 0 true aaaaaaaaaaaa \
+  '{"required_status_checks":["E2E Tests Passed"],"required_status_checks_known":true,
+    "successful_checks":[{"name":"CodeRabbit","workflow":"review","status":"completed","conclusion":"success"},
+                         {"name":"E2E Tests Passed","workflow":"e2e","status":"completed","conclusion":"success"}]}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "a materialized required context should allow clean, got $rc" "$out"
+grep -q '3 poll' <<<"$out" || fail "required context should settle after it materializes" "$out"
+pass "a required context that materializes allows the terminal verdict"
 
 # --- a base that advanced leaves the merge result untested -----------------
 d="$(make_tmp_dir)"; setup_fake "$d"
@@ -638,6 +891,22 @@ out="$(run_await "$d" 12 --interval-sec 1 --quiet 2>/dev/null)" && rc=0 || rc=$?
 [[ "$rc" -eq 1 ]] || fail "base_advanced_since_head must prevent a clean verdict, got $rc" "$out"
 grep -qi 'base advanced' <<<"$out" || fail "should report the advanced base" "$out"
 pass "an advanced base is reported and prevents a clean verdict"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+skipped_checks="$(jq -nc '[range(10) | {name:("Skipped \(.)"), workflow:"ci", status:"completed", conclusion:"skipped"}]')"
+extra="$(jq -nc --argjson terminal "$skipped_checks" \
+  '{check_count:30, terminal_checks:$terminal, pr:{base_advanced_since_head:true}}')"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa "$extra"
+snapshot "$d" 2 20 0 0 true aaaaaaaaaaaa "$extra"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 1 ]] || fail "advanced-base JSON report should exit 1, got $rc" "$out"
+jq -e '
+  .check_count == 30 and .passed_check_count == 20
+  and .skipped_check_count == 10 and .neutral_check_count == 0
+  and .failed_check_count == 0 and .pending_check_count == 0
+  and (.finding_reasons | index("base_advanced"))
+' <<<"$out" >/dev/null || fail "JSON must expose counts and the advanced-base reason" "$out"
+pass "JSON reports separate check counts and explicit terminal findings"
 
 # --- approval-required must belong to the current head ---------------------
 d="$(make_tmp_dir)"; setup_fake "$d"

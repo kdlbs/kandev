@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["02-frontend-bootstrap-workspace"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 03: E2E — improve tasks land in the dedicated workspace

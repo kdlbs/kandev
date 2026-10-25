@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 01: Scope pending-action clear to the request's own message

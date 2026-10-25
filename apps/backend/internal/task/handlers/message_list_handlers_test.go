@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -29,8 +31,19 @@ type messageListRepo struct {
 
 	listCalls        int
 	paginatedOptions []models.ListMessagesOptions
+	windowOptions    []models.ListMessagesOptions
+	turnWindow       models.MessageTurnWindow
 	searchOptions    []models.SearchMessagesOptions
 	hasMore          bool
+}
+
+func (r *messageListRepo) ReadMessageTurnWindow(
+	_ context.Context,
+	_ string,
+	opts models.ListMessagesOptions,
+) (models.MessageTurnWindow, error) {
+	r.windowOptions = append(r.windowOptions, opts)
+	return r.turnWindow, nil
 }
 
 func (r *messageListRepo) ListMessages(context.Context, string) ([]*models.Message, error) {
@@ -104,10 +117,10 @@ func TestHTTPListMessagesRequiresSessionID(t *testing.T) {
 	require.Zero(t, repo.listCalls)
 }
 
-// TestHTTPListMessagesUsesTheUnpaginatedPathByDefault pins the mode switch:
-// with no cursor, sort or limit the handler must take the plain list, whose
-// response carries no cursor.
-func TestHTTPListMessagesUsesTheUnpaginatedPathByDefault(t *testing.T) {
+// TestHTTPListMessagesDefaultsToABoundedFirstPage pins the mode switch: with
+// no cursor, sort or limit the handler must still take the bounded paginated
+// path (DefaultMessagesPageSize), never the unbounded full-session read.
+func TestHTTPListMessagesDefaultsToABoundedFirstPage(t *testing.T) {
 	repo := &messageListRepo{}
 	h := newMessageListHandlers(t, repo)
 	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages", "sess-b")
@@ -117,11 +130,49 @@ func TestHTTPListMessagesUsesTheUnpaginatedPathByDefault(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp dto.ListMessagesResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 2, resp.Total)
-	require.Equal(t, 1, repo.listCalls)
-	require.Empty(t, repo.paginatedOptions, "the paginated query must not run")
-	require.Empty(t, resp.Cursor)
-	require.False(t, resp.HasMore)
+	require.Zero(t, repo.listCalls, "the unbounded query must not run")
+	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, service.DefaultMessagesPageSize, repo.paginatedOptions[0].Limit)
+}
+
+func TestHTTPListMessagesIncludesWindowTurnContextOnRequest(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageListRepo{turnWindow: models.MessageTurnWindow{
+		Messages: []*models.Message{{ID: "msg-window", TaskSessionID: "sess-b", TurnID: "turn-window"}},
+		Turns: []*models.Turn{{
+			ID: "turn-window", TaskSessionID: "sess-b", TaskID: "task-b",
+			StartedAt: now, CreatedAt: now, UpdatedAt: now,
+		}},
+		Coverage: &models.MessageTurnCoverage{MessageIDs: []string{"msg-window"}, ActiveTurnID: "turn-window"},
+	}}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?limit=20&sort=desc&include_turns=true", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response dto.ListMessagesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Len(t, response.Messages, 1)
+	require.Len(t, response.Turns, 1)
+	require.Equal(t, []string{"msg-window"}, response.TurnCoverage.MessageIDs)
+	require.Equal(t, "turn-window", *response.TurnCoverage.ActiveTurnID)
+	require.Empty(t, repo.paginatedOptions)
+	require.Len(t, repo.windowOptions, 1)
+	require.Equal(t, 20, repo.windowOptions[0].Limit)
+	require.Equal(t, "desc", repo.windowOptions[0].Sort)
+}
+
+func TestHTTPListMessagesRejectsInvalidIncludeTurns(t *testing.T) {
+	repo := &messageListRepo{}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?include_turns=maybe", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Empty(t, repo.windowOptions)
+	require.Empty(t, repo.paginatedOptions)
 }
 
 // TestHTTPListMessagesSwitchesToPaginationOnAnyCursorParam covers each param
@@ -183,23 +234,85 @@ func TestHTTPListMessagesRejectsConflictingAndInvalidParams(t *testing.T) {
 	require.Zero(t, repo.listCalls)
 }
 
-// TestHTTPListMessagesIgnoresAnUnparseableLimit documents the lenient parse:
-// a garbage limit leaves limit at 0 but still selects the paginated path,
-// because the parameter was present.
-func TestHTTPListMessagesIgnoresAnUnparseableLimit(t *testing.T) {
+func TestHTTPListMessagesRejectsInvalidLimits(t *testing.T) {
+	for name, query := range map[string]string{
+		"empty":     "?limit=",
+		"malformed": "?limit=many",
+		"zero":      "?limit=0",
+		"negative":  "?limit=-1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &messageListRepo{}
+			h := newMessageListHandlers(t, repo)
+			c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages"+query, "sess-b")
+
+			h.httpListMessages(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.JSONEq(t, `{"error":"limit must be a positive integer"}`, rec.Body.String())
+			require.Empty(t, repo.paginatedOptions)
+			require.Zero(t, repo.listCalls)
+		})
+	}
+}
+
+func TestHTTPListMessagesRejectsEmptyAroundAndUsesAroundSortError(t *testing.T) {
+	for name, query := range map[string]string{
+		"empty around":   "?around=",
+		"ascending sort": "?around=message&sort=asc",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &messageListRepo{}
+			h := newMessageListHandlers(t, repo)
+			c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages"+query, "sess-b")
+
+			h.httpListMessages(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Zero(t, repo.listCalls)
+			require.Empty(t, repo.paginatedOptions)
+			if name == "empty around" {
+				require.JSONEq(t, `{"error":"around must not be empty"}`, rec.Body.String())
+			} else {
+				require.JSONEq(t, `{"error":"sort must be desc with around"}`, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHTTPListMessagesRejectsUnsupportedAuthorType(t *testing.T) {
 	repo := &messageListRepo{}
 	h := newMessageListHandlers(t, repo)
-	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?limit=many", "sess-b")
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?author_type=agent", "sess-b")
 
 	h.httpListMessages(c)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.JSONEq(t, `{"error":"author_type must be \"user\""}`, rec.Body.String())
+	require.Empty(t, repo.paginatedOptions)
 	require.Zero(t, repo.listCalls)
 }
 
+func TestHTTPListMessagesPassesAuthorFilterAndAround(t *testing.T) {
+	repo := &messageListRepo{hasMore: true}
+	h := newMessageListHandlers(t, repo)
+
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?author_type=user&limit=20", "sess-b")
+	h.httpListMessages(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "user", repo.paginatedOptions[0].AuthorType)
+
+	c, rec = messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?around=msg-2&limit=20&sort=desc", "sess-b")
+	h.httpListMessages(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "msg-2", repo.paginatedOptions[1].Around)
+	var aroundResponse dto.ListMessagesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &aroundResponse))
+	require.False(t, aroundResponse.HasMore)
+}
+
 func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
-	repo := &messageListRepo{listErr: errors.New("database unavailable")}
+	repo := &messageListRepo{paginatedErr: errors.New("database unavailable")}
 	h := newMessageListHandlers(t, repo)
 	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages", "sess-b")
 
@@ -207,6 +320,17 @@ func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.JSONEq(t, `{"error":"failed to list messages"}`, rec.Body.String())
+}
+
+func TestHTTPListMessagesMapsMissingAroundTargetToNotFound(t *testing.T) {
+	repo := &messageListRepo{paginatedErr: taskrepo.ErrMessageNotFound}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?around=gone&limit=20&sort=desc", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.JSONEq(t, `{"error":"message not found"}`, rec.Body.String())
 }
 
 // TestHTTPListMessagesDeniesForeignSession covers the transcript read, which
@@ -291,6 +415,50 @@ func TestWSListMessagesReturnsPageAndCursor(t *testing.T) {
 	require.Len(t, repo.paginatedOptions, 1)
 	require.Equal(t, 10, repo.paginatedOptions[0].Limit)
 	require.Equal(t, "asc", repo.paginatedOptions[0].Sort)
+}
+
+func TestWSListMessagesIncludesWindowTurnContextOnRequest(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageListRepo{turnWindow: models.MessageTurnWindow{
+		Messages: []*models.Message{{ID: "msg-window", TaskSessionID: "sess-b", TurnID: "turn-window"}},
+		Turns: []*models.Turn{{
+			ID: "turn-window", TaskSessionID: "sess-b", TaskID: "task-b",
+			StartedAt: now, CreatedAt: now, UpdatedAt: now,
+		}},
+		Coverage: &models.MessageTurnCoverage{MessageIDs: []string{"msg-window"}},
+	}}
+	h := newMessageListHandlers(t, repo)
+
+	response, err := h.wsListMessages(context.Background(), wsWorkflowRequest(t, ws.ActionMessageList, map[string]any{
+		"session_id": "sess-b", "limit": 20, "sort": "desc", "include_turns": true,
+	}))
+
+	require.NoError(t, err)
+	var page dto.ListMessagesResponse
+	wsWorkflowResponse(t, response, &page)
+	require.Len(t, page.Turns, 1)
+	require.NotNil(t, page.TurnCoverage)
+	require.Nil(t, page.TurnCoverage.ActiveTurnID)
+	require.Len(t, repo.windowOptions, 1)
+	require.Equal(t, 20, repo.windowOptions[0].Limit)
+	require.Empty(t, repo.paginatedOptions)
+}
+
+// TestWSListMessagesDefaultsToABoundedFirstPage mirrors
+// TestHTTPListMessagesDefaultsToABoundedFirstPage for the WebSocket path: a
+// request with no limit/before/after/sort must still bound the query.
+func TestWSListMessagesDefaultsToABoundedFirstPage(t *testing.T) {
+	repo := &messageListRepo{}
+	h := newMessageListHandlers(t, repo)
+
+	resp, err := h.wsListMessages(context.Background(),
+		wsWorkflowRequest(t, ws.ActionMessageList, map[string]any{"session_id": "sess-b"}))
+
+	require.NoError(t, err)
+	var page dto.ListMessagesResponse
+	wsWorkflowResponse(t, resp, &page)
+	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, service.DefaultMessagesPageSize, repo.paginatedOptions[0].Limit)
 }
 
 func TestWSListMessagesSurfacesRepositoryFailure(t *testing.T) {

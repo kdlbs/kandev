@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-detachment", "02-frontend-actions"]
 plan: "plan.md"
-spec: "../../specs/tasks/subtask-detachment.md"
+spec: "../../specs/tasks/requirements/subtask-detachment.md"
 ---
 
 # Task 03: E2E and verification

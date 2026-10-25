@@ -41,6 +41,13 @@ async function sendMessage(dialog: Locator, text: string) {
 }
 
 test.describe("Configuration Chat", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("config-chat-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
   test.beforeEach(async ({ apiClient, seedData }) => {
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_config_agent_profile_id: seedData.agentProfileId,
@@ -140,6 +147,19 @@ test.describe("Configuration Chat", () => {
     }
   });
 
+  test("keeps the floating launcher visible and operable while open", async ({ testPage }) => {
+    const popover = await openConfigChatFromSettings(testPage);
+    const launcher = testPage.getByRole("button", { name: "Configuration Chat", exact: true });
+
+    await expect(launcher).toBeVisible();
+    await expect(launcher).toBeEnabled();
+    await expect(launcher).not.toHaveAttribute("aria-hidden", "true");
+    await expect(launcher).not.toHaveAttribute("tabindex", "-1");
+
+    await launcher.click();
+    await expect(popover).not.toBeVisible();
+  });
+
   test("starts floating, expands the same session, restores, and continues", async ({
     testPage,
   }) => {
@@ -232,8 +252,9 @@ test.describe("Configuration Chat", () => {
     await palette.getByText("Configuration Chat", { exact: true }).click();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await expect(dialog.getByTestId("config-chat-setup")).toBeVisible({ timeout: 10_000 });
-    await expect(dialog.getByRole("img", { name: "Configuration chat" })).toBeVisible();
+    const setup = dialog.getByTestId("quick-chat-setup");
+    await expect(setup).toBeVisible({ timeout: 10_000 });
+    await expect(setup.getByRole("switch", { name: "Configuration chat" })).toBeChecked();
   });
 
   test("keeps conversation context visible around an inline clarification", async ({

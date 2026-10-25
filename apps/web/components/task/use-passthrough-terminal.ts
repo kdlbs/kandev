@@ -5,22 +5,18 @@ import { AttachAddon } from "@xterm/addon-attach";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { getTerminalTheme } from "@/lib/theme/terminal-theme";
+import { getTerminalTheme, TERMINAL_MINIMUM_CONTRAST_RATIO } from "@/lib/theme/terminal-theme";
+import type { ResolvedTheme } from "@/components/theme/app-theme";
 import { startReconnectLoop, teardownWebSocket } from "./ws-reconnect";
 import { matchesShortcut } from "@/lib/keyboard/utils";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { exposeBufferReader, clearBufferReader } from "./terminal-buffer-reader";
+import { log } from "./terminal-debug";
+import { MIN_HEIGHT, MIN_WIDTH } from "./use-fit-and-resize";
 
-// Debug flag - set to true to see detailed logs
-const DEBUG = false;
-export const log = (...args: unknown[]) => {
-  if (DEBUG) console.log("[PassthroughTerminal]", ...args);
-};
-
-// Minimum dimensions to prevent zero-size issues
-export const MIN_WIDTH = 100;
-export const MIN_HEIGHT = 100;
+export { log } from "./terminal-debug";
+export { MIN_HEIGHT, MIN_WIDTH, useFitAndResize } from "./use-fit-and-resize";
 
 export type TerminalInitOptions = {
   terminalRef: React.RefObject<HTMLDivElement | null>;
@@ -32,6 +28,7 @@ export type TerminalInitOptions = {
   webglAddonRef: React.MutableRefObject<WebglAddon | null>;
   fitAndResize: (force?: boolean) => void;
   onReady: () => void;
+  resolvedTheme: ResolvedTheme;
 };
 
 type TerminalKeyHandlerOptions = {
@@ -135,11 +132,11 @@ function initTerminalInstance(
     fontFamily?: string;
     fontSize?: number;
     disableWebgl?: boolean;
+    resolvedTheme: ResolvedTheme;
   } & TerminalKeyHandlerOptions,
 ) {
   if (refs.isInitializedRef.current || refs.xtermRef.current) return undefined;
   refs.isInitializedRef.current = true;
-  log("Creating terminal");
   const terminal = new Terminal({
     allowProposedApi: true,
     cursorBlink: true,
@@ -151,7 +148,8 @@ function initTerminalInstance(
     // i18n-exempt: CSS font-family stack, not copy.
     fontFamily: options.fontFamily || 'Menlo, Monaco, "Courier New", monospace',
     macOptionIsMeta: true,
-    theme: getTerminalTheme(termContainer),
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    theme: getTerminalTheme(termContainer, options.resolvedTheme),
   });
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
@@ -224,11 +222,14 @@ export function useTerminalInit({
   fontFamily,
   fontSize,
   disableWebgl,
+  resolvedTheme,
   onToggleBottomTerminal,
   sendInput,
   keyboardShortcutsRef,
   onFindInPanelRef,
 }: TerminalInitHookOptions) {
+  const resolvedThemeRef = useRef(resolvedTheme);
+  resolvedThemeRef.current = resolvedTheme;
   const refs = {
     xtermRef,
     fitAddonRef,
@@ -238,10 +239,8 @@ export function useTerminalInit({
     webglAddonRef,
   };
   useEffect(() => {
-    log("Terminal init effect");
     const container = terminalRef.current;
     if (!container) {
-      log("No container ref");
       return;
     }
     if (isInitializedRef.current) {
@@ -259,6 +258,7 @@ export function useTerminalInit({
           fontFamily,
           fontSize,
           disableWebgl,
+          resolvedTheme: resolvedThemeRef.current,
           onToggleBottomTerminal,
           sendInput,
           keyboardShortcutsRef,
@@ -305,6 +305,7 @@ export function useTerminalInit({
         xterm.current.dispose();
         xterm.current = null;
       }
+      clearBufferReader(container);
       fitAddon.current = null;
       isInitializedRef.current = false;
       lastDimensionsRef.current = { cols: 0, rows: 0 };
@@ -329,7 +330,7 @@ export type WebSocketConnectionOptions = {
   wsRef: React.MutableRefObject<WebSocket | null>;
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
-  onDisconnected?: () => void;
+  onDisconnected?: (event: CloseEvent) => void;
   /** When true, AttachAddon is created in receive-only mode so callers can
    * intercept onData themselves (used by mobile to route input through the
    * key-bar's modifier transform). Defaults to bidirectional. */
@@ -425,7 +426,7 @@ function connectWebSocket({
   ws.binaryType = "arraybuffer";
   wsRef.current = ws;
   ws.onopen = () => {
-    if (!isMountedCheck()) {
+    if (!isMountedCheck() || wsRef.current !== ws) {
       ws.close();
       return;
     }
@@ -437,9 +438,12 @@ function connectWebSocket({
     terminal.loadAddon(attachAddon);
     attachAddonRef.current = attachAddon;
     onWsReady?.(ws);
+    // The gateway may defer PTY startup until its first resize frame. Send the
+    // frame before exposing the terminal as connected so immediate input is not
+    // dropped while the PTY is still unready.
+    fitAndResize(true);
     onConnected();
-    // Send initial resize (forced) so the backend knows our terminal dimensions,
-    // then one deferred resize to catch layout settling + force a full redraw.
+    // A deferred resize catches layout settling and forces a full redraw.
     // The WebGL renderer can become stale when the container transitions through
     // 0×0 (portal system detach/reattach), so we must explicitly refresh.
     requestAnimationFrame(() => {
@@ -458,7 +462,7 @@ function connectWebSocket({
     onTimeout(settleTimeout);
   };
   ws.onclose = (event) => {
-    log("WebSocket closed:", event.code, event.reason);
+    if (!isMountedCheck() || wsRef.current !== ws) return;
     if (attachAddonRef.current) {
       attachAddonRef.current.dispose();
       attachAddonRef.current = null;
@@ -616,59 +620,5 @@ export function useSendInput(wsRef: React.MutableRefObject<WebSocket | null>) {
       }
     },
     [wsRef],
-  );
-}
-
-export type FitAndResizeOptions = {
-  xtermRef: React.MutableRefObject<Terminal | null>;
-  fitAddonRef: React.MutableRefObject<FitAddon | null>;
-  terminalRef: React.RefObject<HTMLDivElement | null>;
-  lastDimensionsRef: React.MutableRefObject<{ cols: number; rows: number }>;
-  sendResize: (cols: number, rows: number) => void;
-};
-
-export function useFitAndResize({
-  xtermRef,
-  fitAddonRef,
-  terminalRef,
-  lastDimensionsRef,
-  sendResize,
-}: FitAndResizeOptions) {
-  return useCallback(
-    (force = false) => {
-      const terminal = xtermRef.current;
-      const fitAddon = fitAddonRef.current;
-      const container = terminalRef.current;
-      if (!terminal || !fitAddon || !container) {
-        log("fitAndResize: missing refs");
-        return;
-      }
-      const rect = container.getBoundingClientRect();
-      if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) {
-        log("fitAndResize: container too small, skipping");
-        return;
-      }
-      try {
-        fitAddon.fit();
-        log("fitAndResize: fit done", terminal.cols, "x", terminal.rows);
-      } catch (e) {
-        log("fitAndResize: fit failed", e);
-        return;
-      }
-      const { cols, rows } = terminal;
-      const last = lastDimensionsRef.current;
-      const changed = cols !== last.cols || rows !== last.rows;
-      const wasZero = last.cols === 0 && last.rows === 0;
-      if (force || changed) {
-        lastDimensionsRef.current = { cols, rows };
-        sendResize(cols, rows);
-      }
-      // Force full redraw when transitioning from uninitialized/zero dimensions —
-      // the WebGL canvas may be stale after the container was at 0×0 (portal moves).
-      if (wasZero || changed) {
-        terminal.refresh(0, terminal.rows - 1);
-      }
-    },
-    [xtermRef, fitAddonRef, terminalRef, lastDimensionsRef, sendResize],
   );
 }

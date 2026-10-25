@@ -1,10 +1,38 @@
 package backendapp
 
 import (
+	"context"
+	"encoding/json"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
+
+func newStatusSummaryTestStore(t *testing.T) *github.Store {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "github.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
+	if _, err := sqlxDB.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
+	store, err := github.NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	return store
+}
 
 func TestTaskStatusSummaryPRKeyMatchesLiveEventIdentity(t *testing.T) {
 	tests := []struct {
@@ -58,5 +86,122 @@ func TestTaskStatusRuntimeProvidersTreatNilOrchestratorAsAbsent(t *testing.T) {
 	}
 	if countQueuedPrompts != nil {
 		t.Fatal("queued prompt counter should be nil without an orchestrator")
+	}
+}
+
+func TestGitHubTaskStatusSummaryPRReaderPreservesMergeQueueState(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	queuePR := &github.TaskPR{
+		TaskID: "task-queue-summary", RepositoryID: "repo-queue-summary", PRNumber: 42,
+		PRURL: "https://example.test/42", State: "open", CreatedAt: time.Now().UTC(),
+		MergeQueueState: "queued",
+	}
+	if err := store.CreateTaskPR(ctx, queuePR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{queuePR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[queuePR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	if inputs[0].MergeQueueState != queuePR.MergeQueueState {
+		t.Fatalf("MergeQueueState = %q, want %q", inputs[0].MergeQueueState, queuePR.MergeQueueState)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.7
+func TestGitHubTaskStatusSummaryPRReaderIncludesWorkflowApprovalIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	approvalPR := &github.TaskPR{
+		TaskID: "task-workflow-approval-summary", RepositoryID: "repo-workflow-approval-summary", PRNumber: 42,
+		Owner: "contributor", Repo: "fork", PRURL: "https://example.test/42", State: "open", HeadSHA: "head-a", CreatedAt: time.Now().UTC(),
+		WorkflowAttention: &github.WorkflowAttention{
+			State:      github.WorkflowAttentionApprovalRequired,
+			HeadSHA:    "head-a",
+			ObservedAt: time.Now().UTC(),
+			Stale:      true,
+		},
+	}
+	if err := store.CreateTaskPR(ctx, approvalPR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{approvalPR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[approvalPR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	if inputs[0].HeadSHA != "head-a" || inputs[0].WorkflowAttentionState != "approval_required" ||
+		inputs[0].WorkflowAttentionHeadSHA != "head-a" || !inputs[0].WorkflowAttentionStale ||
+		inputs[0].Owner != "contributor" || inputs[0].Repo != "fork" {
+		t.Fatalf("workflow approval input = %+v", inputs[0])
+	}
+	summary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		PRObserved:   true,
+		PullRequests: inputs,
+		Now:          time.Now().UTC(),
+	})
+	encoded, err := json.Marshal(summary.PullRequest)
+	if err != nil {
+		t.Fatalf("marshal task pull request summary: %v", err)
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("unmarshal task pull request summary: %v", err)
+	}
+	if fields["workflow_approval_required"] != true || fields["workflow_approval_stale"] != true ||
+		fields["workflow_approval_pr_number"] != float64(42) ||
+		fields["workflow_approval_repository"] != "contributor/fork" {
+		t.Fatalf("serialized workflow approval projection = %s", encoded)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-PR-MERGE-QUEUE-002.10
+func TestGitHubTaskStatusSummaryPRReaderIncludesPerPRAutomationFlags(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	queuePR := &github.TaskPR{
+		TaskID: "task-automation-summary", RepositoryID: "repo-automation-summary", PRNumber: 42,
+		PRURL: "https://example.test/42", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, queuePR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+	autoFix := true
+	autoMerge := true
+	if _, err := store.UpdateTaskPRAutomationOptions(ctx, queuePR.TaskID, queuePR.RepositoryID, queuePR.PRNumber,
+		github.TaskPRAutomationOptionsPatch{AutoFixEnabled: &autoFix, AutoMergeEnabled: &autoMerge}, false,
+	); err != nil {
+		t.Fatalf("UpdateTaskPRAutomationOptions: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{queuePR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[queuePR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	if !inputs[0].AutoFixEnabled || !inputs[0].AutoMergeEnabled {
+		t.Fatalf("automation flags = %+v, want both enabled", inputs[0])
 	}
 }

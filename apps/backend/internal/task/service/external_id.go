@@ -12,7 +12,7 @@ import (
 )
 
 // ExternalIDMaxBytes is the maximum UTF-8 byte length of a normalized
-// external_id (docs/specs/tasks/external-id-idempotency/spec.md,
+// external_id (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Validation and normalization").
 const ExternalIDMaxBytes = 255
 
@@ -20,6 +20,14 @@ const ExternalIDMaxBytes = 255
 // validation: a raw control character, or a normalized value over
 // ExternalIDMaxBytes.
 var ErrExternalIDInvalid = errors.New("invalid external_id")
+
+// ReservedExternalIDPrefixCoordinatorProposal identifies external ids the
+// coordinator service allocates for the task it creates behind an approved
+// proposal (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
+// CreateTask refuses a value with this prefix unless the request sets
+// AllowReservedExternalID; ReleaseTaskExternalID refuses it unconditionally.
+// No other caller may create or release an id with this prefix.
+const ReservedExternalIDPrefixCoordinatorProposal = "coordinator-proposal:"
 
 // NormalizeExternalID applies the spec's validation/normalization rules to a
 // raw caller-supplied external_id, in this exact order — the order is
@@ -53,6 +61,17 @@ func NormalizeExternalID(raw string) (string, error) {
 
 func isASCIIControl(r rune) bool {
 	return (r >= 0x00 && r <= 0x1F) || r == 0x7F
+}
+
+// refuseReservedExternalIDPrefix reports ErrExternalIDInvalid when
+// normalized carries ReservedExternalIDPrefixCoordinatorProposal, unless
+// allowed is true.
+func refuseReservedExternalIDPrefix(normalized string, allowed bool) error {
+	if allowed || !strings.HasPrefix(normalized, ReservedExternalIDPrefixCoordinatorProposal) {
+		return nil
+	}
+	return fmt.Errorf("%w: external_id may not use the reserved prefix %q",
+		ErrExternalIDInvalid, ReservedExternalIDPrefixCoordinatorProposal)
 }
 
 // normalizeRequiredExternalID is NormalizeExternalID plus a "missing" check.
@@ -96,7 +115,7 @@ func (s *Service) GetTaskByExternalID(ctx context.Context, workspaceID, rawExter
 
 // ReleaseTaskExternalID is the REST release route's service-level
 // implementation: an operator action that frees an identity without
-// deleting the task holding it (docs/specs/tasks/external-id-idempotency/spec.md,
+// deleting the task holding it (docs/specs/tasks/requirements/external-id-idempotency.md,
 // "The one unsafe thing a caller can do" — this is for a human who has
 // determined the task is abandoned, not an automated retry loop). Returns
 // whether a task held the identity. Publishes task.updated on success, like
@@ -111,6 +130,9 @@ func (s *Service) ReleaseTaskExternalID(ctx context.Context, workspaceID, rawExt
 	if err != nil {
 		return false, err
 	}
+	if err := refuseReservedExternalIDPrefix(externalID, false); err != nil {
+		return false, err
+	}
 	task, err := s.tasks.ReleaseTaskExternalID(ctx, workspaceID, externalID)
 	if err != nil {
 		return false, err
@@ -123,7 +145,7 @@ func (s *Service) ReleaseTaskExternalID(ctx context.Context, workspaceID, rawExt
 }
 
 // SettleExternalID performs the create sequence's step 7 (settlement) for a
-// task the caller just created (docs/specs/tasks/external-id-idempotency/spec.md,
+// task the caller just created (docs/specs/tasks/system-design/external-id-idempotency.md,
 // "Settlement"). Handlers call this after their surface's required
 // synchronous work finishes and before any asynchronous dispatch. Safe to
 // call unconditionally: a request with no external_id (externalID == "")

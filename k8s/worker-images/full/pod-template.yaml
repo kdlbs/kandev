@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: PodTemplate
+template:
+  spec:
+    automountServiceAccountToken: false
+    securityContext:
+      fsGroup: 1000
+    containers:
+      - name: kandev-agent
+        # Replace with the immutable digest of your verified full worker build.
+        image: FULL_WORKER_IMAGE_REQUIRED
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: [ALL]
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {cpu: '2', memory: 4Gi}
+        env:
+          # This socket controls the privileged daemon. The main container's
+          # security context does not contain Docker commands. Use a worker
+          # node pool isolated from trusted workloads.
+          - {name: DOCKER_HOST, value: 'unix:///run/docker/docker.sock'}
+        volumeMounts:
+          - {name: docker-socket, mountPath: /run/docker}
+      - name: docker-engine
+        image: docker.io/library/docker:29.1.5-dind@sha256:0ff14e6a992f2fdb7bef46123cd7fe61a58df0494e8df8bb6f9a5dac7486e1cb
+        # Bypass the image entrypoint, which otherwise enables TCP listeners.
+        command: [/bin/sh]
+        args:
+          - -ceu
+          - |
+            iface=$({ ip -4 route show default; ip -6 route show default; } | awk '$1 == "default" {for (i=1; i<NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+            test -n "$iface"
+            mtu=$(cat "/sys/class/net/$iface/mtu")
+            test "$mtu" -ge 576
+            exec dockerd --host=unix:///run/docker/docker.sock --group=1000 --mtu="$mtu" --default-network-opt=bridge=com.docker.network.driver.mtu="$mtu" --storage-driver=overlay2 --exec-opt native.cgroupdriver=cgroupfs --cgroup-parent=docker
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          privileged: true
+        resources:
+          requests: {cpu: 250m, memory: 512Mi}
+          limits: {cpu: '2', memory: 3Gi}
+        volumeMounts:
+          - {name: kandev-workspace, mountPath: /workspace, readOnly: false}
+          - {name: docker-socket, mountPath: /run/docker}
+          - {name: docker-data, mountPath: /var/lib/docker}
+    volumes:
+      - name: docker-socket
+        emptyDir: {medium: Memory, sizeLimit: 16Mi}
+      - name: docker-data
+        emptyDir: {sizeLimit: 12Gi}

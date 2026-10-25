@@ -1,12 +1,15 @@
 // Package sqlite provides SQLite-based analytics repository implementations.
 package sqlite
 
-import "github.com/jmoiron/sqlx"
+import (
+	"github.com/jmoiron/sqlx"
+)
 
 // Repository provides SQLite-based analytics operations.
 type Repository struct {
-	db *sqlx.DB // writer (for schema init)
-	ro *sqlx.DB // reader (for all queries — this repo is pure reads)
+	db        *sqlx.DB // writer (for schema init)
+	ro        *sqlx.DB // reader (for all queries — this repo is pure reads)
+	admission analyticsAdmission
 }
 
 // NewWithDB creates a new analytics repository with existing database connections.

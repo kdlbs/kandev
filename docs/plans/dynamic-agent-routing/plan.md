@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agents/dynamic-agent-routing.md
+spec: docs/specs/agents/requirements/dynamic-agent-routing.md
 created: 2026-08-14
 status: in_progress
 ---

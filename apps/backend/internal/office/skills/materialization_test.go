@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -28,7 +29,7 @@ func TestMaterializeSkills_GitSourceClonesRepo(t *testing.T) {
 		t.Fatalf("mkdirall: %v", err)
 	}
 	// Clone directly, bypassing the URL-scheme validator (unit-tested separately).
-	if err := runGit("", "clone", "--depth=1", src, repoDir); err != nil {
+	if err := runGit(context.Background(), "", "clone", "--depth=1", src, repoDir); err != nil {
 		t.Fatalf("git clone: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "SKILL.md")); err != nil {
@@ -42,7 +43,7 @@ func TestMaterializeSkills_GitSourceRejectsTraversal(t *testing.T) {
 		SourceType:    "git",
 		SourceLocator: "../repo",
 	}
-	if _, err := materializeSkill(skill, t.TempDir(), ""); err == nil {
+	if _, err := materializeSkill(context.Background(), skill, t.TempDir(), ""); err == nil {
 		t.Fatal("expected path traversal locator to be rejected")
 	}
 }
@@ -138,6 +139,18 @@ func TestGitCloneArgs_HasEndOfOptionsSeparator(t *testing.T) {
 	// The locator must be the argument directly after `--`.
 	if args[sep+1] != locator {
 		t.Fatalf("expected locator directly after --, got %q in %v", args[sep+1], args)
+	}
+}
+
+func TestSkillGitTimeoutUsesCloneBudget(t *testing.T) {
+	if got := skillGitTimeout([]string{"clone", "--depth=1"}); got != skillGitCloneTimeout {
+		t.Fatalf("clone timeout = %s, want %s", got, skillGitCloneTimeout)
+	}
+	if got := skillGitTimeout([]string{"pull", "--ff-only"}); got != skillGitFetchTimeout {
+		t.Fatalf("pull timeout = %s, want %s", got, skillGitFetchTimeout)
+	}
+	if skillGitCloneTimeout != 5*time.Minute || skillGitFetchTimeout != 30*time.Second {
+		t.Fatal("skill Git budgets changed unexpectedly")
 	}
 }
 

@@ -97,8 +97,8 @@ test.describe("Docker executor — attach workspace sources", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.clickTab("Files");
-      await testPage.getByTestId("files-workspace-actions").click();
-      await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+      await testPage.getByTestId("files-create-menu").click();
+      await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
@@ -127,13 +127,21 @@ test.describe("Docker executor — attach workspace sources", () => {
         ),
       ).toBe("docker-second-source fixture\n");
       // Attaching the repository creates an untracked change and can activate
-      // the Changes tab after the earlier Files selection. Restore Files at
-      // the observation point so we assert the visible tree, not its mounted
-      // background panel.
-      await session.clickTab("Files");
-      await expect(session.fileTreeNode("fixture-docker-second-source-main")).toBeVisible({
-        timeout: 30_000,
+      // the Changes tab after the earlier Files selection. Wait for that status
+      // update before selecting Files so a late activation cannot hide its tree.
+      const sourceChange = session.changes.getByRole("button", {
+        name: "fixture-docker-second-source-main",
+        exact: true,
       });
+      await expect(sourceChange).toBeVisible({ timeout: 60_000 });
+      await expect(
+        testPage.locator(".dv-tab.dv-active-tab").filter({ hasText: /^Changes(?: \(\d+\))?$/ }),
+      ).toBeVisible();
+      await session.clickTab("Files");
+      await expect(
+        testPage.locator(".dv-tab.dv-active-tab").filter({ hasText: /^Files$/ }),
+      ).toBeVisible();
+      await session.fileTree.waitForFileTreeNode("fixture-docker-second-source-main", 60_000);
 
       const forgedFolder = await apiClient.rawRequest(
         "POST",
@@ -233,7 +241,7 @@ test.describe("Docker executor — attach workspace sources", () => {
             ...sourcePayload(fixture.remoteURL).sources,
             {
               kind: "repository",
-              remote_url: `${fixture.remoteURL}-missing`,
+              remote_url: fixture.remoteURL.replace(/\.git$/, "-missing.git"),
               provider: "gitlab",
               base_branch: "main",
             },

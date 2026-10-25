@@ -61,15 +61,34 @@ func (s *recoverySelectionStore) Save(
 	return nil
 }
 
+func (s *recoverySelectionStore) Delete(
+	_ context.Context,
+	agentName string,
+	packageName string,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	delete(s.values, agentName+"\x00"+packageName)
+	if s.events != nil {
+		*s.events = append(*s.events, "delete")
+	}
+	return nil
+}
+
 type recoveryRuntimeUpdater struct {
 	mu            sync.Mutex
 	metadata      RuntimeVersionMetadata
 	metadataCalls int
+	resolveErr    error
 	current       hostutility.AgentCapabilities
 	currentFound  bool
 	probeCaps     hostutility.AgentCapabilities
 	probeErr      error
 	runErrs       []error
+	updateOutput  string
 	runCalls      int
 	prepare       []string
 	probe         []string
@@ -84,7 +103,7 @@ func (u *recoveryRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentC
 }
 
 func (u *recoveryRuntimeUpdater) ResolveTarget(context.Context, string) (string, error) {
-	return u.metadata.Latest, nil
+	return u.metadata.Latest, u.resolveErr
 }
 
 func (u *recoveryRuntimeUpdater) ResolveVersions(context.Context, string) (RuntimeVersionMetadata, error) {
@@ -107,8 +126,12 @@ func (u *recoveryRuntimeUpdater) RunUpdate(
 	if index < len(u.runErrs) {
 		err = u.runErrs[index]
 	}
+	output := u.updateOutput
 	u.mu.Unlock()
-	onChunk("prepared\n")
+	if output == "" {
+		output = "prepared\n"
+	}
+	onChunk(output)
 	return err
 }
 
@@ -192,6 +215,7 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 		current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.3"},
 		currentFound: true,
 		probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.2"},
+		resolveErr:   errors.New("registry unavailable"),
 	}
 	updater.events = &events
 	store, completed := newRecoveryStore(updater, selectionStore)
@@ -207,6 +231,9 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 	if final.ActiveVersion != "1.0.2" {
 		t.Fatalf("active version = %q, want 1.0.2", final.ActiveVersion)
 	}
+	if final.CurrentVersion != "1.0.2" {
+		t.Fatalf("current version = %q, want probed 1.0.2", final.CurrentVersion)
+	}
 	if len(updater.prepare) != 1 || !strings.Contains(updater.prepare[0], "--package=@example/managed-acp@1.0.2") {
 		t.Fatalf("prepare commands = %#v", updater.prepare)
 	}
@@ -218,6 +245,50 @@ func TestAgentUpdateExactCandidatePersistsBeforePublishing(t *testing.T) {
 	}
 	if len(events) != 3 || events[0] != "probe" || events[1] != "persist" || events[2] != "publish" {
 		t.Fatalf("activation order = %#v", events)
+	}
+}
+
+func TestAgentUpdateUseDefaultDeletesSelectionAfterProbe(t *testing.T) {
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["managed-acp\x00@example/managed-acp"] = managedruntime.Selection{
+		Package: "@example/managed-acp",
+		Version: "1.0.1",
+	}
+	events := make([]string, 0, 4)
+	selectionStore.events = &events
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"1.0.1", "1.0.2"},
+			Latest:   "1.0.2",
+		},
+		current:      hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.1"},
+		currentFound: true,
+		probeCaps:    hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.2"},
+	}
+	updater.events = &events
+	store, completed := newRecoveryStore(updater, selectionStore)
+	spec := managedRuntimeSpec()
+	spec.DefaultVersion = "1.0.2"
+
+	job, err := store.EnqueueDefault("managed-acp", spec)
+	if err != nil {
+		t.Fatalf("EnqueueDefault: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	if final.Operation != string(managedruntime.OperationUseDefault) {
+		t.Fatalf("operation = %q, want use_default", final.Operation)
+	}
+	if final.ActiveVersion != "" || final.EffectiveVersion != "1.0.2" {
+		t.Fatalf("final versions = active %q, effective %q", final.ActiveVersion, final.EffectiveVersion)
+	}
+	if final.CurrentVersion != "1.0.2" {
+		t.Fatalf("current version = %q, want probed default 1.0.2", final.CurrentVersion)
+	}
+	if _, found, err := selectionStore.Get(context.Background(), "managed-acp", "@example/managed-acp"); err != nil || found {
+		t.Fatalf("selection after reset = found %v, err %v; want absent", found, err)
+	}
+	if len(events) != 3 || events[0] != "probe" || events[1] != "delete" || events[2] != "publish" {
+		t.Fatalf("reset activation order = %#v", events)
 	}
 }
 
@@ -245,6 +316,52 @@ func TestAgentUpdateExactTargetSkipsMetadataRefetch(t *testing.T) {
 	updater.mu.Unlock()
 	if metadataCalls != 0 {
 		t.Fatalf("metadata calls = %d, want no refetch for a validated target", metadataCalls)
+	}
+}
+
+func TestAgentUpdateExactCandidateNpmReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	const packageName = "@agentclientprotocol/claude-agent-acp"
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["claude-acp\x00"+packageName] = managedruntime.Selection{
+		Package: packageName,
+		Version: "0.80.0",
+	}
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"0.80.0", "0.81.0"},
+			Latest:   "0.81.0",
+		},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "0.80.0",
+		},
+		currentFound: true,
+		runErrs:      []error{errors.New("exit status 1")},
+		updateOutput: "npm error code ETARGET\nnpm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.\n",
+	}
+	store, completed := newRecoveryStore(updater, selectionStore)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:        packageName,
+		DefaultVersion: "0.80.0",
+		ACPArgs:        []string{"acp"},
+	}
+	job, err := store.Enqueue("claude-acp", spec, "0.81.0")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
+	if !strings.Contains(final.Error, "release-age policy") {
+		t.Fatalf("Error = %q, want the npm release-age policy failure", final.Error)
+	}
+	if strings.Contains(final.Error, "12:28:47 PM") {
+		t.Fatalf("Error leaked the raw npm date: %q", final.Error)
+	}
+	if updater.runCalls != 1 || len(updater.invalidate) != 0 || len(updater.probe) != 0 {
+		t.Fatalf("policy failure calls: update=%d invalidation=%#v probe=%#v, want 1, none, none", updater.runCalls, updater.invalidate, updater.probe)
+	}
+	selection, found, err := selectionStore.Get(context.Background(), "claude-acp", packageName)
+	if err != nil || !found || selection.Version != "0.80.0" {
+		t.Fatalf("selection after policy failure = %#v, found=%v, err=%v", selection, found, err)
 	}
 }
 

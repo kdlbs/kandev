@@ -12,7 +12,21 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
+import {
+  scrollSidebarFilterListTopIntoView,
+  touchDragBetween,
+  touchDragToPoint,
+} from "../../helpers/touch-drag";
 import { SessionPage } from "../../pages/session-page";
+import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { requireBox } from "../../helpers/layout-assertions";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
+import {
+  repositoryName,
+  seedSidebarCombinationRepository,
+  SIDEBAR_COMBINATION_REPOSITORY_NAME,
+} from "./sidebar-repository-grouping-helpers";
 
 async function seedAndOpenSheet(
   testPage: Page,
@@ -35,7 +49,7 @@ async function seedAndOpenSheet(
   await session.waitForLoad();
 
   // Open the task-switcher sheet from the mobile session top bar.
-  await testPage.getByTestId("mobile-session-menu").click();
+  await testPage.getByTestId("mobile-task-picker-trigger").click();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   await expect(sheet.getByTestId("sidebar-filter-bar")).toBeVisible({ timeout: 10_000 });
   return sheet;
@@ -65,11 +79,129 @@ async function taskRowOrder(sheet: Locator, taskIds: string[]) {
   return order;
 }
 
+async function touchDrag(page: Page, source: Locator, target: Locator): Promise<void> {
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  await touchDragBetween(
+    page,
+    { x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 },
+    { x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + targetBox!.height / 2 },
+  );
+}
+
+test("wider coarse-pointer task-row controls stay inside their cards", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 900, height: 1000 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  const navigation = await apiClient.seedTask(seedData.workspaceId, "Tablet coarse pointer nav", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  await testPage.goto(`/t/${navigation.task_id}`);
+  await new SessionPage(testPage).waitForLoad();
+
+  const filters = new SidebarFilterPopoverPage(testPage);
+  await expect(filters.gear).toBeVisible();
+  await filters.open();
+  const taskRowSettings = filters.popover.getByTestId("task-row-settings");
+  await taskRowSettings.getByTestId("task-row-settings-toggle").click();
+  const detailRow = taskRowSettings.getByTestId("task-row-detail-relative_time");
+  await detailRow.scrollIntoViewIfNeeded();
+  const cardBox = await detailRow.boundingBox();
+  expect(cardBox).not.toBeNull();
+  for (const control of [
+    taskRowSettings.getByTestId("task-row-detail-handle-relative_time"),
+    taskRowSettings.getByTestId("task-row-detail-more-relative_time"),
+    taskRowSettings.getByTestId("task-row-detail-toggle-relative_time"),
+  ]) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.width).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(controlBox?.y).toBeGreaterThanOrEqual(cardBox!.y);
+    expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  }
+  const editorBox = await filters.popover.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(editorBox!.x).toBeGreaterThanOrEqual(0);
+  expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(900);
+  expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+    true,
+  );
+});
+
 test.describe("Mobile sidebar — view system", () => {
+  test("multi-repository group shows the complete ordered label", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+    prCapture,
+  }) => {
+    const secondRepository = await seedSidebarCombinationRepository(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    const primaryRepositoryName = await repositoryName(
+      apiClient,
+      seedData.workspaceId,
+      seedData.repositoryId,
+    );
+    const expectedLabel = `${primaryRepositoryName}, ${SIDEBAR_COMBINATION_REPOSITORY_NAME}`;
+    const multiRepositoryTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Mobile multi-repository task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repositories: [
+          { repository_id: seedData.repositoryId },
+          { repository_id: secondRepository.id },
+        ],
+      },
+    );
+    await apiClient.createTask(seedData.workspaceId, "Mobile primary repository task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, []);
+    const combinationHeader = sheet.locator(
+      `[data-testid="sidebar-group-header"][data-group-label="${expectedLabel}"]`,
+    );
+    await expect(combinationHeader).toHaveCount(1);
+    const combinationGroup = combinationHeader.locator("..");
+    await expect(
+      combinationGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toBeVisible();
+
+    const primaryGroup = sheet
+      .locator(`[data-testid="sidebar-group-header"][data-group-key="${primaryRepositoryName}"]`)
+      .locator("..");
+    await expect(primaryGroup).toHaveCount(1);
+    await expect(
+      primaryGroup.locator(`[data-task-row-id="${multiRepositoryTask.id}"]`),
+    ).toHaveCount(0);
+
+    await combinationHeader.scrollIntoViewIfNeeded();
+    await prCapture.screenshot("multi-repository-group-mobile", {
+      caption: "Mobile task drawer uses the same complete repository combination group.",
+    });
+  });
+
   test("direct creation stays touch-reachable, viewport-safe, and persists", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile New View Task"]);
     const newView = sheet.getByTestId("sidebar-new-view");
@@ -116,15 +248,17 @@ test.describe("Mobile sidebar — view system", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "New view",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "New view");
       })
       .toBe(true);
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet
@@ -132,6 +266,73 @@ test.describe("Mobile sidebar — view system", () => {
         .getByTestId("sidebar-view-chip")
         .filter({ hasText: "New view" }),
     ).toHaveAttribute("data-active", "true");
+
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const deleteDrawer = testPage.getByTestId("sidebar-filter-drawer");
+    const deleteEditor = deleteDrawer.getByTestId("sidebar-filter-popover");
+    const deleteButton = deleteEditor.getByTestId("view-delete-button");
+    await deleteButton.scrollIntoViewIfNeeded();
+    await waitForFiniteAnimations(deleteDrawer);
+    const originalHeight = (await requireBox(deleteDrawer, "view editor")).height;
+    const originalScroll = await deleteEditor.evaluate((element) => element.scrollTop);
+    const deleteButtonBox = await deleteButton.boundingBox();
+    expect(deleteButtonBox).not.toBeNull();
+    expect(deleteButtonBox!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await deleteButton.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || (hit !== null && element.contains(hit));
+      }),
+    ).toBe(true);
+    await deleteButton.tap();
+    const confirmation = deleteDrawer.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete New view?");
+    const compactBox = await expectContentSizedBottomConfirmation(deleteDrawer, confirmation);
+    expect(compactBox.height).toBeLessThan(originalHeight);
+    await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(2);
+    for (const action of await confirmation.getByRole("button").all()) {
+      const box = await action.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await prCapture.screenshot("saved-task-view-delete-mobile", {
+      caption: "Mobile confirmation becomes a focused step in the existing task-filter drawer.",
+    });
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(deleteDrawer).toBeVisible();
+    await waitForFiniteAnimations(deleteDrawer);
+    expect((await requireBox(deleteDrawer, "restored view editor")).height).toBeCloseTo(
+      originalHeight,
+      0,
+    );
+    expect(await deleteEditor.evaluate((element) => element.scrollTop)).toBe(originalScroll);
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "New view",
+    );
+
+    await deleteEditor.getByTestId("view-delete-button").tap();
+    const settingsWrite = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/user/settings") &&
+        response.request().method() === "PATCH" &&
+        response.ok(),
+    );
+    await deleteDrawer
+      .getByTestId("saved-task-view-delete-confirmation")
+      .getByRole("button", { name: "Delete New view" })
+      .tap();
+    await settingsWrite;
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "All tasks",
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("editing filters in the mobile sheet narrows the task list live", async ({
@@ -150,6 +351,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toBeVisible();
 
     await addTitleFilter(testPage, sheet, "auth");
+    const filterEditor = testPage.getByTestId("sidebar-filter-popover");
     // Draft is active — the gear shows its unsaved indicator. Scope to the sheet:
     // the globally-mounted (hidden on mobile) AppSidebar TasksViewPicker renders
     // the same testid, so a page-level query is a strict-mode collision.
@@ -157,13 +359,16 @@ test.describe("Mobile sidebar — view system", () => {
     const blockedNewView = sheet.getByTestId("sidebar-new-view");
     await expect(blockedNewView).toHaveAttribute("aria-disabled", "true");
     await expect(blockedNewView).toHaveAttribute("aria-label", /save or discard changes/i);
+    // The filter editor is a modal drawer on coarse pointers. Close it before
+    // invoking the fixed-bar action underneath it.
+    await testPage.keyboard.press("Escape");
+    await expect(filterEditor).toBeHidden();
     // aria-disabled communicates the blocked state, but this action remains
     // clickable so touch/keyboard users can get the concrete reason toast.
     await blockedNewView.click({ force: true });
     await expect(
       testPage.getByText("Save or discard changes before creating a new view."),
     ).toBeVisible();
-    await testPage.keyboard.press("Escape");
 
     // The list inside the sheet re-filters live via applyView.
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
@@ -215,7 +420,9 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(testPage).toHaveURL((url) => url.pathname === `/t/${archivedTask.task_id}`);
     // The mobile detail header uses the session top bar; desktop renders the
     // unarchive button directly in its task top bar.
-    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(
       testPage
         .getByTestId("mobile-task-layout")
@@ -274,17 +481,61 @@ test.describe("Mobile sidebar — view system", () => {
     await gear.tap();
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-sort-settings-toggle").tap();
     await popover.getByTestId("sort-key-select").tap();
+    await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
+      "Last task summary refresh. Background events can change it.",
+    );
+    await expect(
+      testPage.getByRole("option", { name: "Last activity", exact: true }),
+    ).toContainText("Last user or agent action. Viewing a task does not change it.");
+    await expect(testPage.getByRole("option", { name: "Status", exact: true })).toContainText(
+      "Task state, from review to backlog.",
+    );
+    await expect(testPage.getByRole("option", { name: "Created", exact: true })).toContainText(
+      "When the task was created.",
+    );
+    await expect(testPage.getByRole("option", { name: "Title", exact: true })).toContainText(
+      "Task title in alphabetical order.",
+    );
+    await expect(testPage.getByRole("option", { name: "Custom", exact: true })).toContainText(
+      "The manual order you set for tasks.",
+    );
+    for (const { label, description } of [
+      {
+        label: "Updated",
+        description: "Last task summary refresh. Background events can change it.",
+      },
+      {
+        label: "Last activity",
+        description: "Last user or agent action. Viewing a task does not change it.",
+      },
+      { label: "Status", description: "Task state, from review to backlog." },
+      { label: "Created", description: "When the task was created." },
+      { label: "Title", description: "Task title in alphabetical order." },
+      { label: "Custom", description: "The manual order you set for tasks." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
     await testPage.getByRole("option", { name: "Last activity", exact: true }).tap();
-    const direction = popover.getByTestId("sort-direction-toggle");
-    if ((await direction.getAttribute("data-direction")) !== "desc") await direction.tap();
+    const direction = popover.getByTestId("sort-rule-direction-0");
+    await expect(direction).toHaveAttribute("data-direction", "desc");
+    await direction.tap();
+    await testPage.getByTestId("sort-rule-direction-option-0-asc").tap();
+    await expect(direction).toHaveAttribute("data-direction", "asc");
+    await direction.tap();
+    await testPage.getByTestId("sort-rule-direction-option-0-desc").tap();
+    await expect(direction).toHaveAttribute("data-direction", "desc");
     await popover.getByTestId("view-save-as-button").tap();
     await popover.getByTestId("view-save-as-name-input").fill("Mobile last activity");
     await popover.getByTestId("view-save-as-confirm").tap();
     await testPage.keyboard.press("Escape");
 
     const taskIds = [oldTask!.id, newTask!.id];
-    await expect.poll(() => taskRowOrder(sheet, taskIds)).toEqual(taskIds);
+    await expect.poll(() => taskRowOrder(sheet, taskIds), { timeout: 20000 }).toEqual(taskIds);
     const viewport = testPage.viewportSize();
     const list = sheet.getByTestId("mobile-task-switcher-list");
     const sheetBox = await sheet.boundingBox();
@@ -303,12 +554,325 @@ test.describe("Mobile sidebar — view system", () => {
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile last activity" }),
     ).toHaveAttribute("data-active", "true");
     await expect.poll(() => taskRowOrder(reloadedSheet, taskIds)).toEqual(taskIds);
+  });
+
+  test("keeps mobile section labels clear of separator lines", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator spacing",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").click();
+
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+
+    for (const { label, sectionLevel } of [
+      { label: "Filters", sectionLevel: 2 },
+      { label: "Sort", sectionLevel: 1 },
+      { label: "Group by", sectionLevel: 1 },
+    ]) {
+      const heading = popover.getByText(label, { exact: true });
+      const section =
+        sectionLevel === 2 ? heading.locator("..").locator("..") : heading.locator("..");
+      const [headingBox, sectionBox] = await Promise.all([
+        heading.boundingBox(),
+        section.boundingBox(),
+      ]);
+      expect(headingBox).not.toBeNull();
+      expect(sectionBox).not.toBeNull();
+      expect(headingBox!.y).toBeGreaterThan(sectionBox!.y + 3);
+    }
+  });
+
+  test("keeps mobile section separators inside the drawer surface", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [
+      "Mobile separator containment",
+    ]);
+    await sheet.getByTestId("sidebar-filter-gear").tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+
+    const [drawerBox, popoverBox] = await Promise.all([
+      drawer.boundingBox(),
+      popover.boundingBox(),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    expect(popoverBox!.x).toBeGreaterThan(drawerBox!.x);
+    expect(popoverBox!.x + popoverBox!.width).toBeLessThan(drawerBox!.x + drawerBox!.width);
+  });
+
+  test("task row settings use the drawer, touch targets, and persisted preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const taskTitle = "Mobile task row layout";
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, [taskTitle]);
+    const listedTasks = await apiClient.listTasks(seedData.workspaceId);
+    const task = listedTasks.tasks.find((candidate) => candidate.title === taskTitle);
+    expect(task?.id).toBeTruthy();
+    const gear = sheet.getByTestId("sidebar-filter-gear");
+    await gear.tap();
+
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(drawer).toBeVisible();
+    await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-group-settings-toggle").tap();
+    await popover.getByTestId("group-key-select").tap();
+    for (const { label, description } of [
+      { label: "None", description: "Keep all tasks in one list." },
+      { label: "Repository", description: "Separate tasks by repository." },
+      { label: "Workflow", description: "Separate tasks by workflow." },
+      { label: "Workflow step", description: "Separate tasks by workflow step." },
+      { label: "Executor type", description: "Separate tasks by executor type." },
+      { label: "State", description: "Separate tasks by state." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Repository", exact: true }).tap();
+    const settings = popover.getByTestId("task-row-settings");
+    await expect(settings.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await settings.getByTestId("task-row-settings-toggle").tap();
+    await expect(settings.getByTestId("task-row-details-toggle")).toBeVisible();
+
+    await settings.getByTestId("task-row-trailing-select").tap();
+    for (const { label, description } of [
+      { label: "Git changes", description: "Show added and removed lines." },
+      { label: "Relative time", description: "Show when the task was last updated." },
+      {
+        label: "Change request status",
+        description: "Show the pull request or merge request status.",
+      },
+      { label: "Nothing", description: "Leave the right side empty." },
+    ]) {
+      const option = testPage.getByRole("option", { name: label, exact: true });
+      const descriptionId = await option.getAttribute("aria-describedby");
+      expect(descriptionId).toBeTruthy();
+      await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
+    }
+    await testPage.getByRole("option", { name: "Git changes", exact: true }).tap();
+
+    for (const control of [
+      "task-row-details-toggle",
+      "task-row-detail-handle-relative_time",
+      "task-row-detail-toggle-relative_time",
+    ]) {
+      const box = await settings.getByTestId(control).boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(40);
+      expect(box?.width).toBeGreaterThanOrEqual(40);
+    }
+    const trailingSelectBox = await settings.getByTestId("task-row-trailing-select").boundingBox();
+    expect(trailingSelectBox).not.toBeNull();
+    expect(trailingSelectBox!.height).toBeGreaterThanOrEqual(44);
+
+    const pullRequestHandle = settings.getByTestId("task-row-detail-handle-pull_request_number");
+    const relativeTimeHandle = settings.getByTestId("task-row-detail-handle-relative_time");
+    const detailList = settings.locator("[data-sidebar-reorder-list]");
+    const readDetailOrder = () =>
+      detailList
+        .locator(":scope > div")
+        .evaluateAll((rows) =>
+          rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+        );
+    await expect(relativeTimeHandle).toHaveAttribute("data-vaul-no-drag", "");
+    await scrollSidebarFilterListTopIntoView(detailList);
+    const detailListBox = await detailList.boundingBox();
+    const editorBox = await popover.boundingBox();
+    expect(detailListBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    const outsideY = detailListBox!.y - 8;
+    expect(outsideY).toBeGreaterThan(editorBox!.y);
+    await touchDragToPoint(testPage, pullRequestHandle, {
+      x: detailListBox!.x + detailListBox!.width / 2,
+      y: outsideY,
+    });
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["relative_time", "repository", "pull_request_number"]);
+
+    await scrollSidebarFilterListTopIntoView(detailList);
+    await waitForFiniteAnimations(settings);
+    const drawerBeforeDownwardDrag = await drawer.boundingBox();
+    const repositoryBox = await settings.getByTestId("task-row-detail-repository").boundingBox();
+    expect(repositoryBox).not.toBeNull();
+    await touchDragToPoint(testPage, relativeTimeHandle, {
+      x: repositoryBox!.x + repositoryBox!.width / 2,
+      y: repositoryBox!.y + 2,
+    });
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["repository", "relative_time", "pull_request_number"]);
+    await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
+    const drawerAfterDownwardDrag = await drawer.boundingBox();
+    expect(drawerBeforeDownwardDrag).not.toBeNull();
+    expect(drawerAfterDownwardDrag).not.toBeNull();
+    expect(Math.abs(drawerAfterDownwardDrag!.y - drawerBeforeDownwardDrag!.y)).toBeLessThan(1);
+    await settings.getByTestId("task-row-detail-more-relative_time").tap();
+    const relativeTimeMoveUp = testPage.getByTestId("task-row-detail-more-relative_time-move-up");
+    await waitForFiniteAnimations(testPage.getByRole("menu").filter({ has: relativeTimeMoveUp }));
+    await relativeTimeMoveUp.tap();
+    await expect
+      .poll(readDetailOrder)
+      .toEqual(["relative_time", "repository", "pull_request_number"]);
+    await scrollSidebarFilterListTopIntoView(detailList);
+    await waitForFiniteAnimations(settings);
+
+    await touchDrag(testPage, pullRequestHandle, relativeTimeHandle);
+    await expect
+      .poll(async () =>
+        settings
+          .locator("div[data-testid^='task-row-detail-']")
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+          ),
+      )
+      .toEqual(["pull_request_number", "relative_time", "repository"]);
+
+    const repositoryMore = settings.getByTestId("task-row-detail-more-repository");
+    await repositoryMore.tap();
+    const repositoryMoveUp = testPage.getByTestId("task-row-detail-more-repository-move-up");
+    await waitForFiniteAnimations(testPage.getByRole("menu").filter({ has: repositoryMoveUp }));
+    const repositoryMoveUpBox = await repositoryMoveUp.boundingBox();
+    expect(repositoryMoveUpBox?.height).toBeGreaterThanOrEqual(44);
+    await repositoryMoveUp.tap();
+    await expect
+      .poll(async () =>
+        settings
+          .locator("div[data-testid^='task-row-detail-']")
+          .evaluateAll((rows) =>
+            rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
+          ),
+      )
+      .toEqual(["pull_request_number", "repository", "relative_time"]);
+
+    await settings.getByTestId("task-row-detail-toggle-repository").tap();
+    await settings.getByTestId("task-row-details-toggle").tap();
+    const compactRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    const compactRowBox = await compactRow.boundingBox();
+    const compactTitleBox = await compactRow
+      .getByText(taskTitle, { exact: true })
+      .first()
+      .boundingBox();
+    expect(compactRowBox).not.toBeNull();
+    expect(compactTitleBox).not.toBeNull();
+    expect(
+      Math.abs(
+        compactTitleBox!.y +
+          compactTitleBox!.height / 2 -
+          (compactRowBox!.y + compactRowBox!.height / 2),
+      ),
+    ).toBeLessThanOrEqual(1);
+    await settings.getByTestId("task-row-trailing-select").tap();
+    await testPage.getByRole("option", { name: "Relative time", exact: true }).tap();
+    await popover.getByTestId("view-save-as-button").tap();
+    await popover.getByTestId("view-save-as-name-input").fill("Mobile task rows");
+    await popover.getByTestId("view-save-as-confirm").tap();
+
+    const row = compactRow;
+    await expect(row).toBeVisible();
+    const trailingTime = row.getByTestId("sidebar-task-trailing-time");
+    await expect(trailingTime).toBeVisible();
+    await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
+    await expect(trailingTime.locator('[aria-hidden="true"]')).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
+    const mobileTimeBox = await trailingTime.boundingBox();
+    expect(mobileTimeBox).not.toBeNull();
+    expect(mobileTimeBox!.width).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("mobile-task-row-settings", {
+      caption: "Mobile task-row settings in the inset bottom drawer",
+    });
+    await expect(popover).toHaveCSS("overflow-y", "auto");
+    const drawerBox = await drawer.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(drawerBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await testPage.keyboard.press("Escape");
+    await expect(popover).toBeHidden();
+    const taskAction = row.getByRole("button", { name: "Task actions" });
+    await expect(taskAction).toBeVisible();
+    await prCapture.screenshot("mobile-task-row-trailing-actions", {
+      caption: "Phone task row with adjacent time and its visible touch action",
+    });
+    const taskActionBox = await taskAction.boundingBox();
+    expect(taskActionBox).not.toBeNull();
+    expect(taskActionBox!.width).toBeGreaterThanOrEqual(44);
+    expect(taskActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(mobileTimeBox!.x + mobileTimeBox!.width).toBeLessThanOrEqual(taskActionBox!.x + 1);
+    const rowBoxWithAction = await row.boundingBox();
+    expect(rowBoxWithAction).not.toBeNull();
+    expect(mobileTimeBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(mobileTimeBox!.x + mobileTimeBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(mobileTimeBox!.y).toBeGreaterThanOrEqual(rowBoxWithAction!.y - 1);
+    expect(mobileTimeBox!.y + mobileTimeBox!.height).toBeLessThanOrEqual(
+      rowBoxWithAction!.y + rowBoxWithAction!.height + 1,
+    );
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(rowBoxWithAction!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      rowBoxWithAction!.x + rowBoxWithAction!.width + 1,
+    );
+    expect(taskActionBox!.y).toBeGreaterThanOrEqual(rowBoxWithAction!.y - 1);
+    expect(taskActionBox!.y + taskActionBox!.height).toBeLessThanOrEqual(
+      rowBoxWithAction!.y + rowBoxWithAction!.height + 1,
+    );
+    expect(taskActionBox!.x).toBeGreaterThanOrEqual(drawerBox!.x - 1);
+    expect(taskActionBox!.x + taskActionBox!.width).toBeLessThanOrEqual(
+      drawerBox!.x + drawerBox!.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await row.tap();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${task!.id}`);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(
+      reloadedSheet.getByTestId("sidebar-view-chip").filter({ hasText: "Mobile task rows" }),
+    ).toHaveAttribute("data-active", "true");
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const reloadedPopover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(reloadedPopover.getByTestId("task-row-details-toggle")).toHaveCount(0);
+    await reloadedPopover.getByTestId("task-row-settings-toggle").tap();
+    await expect(reloadedPopover.getByTestId("task-row-trailing-select")).toContainText(
+      "Relative time",
+    );
+    await testPage.keyboard.press("Escape");
   });
 
   test("many saved views scroll without covering fixed actions", async ({
@@ -326,15 +890,18 @@ test.describe("Mobile sidebar — view system", () => {
       collapsed_groups: [],
     }));
     const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      sidebar_views: views,
-      sidebar_active_view_id: views[0].id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: views,
+        active_view_id: views[0].id,
+        draft: null,
+      },
     });
     expect(response.ok).toBe(true);
 
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     const chipRow = sheet.getByTestId("sidebar-view-chip-row");
     await expect(chipRow).toBeVisible();

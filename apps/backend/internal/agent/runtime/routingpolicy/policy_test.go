@@ -1,6 +1,7 @@
 package routingpolicy
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -130,6 +131,36 @@ func TestEvaluateHonorsStopAfterExhaustion(t *testing.T) {
 	}
 }
 
+func TestUnclassifiedPolicyValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		section string
+		wantErr bool
+	}{
+		{name: "absent remains disabled"},
+		{name: "null remains disabled", section: `,"unclassified":null`},
+		{name: "disabled canonical policy", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":0}`},
+		{name: "minimum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":2}`},
+		{name: "maximum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":10}`},
+		{name: "threshold below minimum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":1}`, wantErr: true},
+		{name: "threshold above maximum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":11}`, wantErr: true},
+		{name: "disabled threshold must be zero", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":3}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"}` + tt.section + `}`
+			var document Document
+			if err := json.Unmarshal([]byte(raw), &document); err != nil {
+				t.Fatalf("unmarshal policy: %v", err)
+			}
+			err := ValidateDocument(document)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateDocument() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func withReset(failure *routingerr.Error, resetAt time.Time) *routingerr.Error {
 	failure.ResetHint = &resetAt
 	return failure
@@ -140,4 +171,37 @@ func itoa(value int64) string {
 		return "0"
 	}
 	return "large"
+}
+
+func TestAccountBlockedSkipsRetryAndResetWait(t *testing.T) {
+	now := time.Date(2026, time.October, 12, 3, 0, 0, 0, time.UTC)
+	resetAt := now.Add(time.Minute)
+	failure := &routingerr.Error{
+		Code:             routingerr.CodeAccountBlocked,
+		Class:            routingerr.ClassHard,
+		CatalogueVersion: routingerr.CatalogueVersion,
+		FallbackAllowed:  true,
+		ResetHint:        &resetAt,
+	}
+	for _, outcome := range []Outcome{OutcomeSkip, OutcomeStop} {
+		document := DefaultDocument()
+		document.Hard = policyWithRetry(3)
+		document.Hard.WaitForReset = ResetWaitPolicy{Enabled: true, MaxWaitSeconds: 300}
+		document.Hard.OnExhausted = outcome
+
+		got := Evaluate(document, EvaluationInput{Failure: failure, Now: now, EffectSafe: true})
+
+		want := DecisionStop
+		if outcome == OutcomeSkip {
+			want = DecisionSkip
+		}
+		if got.Kind != want || got.PendingOutcome != outcome || got.Code != routingerr.CodeAccountBlocked ||
+			!got.Deadline.IsZero() || got.RetryOrdinal != 0 {
+			t.Fatalf("on_exhausted=%s: evaluation = %+v, want %s without retry or wait", outcome, got, want)
+		}
+	}
+	unsafe := Evaluate(DefaultDocument(), EvaluationInput{Failure: failure, Now: now, EffectSafe: false})
+	if unsafe.Kind != DecisionStop {
+		t.Fatalf("effect-unsafe account block = %s, want stop", unsafe.Kind)
+	}
 }

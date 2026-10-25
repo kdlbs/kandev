@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
@@ -19,10 +20,19 @@ var codexACPLogoDark []byte
 const codexACPPackage = "@agentclientprotocol/codex-acp"
 
 var (
-	_ Agent                  = (*CodexACP)(nil)
-	_ PassthroughAgent       = (*CodexACP)(nil)
-	_ InferenceAgent         = (*CodexACP)(nil)
-	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
+	_ Agent                         = (*CodexACP)(nil)
+	_ PassthroughAgent              = (*CodexACP)(nil)
+	_ InferenceAgent                = (*CodexACP)(nil)
+	_ ManagedNPMRuntimeAgent        = (*CodexACP)(nil)
+	_ OpenAICompatibleProviderAgent = (*CodexACP)(nil)
+)
+
+// codex-acp >= 1.7 advertises an ACP "gateway" auth method when the client
+// sends clientCapabilities.auth._meta.gateway=true, then applies the base URL
+// and Authorization header from authenticate({methodId:"gateway"}) live.
+const (
+	codexGatewayAuthMethodID = "gateway"
+	codexGatewayProviderName = "Kandev"
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -33,9 +43,9 @@ type CodexACP struct {
 }
 
 // codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
-// flags. Not returned from PermissionSettings(): ACP auto-approve uses agentctl
-// approval_policy. The legacy --full-auto flag was removed; auto_approve uses
-// --ask-for-approval never.
+// flags. Not returned from PermissionSettings(): ACP auto-approve is handled by
+// agentctl's permission flow, not by a subprocess flag. The legacy --full-auto
+// flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
 	PermissionKeyAutoApprove: {
 		Supported:    true,
@@ -100,7 +110,18 @@ func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: codexACPPackage}
+	return newManagedNPMRuntimeSpec(codexACPPackage)
+}
+
+func (a *CodexACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:               "Codex CLI",
+		Package:            "@openai/codex",
+		Source:             RuntimeComponentBundled,
+		Owner:              RuntimeComponentOwnerKandev,
+		ExternalVersionEnv: "CODEX_PATH",
+		GuidanceURL:        "https://github.com/openai/codex",
+	}
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {
@@ -137,8 +158,8 @@ func (a *CodexACP) RemoteAuth() *RemoteAuth {
 	return &RemoteAuth{
 		Methods: []RemoteAuthMethod{
 			{
-				Type:  "files",
-				Label: "Copy auth files",
+				Type:  remoteAuthMethodTypeFiles,
+				Label: remoteAuthLabelCopyFiles,
 				SourceFiles: map[string][]string{
 					"darwin": {".codex/auth.json"},
 					"linux":  {".codex/auth.json"},
@@ -192,10 +213,32 @@ func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 	return emptyPermSettings
 }
 
+// OpenAICompatibleProvider lets a Codex profile point at a self-hosted
+// OpenAI-compatible router through codex-acp's ACP gateway auth method.
+func (a *CodexACP) OpenAICompatibleProvider() *OpenAICompatibleProviderSpec {
+	return &OpenAICompatibleProviderSpec{
+		AuthMethodID: codexGatewayAuthMethodID,
+		ProviderName: codexGatewayProviderName,
+		KeyEnvVar:    "OPENAI_API_KEY",
+	}
+}
+
 // InferenceConfig returns configuration for one-shot inference using ACP.
 func (a *CodexACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostCLI describes the Codex CLI on the Kandev host. `codex app-server`
+// exposes the documented `model/list` request, so the CLI is a programmatic
+// model source. InstallScript installs and updates this CLI.
+func (a *CodexACP) HostCLI() hostcli.Spec {
+	return hostcli.Spec{
+		DisplayName: "Codex CLI",
+		Executable:  "codex",
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
 	}
 }

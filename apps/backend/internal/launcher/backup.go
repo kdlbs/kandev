@@ -1,9 +1,9 @@
 package launcher
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,9 +15,10 @@ import (
 // "kandev-*" auto-snapshots and "manual-*" user snapshots so the families
 // don't interfere with each other's retention policies.
 const (
-	backupPrefix = "dev-prod-db-"
-	backupSuffix = ".db"
-	maxBackups   = 5
+	backupPrefix            = "dev-prod-db-"
+	backupSuffix            = ".db"
+	maxBackups              = 5
+	productionBackupTimeout = 5 * time.Minute
 )
 
 // isProductionDb reports whether dbPath points to a non-dev database that
@@ -34,7 +35,7 @@ func isProductionDb(dbPath string) bool {
 	return true
 }
 
-// backupProductionDb copies the database at dbPath to
+// backupProductionDb snapshots the database at dbPath to
 // <homeDir>/.kandev/data/backups/ before dev mode runs against it, keeping
 // only the maxBackups newest snapshots. It returns the created backup path,
 // or "" with no error when the source DB does not exist.
@@ -46,15 +47,22 @@ func isProductionDb(dbPath string) bool {
 //
 // homeDir and now are injectable for tests: an explicit timestamp makes
 // back-to-back calls produce distinct filenames and mtimes without sleeping.
-func backupProductionDb(dbPath, homeDir string, now time.Time) (string, error) {
-	src, err := os.Open(dbPath)
+func backupProductionDb(ctx context.Context, dbPath, homeDir string, now time.Time) (path string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, productionBackupTimeout)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	info, err := os.Stat(dbPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("open database for backup: %w", err)
 	}
-	defer func() { _ = src.Close() }()
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("backup source is not a regular database file: %s", dbPath)
+	}
 
 	backupDir := filepath.Join(homeDir, ".kandev", "data", "backups")
 	if err := os.MkdirAll(backupDir, 0o700); err != nil {
@@ -62,35 +70,52 @@ func backupProductionDb(dbPath, homeDir string, now time.Time) (string, error) {
 	}
 	// Harden in case a wider-masked directory already exists; snapshot names
 	// are user-local and must not be world-readable.
-	_ = os.Chmod(backupDir, 0o700)
+	if err := os.Chmod(backupDir, 0o700); err != nil {
+		return "", fmt.Errorf("secure backup directory: %w", err)
+	}
+	stageDir, err := os.MkdirTemp(backupDir, ".dev-prod-db-")
+	if err != nil {
+		return "", fmt.Errorf("create snapshot staging directory: %w", err)
+	}
+	defer func() {
+		if cleanupErr := os.RemoveAll(stageDir); cleanupErr != nil {
+			if path == "" {
+				err = errors.Join(err, fmt.Errorf("clean snapshot staging: %w", cleanupErr))
+			} else {
+				fmt.Fprintln(os.Stderr, "[kandev] could not clean snapshot staging: "+cleanupErr.Error())
+			}
+		}
+	}()
 
 	name := backupPrefix + backupTimestamp(now) + backupSuffix
 	dest := filepath.Join(backupDir, name)
-	// Stream the copy so a multi-GB production database never has to fit in
-	// memory, matching the TypeScript launcher's copyFileSync.
-	dst, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return "", fmt.Errorf("create backup file: %w", err)
-	}
-	if _, err := io.Copy(dst, src); err != nil {
-		_ = dst.Close()
-		_ = os.Remove(dest)
+	staged := filepath.Join(stageDir, name)
+	if err := copyProductionSnapshotFn(ctx, dbPath, staged); err != nil {
 		return "", fmt.Errorf("copy database to backup: %w", err)
 	}
-	if err := dst.Close(); err != nil {
-		_ = os.Remove(dest)
-		return "", fmt.Errorf("finalize backup file: %w", err)
+	if err := verifyProductionSnapshot(ctx, staged); err != nil {
+		return "", fmt.Errorf("verify database backup: %w", err)
 	}
-	// Stamp both atime and mtime so pruning (which sorts by mtime) is
-	// deterministic.
-	if err := os.Chtimes(dest, now, now); err != nil {
-		_ = os.Remove(dest)
-		return "", fmt.Errorf("stamp backup mtime: %w", err)
+	if err := publishProductionSnapshot(ctx, staged, dest, now); err != nil {
+		return "", err
 	}
 
 	pruneBackups(backupDir)
 
 	return dest, nil
+}
+
+func publishProductionSnapshot(ctx context.Context, staged, dest string, now time.Time) error {
+	if err := os.Chtimes(staged, now, now); err != nil {
+		return fmt.Errorf("stamp backup mtime: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Link(staged, dest); err != nil {
+		return fmt.Errorf("publish database backup without replacement: %w", err)
+	}
+	return nil
 }
 
 // backupTimestamp renders RFC3339 with separators stripped, matching the

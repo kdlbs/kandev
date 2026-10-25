@@ -18,9 +18,7 @@ const (
 // CreateInvite mints an invite link token. Email is optional; when set, the
 // accept step must use the same address. Returns the raw token exactly once.
 func (s *Service) CreateInvite(ctx context.Context, createdBy, email, role string, ttlHours int) (*store.Invite, string, error) {
-	if role != usermodels.RoleAdmin {
-		role = usermodels.RoleMember
-	}
+	role = usermodels.NormalizeRole(role)
 	ttl := defaultInviteTTL
 	if ttlHours > 0 {
 		ttl = time.Duration(ttlHours) * time.Hour
@@ -36,6 +34,9 @@ func (s *Service) CreateInvite(ctx context.Context, createdBy, email, role strin
 		TokenHash: hash,
 		Email:     normalizeEmail(email),
 		Role:      role,
+		// The invite joins the minting admin's organization, so accepting it
+		// can never place an account in a tenant the inviter cannot see.
+		OrgID:     callerOrgID(ctx),
 		CreatedBy: createdBy,
 		ExpiresAt: time.Now().UTC().Add(ttl),
 	}
@@ -76,6 +77,10 @@ func (s *Service) AcceptInvite(ctx context.Context, token, email, password, disp
 		DisplayName: displayName,
 		Role:        invite.Role,
 		Status:      usermodels.StatusActive,
+		// The organization comes from the invite, which recorded the minting
+		// admin's org. Accepting an invite is an anonymous request, so this is
+		// the only trustworthy source for it.
+		OrgID: invite.OrgID,
 	}
 	if err := s.users.CreateUser(ctx, user); err != nil {
 		return nil, "", ErrEmailTaken

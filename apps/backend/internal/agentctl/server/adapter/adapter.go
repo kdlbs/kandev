@@ -1,9 +1,8 @@
-// Package adapter provides protocol adapters for different agent communication protocols.
-// This abstraction allows agentctl to work with agents using ACP, REST, MCP, or custom protocols.
+// Package adapter provides protocol adapters for agent communication.
 //
 // Architecture:
-//   - Transport layer (transport/*): Handles protocol-level communication (ACP, stream-json, codex, opencode)
-//   - Factory: Creates the appropriate transport adapter based on agent's protocol
+//   - Transport layer (transport/*): Handles protocol-level communication
+//   - Factory: Creates the configured ACP or native Codex adapter
 //
 // Agent configuration (commands, discovery, models) is handled by the agent/registry package
 // using agents.json as the source of truth. This package only handles protocol communication.
@@ -12,10 +11,12 @@ package adapter
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -27,13 +28,36 @@ type (
 	PermissionResponse = types.PermissionResponse
 	PermissionOption   = streams.PermissionOption
 	PermissionHandler  = types.PermissionHandler
+	UserInputOption    = types.UserInputOption
+	UserInputQuestion  = types.UserInputQuestion
+	UserInputRequest   = types.UserInputRequest
+	UserInputAnswer    = types.UserInputAnswer
+	UserInputResponse  = types.UserInputResponse
 )
+
+// UserInputRequestHandler creates a clarification request and waits for its
+// response. Its context is cancelled when the provider resolves the request.
+type UserInputRequestHandler = types.UserInputRequestHandler
+
+// UserInputRequestHandlerSetter is an optional capability implemented by
+// adapters that support protocol-native questions.
+type UserInputRequestHandlerSetter interface {
+	SetUserInputRequestHandler(handler UserInputRequestHandler)
+}
 
 // Re-export stream types for convenience.
 type (
-	AgentEvent = streams.AgentEvent
-	PlanEntry  = streams.PlanEntry
+	AgentEvent                 = streams.AgentEvent
+	PlanEntry                  = streams.PlanEntry
+	SessionRestoreCapabilities = shared.SessionRestoreCapabilities
 )
+
+// SessionRestoreCapabilitiesProvider is optional so older adapters and test
+// doubles remain source-compatible while lifecycle can use negotiated native
+// restore evidence when it is available.
+type SessionRestoreCapabilitiesProvider interface {
+	GetSessionRestoreCapabilities() SessionRestoreCapabilities
+}
 
 // Re-export agent event type constants from streams package.
 const (
@@ -52,9 +76,10 @@ const (
 )
 
 // OneShotAdapter is an optional interface implemented by adapters that spawn
-// a new process per prompt (e.g., Amp). When an adapter is one-shot, the
-// process manager skips subprocess creation and the adapter manages its own
-// subprocess lifecycle internally.
+// a new process per prompt. When an adapter is one-shot, the process manager
+// skips subprocess creation and the adapter manages its own subprocess
+// lifecycle internally. No production adapter implements this today; Amp is
+// now an ACP agent and goes through the standard subprocess path.
 type OneShotAdapter interface {
 	IsOneShot() bool
 }
@@ -97,6 +122,14 @@ type StderrLineSanitizer interface {
 	SanitizeStderrLine(line string) (safeLine string, keep bool)
 }
 
+// SessionCapabilityProvider exposes capabilities negotiated by ACP initialize.
+// It is optional so adapters and focused tests that do not expose capability
+// details retain the existing AgentAdapter contract.
+type SessionCapabilityProvider interface {
+	SupportsSessionResume() bool
+	SupportsSessionLoad() bool
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -107,7 +140,7 @@ type StderrProviderSetter interface {
 // ModeSettableAdapter is an optional interface implemented by adapters that
 // support changing the session mode (e.g., ACP adapters with session/set_mode).
 type ModeSettableAdapter interface {
-	SetMode(ctx context.Context, modeID string) error
+	SetMode(ctx context.Context, modeID string) (streams.ModeResult, error)
 }
 
 // ModelSettableAdapter is an optional interface implemented by adapters that
@@ -130,6 +163,15 @@ type AuthenticatableAdapter interface {
 	Authenticate(ctx context.Context, methodID string) error
 }
 
+// ProviderErrorContextProvider exposes the adapter state a generic ACP
+// prompt-error projection needs but cannot read from the error itself: the
+// negotiated provider identity and the session's settled model identity, read
+// under the adapter's own lock at projection time. modelID is empty when no
+// model has been settled for the session yet.
+type ProviderErrorContextProvider interface {
+	ProviderErrorContext() (providerID, modelID string)
+}
+
 // ConfigOptionSettableAdapter is an optional interface implemented by adapters
 // that support setting an arbitrary session config option (ACP
 // session/set_config_option). Useful for agent-specific runtime knobs that
@@ -145,6 +187,29 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// ForkableSession is an optional capability for providers that can fork a
+// completed conversation without changing the active session.
+type ForkableSession interface {
+	ForkSession(ctx context.Context, sourceSessionID, completedTurnID string) (string, error)
+}
+
+// TurnStartRecorder is an optional interface implemented by adapters that
+// record a wall-clock turn-start timestamp per session, covering both a
+// human prompt dispatch and a synthetic ScheduleWakeup self-resume (spec
+// docs/specs/disambiguate-waiting/spec.md, D3). Only ACP adapters implement
+// this today. The background-workload liveness probe (agent.background.probe)
+// uses it to anchor the probe's start-time comparison.
+type TurnStartRecorder interface {
+	RecordedTurnStart(sessionID string) (time.Time, bool)
+}
+
+// BackgroundWorkProvider is an optional capability implemented by adapters that
+// support querying background workload snapshots or performing actions on workloads.
+type BackgroundWorkProvider interface {
+	BackgroundWorkSnapshot(ctx context.Context) (*streams.BackgroundWorkSnapshot, error)
+	PerformBackgroundWorkAction(ctx context.Context, req streams.BackgroundWorkActionRequest) (*streams.BackgroundWorkActionResponse, error)
+}
+
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
 	Name    string `json:"name"`
@@ -152,7 +217,7 @@ type AgentInfo struct {
 }
 
 // AgentAdapter defines the interface for protocol adapters.
-// Each adapter translates a specific protocol (ACP, REST, MCP, etc.) into the
+// Each adapter translates ACP, the only supported protocol, into the
 // normalized AgentEvent format that agentctl exposes via its HTTP API.
 //
 // Lifecycle:
@@ -166,15 +231,12 @@ type AgentInfo struct {
 //  8. Call Close() when done
 type AgentAdapter interface {
 	// PrepareEnvironment performs protocol-specific setup before the agent process starts.
-	// For ACP, this is a no-op (MCP servers are passed through the protocol).
-	// For OpenCode, this returns environment variables for server authentication.
 	// Must be called before the agent subprocess is started.
 	// Returns a map of environment variables to add to the subprocess environment.
 	PrepareEnvironment() (map[string]string, error)
 
 	// PrepareCommandArgs returns extra command-line arguments for the agent process.
-	// For Codex, this returns -c flags for MCP servers and sandbox config.
-	// For other protocols, this returns nil (no extra args needed).
+	// The ACP adapter returns nil (no extra args needed).
 	// Must be called after PrepareEnvironment and before starting the subprocess.
 	PrepareCommandArgs() []string
 
@@ -182,19 +244,17 @@ type AgentAdapter interface {
 	// Must be called after the subprocess is started and before Initialize.
 	Connect(stdin io.Writer, stdout io.Reader) error
 
-	// Initialize establishes the connection with the agent and exchanges capabilities.
-	// For subprocess-based agents (ACP), this sends the initialize request.
-	// For HTTP-based agents (REST), this might do a health check.
+	// Initialize establishes the protocol connection with the agent.
 	Initialize(ctx context.Context) error
 
 	// GetAgentInfo returns information about the connected agent.
 	// Returns nil if Initialize has not been called yet.
 	GetAgentInfo() *AgentInfo
 
-	// NewSession creates a new agent session and returns the session ID.
+	// NewSession creates a new provider session and returns its provider ID.
 	NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 
-	// LoadSession resumes an existing session by ID.
+	// LoadSession resumes an existing provider session by ID.
 	// mcpServers contains the MCP servers to configure for the resumed session.
 	// Agents that receive MCP configs via the protocol (e.g. ACP with AssumeMcpSse)
 	// need these to reconnect to MCP servers on a new agentctl instance.
@@ -216,8 +276,8 @@ type AgentAdapter interface {
 	GetSessionID() string
 
 	// GetOperationID returns the current operation/turn ID.
-	// Returns empty string if no operation is in progress or not supported by the protocol.
-	// For Codex this is the turn ID, for ACP this may be empty.
+	// Returns empty string if no operation is in progress, or if the connected
+	// ACP agent does not report a turn ID.
 	GetOperationID() string
 
 	// SetPermissionHandler sets the handler for permission requests.
@@ -227,10 +287,11 @@ type AgentAdapter interface {
 	Close() error
 
 	// RequiresProcessKill returns true if the adapter's subprocess needs to be
-	// explicitly killed during shutdown. Adapters that communicate via stdin/stdout
-	// (ACP, Codex, Claude Code) return false because closing stdin causes the
-	// subprocess to exit. HTTP-server-based adapters (OpenCode) return true because
-	// they don't exit on stdin close.
+	// explicitly killed during shutdown. Most ACP agents return false because
+	// closing stdin causes the subprocess to exit. Some agents (e.g. opencode
+	// acp) keep an internal HTTP server and MCP child processes alive after
+	// stdin closes, so their config sets this true to force an immediate
+	// process-group kill instead of waiting on a graceful stdin close.
 	RequiresProcessKill() bool
 }
 
@@ -250,6 +311,11 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID, DefinitionRevision, and Origins are sanitized backend
+	// provenance carried through adapter construction for attachment evidence.
+	DefinitionID       string                  `json:"definition_id,omitempty"`
+	DefinitionRevision int64                   `json:"definition_revision,omitempty"`
+	Origins            []types.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // Config holds configuration for creating adapters
@@ -259,11 +325,6 @@ type Config struct {
 
 	// AutoApprove automatically approves permission requests
 	AutoApprove bool
-
-	// ApprovalPolicy controls when the agent requests approval.
-	// Valid values: "untrusted" (always), "on-failure", "on-request", "never".
-	// Defaults to "on-request" if empty.
-	ApprovalPolicy string
 
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
@@ -276,7 +337,9 @@ type Config struct {
 	// Used for display purposes.
 	AgentName string
 
-	// For HTTP-based adapters (REST)
+	// BaseURL, AuthHeader, AuthValue, and Headers are unused by any adapter
+	// today (no HTTP-based transport exists). Config.ToSharedConfig still
+	// propagates them to shared.Config, but no transport reads them.
 	BaseURL    string            // Base URL of the agent's HTTP API
 	AuthHeader string            // Optional auth header name
 	AuthValue  string            // Optional auth header value
@@ -303,6 +366,13 @@ type Config struct {
 
 	// NotificationQueueCapacity is the server-resolved ACP inbound queue size.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
+
+	// ProviderGatewayAuth authenticates the ACP agent against an
+	// OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -310,19 +380,20 @@ func (c *Config) ToSharedConfig() *shared.Config {
 	mcpServers := make([]shared.McpServerConfig, len(c.McpServers))
 	for i, srv := range c.McpServers {
 		mcpServers[i] = shared.McpServerConfig{
-			Name:    srv.Name,
-			URL:     srv.URL,
-			Type:    srv.Type,
-			Command: srv.Command,
-			Args:    srv.Args,
-			Env:     srv.Env,
-			Headers: srv.Headers,
+			Name:         srv.Name,
+			URL:          srv.URL,
+			Type:         srv.Type,
+			Command:      srv.Command,
+			Args:         srv.Args,
+			Env:          srv.Env,
+			Headers:      srv.Headers,
+			DefinitionID: srv.DefinitionID, DefinitionRevision: srv.DefinitionRevision,
+			Origins: append([]types.McpServerOrigin(nil), srv.Origins...),
 		}
 	}
 	return &shared.Config{
 		WorkDir:                   c.WorkDir,
 		AutoApprove:               c.AutoApprove,
-		ApprovalPolicy:            c.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   c.AgentID,
 		AgentName:                 c.AgentName,
@@ -335,6 +406,8 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpHttp:             c.AssumeMcpHttp,
 		RequiresProcessKill:       c.RequiresProcessKill,
 		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       c.ProviderGatewayAuth,
 	}
 }
 
@@ -349,7 +422,7 @@ func (c *Config) ToSharedConfig() *shared.Config {
 //
 // Delivery is opportunistic: whether the agent folds the prompt into the running
 // turn or runs it as the next turn is the agent's decision and is not advertised
-// over the protocol. See docs/specs/platform/mid-turn-steering.md.
+// over the protocol. See docs/specs/platform/requirements/mid-turn-steering.md.
 type SteerablePrompter interface {
 	SupportsSteering() bool
 	PromptSteer(

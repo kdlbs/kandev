@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-portable-settings-contract"]
 plan: "plan.md"
-spec: "../../specs/ui/transcript-navigation-settings.md"
+spec: "../../specs/ui/requirements/transcript-navigation-settings.md"
 ---
 
 # Task 02: Settings UI and Transcript Control
@@ -44,7 +44,7 @@ Sequential. The UI consumes the contract and defaults introduced by Task 01.
 ## Inputs
 
 - Spec: What and auto-scroll visibility scenarios.
-- ADR 0046 and `docs/specs/ui/settings-manual-save.md`.
+- ADR 0046 and `docs/specs/ui/requirements/settings-manual-save.md`.
 - Existing `AutoScrollToggleButton` and `useTranscriptAutoScrollEnabled` behavior.
 
 ## Risks

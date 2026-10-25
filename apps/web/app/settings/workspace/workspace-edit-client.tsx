@@ -21,21 +21,26 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { updateWorkspaceAction, deleteWorkspaceAction } from "@/app/actions/workspaces";
-import type { TFunction } from "i18next";
 import type { Executor } from "@/lib/types/http";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
+import { buildWorkspaceSaveHandler, type SavedState } from "./workspace-edit-save";
+import { useWorkspaceIdlePolicyDraft } from "./workspace-edit-idle-policy-draft";
 
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { SettingsCard } from "@/components/settings/settings-card";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
+import { WorkspacePlacementCard } from "@/components/settings/workspaces/workspace-placement-card";
+import { WorkspaceTeamAccessCard } from "@/components/settings/workspaces/workspace-team-access-card";
+import { hasScope, SCOPE } from "@/lib/types/team-access";
+import { WorkspaceIdlePolicyFormSection } from "./workspace-idle-policy-form-section";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -123,6 +128,7 @@ function SelectField({
 }
 
 type WorkspaceSettingsCardProps = {
+  canManage: boolean;
   workspaceId: string;
   workspaceNameDraft: string;
   nameIsDirty: boolean;
@@ -139,6 +145,7 @@ type WorkspaceSettingsCardProps = {
 };
 
 function WorkspaceSettingsCard({
+  canManage,
   workspaceId,
   workspaceNameDraft,
   nameIsDirty,
@@ -163,53 +170,54 @@ function WorkspaceSettingsCard({
       name: p.label,
     }));
   return (
-    <SettingsCard isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}>
-      <CardHeader>
-        <CardTitle>{t("workspaces:workspaceSettings")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-4">
-          <SettingsTarget
-            targetId={workspaceDiscoveryTarget(workspaceId, "name")}
-            className="space-y-2"
-          >
-            <Label htmlFor="workspace-name">{t("workspaces:name")}</Label>
-            <Input
-              id="workspace-name"
-              value={workspaceNameDraft}
-              data-settings-dirty={nameIsDirty}
-              onChange={(e) => onNameChange(e.target.value)}
-            />
-          </SettingsTarget>
-          <SelectField
-            label={t("workspaces:defaultExecutor")}
-            placeholder={t("workspaces:selectDefaultExecutor")}
-            value={defaultExecutorId}
-            isDirty={executorIsDirty}
-            onChange={onExecutorChange}
-            options={executorsEmpty ? [] : executorOptions}
-            emptyLabel={t("workspaces:noExecutorsAvailable")}
-            emptyValue=""
-            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
+    <SettingsGroup
+      title={t("workspaces:workspaceSettings")}
+      isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}
+      contentClassName="space-y-4 divide-y-0"
+    >
+      <div className="space-y-4">
+        <SettingsTarget
+          targetId={workspaceDiscoveryTarget(workspaceId, "name")}
+          className="space-y-2"
+        >
+          <Label htmlFor="workspace-name">{t("workspaces:name")}</Label>
+          <Input
+            id="workspace-name"
+            value={workspaceNameDraft}
+            disabled={!canManage}
+            data-settings-dirty={nameIsDirty}
+            onChange={(e) => onNameChange(e.target.value)}
           />
-          <SelectField
-            label={t("workspaces:defaultAgentProfile")}
-            placeholder={t("workspaces:selectDefaultAgentProfile")}
-            value={defaultAgentProfileId}
-            isDirty={agentProfileIsDirty}
-            onChange={onAgentProfileChange}
-            options={profileOptions}
-            emptyLabel={t("workspaces:noAgentProfilesAvailable")}
-            emptyValue="empty-agent-profiles"
-            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-agent-profile")}
-          />
-        </div>
-      </CardContent>
-    </SettingsCard>
+        </SettingsTarget>
+        <SelectField
+          label={t("workspaces:defaultExecutor")}
+          placeholder={t("workspaces:selectDefaultExecutor")}
+          value={defaultExecutorId}
+          isDirty={executorIsDirty}
+          onChange={onExecutorChange}
+          options={executorsEmpty ? [] : executorOptions}
+          emptyLabel={t("workspaces:noExecutorsAvailable")}
+          emptyValue=""
+          discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
+        />
+        <SelectField
+          label={t("workspaces:defaultAgentProfile")}
+          placeholder={t("workspaces:selectDefaultAgentProfile")}
+          value={defaultAgentProfileId}
+          isDirty={agentProfileIsDirty}
+          onChange={onAgentProfileChange}
+          options={profileOptions}
+          emptyLabel={t("workspaces:noAgentProfilesAvailable")}
+          emptyValue="empty-agent-profiles"
+          discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-agent-profile")}
+        />
+      </div>
+    </SettingsGroup>
   );
 }
 
 type DeleteWorkspaceCardProps = {
+  canManage: boolean;
   workspaceName: string;
   deleteDialogOpen: boolean;
   setDeleteDialogOpen: (open: boolean) => void;
@@ -219,6 +227,7 @@ type DeleteWorkspaceCardProps = {
 };
 
 function DeleteWorkspaceCard({
+  canManage,
   workspaceName,
   deleteDialogOpen,
   setDeleteDialogOpen,
@@ -227,6 +236,9 @@ function DeleteWorkspaceCard({
   onDelete,
 }: DeleteWorkspaceCardProps) {
   const { t } = useTranslation();
+  // Deleting a workspace is owner-only. The API refuses a member either way;
+  // hiding the card keeps the UI from offering an action it will reject.
+  if (!canManage) return null;
   return (
     <>
       <Card className="border-destructive">
@@ -305,105 +317,50 @@ function DeleteWorkspaceCard({
   );
 }
 
-type SavedState = {
-  name: string;
-  executorId: string;
-  agentProfileId: string;
-};
+function useWorkspaceDeleteDraft(
+  workspace: Workspace,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  const router = useRouter();
+  const { toast } = useToast();
+  const { t } = useTranslation();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const deleteRequest = useRequest(deleteWorkspaceAction);
+  const officeEnabled = useFeature("office");
 
-function buildWorkspaceUpdates(
-  draft: { name: string; executorId: string; agentProfileId: string },
-  saved: SavedState,
-): Record<string, string | undefined> {
-  const updates: Record<string, string | undefined> = {};
-  if (draft.name.trim() !== saved.name) updates.name = draft.name.trim();
-  if (draft.executorId !== saved.executorId) updates.default_executor_id = draft.executorId;
-  if (draft.agentProfileId !== saved.agentProfileId)
-    updates.default_agent_profile_id = draft.agentProfileId;
-  return updates;
-}
-
-type WorkspaceDraftState = {
-  workspaceNameDraft: string;
-  defaultExecutorId: string;
-  defaultAgentProfileId: string;
-};
-
-type SaveRequestLike = {
-  run: (id: string, updates: Record<string, string | undefined>) => Promise<Workspace>;
-};
-
-type WorkspaceSaveHandlerOptions = {
-  currentWorkspace: Workspace;
-  draft: WorkspaceDraftState;
-  savedState: SavedState;
-  isDirty: boolean;
-  setSavedState: (s: SavedState) => void;
-  setCurrentWorkspace: (fn: (prev: Workspace) => Workspace) => void;
-  workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
-  saveWorkspaceRequest: SaveRequestLike;
-  toast: ReturnType<typeof useToast>["toast"];
-  t: TFunction;
-};
-
-function buildSaveHandler({
-  currentWorkspace,
-  draft,
-  savedState,
-  isDirty,
-  setSavedState,
-  setCurrentWorkspace,
-  workspaces,
-  setWorkspaces,
-  saveWorkspaceRequest,
-  toast,
-  t,
-}: WorkspaceSaveHandlerOptions) {
-  return async () => {
-    if (!isDirty) return;
+  const handleDelete = async () => {
+    if (confirmText !== workspace.name) return;
     try {
-      const updates = buildWorkspaceUpdates(
-        {
-          name: draft.workspaceNameDraft,
-          executorId: draft.defaultExecutorId,
-          agentProfileId: draft.defaultAgentProfileId,
-        },
-        savedState,
-      );
-      const updated = await saveWorkspaceRequest.run(currentWorkspace.id, updates);
-      setCurrentWorkspace((prev) => ({ ...prev, ...updated }));
-      setSavedState({
-        name: updated.name ?? draft.workspaceNameDraft.trim(),
-        executorId: updated.default_executor_id ?? "",
-        agentProfileId: updated.default_agent_profile_id ?? "",
-      });
-      setWorkspaces(
-        workspaces.map((ws: Workspace) =>
-          ws.id === updated.id
-            ? {
-                ...ws,
-                name: updated.name,
-                default_executor_id: updated.default_executor_id ?? null,
-                default_environment_id: updated.default_environment_id ?? null,
-                default_agent_profile_id: updated.default_agent_profile_id ?? null,
-              }
-            : ws,
-        ),
-      );
+      await deleteRequest.run(workspace.id, workspace.name, officeEnabled);
+      const { workspaces, setWorkspaces } = storeApi.getState();
+      setWorkspaces(workspaces.items.filter((item) => item.id !== workspace.id));
+      runWithNavigationBlockerBypassed(() => router.push("/settings/workspaces"));
     } catch (error) {
       toast({
-        title: t("workspaces:failedToSaveWorkspace"),
+        title: t("workspaces:failedToDeleteWorkspace"),
         description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
-      throw error;
     }
+  };
+
+  const handleDialogOpenChange = (open: boolean) => {
+    setDialogOpen(open);
+    if (!open) setConfirmText("");
+  };
+
+  return {
+    deleteDialogOpen: dialogOpen,
+    setDeleteDialogOpen: handleDialogOpenChange,
+    deleteConfirmText: confirmText,
+    setDeleteConfirmText: setConfirmText,
+    handleDeleteWorkspace: handleDelete,
   };
 }
 
 function useWorkspaceEditForm(workspace: Workspace) {
-  const router = useRouter();
+  const storeApi = useAppStoreApi();
   const { toast } = useToast();
   const { t } = useTranslation();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(workspace);
@@ -416,66 +373,55 @@ function useWorkspaceEditForm(workspace: Workspace) {
     name: workspace.name ?? "",
     executorId: workspace.default_executor_id ?? "",
     agentProfileId: workspace.default_agent_profile_id ?? "",
+    idleSuspensionEnabled: workspace.acp_idle_suspension_enabled ?? false,
+    idleTimeoutMinutes: workspace.acp_idle_timeout_minutes ?? 120,
   });
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-
+  const {
+    enabled: idleSuspensionEnabled,
+    setEnabled: setIdleSuspensionEnabled,
+    timeoutMinutes: idleTimeoutMinutes,
+    setTimeoutMinutes: setIdleTimeoutMinutes,
+    timeoutValid: idleTimeoutValid,
+    isDirty: idlePolicyIsDirty,
+  } = useWorkspaceIdlePolicyDraft(workspace, savedState);
   const executors = useAppStore((state) => state.executors.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
+  const deleteDraft = useWorkspaceDeleteDraft(currentWorkspace, storeApi);
 
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
-  const deleteWorkspaceRequest = useRequest(deleteWorkspaceAction);
-  // Selects the delete route: the office endpoint only exists while the feature
-  // is on. See `deleteWorkspaceAction`.
-  const officeEnabled = useFeature("office");
 
   const activeExecutors = executors.filter((executor: Executor) => executor.status === "active");
   const isDirty =
     workspaceNameDraft.trim() !== savedState.name ||
     defaultExecutorId !== savedState.executorId ||
     defaultAgentProfileId !== savedState.agentProfileId;
+  const isWorkspaceDirty = isDirty || idlePolicyIsDirty;
 
-  const handleSave = buildSaveHandler({
+  const handleSave = buildWorkspaceSaveHandler({
     currentWorkspace,
-    draft: { workspaceNameDraft, defaultExecutorId, defaultAgentProfileId },
+    draft: {
+      workspaceNameDraft,
+      defaultExecutorId,
+      defaultAgentProfileId,
+      idleSuspensionEnabled,
+      idleTimeoutMinutes,
+    },
     savedState,
-    isDirty,
+    isDirty: isWorkspaceDirty,
     setSavedState,
     setCurrentWorkspace,
-    workspaces,
-    setWorkspaces,
+    storeApi,
     saveWorkspaceRequest,
     toast,
     t,
   });
 
-  const handleDeleteWorkspace = async () => {
-    if (deleteConfirmText !== currentWorkspace.name) return;
-    try {
-      await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name, officeEnabled);
-      setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
-      runWithNavigationBlockerBypassed(() => router.push("/settings/workspaces"));
-    } catch (error) {
-      toast({
-        title: t("workspaces:failedToDeleteWorkspace"),
-        description: error instanceof Error ? error.message : t("common:requestFailed"),
-        variant: "error",
-      });
-    }
-  };
-
-  // Clears pre-fill so Cancel-then-reopen can't silently bypass the re-type requirement.
-  const handleDeleteDialogOpenChange = (open: boolean) => {
-    setDeleteDialogOpen(open);
-    if (!open) setDeleteConfirmText("");
-  };
-
   const handleDiscard = () => {
     setWorkspaceNameDraft(savedState.name);
     setDefaultExecutorId(savedState.executorId);
     setDefaultAgentProfileId(savedState.agentProfileId);
+    setIdleSuspensionEnabled(savedState.idleSuspensionEnabled);
+    setIdleTimeoutMinutes(String(savedState.idleTimeoutMinutes));
   };
 
   return {
@@ -486,19 +432,65 @@ function useWorkspaceEditForm(workspace: Workspace) {
     setDefaultExecutorId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
-    deleteDialogOpen,
-    setDeleteDialogOpen: handleDeleteDialogOpenChange,
-    deleteConfirmText,
-    setDeleteConfirmText,
+    idleSuspensionEnabled,
+    setIdleSuspensionEnabled,
+    idleTimeoutMinutes,
+    setIdleTimeoutMinutes,
     activeExecutors,
     executors,
     agentProfiles,
     savedState,
-    isDirty,
+    isDirty: isWorkspaceDirty,
+    idleTimeoutValid,
+    idlePolicyIsDirty,
     handleSave,
     handleDiscard,
-    handleDeleteWorkspace,
+    ...deleteDraft,
   };
+}
+
+type WorkspaceFormSaveOptions = {
+  workspaceId: string;
+  workspaceNameDraft: string;
+  defaultExecutorId: string;
+  defaultAgentProfileId: string;
+  idleSuspensionEnabled: boolean;
+  idleTimeoutMinutes: string;
+  idleTimeoutValid: boolean;
+  isDirty: boolean;
+  save: () => Promise<void>;
+  discard: () => void;
+};
+
+function useWorkspaceFormSaveContributor(options: WorkspaceFormSaveOptions) {
+  const { t } = useTranslation();
+  const hasWorkspaceName = Boolean(options.workspaceNameDraft.trim());
+  const invalidReason = workspaceDraftInvalidReason(hasWorkspaceName, options.idleTimeoutValid, t);
+  useSettingsSaveContributor({
+    id: `workspace:${options.workspaceId}`,
+    revision: JSON.stringify({
+      workspaceNameDraft: options.workspaceNameDraft,
+      defaultExecutorId: options.defaultExecutorId,
+      defaultAgentProfileId: options.defaultAgentProfileId,
+      idleSuspensionEnabled: options.idleSuspensionEnabled,
+      idleTimeoutMinutes: options.idleTimeoutMinutes,
+    }),
+    isDirty: options.isDirty,
+    canSave: hasWorkspaceName && options.idleTimeoutValid,
+    invalidReason,
+    save: options.save,
+    discard: options.discard,
+  });
+}
+
+function workspaceDraftInvalidReason(
+  hasWorkspaceName: boolean,
+  timeoutValid: boolean,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (!hasWorkspaceName) return t("workspaces:workspaceNameIsRequired");
+  if (!timeoutValid) return t("workspaces:idleTimeoutMustBePositive");
+  return undefined;
 }
 
 function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
@@ -510,6 +502,10 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     setDefaultExecutorId,
     defaultAgentProfileId,
     setDefaultAgentProfileId,
+    idleSuspensionEnabled,
+    setIdleSuspensionEnabled,
+    idleTimeoutMinutes,
+    setIdleTimeoutMinutes,
     deleteDialogOpen,
     setDeleteDialogOpen,
     deleteConfirmText,
@@ -519,22 +515,26 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     agentProfiles,
     savedState,
     isDirty,
+    idleTimeoutValid,
+    idlePolicyIsDirty,
     handleSave,
     handleDiscard,
     handleDeleteWorkspace,
   } = useWorkspaceEditForm(workspace);
+  // Owner-only controls are gated on the server-issued scope, never on an
+  // owner-id comparison, so the UI and the API agree on one answer.
+  const canManage = hasScope(workspace.scopes, SCOPE.workspaceManage);
   const { t } = useTranslation();
 
-  useSettingsSaveContributor({
-    id: `workspace:${currentWorkspace.id}`,
-    revision: JSON.stringify({
-      workspaceNameDraft,
-      defaultExecutorId,
-      defaultAgentProfileId,
-    }),
+  useWorkspaceFormSaveContributor({
+    workspaceId: currentWorkspace.id,
+    workspaceNameDraft,
+    defaultExecutorId,
+    defaultAgentProfileId,
+    idleSuspensionEnabled,
+    idleTimeoutMinutes,
+    idleTimeoutValid,
     isDirty,
-    canSave: Boolean(workspaceNameDraft.trim()),
-    invalidReason: workspaceNameDraft.trim() ? undefined : t("workspaces:workspaceNameIsRequired"),
     save: handleSave,
     discard: handleDiscard,
   });
@@ -544,6 +544,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       <WorkspaceSectionHeader tab="overview" description={t("workspaces:manageWorkspaceDetails")} />
       <Separator />
       <WorkspaceSettingsCard
+        canManage={canManage}
         workspaceId={currentWorkspace.id}
         workspaceNameDraft={workspaceNameDraft}
         nameIsDirty={workspaceNameDraft.trim() !== savedState.name}
@@ -558,8 +559,37 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
       />
+      <WorkspaceIdlePolicyFormSection
+        canManage={canManage}
+        enabled={idleSuspensionEnabled}
+        timeoutMinutes={idleTimeoutMinutes}
+        timeoutValid={idleTimeoutValid}
+        savedTimeoutMinutes={savedState.idleTimeoutMinutes}
+        enabledIsDirty={idleSuspensionEnabled !== savedState.idleSuspensionEnabled}
+        timeoutIsDirty={idlePolicyIsDirty}
+        onEnabledChange={setIdleSuspensionEnabled}
+        onTimeoutChange={setIdleTimeoutMinutes}
+      />
+      {/*
+        Reads the live store item rather than the form's captured snapshot:
+        scopes arrive with hydration, which can land after this
+        form mounts, and a snapshot would freeze the owner out of their own
+        workspace.
+      */}
+      <WorkspacePlacementCard
+        workspaceId={workspace.id}
+        unitId={workspace.unit_id}
+        scopes={workspace.scopes}
+      />
+      <Separator />
+      <WorkspaceTeamAccessCard
+        workspaceId={workspace.id}
+        ownerId={workspace.owner_id ?? ""}
+        scopes={workspace.scopes}
+      />
       <Separator />
       <DeleteWorkspaceCard
+        canManage={canManage}
         workspaceName={currentWorkspace.name}
         deleteDialogOpen={deleteDialogOpen}
         setDeleteDialogOpen={setDeleteDialogOpen}

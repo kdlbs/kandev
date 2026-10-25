@@ -3,11 +3,13 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"testing"
 	"time"
-
-	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt guards
@@ -52,7 +54,7 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:trig:1")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:trig:1"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error for a skip: %v", err)
 	}
@@ -94,6 +96,63 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 	}
 }
 
+func TestFireTriggerAdmitsRunBeforePublishing(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Daily report",
+		TaskTitleTemplate: "Report: {{trigger.type}}",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "s-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+	}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeScheduled, Config: json.RawMessage(`{}`), Enabled: true}
+	if err := svc.store.CreateTrigger(ctx, trig); err != nil {
+		t.Fatal(err)
+	}
+
+	var publishedRun *AutomationRun
+	if _, err := svc.eventBus.Subscribe(events.AutomationTriggered, func(ctx context.Context, event *bus.Event) error {
+		evt, ok := event.Data.(*AutomationTriggeredEvent)
+		if !ok {
+			t.Fatalf("event data = %T, want *AutomationTriggeredEvent", event.Data)
+		}
+		if evt.RunID == "" {
+			t.Fatal("published automation event has no admitted run ID")
+		}
+		var err error
+		publishedRun, err = svc.store.GetRun(ctx, evt.RunID)
+		if err != nil {
+			t.Fatalf("load admitted run during publish: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Skipped || result.RunID == "" {
+		t.Fatalf("FireTrigger result = %+v, want an admitted run", result)
+	}
+	if publishedRun == nil {
+		t.Fatal("event was not observed")
+	}
+	if publishedRun.Status != RunStatusTriggered {
+		t.Fatalf("published run status = %q, want triggered", publishedRun.Status)
+	}
+	if publishedRun.DisplayTitle != "Report: scheduled" {
+		t.Fatalf("display title = %q, want rendered trigger title", publishedRun.DisplayTitle)
+	}
+}
+
 func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()
@@ -119,7 +178,7 @@ func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
 	}
 
 	const dedupKey = "pr_merged:task-1:acme/api#7"
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), dedupKey)
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), DedupKey(dedupKey))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}
@@ -200,10 +259,24 @@ func TestCronScheduler_DailyTrigger_DoesNotRefireNextTick(t *testing.T) {
 	}
 	updated := triggers[0]
 
-	// One minute later — well within the @daily interval — the scheduler
-	// must not treat the trigger as due again.
-	if cs.shouldFire(&updated, now.Add(time.Minute)) {
-		t.Fatal("expected shouldFire to be false one minute after a skipped evaluation of a daily trigger")
+	if updated.LastEvaluatedAt == nil {
+		t.Fatal("expected the skipped evaluation to be persisted")
+	}
+	evaluatedAt := updated.LastEvaluatedAt.UTC()
+	nextMidnight := time.Date(evaluatedAt.Year(), evaluatedAt.Month(), evaluatedAt.Day()+1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		due  bool
+	}{
+		{"before next daily occurrence", nextMidnight.Add(-time.Nanosecond), false},
+		{"at next daily occurrence", nextMidnight, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cs.shouldFire(&updated, tc.at); got != tc.due {
+				t.Fatalf("shouldFire at %s = %v, want %v", tc.at, got, tc.due)
+			}
+		})
 	}
 }
 
@@ -246,7 +319,7 @@ func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *t
 		t.Fatal(err)
 	}
 
-	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
+	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupNotConfigured()); err == nil {
 		t.Fatal("expected FireTrigger to return the concurrency-cap check error")
 	}
 
@@ -304,7 +377,7 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("new-run"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}
@@ -320,5 +393,59 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		if r.Status == RunStatusSkipped {
 			t.Fatalf("expected the new trigger to fire instead of skip for the cap; runs=%+v", runs)
 		}
+	}
+}
+
+func TestRetrySchedulerReplaysPendingCommittedContinuation(t *testing.T) {
+	svc := newTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	automation := &Automation{
+		ID: "scheduler-recovery-automation", WorkspaceID: "scheduler-recovery-workspace",
+		Name: "scheduler recovery", Enabled: true,
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, automation))
+	require.NoError(t, svc.store.CreateRetryGroup(ctx, &RetryGroup{
+		ID: "scheduler-recovery-group", AutomationID: automation.ID,
+		Generation: 1, State: RetryGroupLive,
+	}))
+	run := &AutomationRun{
+		ID: "scheduler-recovery-run", AutomationID: automation.ID,
+		Status: RunStatusTriggered, RetryState: RetryStateTriggered,
+		RetryGroupID: "scheduler-recovery-group", RetryGroupGeneration: 1,
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+	require.NoError(t, svc.store.CreateRetryIntent(ctx, &RetryTaskIntent{
+		ID: "scheduler-recovery-intent", RunID: run.ID,
+		GroupGeneration: 1, State: retryIntentAdmitted,
+	}))
+	require.NoError(t, svc.store.CreateRetryOperation(ctx, &RetryOperation{
+		ID: "scheduler-recovery-operation", IntentID: "scheduler-recovery-intent",
+		RunID: run.ID, GroupGeneration: 1, Kind: retryTaskOperationKind,
+		State: retryOperationCommitted, ExternalTaskID: "provider-task",
+		ExternalSessionID: "provider-session", ExternalTurnID: "provider-turn",
+	}))
+	require.NoError(t, svc.store.CreateRetryOutbox(ctx, &RetryOutbox{
+		EventID: "scheduler-recovery-event", RunID: run.ID, SnapshotVersion: 1,
+		State: retryOutboxPending,
+	}))
+
+	replayed := make(chan *AutomationTriggeredEvent, 1)
+	_, err := svc.eventBus.Subscribe(events.AutomationTriggered, func(_ context.Context, event *bus.Event) error {
+		replayed <- event.Data.(*AutomationTriggeredEvent)
+		return nil
+	})
+	require.NoError(t, err)
+
+	scheduler := NewRetryScheduler(svc, svc.logger)
+	scheduler.Start(ctx)
+	defer scheduler.Stop()
+
+	select {
+	case event := <-replayed:
+		require.Equal(t, run.ID, event.RunID)
+	case <-time.After(3 * time.Second):
+		t.Fatal("pending committed continuation was not replayed in process")
 	}
 }

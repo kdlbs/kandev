@@ -78,7 +78,10 @@ func (s *Server) handlePortProxy(c *gin.Context) {
 		}
 	}()
 
-	proxy.ServeHTTP(c.Writer, c.Request)
+	request, releaseFencing := credentialScopedRequest(c)
+	defer releaseFencing()
+
+	proxy.ServeHTTP(c.Writer, request)
 }
 
 func (s *Server) createPortProxy(port int) *httputil.ReverseProxy {

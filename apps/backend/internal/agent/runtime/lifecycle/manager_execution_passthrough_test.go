@@ -7,9 +7,20 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestSSHPassthroughAttachWaitsForLifecycleLaunch(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session": {SessionID: "session", TaskID: "task", WorkspacePath: "/remote/task", ExecutorType: "ssh"},
+	}}
+	_, err := mgr.EnsurePassthroughExecution(context.Background(), "session")
+	require.ErrorIs(t, err, ErrSessionWorkspaceNotReady)
+	require.Empty(t, mgr.executionStore.List())
+}
 
 func TestResolveSessionRuntimeFallbackOrder(t *testing.T) {
 	ctx := context.Background()
@@ -103,6 +114,19 @@ func TestVerifyPassthroughEnabledWithoutResolver(t *testing.T) {
 	_, err := mgr.verifyPassthroughEnabled(context.Background(), "session-1", "profile-1")
 
 	require.ErrorContains(t, err, "has no profile configured for passthrough mode")
+}
+
+func TestPassthroughProviderGuardRejectsGatewayProfiles(t *testing.T) {
+	err := validatePassthroughProvider(&AgentProfileInfo{
+		CLIPassthrough: true,
+		ProviderKind:   settingsmodels.ProviderKindOpenAICompatible,
+	})
+
+	require.ErrorContains(t, err, "CLI passthrough cannot use an OpenAI-compatible provider")
+}
+
+func TestPassthroughProviderGuardAllowsNativeProfiles(t *testing.T) {
+	require.NoError(t, validatePassthroughProvider(&AgentProfileInfo{CLIPassthrough: true}))
 }
 
 // TestEnsurePassthroughExecutionChecksAccessBeforeCacheLookup pins that a

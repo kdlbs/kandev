@@ -32,4 +32,34 @@ test.describe("mobile i18n language switcher", () => {
     await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
     await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
   });
+
+  test("switches to Japanese, persists through reload, and restores English", async ({
+    testPage,
+  }) => {
+    await testPage.goto(APPEARANCE_URL);
+
+    const select = testPage.getByLabel("Display language");
+    await expect(select).toBeVisible({ timeout: 10_000 });
+    await select.tap();
+    await testPage.getByRole("listbox").getByRole("option", { name: "日本語" }).tap();
+
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "ja", { timeout: 10_000 });
+    await expect(testPage.getByLabel("表示言語")).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => {
+        const cookies = await testPage.context().cookies();
+        return cookies.find((cookie) => cookie.name === "kandev_locale")?.value;
+      })
+      .toBe("ja");
+
+    await testPage.reload();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "ja", { timeout: 10_000 });
+    await expect(testPage.getByLabel("表示言語")).toBeVisible({ timeout: 10_000 });
+
+    const selectAfter = testPage.getByLabel("表示言語");
+    await selectAfter.tap();
+    await testPage.getByRole("listbox").getByRole("option", { name: "English" }).tap();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
+    await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
+  });
 });

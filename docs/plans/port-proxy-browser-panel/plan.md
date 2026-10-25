@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/port-proxy-browser-panel/spec.md
+spec: docs/specs/ui/requirements/port-proxy-browser-panel.md
 created: 2026-08-07
 status: complete
 ---

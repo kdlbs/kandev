@@ -6,7 +6,7 @@ wave: 12
 depends_on:
   - "19-final-review-remediation"
 plan: "plan.md"
-spec: "../../specs/ui/ci-pr-automation.md"
+spec: "../../specs/ui/requirements/ci-pr-automation.md"
 ---
 
 # Task 20: PR events automation controls

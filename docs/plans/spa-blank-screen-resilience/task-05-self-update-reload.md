@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/system-page/spec.md"
+spec: "../../specs/system-page/requirements/system-page.md"
 decision: "../../decisions/2026-07-27-spa-failure-containment-and-deployment-recovery.md"
 ---
 

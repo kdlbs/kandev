@@ -145,13 +145,23 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 }
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
+	a, err := cs.svc.Store().GetAutomation(ctx, t.AutomationID)
+	if err != nil || a == nil {
+		return
+	}
+	for _, condition := range a.Triggers {
+		if condition.Type == TriggerTypePluginEvent {
+			return
+		}
+	}
+
 	data, _ := json.Marshal(map[string]string{
 		triggerDataSourceKey: string(TriggerTypeScheduled),
 		"timestamp":          now.Format(time.RFC3339),
 	})
 	dedupKey := fmt.Sprintf("scheduled:%s:%d", t.ID, now.Unix()/60) // Dedup by minute
 
-	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, dedupKey); err != nil {
+	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, DedupKey(dedupKey)); err != nil {
 		cs.logger.Error("failed to fire scheduled trigger",
 			zap.String("trigger_id", t.ID),
 			zap.String("automation_id", t.AutomationID),
@@ -169,6 +179,8 @@ var cronParser = cron.NewParser(
 // nextCronFire computes the next time the given cron expression fires strictly
 // after `after`, interpreted in the given timezone. An empty timezone means
 // UTC, so scheduling is deterministic regardless of the host's local clock.
+// A calendar schedule with no occurrence within cron's five-year search
+// horizon returns an error.
 //
 // Wall-clock schedules honor the timezone's DST transitions (a "0 9 * * *"
 // daily schedule always fires at 09:00 local, whether that is 13:00 or 14:00
@@ -198,7 +210,49 @@ func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
 	}
-	return schedule.Next(after), nil
+
+	// @every is a pure interval (cron.ConstantDelaySchedule), not a wall-clock
+	// schedule, so DST fall-back suppression does not apply to it.
+	spec, ok := schedule.(*cron.SpecSchedule)
+	if !ok {
+		return schedule.Next(after), nil
+	}
+
+	// schedule.Next returns its candidate in the input's location, so the
+	// input must already be in the schedule's own location for ZoneBounds to
+	// see the same transitions the schedule fires against.
+	candidate := spec.Next(after.In(spec.Location))
+	for !candidate.IsZero() && isAmbiguousFallBack(candidate) {
+		transitionStart, _ := candidate.ZoneBounds()
+		if !after.Before(transitionStart) {
+			break
+		}
+		// The repeated window is bounded by the offset delta, so this advances
+		// at most one candidate per matching schedule slot in that window.
+		candidate = spec.Next(candidate)
+	}
+	if candidate.IsZero() {
+		return time.Time{}, fmt.Errorf("cron schedule has no occurrence within the five-year search horizon")
+	}
+	return candidate, nil
+}
+
+// isAmbiguousFallBack reports whether t falls within the repeated wall-clock
+// window created by a DST "fall back" transition: after the transition, the
+// first (transition-end - transition-start)-wide slice of the new period
+// repeats wall-clock times already fired once in the pre-transition offset.
+func isAmbiguousFallBack(t time.Time) bool {
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return false
+	}
+	_, prevOffset := start.Add(-time.Second).Zone()
+	_, currOffset := t.Zone()
+	delta := time.Duration(prevOffset-currOffset) * time.Second
+	if delta <= 0 {
+		return false
+	}
+	return t.Sub(start) < delta
 }
 
 func hasCronTZPrefix(expr string) bool {

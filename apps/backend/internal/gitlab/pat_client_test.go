@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 func TestPATClientProviderActionContract(t *testing.T) {
@@ -430,7 +432,7 @@ func TestPATClient_ListIssuesPaged_ScopeAssignedToMe(t *testing.T) {
 	defer stop()
 
 	c := NewPATClient(host, "tok")
-	if _, err := c.ListIssuesPaged(context.Background(), "scope=assigned_to_me", "", 1, 25); err != nil {
+	if _, err := c.ListIssuesPaged(context.Background(), "scope=assigned_to_me", "", "Next", 1, 25); err != nil {
 		t.Fatalf("err = %v", err)
 	}
 	if receivedPath != "/issues" {
@@ -441,6 +443,9 @@ func TestPATClient_ListIssuesPaged_ScopeAssignedToMe(t *testing.T) {
 	}
 	if got := receivedQuery.Get("state"); got != "opened" {
 		t.Errorf("state = %q, want opened", got)
+	}
+	if got := receivedQuery.Get("milestone"); got != "Next" {
+		t.Errorf("milestone = %q, want Next — must reach the server", got)
 	}
 }
 
@@ -467,7 +472,7 @@ func TestPATClient_ListIssuesPaged_HonoursTotalHeader(t *testing.T) {
 	defer stop()
 
 	c := NewPATClient(host, "tok")
-	page, err := c.ListIssuesPaged(context.Background(), "", "", 2, 20)
+	page, err := c.ListIssuesPaged(context.Background(), "", "", "", 2, 20)
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -682,7 +687,7 @@ func TestSummarizeApprovals(t *testing.T) {
 
 func TestCountDiffLines(t *testing.T) {
 	diff := "--- a/foo.go\n+++ b/foo.go\n@@ -1,3 +1,3 @@\n-old\n+new1\n+new2\n unchanged\n"
-	add, del := countDiffLines(diff)
+	add, del := unidiff.CountLines(diff)
 	if add != 2 {
 		t.Errorf("additions = %d, want 2", add)
 	}

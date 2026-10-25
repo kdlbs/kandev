@@ -1,0 +1,40 @@
+# Opt-in RBAC for the Kubernetes executor. This file is not applied by the
+# control-plane deployment example. Change every kandev-agents namespace below
+# if the executor uses another namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kandev-executor
+  namespace: kandev-agents
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kandev-executor
+  namespace: kandev-agents
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "create", "delete", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/portforward"]
+    verbs: ["get", "create"]
+  # Keep this rule for managed_pvc profiles. For existing_claim, reduce it to
+  # get only. For empty_dir-only profiles, remove the rule entirely.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kandev-executor
+  namespace: kandev-agents
+subjects:
+  - kind: ServiceAccount
+    name: kandev-executor
+    namespace: kandev-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kandev-executor

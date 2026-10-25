@@ -1,0 +1,131 @@
+import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { create, useStore } from "zustand";
+import { immer } from "zustand/middleware/immer";
+import { createSettingsSlice } from "@/lib/state/slices/settings/settings-slice";
+import type { SettingsSlice } from "@/lib/state/slices/settings/types";
+import type { AgentUpdateJob } from "@/lib/api";
+
+const listAgentUpdateStatusesMock = vi.fn();
+function newStore() {
+  return create<SettingsSlice>()(immer((set, get) => createSettingsSlice(set, get)));
+}
+let mockStore = newStore();
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => mockStore,
+  useAppStore: (selector: (s: SettingsSlice) => unknown) => useStore(mockStore, selector),
+}));
+beforeEach(() => {
+  mockStore = newStore();
+});
+
+vi.mock("@/lib/api/domains/agent-update-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/agent-update-api")>()),
+  listAgentUpdateStatuses: (...args: unknown[]) => listAgentUpdateStatusesMock(...args),
+}));
+
+import { useAgentRuntimeUpdateStatuses } from "./use-agent-runtime-update-statuses";
+
+function job(overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob {
+  return {
+    job_id: "job-1",
+    agent_name: "claude-acp",
+    status: "succeeded",
+    started_at: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+afterEach(() => vi.resetAllMocks());
+
+describe("useAgentRuntimeUpdateStatuses", () => {
+  it("loads structural statuses into a shared agent map", async () => {
+    listAgentUpdateStatusesMock.mockResolvedValueOnce({
+      statuses: [
+        {
+          agent_name: "claude-acp",
+          package: "@agentclientprotocol/claude-agent-acp",
+          default_version: "0.70.0",
+          effective_version: "0.70.0",
+          latest_version: "0.71.0",
+          check_state: "update_available",
+        },
+        {
+          agent_name: "codex-acp",
+          package: "@agentclientprotocol/codex-acp",
+          default_version: "1.6.0",
+          effective_version: "1.6.0",
+          check_state: "unknown",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useAgentRuntimeUpdateStatuses({}));
+
+    await waitFor(() => expect(result.current.statusByAgent["claude-acp"]).toBeDefined());
+    expect(result.current.statusByAgent["claude-acp"]?.check_state).toBe("update_available");
+    expect(result.current.statusByAgent["codex-acp"]?.check_state).toBe("unknown");
+    expect(listAgentUpdateStatusesMock).toHaveBeenCalledWith({ cache: "no-store" });
+  });
+
+  it("refreshes once after a successful update job", async () => {
+    listAgentUpdateStatusesMock
+      .mockResolvedValueOnce({ statuses: [] })
+      .mockResolvedValueOnce({ statuses: [] });
+    const { result, rerender } = renderHook(({ jobs }) => useAgentRuntimeUpdateStatuses(jobs), {
+      initialProps: { jobs: {} as Record<string, AgentUpdateJob> },
+    });
+
+    await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(1));
+    rerender({ jobs: { "claude-acp": job() } });
+    await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(2));
+    expect(result.current.statusByAgent).toEqual({});
+  });
+
+  it("does not erase a last good map when a refresh fails", async () => {
+    listAgentUpdateStatusesMock
+      .mockResolvedValueOnce({
+        statuses: [
+          {
+            agent_name: "claude-acp",
+            package: "@agentclientprotocol/claude-agent-acp",
+            default_version: "0.70.0",
+            effective_version: "0.70.0",
+            latest_version: "0.71.0",
+            check_state: "update_available",
+          },
+        ],
+      })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ statuses: [] });
+    const { result, rerender } = renderHook(({ jobs }) => useAgentRuntimeUpdateStatuses(jobs), {
+      initialProps: { jobs: {} as Record<string, AgentUpdateJob> },
+    });
+
+    await waitFor(() => expect(result.current.statusByAgent["claude-acp"]).toBeDefined());
+    rerender({ jobs: { "claude-acp": job({ job_id: "job-2" }) } });
+    await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(2));
+    expect(result.current.statusByAgent["claude-acp"]?.check_state).toBe("update_available");
+
+    rerender({ jobs: { "claude-acp": job({ job_id: "job-2" }) } });
+    await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(3));
+  });
+});
+
+it("shares two mounted consumers and settles when the initiator unmounts", async () => {
+  let resolve!: (value: unknown) => void;
+  listAgentUpdateStatusesMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const first = renderHook(() => useAgentRuntimeUpdateStatuses({}));
+  const second = renderHook(() => useAgentRuntimeUpdateStatuses({}));
+  expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(1);
+  first.unmount();
+  resolve({ statuses: [{ agent_name: "gemini", check_state: "unknown" }] });
+  await waitFor(() =>
+    expect(second.result.current.statusByAgent.gemini?.check_state).toBe("unknown"),
+  );
+});

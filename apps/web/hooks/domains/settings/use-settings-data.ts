@@ -1,91 +1,69 @@
-import { useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { listAgents, listAvailableAgents, listExecutors } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { listAvailableAgents } from "@/lib/api";
+import { loadInitialExecutors } from "./initial-executor-catalogue-read";
+import {
+  agentListAuthScopeIdentity,
+  getAgentListResourceScope,
+  type AgentListSnapshot,
+} from "./agent-list-resource";
 
-const AGENT_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+const EMPTY_AGENT_LIST_SNAPSHOT: AgentListSnapshot = {
+  response: null,
+  profileVersion: -1,
+  loading: false,
+  loaded: false,
+  error: null,
+};
 
-type AgentListResponse = Awaited<ReturnType<typeof listAgents>>;
-
-function hasAgentProfiles(response: AgentListResponse): boolean {
-  return response.agents.some((agent) => (agent.profiles?.length ?? 0) > 0);
-}
-
-function waitForAgentListRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
-}
-
-/**
- * Agent discovery and profile persistence complete before the backend health
- * endpoint becomes ready, but a freshly started client can still observe an
- * empty list while that state is settling. Keep the settings surface loading
- * briefly instead of treating that transient response as the authoritative
- * "no agents" state.
- */
-export async function listAgentsUntilSettled(): Promise<AgentListResponse> {
-  for (const retryDelayMs of AGENT_LIST_RETRY_DELAYS_MS) {
-    try {
-      const response = await listAgents({ cache: "no-store" });
-      if (hasAgentProfiles(response)) {
-        return response;
-      }
-    } catch {}
-
-    await waitForAgentListRetry(retryDelayMs);
-  }
-
-  return listAgents({ cache: "no-store" });
-}
-
-function applyAgentList(
-  response: AgentListResponse,
-  setSettingsAgents: (agents: AgentListResponse["agents"]) => void,
-  setAgentProfiles: (profiles: ReturnType<typeof toAgentProfileOption>[]) => void,
-): void {
-  setSettingsAgents(response.agents);
-  setAgentProfiles(
-    response.agents.flatMap((agent) =>
-      agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-    ),
+function useAgentListResource(enabled: boolean) {
+  const store = useAppStoreApi();
+  const identity = useAppStore(agentListAuthScopeIdentity);
+  const scope = useMemo(
+    () => (enabled ? getAgentListResourceScope(store) : null),
+    [enabled, identity, store],
   );
+  const subscribe = useCallback(
+    (listener: () => void) => (enabled && scope ? scope.subscribe(listener) : () => {}),
+    [enabled, scope],
+  );
+  const getSnapshot = useCallback(() => scope?.getSnapshot() ?? EMPTY_AGENT_LIST_SNAPSHOT, [scope]);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return { scope, snapshot };
 }
 
 export function useSettingsData(enabled = true) {
+  const store = useAppStoreApi();
   const executors = useAppStore((state) => state.executors.items);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const settingsData = useAppStore((state) => state.settingsData);
   const availableAgents = useAppStore((state) => state.availableAgents);
-  const setExecutors = useAppStore((state) => state.setExecutors);
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
   const setAvailableAgentsLoading = useAppStore((state) => state.setAvailableAgentsLoading);
   const setSettingsData = useAppStore((state) => state.setSettingsData);
+  const { scope: agentListResource, snapshot: agentListSnapshot } = useAgentListResource(enabled);
 
   useEffect(() => {
-    if (!enabled) return;
-    if (settingsData.executorsLoaded) return;
-    if (executors.length === 0) {
-      listExecutors({ cache: "no-store" })
-        .then((response) => setExecutors(response.executors))
-        .catch(() => setExecutors([]))
-        .finally(() => setSettingsData({ executorsLoaded: true }));
-    } else {
-      setSettingsData({ executorsLoaded: true });
-    }
-  }, [enabled, executors.length, setExecutors, setSettingsData, settingsData.executorsLoaded]);
+    if (!enabled || !agentListResource) return;
+    void loadInitialExecutors(store);
+  }, [enabled, agentListResource, store, executors.length, settingsData.executorsLoaded]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !agentListResource) return;
     if (settingsData.agentsLoaded) return;
     if (settingsAgents.length === 0) {
-      listAgentsUntilSettled()
-        .then((response) => applyAgentList(response, setSettingsAgents, setAgentProfiles))
+      agentListResource
+        .ensure()
         .catch(() => {
+          if (!agentListResource.isActive) return;
           setSettingsAgents([]);
           setAgentProfiles([]);
         })
-        .finally(() => setSettingsData({ agentsLoaded: true }));
+        .finally(() => {
+          if (agentListResource.isActive) setSettingsData({ agentsLoaded: true });
+        });
     } else {
       setSettingsData({ agentsLoaded: true });
     }
@@ -94,6 +72,8 @@ export function useSettingsData(enabled = true) {
     setAgentProfiles,
     setSettingsAgents,
     setSettingsData,
+    agentListResource,
+    agentListSnapshot.loaded,
     settingsAgents.length,
     settingsData.agentsLoaded,
   ]);
@@ -106,7 +86,7 @@ export function useSettingsData(enabled = true) {
   // the probe takes to finish. This effect kicks the probe off and gates
   // listAgents-staleness on its completion.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !agentListResource) return;
     if (availableAgents.loaded || availableAgents.loading) return;
     setAvailableAgentsLoading(true);
     listAvailableAgents({ cache: "no-store" })
@@ -120,27 +100,15 @@ export function useSettingsData(enabled = true) {
     setAvailableAgentsLoading,
   ]);
 
-  // Re-fetch agent profiles once the host-utility probe completes. Use a ref
-  // gate so we re-fetch exactly once per `availableAgents.loaded` transition,
-  // not on every render after.
-  const reconciledRef = useRef(false);
+  // Re-fetch once after the shared host-utility probe settles. The resource
+  // owns this gate so multiple settings consumers do not queue duplicate reads.
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !agentListResource) return;
     if (!availableAgents.loaded) return;
     if (!settingsData.agentsLoaded) return; // Wait for the initial agents fetch first.
-    if (reconciledRef.current) return;
-    reconciledRef.current = true;
-    listAgentsUntilSettled()
-      .then((response) => applyAgentList(response, setSettingsAgents, setAgentProfiles))
-      .catch(() => {
-        // Best-effort reconcile; keep prior (possibly stale) profiles rather
-        // than wiping the dialog state on a transient error.
-      });
-  }, [
-    enabled,
-    availableAgents.loaded,
-    settingsData.agentsLoaded,
-    setAgentProfiles,
-    setSettingsAgents,
-  ]);
+    agentListResource.refreshAfterAvailableAgents().catch(() => {
+      // Best-effort reconcile; keep prior (possibly stale) profiles rather
+      // than wiping the dialog state on a transient error.
+    });
+  }, [enabled, availableAgents.loaded, settingsData.agentsLoaded, agentListResource]);
 }

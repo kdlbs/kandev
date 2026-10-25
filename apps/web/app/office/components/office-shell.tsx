@@ -12,6 +12,13 @@ import {
   useOfficeTopbarChrome,
 } from "@/app/office/components/office-topbar-context";
 import { usePathname } from "@/lib/routing/client-router";
+import { useAppStore } from "@/components/state-provider";
+import { useWorkspacePause } from "@/hooks/domains/office/use-workspace-pause";
+import {
+  WorkspacePauseState,
+  WorkspacePauseTopbarActions,
+  type WorkspacePauseViewProps,
+} from "@/app/office/components/workspace-pause-banner";
 // Route -> catalog key, not route -> title. The map is module scope, so a `t()`
 // here would resolve once at import and freeze at the boot locale; the keys are
 // resolved at render below. The route paths are URLs, not copy.
@@ -113,6 +120,12 @@ function OfficeShellChrome({ children, routePath }: OfficeShellProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const chrome = useOfficeTopbarChrome();
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const pauseState = useWorkspacePause(activeWorkspaceId);
+  const pauseView: WorkspacePauseViewProps = {
+    activeWorkspaceId,
+    ...pauseState,
+  };
   const titleKey = resolveTitleKey(pathname);
   const title = chrome?.title ?? (titleKey ? t(titleKey) : "");
 
@@ -123,7 +136,12 @@ function OfficeShellChrome({ children, routePath }: OfficeShellProps) {
       icon={chrome?.icon}
       parents={chrome?.parents}
       leftActions={chrome?.leftActions}
-      actions={chrome?.actions}
+      actions={
+        <>
+          <WorkspacePauseTopbarActions view={pauseView} />
+          {chrome?.actions}
+        </>
+      }
       topbarTestId="office-topbar"
       className="gap-2 bg-background px-4"
       pageNav={(onClose) => <OfficePageNav onClose={onClose} />}
@@ -133,6 +151,12 @@ function OfficeShellChrome({ children, routePath }: OfficeShellProps) {
       // different surfaces is a coin flip for the user.
       navOmitDestinations={["tasks"]}
     >
+      {/* Persistent across every /office/** navigation, per
+          AC-OFFICE-KILL-SWITCH-006.4 and -006.12 — the shell wraps every
+          Office route, so mounting here (rather than per-page) is what
+          keeps the indicator and pause control present regardless of which
+          page the operator is on. */}
+      <WorkspacePauseState view={pauseView} />
       {/* `data-office-route` stamps the RESOLVED route onto the outlet, and is
           the render anchor the pseudo-coverage oracle waits on for every
           `office — …` screen (e2e/tests/i18n/pseudo-coverage.spec.ts).

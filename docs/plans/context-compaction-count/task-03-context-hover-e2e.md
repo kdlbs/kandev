@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-context-hover-ui"]
 plan: "plan.md"
-spec: "../../specs/context-compaction-count/spec.md"
+spec: "../../specs/ui/requirements/context-compaction-count.md"
 ---
 
 # Task 03: Cover desktop and mobile hover

@@ -5,15 +5,20 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlayerPlay, IconSend, IconX } from "@tabler/icons-react";
+import { cn } from "@kandev/ui/lib/utils";
 import { useTranslation } from "react-i18next";
 
 interface CommentFormProps {
   initialContent?: string;
-  onSubmit: (content: string) => void;
+  value?: string;
+  onChange?: (content: string) => void;
+  className?: string;
+  onSubmit: (content: string) => unknown;
   onCancel?: () => void;
-  onSubmitAndRun?: (content: string) => void;
+  onSubmitAndRun?: (content: string) => unknown;
   isEditing?: boolean;
   autoFocus?: boolean;
+  submitDisabled?: boolean;
 }
 
 function ActionButtons({
@@ -92,14 +97,23 @@ function ActionButtons({
 
 export function CommentForm({
   initialContent = "",
+  value,
+  onChange,
+  className,
   onSubmit,
   onCancel,
   onSubmitAndRun,
   isEditing = false,
   autoFocus = true,
+  submitDisabled = false,
 }: CommentFormProps) {
   const { t } = useTranslation();
-  const [content, setContent] = useState(initialContent);
+  const [localContent, setLocalContent] = useState(initialContent);
+  const content = value ?? localContent;
+  const setContent = (next: string) => {
+    if (value === undefined) setLocalContent(next);
+    onChange?.(next);
+  };
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -108,17 +122,15 @@ export function CommentForm({
 
   const handleSubmit = () => {
     const trimmed = content.trim();
-    if (trimmed) {
-      onSubmit(trimmed);
-      setContent("");
+    if (trimmed && !submitDisabled) {
+      if (onSubmit(trimmed) !== false) setContent("");
     }
   };
 
   const handleSubmitAndRun = () => {
     const trimmed = content.trim();
-    if (trimmed && onSubmitAndRun) {
-      onSubmitAndRun(trimmed);
-      setContent("");
+    if (trimmed && onSubmitAndRun && !submitDisabled) {
+      if (onSubmitAndRun(trimmed) !== false) setContent("");
     }
   };
 
@@ -132,15 +144,21 @@ export function CommentForm({
       else handleSubmit();
     } else if (e.key === "Escape" && onCancel) {
       e.preventDefault();
+      e.stopPropagation();
       onCancel();
     }
   };
 
-  const disabled = !content.trim();
+  const disabled = !content.trim() || submitDisabled;
   const showRunButton = !!onSubmitAndRun && !isEditing;
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-2 shadow-md">
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-md border border-border bg-card p-2 shadow-md",
+        className,
+      )}
+    >
       <Textarea
         ref={textareaRef}
         value={content}
@@ -150,8 +168,8 @@ export function CommentForm({
         className="min-h-[60px] resize-none text-xs"
         rows={2}
       />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">
+      <div data-comment-actions className="flex items-center justify-between gap-2">
+        <span data-comment-shortcuts className="text-[10px] text-muted-foreground">
           {onSubmitAndRun
             ? t("diff:enterToAddShiftEnterToRun", { modKey })
             : t("diff:enterToAdd", { modKey })}

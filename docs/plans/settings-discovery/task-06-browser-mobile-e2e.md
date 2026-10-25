@@ -5,7 +5,7 @@ status: completed
 wave: 6
 depends_on: ["03-command-palette", "05-domain-target-coverage"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-discovery.md"
+spec: "../../specs/ui/requirements/settings-discovery.md"
 ---
 
 # Task 06: Desktop and mobile browser coverage

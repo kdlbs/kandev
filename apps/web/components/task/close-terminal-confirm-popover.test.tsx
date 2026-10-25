@@ -41,9 +41,12 @@ describe("CloseTerminalConfirmPopover", () => {
     render(<Harness />);
     expect(screen.getByRole("dialog", { name: "Close terminal?" })).toBeTruthy();
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "Close terminal" }).className).toContain("min-h-11");
+    const closeButton = screen.getByRole("button", { name: "Close terminal" });
+    expect(closeButton.className).toContain("max-md:h-11");
+    expect(closeButton.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(closeButton.className).not.toContain("min-h-11");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
+    fireEvent.click(closeButton);
 
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("dialog", { name: "Close terminal?" })).toBeNull();

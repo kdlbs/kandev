@@ -1,6 +1,7 @@
 "use client";
 
 import { IconAlertCircle, IconLoader2 } from "@tabler/icons-react";
+import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { TaskRunStatus } from "@/app/office/tasks/[id]/types";
 import { useTranslation } from "react-i18next";
@@ -53,7 +54,9 @@ export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadg
         data-testid="user-comment-run-badge"
         data-status={status}
       >
-        <IconLoader2 className="h-3 w-3 animate-spin" aria-hidden />
+        <CompositorSpin className="h-3 w-3" aria-hidden>
+          <IconLoader2 className="size-full" />
+        </CompositorSpin>
         {t("task:working4")}
       </span>
     );

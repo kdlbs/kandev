@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-service-and-events"]
 plan: "plan.md"
-spec: "../../specs/repository-sets/spec.md"
+spec: "../../specs/workspaces/requirements/repository-sets.md"
 ---
 
 # Task 03: Repository Set HTTP And WebSocket Surface

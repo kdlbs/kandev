@@ -21,6 +21,7 @@ import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-b
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
 import { RepositoryCustomScripts } from "@/components/settings/repository-custom-scripts";
+import { RepositoryBranchPolicies } from "@/components/settings/repository-branch-policies";
 import {
   RepositorySecretBindings,
   validateRepositorySecretBindings,
@@ -28,6 +29,7 @@ import {
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+import { RepositoryMCPSelectionSection } from "@/components/settings/repository-mcp-selection";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
@@ -220,6 +222,7 @@ function RepositoryScriptFields({
 
 type RepositoryEditViewProps = {
   repository: RepositoryWithScripts;
+  workspaceId: string;
   savedRepository?: RepositoryWithScripts;
   isDirty: boolean;
   areScriptsDirty: boolean;
@@ -230,10 +233,12 @@ type RepositoryEditViewProps = {
   onOpenDelete: () => void;
   deleteLoading: boolean;
   close: () => void;
+  onMCPDirtyChange: (dirty: boolean) => void;
 };
 
 function RepositoryEditView({
   repository,
+  workspaceId,
   savedRepository,
   isDirty,
   areScriptsDirty,
@@ -244,6 +249,7 @@ function RepositoryEditView({
   onOpenDelete,
   deleteLoading,
   close,
+  onMCPDirtyChange,
 }: RepositoryEditViewProps) {
   const { t } = useTranslation();
   return (
@@ -282,6 +288,16 @@ function RepositoryEditView({
             }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
           />
+
+          <RepositoryBranchPolicies repository={repository} workspaceId={workspaceId} />
+
+          {!repository.id.startsWith("temp-repo-") && (
+            <RepositoryMCPSelectionSection
+              repositoryId={repository.id}
+              workspaceId={workspaceId}
+              onDirtyChange={onMCPDirtyChange}
+            />
+          )}
 
           <RepositoryScriptFields
             repositoryId={repository.id}
@@ -341,6 +357,7 @@ function repositorySecretInvalidReason(
 
 type RepositoryCardProps = {
   repository: RepositoryWithScripts;
+  workspaceId: string;
   savedRepository?: RepositoryWithScripts;
   isRepositoryDirty: boolean;
   areScriptsDirty: boolean;
@@ -352,6 +369,7 @@ type RepositoryCardProps = {
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
   onDeleteScript: (repoId: string, scriptId: string) => void;
   onSave: (repoId: string) => Promise<void>;
+  onDiscard?: (repoId: string) => void;
   onDelete: (repoId: string) => Promise<void> | void;
 };
 
@@ -419,25 +437,30 @@ function useRepositoryDelete(
   };
 }
 
-export function RepositoryCard({
+function useRepositoryCardState({
   repository,
-  savedRepository,
   isRepositoryDirty,
   areScriptsDirty,
-  autoOpen = false,
-  readOnly = false,
-  onUpdate,
-  onAddScript,
-  onUpdateScript,
-  onDeleteScript,
+  autoOpen,
   onSave,
+  onDiscard,
   onDelete,
-}: RepositoryCardProps) {
+}: Pick<
+  RepositoryCardProps,
+  | "repository"
+  | "isRepositoryDirty"
+  | "areScriptsDirty"
+  | "autoOpen"
+  | "onSave"
+  | "onDiscard"
+  | "onDelete"
+>) {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const [isEditing, setIsEditing] = useState(() => autoOpen);
+  const [isEditing, setIsEditing] = useState(() => Boolean(autoOpen));
+  const [mcpSelectionDirty, setMcpSelectionDirty] = useState(false);
   const saveRequest = useRequest(() => onSave(repository.id));
-  const isDirty = isRepositoryDirty || areScriptsDirty;
+  const isDirty = isRepositoryDirty || areScriptsDirty || mcpSelectionDirty;
   const deleteState = useRepositoryDelete(repository.id, onDelete, () => setIsEditing(false));
   const secretBindingValidation = validateRepositorySecretBindings(repository.secret_bindings);
   const invalidReason = repositorySecretInvalidReason(t, secretBindingValidation);
@@ -454,6 +477,10 @@ export function RepositoryCard({
       throw error;
     }
   };
+  const handleClose = () => {
+    if (mcpSelectionDirty) return;
+    setIsEditing(false);
+  };
   useSettingsSaveContributor({
     id: `repository:${repository.id}`,
     revision: JSON.stringify(repository),
@@ -461,7 +488,52 @@ export function RepositoryCard({
     canSave: !secretBindingValidation,
     invalidReason,
     save: handleSave,
-    discard: () => undefined,
+    discard: () => onDiscard?.(repository.id),
+  });
+
+  return {
+    deleteState,
+    handleClose,
+    isDirty,
+    isEditing,
+    mcpSelectionDirty,
+    setIsEditing,
+    setMcpSelectionDirty,
+  };
+}
+
+export function RepositoryCard({
+  repository,
+  workspaceId,
+  savedRepository,
+  isRepositoryDirty,
+  areScriptsDirty,
+  autoOpen = false,
+  readOnly = false,
+  onUpdate,
+  onAddScript,
+  onUpdateScript,
+  onDeleteScript,
+  onSave,
+  onDiscard,
+  onDelete,
+}: RepositoryCardProps) {
+  const {
+    deleteState,
+    handleClose,
+    isDirty,
+    isEditing,
+    mcpSelectionDirty,
+    setIsEditing,
+    setMcpSelectionDirty,
+  } = useRepositoryCardState({
+    repository,
+    isRepositoryDirty,
+    areScriptsDirty,
+    autoOpen,
+    onSave,
+    onDiscard,
+    onDelete,
   });
 
   // Read-only (dedicated Improve Kandev workspace): show the repository
@@ -484,10 +556,11 @@ export function RepositoryCard({
         isEditing={isEditing}
         historyId={`repo-${repository.id}`}
         onOpen={() => setIsEditing(true)}
-        onClose={() => setIsEditing(false)}
+        onClose={handleClose}
         renderEdit={({ close }) => (
           <RepositoryEditView
             repository={repository}
+            workspaceId={workspaceId}
             savedRepository={savedRepository}
             isDirty={isDirty}
             areScriptsDirty={areScriptsDirty}
@@ -497,7 +570,10 @@ export function RepositoryCard({
             onDeleteScript={onDeleteScript}
             onOpenDelete={deleteState.handleOpenDelete}
             deleteLoading={deleteState.buttonLoading}
-            close={close}
+            close={() => {
+              if (!mcpSelectionDirty) close();
+            }}
+            onMCPDirtyChange={setMcpSelectionDirty}
           />
         )}
         renderPreview={({ open }) => (

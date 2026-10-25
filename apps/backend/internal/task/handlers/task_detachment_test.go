@@ -39,6 +39,10 @@ func (r *detachHandlerRepo) UpdateTask(_ context.Context, task *models.Task) err
 	return nil
 }
 
+func (r *detachHandlerRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *detachHandlerRepo) DetachTask(_ context.Context, _ string) (bool, error) {
 	if r.getErr != nil {
 		return false, r.getErr

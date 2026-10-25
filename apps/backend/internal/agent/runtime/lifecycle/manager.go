@@ -14,12 +14,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -40,13 +42,18 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry        *registry.Registry
-	eventBus        bus.EventBus
-	credsMgr        CredentialsManager
-	profileResolver ProfileResolver
-	worktreeMgr     *worktree.Manager
-	mcpProvider     McpConfigProvider
-	logger          *logger.Logger
+	registry              *registry.Registry
+	eventBus              bus.EventBus
+	credsMgr              CredentialsManager
+	profileResolver       ProfileResolver
+	ownerAdmission        OwnerAdmission
+	worktreeMgr           *worktree.Manager
+	mcpProvider           McpConfigProvider
+	mcpResolver           MCPResolutionProvider
+	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
+	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
+	logger                *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -69,47 +76,177 @@ type Manager struct {
 	streamManager  *StreamManager         // Manages WebSocket streams
 	eventPublisher *EventPublisher        // Publishes lifecycle events
 	historyManager *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
+	runtimeOwner   *agentctl.RuntimeOwner // Owns the local standalone agentctl binding
+
+	runtimeAvailabilityMu           sync.Mutex
+	runtimeAvailabilitySubscription bus.Subscription
 
 	// Workspace info provider for on-demand instance creation
-	workspaceInfoProvider WorkspaceInfoProvider
+	workspaceInfoProvider          WorkspaceInfoProvider
+	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+	turnChangeCaptureHandler       TurnChangeCaptureHandler
+
+	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
+	taskRuntimeFences taskRuntimeOwnershipFences
+
+	// passthroughMCPMu serializes project-local MCP materialization and cleanup.
+	// The file is shared by executions that use the same workspace, so the
+	// filesystem operation and its ownership claim must be one critical section.
+	passthroughMCPMu               sync.Mutex
+	passthroughMCPActiveClaims     map[string]map[string]passthroughMCPFileClaim
+	passthroughMCPActiveExecutions map[string]map[string]*AgentExecution
 
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
 
+	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
+	startupRecoveryDelay func() time.Duration
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
-
-	// mcpHandler is the MCP request dispatcher for handling MCP requests
-	// from agentctl instances through the agent stream.
-	mcpHandler agentctl.MCPHandler
 
 	// sessionAccessCheck enforces per-user workspace scoping on session-scoped
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
+	// sessionExecCheck enforces the session.exec scope on surfaces that hand
+	// the caller a shell, a file write, or a port preview. Reading a
+	// transcript and running a command in the worktree are different
+	// permissions, so they get different checks.
+	sessionExecCheck  func(ctx context.Context, sessionID string) error
+	executorAdmission func(context.Context, string, string, string) (context.Context, error)
+
+	// recoveryGuard is the in-memory per-session acquire-or-observe map of
+	// AC-EXECUTORS-SURVIVAL-002.8, taken over the live standalone
+	// recovery-inventory records at startup step 3 before any control server
+	// is contacted, and consulted by Launch to refuse a concurrent request
+	// for a session that might still be re-tracking. Always non-nil.
+	recoveryGuard *RecoveryGuard
+
+	// retrackedSessionsMu guards retrackedSessions.
+	retrackedSessionsMu sync.RWMutex
+
+	// retrackedSessions is the set of session IDs this backend successfully
+	// re-tracked during its most recent Start() recovery pass
+	// (AC-EXECUTORS-SURVIVAL-003.1). Reset at the start of each Start() call,
+	// then populated once per recovered execution, right after it lands in
+	// executionStore -- never for an instance this pass explicitly refused
+	// to re-track (unreconstructable agent identity, unretrievable turn
+	// status). Queried by the orchestrator's startup reconciliation via
+	// WasSessionRetracked so a session whose agent actually survived the
+	// restart skips "backend died mid-turn" cleanup
+	// (AC-EXECUTORS-SURVIVAL-003.2/.3/.4/.5). Always non-nil after
+	// construction.
+	retrackedSessions map[string]struct{}
+
+	// standaloneOwnSessionsMu guards standaloneOwnSessions.
+	standaloneOwnSessionsMu sync.RWMutex
+
+	// standaloneOwnSessions is the set of session IDs whose executors_running
+	// row this backend itself created via Launch during this process's
+	// lifetime -- never populated by the recovery path (which adds directly
+	// to executionStore and marks retrackedSessions instead). Consulted by
+	// the standalone liveness classifier's own-record-vs-inherited-record
+	// carve-out (design 02 "Persistence": "A server this backend STARTED is
+	// not a server it adopted" -- a row this backend created is checkable
+	// against whichever control server this backend is currently using,
+	// adopted or freshly started, because that server is the only authority
+	// that can answer for it; an inherited row that server has never heard of
+	// classifies unknown instead of dead). Unlike retrackedSessions, this is
+	// NEVER reset by Start() -- it must accumulate for the whole process
+	// lifetime, not just one recovery pass. Always non-nil after
+	// construction.
+	standaloneOwnSessions map[string]struct{}
+
+	// passthroughLookup reads a session's durable passthrough mode
+	// (TaskSession.IsPassthrough) for AC-EXECUTORS-SURVIVAL-005.3's startup
+	// guard exclusion. Nil = every live standalone session is guarded (the
+	// safe default: guarding a passthrough session by mistake only costs one
+	// refused launch, never excluding a real candidate). See
+	// SetPassthroughLookup.
+	passthroughLookup PassthroughLookup
+
+	// recoveryDeadline and recoveryDeadlineStart implement the
+	// AC-EXECUTORS-SURVIVAL-003.7 single bound covering this startup pass's
+	// adoption+enumeration+reconstruction work. recoveryDeadlineStart is the
+	// instant this launch first contacted a recorded control endpoint (zero
+	// when it never did -- Start then falls back to its own invocation
+	// time); recoveryDeadline is the configured duration from that instant.
+	// A zero recoveryDeadline falls back to the AC's own 30s default. See
+	// SetRecoveryDeadline / SetRecoveryDeadlineStart.
+	recoveryDeadline      time.Duration
+	recoveryDeadlineStart time.Time
+
+	// agentSurvivalEnabled mirrors the features.agentSurvival runtime flag
+	// (config.Config.Features.AgentSurvival). When true and a stop's reason is
+	// StopReasonBackendShutdown, StopAgentWithReason takes the survivable-detach
+	// branch instead of the terminating one (design 01/02 kill-path #4). Set
+	// once during startup wiring via SetAgentSurvivalEnabled; false (today's
+	// unconditional terminating stop) is the correct zero value.
+	agentSurvivalEnabled bool
+
+	// inheritedRecordScope records what this launch found at the recorded
+	// control endpoint, so classifyStandaloneLiveness can judge records
+	// inherited from an earlier launch correctly. Set once during startup
+	// wiring via SetInheritedRecordScope; the zero value (no server
+	// answered) is correct for a launch that never attempted adoption.
+	inheritedRecordScope InheritedRecordScope
 
 	// environmentAccessCheck is the environment-keyed sibling of
 	// sessionAccessCheck, used by the terminal environment-shell route which
 	// resolves executions by environment ID. Nil = no scoping.
 	environmentAccessCheck func(ctx context.Context, environmentID string) error
 
+	// environmentExecCheck enforces session.exec on the environment-keyed
+	// surfaces that tear down or hand out a PTY. environmentAccessCheck is the
+	// read-level sibling used by the SSR terminal lists: listing terminals and
+	// destroying one are different permissions on the same identifier.
+	environmentExecCheck func(ctx context.Context, environmentID string) error
+
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, used by
+	// the task-keyed SSR terminal list which reads terminal rows by task ID
+	// without resolving an execution at all. Nil = no scoping.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
+	// taskEnvironmentAccessCheck authorizes a (task, environment) pair for
+	// surfaces that merge state keyed by both, where authorizing each ID on
+	// its own would not establish that they belong together. Nil = no scoping.
+	taskEnvironmentAccessCheck func(ctx context.Context, taskID, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
+	remoteRefreshGroup   singleflight.Group
 
 	// Background remote status polling
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
+	remoteRecoveryMu         sync.Mutex
+	remoteRecoveryPending    map[string]*remoteRecoveryRetry
+	remoteRecoveryCursor     string
+	stopContext              context.Context
+	cancelStop               context.CancelFunc
 	// Bounds the non-mutating contribution push check before agent launch.
 	// A zero value uses the production default and keeps test Manager literals safe.
 	remoteContributionPreflightTimeout time.Duration
 	stopCh                             chan struct{}
 	stopOnce                           sync.Once
+	turnChangeRetryMu                  sync.Mutex
 	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
 	// short-circuit work that would otherwise race the teardown and log
 	// confusing errors against children already being stopped.
 	shuttingDown atomic.Bool
+
+	// recoveryComplete is flipped true once Start's synchronous recovery
+	// pass (adoption, enumeration, and per-instance reconstruction) has
+	// finished for this process's lifetime. AC-EXECUTORS-SURVIVAL-003.6
+	// requires a caller outside that pass (e.g. RowLiveness, the idle
+	// reclaim path) to answer Unknown without enumerating while recovery is
+	// still in flight, rather than racing a live enumeration against work
+	// recovery itself has not finished doing.
+	recoveryComplete atomic.Bool
 
 	// pollAggregator routes hub session-mode events to agentctl. See
 	// manager_subscription.go.
@@ -131,18 +268,38 @@ type Manager struct {
 	// runningWriter persists the executors_running row in lockstep with executionStore.
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
-	runningWriter ExecutorRunningWriter
+	runningWriter  ExecutorRunningWriter
+	runRecoveryErr error
 
 	// executorProfileReader resolves the executor profile bound to a task
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader ExecutorProfileReader
+	executorProfileReader         ExecutorProfileReader
+	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
+	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginRuntimeAPIURL           string
+	pluginExecutorCallbackMu      sync.Mutex
+	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
 	// SkillDeployer hook. Nil → skill deploy is skipped.
 	agentProfileReader AgentProfileReader
+
+	// reachabilityReader resolves an ssh executor's stored reachability
+	// record for the launch-time session.launch.warning producer. Nil →
+	// no warning is ever published (feature not wired). See
+	// manager_launch_reachability_warning.go and SetSSHReachabilityWarningPolicy.
+	reachabilityReader ReachabilityReader
+	// reachabilityProbingEnabled mirrors whether the reachability poller's
+	// periodic sweep is on (interval != 0). When true, a stored unreachable
+	// record is always warning-eligible regardless of how old checked_at is.
+	reachabilityProbingEnabled bool
+	// reachabilityWarningWindowSeconds is 3x the reachability package's own
+	// default interval (not the configured/effective one), evaluated even
+	// with probing disabled per AC-EXECUTORS-SSH-REACHABILITY-001.28.
+	reachabilityWarningWindowSeconds int
 
 	// skillDeployer materialises per-profile skills + custom prompt before
 	// the agent process starts. Defaults to a no-op deployer; office wires
@@ -154,12 +311,9 @@ type Manager struct {
 	// tests override it to avoid touching the real filesystem.
 	remediateNpxCache func(path string, log *zap.Logger) error
 
-	// standaloneHostPID is the OS process id of the standalone agentctl
-	// control-server this backend spawned on the local host. It is the
-	// host-local liveness handle recorded in executors_running.local_pid for
-	// local/standalone rows (see persistence.go / #1597 truthful executor rows).
-	// 0 when unset (tests, or before the launcher wires it). Never used for
-	// SSH/remote rows — their process lives on another host.
+	// standaloneHostPID is the boot-time fallback OS PID for older standalone
+	// callers. Production executions capture the process identity from their
+	// immutable runtime binding instead. Never used for SSH/remote rows.
 	standaloneHostPID atomic.Int64
 
 	// agentctlStartupConfig is the resolved child contract applied to every
@@ -172,29 +326,34 @@ type Manager struct {
 	// managedRuntimeSelections supplies exact versions for host-local managed
 	// npm runtimes. Remote/container runtimes intentionally do not consult it.
 	managedRuntimeSelections managedruntime.SelectionReader
-	// managedRuntimeCacheInvalidator removes one trusted npm execution tree
-	// during bounded host-local startup recovery.
-	managedRuntimeCacheInvalidator ManagedRuntimeCacheInvalidator
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
+	openCodeAdmission   sync.RWMutex
 	activityLeases      map[string]*activity.TaskLease
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
 }
 
+// SetCursorNativeMCPCommandRunner installs the bounded runner used for native
+// Cursor MCP approval and readiness checks. Production uses the exec runner;
+// tests inject a fake so they never mutate a developer's Cursor account.
+func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
+	m.cursorNativeMCPRunner = runner
+}
+
+// SetOwnerAdmission wires the durable owner gate used by run-owned launches.
+// Task launches keep their existing task/session admission when no owner gate
+// is configured.
+func (m *Manager) SetOwnerAdmission(admission OwnerAdmission) {
+	m.ownerAdmission = admission
+}
+
 // ManagedGoCacheEnvironmentProvider supplies the environment for one new
 // local execution. Implementations must return an absolute GOCACHE path.
 type ManagedGoCacheEnvironmentProvider interface {
 	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
-}
-
-// ManagedRuntimeCacheInvalidator owns the host npm cache boundary. Lifecycle
-// recovery never discovers or deletes cache paths directly.
-type ManagedRuntimeCacheInvalidator interface {
-	InvalidateExecutionCache(context.Context, string) error
-	InvalidateExecutionCacheVersion(ctx context.Context, packageName, version string) error
 }
 
 // SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
@@ -208,10 +367,16 @@ func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.Selection
 	m.managedRuntimeSelections = store
 }
 
-// SetManagedRuntimeCacheInvalidator wires the settings-owned exact cache
-// deletion boundary. It is optional for embedded/test managers.
-func (m *Manager) SetManagedRuntimeCacheInvalidator(invalidator ManagedRuntimeCacheInvalidator) {
-	m.managedRuntimeCacheInvalidator = invalidator
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
@@ -249,6 +414,44 @@ func (m *Manager) SetStandaloneHostPID(pid int) {
 	m.standaloneHostPID.Store(int64(pid))
 }
 
+// SetRuntimeOwner shares local agentctl ownership with lifecycle consumers.
+// Per-execution clients retain their immutable generation and reject delayed
+// work after a replacement is published.
+func (m *Manager) SetRuntimeOwner(owner *agentctl.RuntimeOwner) {
+	m.runtimeAvailabilityMu.Lock()
+	m.runtimeOwner = owner
+	if owner != nil && m.eventBus != nil && m.runtimeAvailabilitySubscription == nil {
+		select {
+		case <-m.stopCh:
+		default:
+			subscription, err := m.eventBus.Subscribe(events.AgentRuntimeAvailabilityChanged, m.handleRuntimeAvailabilityChanged)
+			if err != nil {
+				m.logger.Error("failed to subscribe to local runtime availability", zap.Error(err))
+			} else {
+				m.runtimeAvailabilitySubscription = subscription
+			}
+		}
+	}
+	m.runtimeAvailabilityMu.Unlock()
+	if m.executorRegistry == nil || owner == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameStandalone)
+	if err != nil {
+		return
+	}
+	if standalone, ok := backend.(*StandaloneExecutor); ok {
+		standalone.SetRuntimeOwner(owner)
+	}
+}
+
+func (m *Manager) runtimeExecutionCurrent(execution *AgentExecution) bool {
+	if execution == nil || execution.runtimeEpoch == 0 || m.runtimeOwner == nil {
+		return true
+	}
+	return m.runtimeOwner.IsEpochCurrent(execution.runtimeEpoch)
+}
+
 // SetAgentctlStartupConfig wires the resolved backend-owned agentctl values
 // into every executor request. Remote and container executors serialize this
 // contract explicitly instead of inheriting the backend environment.
@@ -281,6 +484,7 @@ func NewManager(
 
 	// Create stop channel for graceful shutdown
 	stopCh := make(chan struct{})
+	stopContext, cancelStop := context.WithCancel(context.Background())
 
 	// Initialize session manager
 	sessionManager := NewSessionManager(log, stopCh)
@@ -298,25 +502,33 @@ func NewManager(
 	}
 
 	mgr := &Manager{
-		registry:                 reg,
-		eventBus:                 eventBus,
-		executorRegistry:         executorRegistry,
-		executorFallbackPolicy:   fallbackPolicy,
-		credsMgr:                 credsMgr,
-		profileResolver:          profileResolver,
-		mcpProvider:              mcpProvider,
-		logger:                   componentLogger,
-		dataDir:                  dataDir,
-		executionStore:           executionStore,
-		commandBuilder:           commandBuilder,
-		sessionManager:           sessionManager,
-		eventPublisher:           eventPublisher,
-		historyManager:           historyManager,
-		remoteStatusPollInterval: 60 * time.Second,
-		remoteStatusBySession:    make(map[string]*RemoteStatus),
-		stopCh:                   stopCh,
-		skillDeployer:            NoopSkillDeployer(),
-		remediateNpxCache:        routingerr.RemediateNpxCache,
+		registry:                       reg,
+		eventBus:                       eventBus,
+		executorRegistry:               executorRegistry,
+		executorFallbackPolicy:         fallbackPolicy,
+		credsMgr:                       credsMgr,
+		profileResolver:                profileResolver,
+		mcpProvider:                    mcpProvider,
+		logger:                         componentLogger,
+		dataDir:                        dataDir,
+		executionStore:                 executionStore,
+		commandBuilder:                 commandBuilder,
+		sessionManager:                 sessionManager,
+		eventPublisher:                 eventPublisher,
+		historyManager:                 historyManager,
+		remoteStatusPollInterval:       60 * time.Second,
+		remoteStatusBySession:          make(map[string]*RemoteStatus),
+		remoteRecoveryPending:          make(map[string]*remoteRecoveryRetry),
+		stopContext:                    stopContext,
+		cancelStop:                     cancelStop,
+		stopCh:                         stopCh,
+		skillDeployer:                  NoopSkillDeployer(),
+		remediateNpxCache:              routingerr.RemediateNpxCache,
+		recoveryGuard:                  NewRecoveryGuard(),
+		retrackedSessions:              make(map[string]struct{}),
+		standaloneOwnSessions:          make(map[string]struct{}),
+		passthroughMCPActiveClaims:     make(map[string]map[string]passthroughMCPFileClaim),
+		passthroughMCPActiveExecutions: make(map[string]map[string]*AgentExecution),
 	}
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
@@ -336,10 +548,18 @@ func NewManager(
 		OnProcessOutput:                  mgr.handleProcessOutput,
 		OnProcessStatus:                  mgr.handleProcessStatus,
 	}, nil, stopCh)
+	mgr.streamManager.isExecutionCurrent = func(execution *AgentExecution) bool {
+		current, exists := mgr.executionStore.Get(execution.ID)
+		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
+	}
+	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
+	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
+	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
+	sessionManager.SetTurnChangeCaptureCallbacks(mgr.admitTurnChangeCapture, mgr.failTurnChangeDispatch)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)
 
@@ -348,6 +568,39 @@ func NewManager(
 	}
 
 	return mgr
+}
+
+// SetTurnChangeCaptureHandler installs the task-owned immutable interval
+// coordinator. Set this during backend composition before runtime prompts are
+// accepted.
+func (m *Manager) SetTurnChangeCaptureHandler(handler TurnChangeCaptureHandler) {
+	m.turnChangeCaptureHandler = handler
+}
+
+func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
+	execution, exists := m.executionStore.Get(failure.ExecutionID)
+	if !exists {
+		m.logger.Debug("ignoring stale initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+		return
+	}
+	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+		Type: toolStatusError,
+		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
+		// provider diagnostic to decide whether a safe pre-result retry or
+		// fallback is permitted; replacing it with a generic label makes a 529
+		// indistinguishable from a local delivery failure.
+		Error:            routingerr.Sanitize(failure.Err.Error()),
+		SessionID:        failure.SessionID,
+		PromptGeneration: failure.PromptGeneration,
+		TurnID:           failure.TurnID,
+	})
+	if !settled {
+		m.logger.Debug("ignoring superseded initial prompt delivery failure",
+			zap.String("execution_id", failure.ExecutionID),
+			zap.Uint64("prompt_generation", failure.PromptGeneration))
+	}
 }
 
 // HandleSessionMode routes a session-level mode transition (from the gateway
@@ -403,12 +656,34 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // where they are dispatched to this handler. This enables agents to use MCP tools
 // like listing workspaces, boards, tasks, and asking user questions.
 //
-// This must be called before agents start making MCP calls. Typically set during
-// initialization after the MCP handlers are created.
+// Streams resolve the current handler for each request, so recovered streams
+// can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
-	m.mcpHandler = handler
-	// Update the stream manager with the handler
-	m.streamManager.mcpHandler = handler
+	m.streamManager.setMCPHandler(handler)
+}
+
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
+}
+
+// SetAgentDeliveryRepository wires the backend inbox used by retained
+// agentctl streams. The repository is optional for isolated runtimes and
+// legacy embedders; when present, reconnects resume from the projected cursor.
+func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository) {
+	if m == nil || m.streamManager == nil {
+		return
+	}
+	m.streamManager.setAgentDeliveryRepository(repository)
+}
+
+// CredentialsManager returns the credentials manager the manager launches
+// agents with, for read-only inspection by admission checks.
+func (m *Manager) CredentialsManager() CredentialsManager {
+	return m.credsMgr
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -424,7 +699,14 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 // Set once during startup wiring, before agents start making MCP calls. Leave
 // unset to keep dispatch unscoped (single-user instances).
 func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
-	m.streamManager.mcpIdentityScoper = scoper
+	m.streamManager.setMCPIdentityScoper(scoper)
+}
+
+// SetMCPPrincipalScoper installs the trusted in-session MCP principal resolver.
+// The resolver derives automation identity and workspace boundaries from the
+// execution's own task and session, never from the agent request payload.
+func (m *Manager) SetMCPPrincipalScoper(scoper MCPPrincipalScoper) {
+	m.streamManager.setMCPPrincipalScoper(scoper)
 }
 
 // SetSessionAccessChecker installs the per-user session visibility check used
@@ -433,6 +715,139 @@ func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
 // once during startup wiring, before the HTTP server accepts connections.
 func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
 	m.sessionAccessCheck = check
+}
+
+// SetSessionExecAccessChecker installs the session.exec check used by the
+// terminal, shell, file-write, VS Code and port-preview surfaces.
+func (m *Manager) SetSessionExecAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionExecCheck = check
+}
+
+// CheckSessionExecAccess authorizes an execution-capable session operation.
+// It falls back to the read check when no exec checker is wired, so an
+// unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckSessionExecAccess(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck == nil {
+		return m.CheckSessionAccess(ctx, sessionID)
+	}
+	return m.sessionExecCheck(ctx, sessionID)
+}
+
+// SetPassthroughLookup installs the durable passthrough-mode read used at
+// startup step 3 to exclude passthrough sessions from the recovery guard
+// (AC-EXECUTORS-SURVIVAL-005.3). Must read TaskSession.IsPassthrough from the
+// durable store, never from in-memory execution state -- that state is empty
+// at this point in startup, which would silently guard every passthrough
+// session instead of excluding it. Set once during startup wiring, before
+// Start runs.
+func (m *Manager) SetPassthroughLookup(lookup PassthroughLookup) {
+	m.passthroughLookup = lookup
+}
+
+// SetRecoveryGuard installs a pre-populated recovery guard, replacing the
+// empty one NewManager created. Backend startup composition uses this to
+// hand Start the same guard TakeStartupRecoveryGuards already took sessions
+// on before any control server was contacted (AC-EXECUTORS-SURVIVAL-002.8) --
+// something that must happen ahead of an adoption attempt this Manager
+// doesn't yet exist to perform itself. Start's own guard-taking is still
+// safe to run afterward: AcquireOrObserve treats an already-guarded session
+// as observed, not re-acquired. A nil guard is ignored so a caller with
+// nothing pre-taken leaves the Manager's own default in place.
+func (m *Manager) SetRecoveryGuard(guard *RecoveryGuard) {
+	if guard == nil {
+		return
+	}
+	m.recoveryGuard = guard
+}
+
+// SetRecoveryDeadline installs the configured AC-EXECUTORS-SURVIVAL-003.7
+// recovery deadline duration. Zero (unset) falls back to the AC's own 30s
+// default at Start.
+func (m *Manager) SetRecoveryDeadline(d time.Duration) {
+	m.recoveryDeadline = d
+}
+
+// SetRecoveryDeadlineStart installs the AC-EXECUTORS-SURVIVAL-003.7 recovery
+// deadline's clock start: the instant this launch first contacted a recorded
+// control endpoint. A zero value (no adoption attempted, or none recorded)
+// falls back to Start's own invocation time. Set once during startup wiring,
+// before Start runs.
+func (m *Manager) SetRecoveryDeadlineStart(t time.Time) {
+	m.recoveryDeadlineStart = t
+}
+
+// SetAgentSurvivalEnabled installs the features.agentSurvival capability
+// state that StopAgentWithReason reads to decide between a survivable detach
+// and today's terminating stop on backend shutdown. Set once during startup
+// wiring, before Start runs.
+func (m *Manager) SetAgentSurvivalEnabled(enabled bool) {
+	m.agentSurvivalEnabled = enabled
+}
+
+// RecoveryGuard exposes the in-memory recovery guard so it can be wired into
+// an ExecutorBackend that supports AC-EXECUTORS-SURVIVAL-002.16 (currently
+// StandaloneExecutor, via SetUnstoppableSessionRecorder). Always non-nil.
+func (m *Manager) RecoveryGuard() *RecoveryGuard {
+	return m.recoveryGuard
+}
+
+// WasSessionRetracked reports whether sessionID was successfully re-tracked
+// during this backend's most recent Start() recovery pass
+// (AC-EXECUTORS-SURVIVAL-003.1). Safe for concurrent use.
+func (m *Manager) WasSessionRetracked(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	m.retrackedSessionsMu.RLock()
+	defer m.retrackedSessionsMu.RUnlock()
+	_, ok := m.retrackedSessions[sessionID]
+	return ok
+}
+
+// markSessionRetracked records sessionID as re-tracked for the current
+// Start() pass. See retrackedSessions.
+func (m *Manager) markSessionRetracked(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.retrackedSessionsMu.Lock()
+	m.retrackedSessions[sessionID] = struct{}{}
+	m.retrackedSessionsMu.Unlock()
+}
+
+// resetRetrackedSessions clears the re-tracked set at the start of a new
+// Start() pass.
+func (m *Manager) resetRetrackedSessions() {
+	m.retrackedSessionsMu.Lock()
+	m.retrackedSessions = make(map[string]struct{})
+	m.retrackedSessionsMu.Unlock()
+}
+
+// wasCreatedThisLifetime reports whether sessionID's executors_running row
+// was created by THIS backend process via Launch, as opposed to inherited
+// from an earlier launch and re-tracked at startup. See
+// standaloneOwnSessions. Safe for concurrent use.
+func (m *Manager) wasCreatedThisLifetime(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	m.standaloneOwnSessionsMu.RLock()
+	defer m.standaloneOwnSessionsMu.RUnlock()
+	_, ok := m.standaloneOwnSessions[sessionID]
+	return ok
+}
+
+// markSessionCreatedThisLifetime records sessionID as created by this
+// backend process. See standaloneOwnSessions. Never cleared: unlike
+// retrackedSessions this must survive for the whole process lifetime, not
+// just one Start() pass.
+func (m *Manager) markSessionCreatedThisLifetime(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.standaloneOwnSessionsMu.Lock()
+	m.standaloneOwnSessions[sessionID] = struct{}{}
+	m.standaloneOwnSessionsMu.Unlock()
 }
 
 // SetAttachmentReader wires the backend attachment reader used by prompt
@@ -448,6 +863,36 @@ func (m *Manager) SetAttachmentReader(reader AttachmentReader) {
 // check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
 func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {
 	m.environmentAccessCheck = check
+}
+
+// SetEnvironmentExecAccessChecker installs the session.exec check for the
+// environment-keyed surfaces that destroy or open a PTY.
+func (m *Manager) SetEnvironmentExecAccessChecker(check func(ctx context.Context, environmentID string) error) {
+	m.environmentExecCheck = check
+}
+
+// CheckEnvironmentExecAccess authorizes an execution-capable environment
+// operation. It falls back to the read check when no exec checker is wired,
+// so an unwired build is no more permissive than before this scope existed.
+func (m *Manager) CheckEnvironmentExecAccess(ctx context.Context, taskEnvironmentID string) error {
+	if m.environmentExecCheck == nil {
+		return m.CheckEnvironmentAccess(ctx, taskEnvironmentID)
+	}
+	return m.environmentExecCheck(ctx, taskEnvironmentID)
+}
+
+// SetTaskAccessChecker installs the per-user task visibility check used by
+// the task-keyed SSR terminal route. The checker must return nil for contexts
+// without a request identity (internal callers).
+func (m *Manager) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	m.taskAccessCheck = check
+}
+
+// SetTaskEnvironmentAccessChecker installs the per-user check for a
+// (task, environment) pair, used by the task-keyed SSR terminal route which
+// merges terminals from the task with unmanaged shells from the environment.
+func (m *Manager) SetTaskEnvironmentAccessChecker(check func(ctx context.Context, taskID, environmentID string) error) {
+	m.taskEnvironmentAccessCheck = check
 }
 
 // CheckSessionAccess authorizes a session-scoped operation for the ctx
@@ -473,6 +918,29 @@ func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID 
 	return m.environmentAccessCheck(ctx, taskEnvironmentID)
 }
 
+// CheckTaskAccess authorizes a task-scoped operation for the ctx identity.
+// The task-keyed sibling of CheckSessionAccess, for handlers that read
+// task-owned state (the SSR terminal list) without going through an
+// execution. No-op when no checker is set.
+func (m *Manager) CheckTaskAccess(ctx context.Context, taskID string) error {
+	if m.taskAccessCheck == nil {
+		return nil
+	}
+	return m.taskAccessCheck(ctx, taskID)
+}
+
+// CheckTaskEnvironmentAccess authorizes a (task, environment) pair for the ctx
+// identity: both IDs visible, and the environment actually bound to the task.
+// Handlers that merge state keyed by both must use this rather than the two
+// single-ID checks, which pass independently for an unrelated pair. No-op when
+// no checker is set.
+func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
+	if m.taskEnvironmentAccessCheck == nil {
+		return nil
+	}
+	return m.taskEnvironmentAccessCheck(ctx, taskID, taskEnvironmentID)
+}
+
 // SetWorkspaceInfoProvider sets the provider for workspace information.
 //
 // The WorkspaceInfoProvider interface allows the lifecycle manager to dynamically create
@@ -490,6 +958,12 @@ func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
 }
 
+// SetWorkspaceRecoveryErrorReporter installs the task-service callback for
+// verified managed-clone relocation refusals.
+func (m *Manager) SetWorkspaceRecoveryErrorReporter(reporter WorkspaceRecoveryErrorReporter) {
+	m.workspaceRecoveryErrorReporter = reporter
+}
+
 // SetBootMessageService sets the service used to create boot messages in chat
 // during agent startup. If not set, no boot messages will be created.
 func (m *Manager) SetBootMessageService(svc BootMessageService) {
@@ -504,6 +978,7 @@ func (m *Manager) SetPreparerRegistry(registry *PreparerRegistry) {
 // SetSecretStore sets the secret store for encrypting runtime auth tokens.
 func (m *Manager) SetSecretStore(store secrets.SecretStore) {
 	m.secretStore = store
+	m.wireKubernetesEnvironmentStore()
 }
 
 // SetAgentProfileReader wires the reader the launch-prep SkillDeployer uses
@@ -540,5 +1015,24 @@ func (m *Manager) DockerClientProvider() func() *docker.Client {
 			return nil
 		}
 		return dockerExec.Client()
+	}
+}
+
+// execAccessCheck returns the check that execution-capable surfaces must pass.
+//
+// It prefers the session.exec checker and falls back to the plain access check
+// when no scoped checker is wired. The fallback is never weaker than the
+// behavior before session.exec existed; production always wires both.
+func (m *Manager) execAccessCheck() func(ctx context.Context, sessionID string) error {
+	if m.sessionExecCheck != nil {
+		return m.sessionExecCheck
+	}
+	return m.sessionAccessCheck
+}
+
+func (m *Manager) SetExecutorAdmission(admit func(context.Context, string, string, string) (context.Context, error)) {
+	m.executorAdmission = admit
+	if m.sessionManager != nil {
+		m.sessionManager.executorAdmission = admit
 	}
 }

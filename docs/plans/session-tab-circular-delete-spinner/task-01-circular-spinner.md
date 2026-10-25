@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/session-tab-delete-feedback.md"
+spec: "../../specs/ui/requirements/session-tab-delete-feedback.md"
 ---
 
 # Task 01: Refine session-tab feedback
@@ -45,7 +45,7 @@ Sequential. The component and its regression test share the same visual contract
 
 ## Inputs
 
-- Spec: `docs/specs/ui/session-tab-delete-feedback.md`, pending close-state and primary-promotion
+- Spec: `docs/specs/ui/requirements/session-tab-delete-feedback.md`, pending close-state and primary-promotion
   feedback requirements and scenarios.
 - Plan: `plan.md`, `Root cause`, `Session-tab close action`, and `Tests`.
 - Exemplar: `TerminalTabClosingSpinner` in

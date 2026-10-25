@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import {
   findCIAutomationStateForPR,
   findPRAutomationOptionsForPR,
+  deriveCIAutomationQueueState,
 } from "@/lib/github/ci-automation";
 import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
 import { CIAutomationPromptDialog } from "@/components/github/pr-ci-automation-prompt-dialog";
@@ -16,13 +18,15 @@ import {
 } from "@/components/github/pr-ci-automation-rows";
 
 export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
-  const { options, loading, saving, error, refresh, update, resetPrompt } =
+  const { options, loading, saving, error, refresh, update, resetPrompt, retryMerge } =
     useTaskCIAutomationOptions(pr.task_id);
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
   const automationState = findCIAutomationStateForPR(options?.pr_states, pr);
   const prOptions = findPRAutomationOptionsForPR(options?.pr_options, pr);
+  const queueState = deriveCIAutomationQueueState(pr, prOptions, automationState);
 
   const openPromptEditor = useCallback(() => {
     setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
@@ -46,9 +50,11 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         repository_id: pr.repository_id ?? "",
         pr_number: pr.pr_number,
       };
-      Promise.resolve(update(scoped)).catch(() => reportError("Failed to update CI automation."));
+      Promise.resolve(update(scoped)).catch(() =>
+        reportError(t("github:failedToUpdateCiAutomation")),
+      );
     },
-    [pr, reportError, update],
+    [pr, reportError, t, update],
   );
 
   // The auto-fix prompt override stays task-level (applies to every linked
@@ -58,18 +64,26 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
     if (!value) return;
     Promise.resolve(update({ auto_fix_prompt_override: value }))
       .then(() => setPromptOpen(false))
-      .catch(() => reportError("Failed to save auto-fix prompt."));
-  }, [promptDraft, reportError, update]);
+      .catch(() => reportError(t("github:failedToSaveAutoFixPrompt")));
+  }, [promptDraft, reportError, t, update]);
 
   const useDefaultPrompt = useCallback(() => {
     Promise.resolve(resetPrompt())
       .then(() => setPromptOpen(false))
-      .catch(() => reportError("Failed to reset auto-fix prompt."));
-  }, [reportError, resetPrompt]);
+      .catch(() => reportError(t("github:failedToResetAutoFixPrompt")));
+  }, [reportError, resetPrompt, t]);
 
   const retryLoad = useCallback(() => {
-    Promise.resolve(refresh()).catch(() => reportError("Failed to load CI automation."));
-  }, [refresh, reportError]);
+    Promise.resolve(refresh()).catch(() =>
+      reportError(t("github:failedToLoadCiAutomationOptions")),
+    );
+  }, [refresh, reportError, t]);
+
+  const retryAutoMerge = useCallback(() => {
+    Promise.resolve(retryMerge(pr.repository_id ?? "", pr.pr_number))
+      .then(() => toast({ description: t("github:autoMergeRetryAccepted") }))
+      .catch(() => reportError(t("github:failedToRetryAutoMerge")));
+  }, [pr.pr_number, pr.repository_id, reportError, retryMerge, t, toast]);
 
   const disabled = loading || saving || !options;
   return (
@@ -77,7 +91,12 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
       data-testid="pr-ci-automation-controls"
       className="flex flex-col gap-1 border-t border-border/50 pt-2"
     >
-      <CIAutomationHeader pr={pr} disabled={!options} onEditPrompt={openPromptEditor} />
+      <CIAutomationHeader
+        pr={pr}
+        queueState={queueState}
+        disabled={!options}
+        onEditPrompt={openPromptEditor}
+      />
       <CIAutomationOptionRows
         pr={pr}
         prOptions={prOptions}
@@ -86,14 +105,17 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         patchOption={patchOption}
         automationState={automationState}
       />
-      {automationState?.last_error && (
-        <CIAutomationErrorRow
-          error={automationState.last_error}
-          loading={loading}
-          onRetry={retryLoad}
-        />
-      )}
-      {error && <CIAutomationErrorRow error={error} loading={loading} onRetry={retryLoad} />}
+      <PRCIAutomationErrors
+        storedError={automationState?.last_error}
+        storedErrorKind={automationState?.last_error_kind}
+        loadError={error}
+        loading={loading}
+        saving={saving}
+        retryLabel={t("github:retry")}
+        refreshLabel={t("github:refresh")}
+        onRetryMerge={retryAutoMerge}
+        onRefresh={retryLoad}
+      />
       <CIAutomationPromptDialog
         open={promptOpen}
         prompt={promptDraft}
@@ -104,5 +126,49 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         onReset={useDefaultPrompt}
       />
     </div>
+  );
+}
+
+function PRCIAutomationErrors({
+  storedError,
+  storedErrorKind,
+  loadError,
+  loading,
+  saving,
+  retryLabel,
+  refreshLabel,
+  onRetryMerge,
+  onRefresh,
+}: {
+  storedError?: string | null;
+  storedErrorKind?: string;
+  loadError?: string | null;
+  loading: boolean;
+  saving: boolean;
+  retryLabel: string;
+  refreshLabel: string;
+  onRetryMerge: () => void;
+  onRefresh: () => void;
+}) {
+  const mergeError = storedErrorKind === "auto_merge";
+  return (
+    <>
+      {storedError && (
+        <CIAutomationErrorRow
+          error={storedError}
+          loading={loading || saving}
+          actionLabel={mergeError ? retryLabel : refreshLabel}
+          onAction={mergeError ? onRetryMerge : onRefresh}
+        />
+      )}
+      {loadError && (
+        <CIAutomationErrorRow
+          error={loadError}
+          loading={loading}
+          actionLabel={refreshLabel}
+          onAction={onRefresh}
+        />
+      )}
+    </>
   );
 }

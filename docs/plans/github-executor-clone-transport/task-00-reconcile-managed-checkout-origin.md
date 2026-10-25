@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 00: Reconcile Managed Checkout Origin
@@ -48,7 +48,7 @@ node scripts/validate-public-docs.mjs
 - `apps/backend/internal/orchestrator/executor/executor_resume_clone_transport_test.go`
 - `apps/backend/internal/orchestrator/executor/executor_resume_clone_default_branch_test.go`
 - `docs/public/integrations.md`
-- `docs/specs/integrations/github-authentication.md`
+- `docs/specs/integrations/requirements/github-authentication.md`
 - this task file and `plan.md`
 
 ## Dependencies

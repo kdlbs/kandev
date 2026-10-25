@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/changes-walkthrough-toolbar-width/spec.md
+spec: docs/specs/ui/requirements/changes-walkthrough-toolbar-width.md
 created: 2026-07-31
 status: implemented
 ---

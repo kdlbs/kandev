@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -218,16 +220,185 @@ func TestGetGitStatus_UntrackedFileWithSpaces(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.13, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+func TestGetGitStatus_ExcludesUntrackedNodeModules(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	dependencyFiles := []string{
+		"node_modules/root-package/index.js",
+		"packages/app/node_modules/nested-package/index.js",
+	}
+	for _, filePath := range dependencyFiles {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, filePath)), 0o755); err != nil {
+			t.Fatalf("failed to create dependency directory for %s: %v", filePath, err)
+		}
+		writeFile(t, repoDir, filePath, "dependency content\n")
+	}
+	const sourcePath = "src/untracked-source.ts"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, sourcePath)), 0o755); err != nil {
+		t.Fatalf("failed to create source directory: %v", err)
+	}
+	writeFile(t, repoDir, sourcePath, "export const source = true;\n")
+
+	status, err := wt.getGitStatus(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get git status: %v", err)
+	}
+
+	if len(status.Untracked) != 1 || status.Untracked[0] != sourcePath {
+		t.Fatalf("untracked paths = %v, want only %q", status.Untracked, sourcePath)
+	}
+	if len(status.Files) != 1 {
+		t.Fatalf("status files = %v, want only the ordinary source file", mapKeys(status.Files))
+	}
+	for filePath := range status.Files {
+		if strings.Contains(filePath, "node_modules") {
+			t.Fatalf("dependency path %q entered the status snapshot", filePath)
+		}
+	}
+	fileInfo, ok := status.Files[sourcePath]
+	if !ok {
+		t.Fatalf("ordinary untracked source %q is missing from status", sourcePath)
+	}
+	if fileInfo.Status != "untracked" {
+		t.Errorf("source status = %q, want untracked", fileInfo.Status)
+	}
+	if fileInfo.Diff == "" {
+		t.Error("ordinary untracked source did not receive a synthetic diff")
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.14
+func TestGetGitStatus_PreservesTrackedNodeModules(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	const trackedPath = "node_modules/checked-in-package/index.js"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(repoDir, trackedPath)), 0o755); err != nil {
+		t.Fatalf("failed to create tracked dependency directory: %v", err)
+	}
+	writeFile(t, repoDir, trackedPath, "const version = 1;\n")
+	runGit(t, repoDir, "add", "-f", trackedPath)
+	runGit(t, repoDir, "commit", "-m", "Track dependency fixture")
+	writeFile(t, repoDir, trackedPath, "const version = 2;\n")
+
+	status, err := wt.getGitStatus(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get git status: %v", err)
+	}
+
+	fileInfo, ok := status.Files[trackedPath]
+	if !ok {
+		t.Fatalf("tracked dependency path %q is missing from status; got %v", trackedPath, mapKeys(status.Files))
+	}
+	if fileInfo.Status != "modified" || fileInfo.Staged {
+		t.Fatalf("tracked dependency status = %#v, want unstaged modified", fileInfo)
+	}
+	if fileInfo.Diff == "" {
+		t.Error("tracked dependency did not receive a diff")
+	}
+}
+
+func TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions(t *testing.T) {
+	tests := []struct {
+		name           string
+		path           string
+		setup          func(t *testing.T, repoDir, path string)
+		betweenQueries func(t *testing.T, repoDir, path string)
+		wantUntracked  []string
+		wantFile       *types.FileInfo
+	}{
+		{
+			name: "untracked to staged",
+			path: "staged-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "staged after the first query\n")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "add", path)
+			},
+			wantUntracked: []string{"staged-between-status-queries.txt"},
+			wantFile: &types.FileInfo{
+				Path:   "staged-between-status-queries.txt",
+				Status: fileStatusUntracked,
+			},
+		},
+		{
+			name: "tracked to untracked",
+			path: "removed-from-index-between-status-queries.txt",
+			setup: func(t *testing.T, repoDir, path string) {
+				writeFile(t, repoDir, path, "tracked before the first query\n")
+				runGit(t, repoDir, "add", path)
+				runGit(t, repoDir, "commit", "-m", "Track transition fixture")
+			},
+			betweenQueries: func(t *testing.T, repoDir, path string) {
+				runGit(t, repoDir, "rm", "--cached", path)
+			},
+			wantUntracked: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+
+			wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+			t.Cleanup(wt.Stop)
+			tt.setup(t, repoDir, tt.path)
+			wt.gitStatusBetweenQueries = func(context.Context) {
+				tt.betweenQueries(t, repoDir, tt.path)
+			}
+
+			update := types.GitStatusUpdate{Files: make(map[string]types.FileInfo)}
+			if err := wt.parseGitStatusOutput(context.Background(), &update); err != nil {
+				t.Fatalf("parseGitStatusOutput failed: %v", err)
+			}
+
+			if len(update.Untracked) != len(tt.wantUntracked) {
+				t.Fatalf("untracked paths = %v, want %v", update.Untracked, tt.wantUntracked)
+			}
+			for i, wantPath := range tt.wantUntracked {
+				if update.Untracked[i] != wantPath {
+					t.Fatalf("untracked path %d = %q, want %q", i, update.Untracked[i], wantPath)
+				}
+			}
+
+			if tt.wantFile == nil {
+				if len(update.Files) != 0 {
+					t.Fatalf("status files = %v, want no entries from the stable pre-removal view", mapKeys(update.Files))
+				}
+				return
+			}
+			fileInfo, ok := update.Files[tt.wantFile.Path]
+			if !ok {
+				t.Fatalf("stable transition view omitted %q", tt.wantFile.Path)
+			}
+			if fileInfo.Status != tt.wantFile.Status || fileInfo.Staged != tt.wantFile.Staged {
+				t.Fatalf("file status = %#v, want %#v", fileInfo, *tt.wantFile)
+			}
+		})
+	}
+}
+
 // TestGetGitStatus_FreshBypassesStaleCache simulates the bug class where the
 // poll loop missed a HEAD change (paused mode, dropped tick) and left
 // currentStatus.Files holding pre-commit entries. fresh=true must re-run
-// `git status --porcelain` and return ground truth, not the cached snapshot.
+// `git status --porcelain` and publish ground truth to the shared cache.
 func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
+	t.Cleanup(wt.Stop)
 	ctx := context.Background()
 
 	// Commit a file so we have something to modify.
@@ -235,16 +406,27 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "add tracked")
 
-	// Dirty the worktree and prime the cache by running an update.
+	// Dirty the worktree and capture the status that will become the stale
+	// cache snapshot. Seed the cache directly because GetGitStatus falls back
+	// to a live read when the cache is empty, which cannot prove it was primed.
 	writeFile(t, repoDir, "tracked.txt", "v2")
-	wt.updateGitStatus(ctx)
-
-	cached, err := wt.GetGitStatus(ctx, false)
+	cached, err := wt.getGitStatus(ctx)
 	if err != nil {
-		t.Fatalf("priming GetGitStatus failed: %v", err)
+		t.Fatalf("capturing stale status failed: %v", err)
 	}
 	if _, ok := cached.Files["tracked.txt"]; !ok {
-		t.Fatalf("expected priming run to cache tracked.txt as modified; got Files=%v", mapKeys(cached.Files))
+		t.Fatalf("expected captured status to contain modified tracked.txt; got Files=%v", mapKeys(cached.Files))
+	}
+	wt.mu.Lock()
+	wt.currentStatus = cached
+	wt.mu.Unlock()
+
+	primed, err := wt.GetGitStatus(ctx, false)
+	if err != nil {
+		t.Fatalf("primed GetGitStatus failed: %v", err)
+	}
+	if _, ok := primed.Files["tracked.txt"]; !ok {
+		t.Fatalf("expected seeded cache to contain tracked.txt; got Files=%v", mapKeys(primed.Files))
 	}
 
 	// Simulate the bug: commit the file but DO NOT refresh the tracker (this
@@ -275,28 +457,58 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 		t.Errorf("fresh=true should produce empty Modified; got %v", fresh.Modified)
 	}
 
-	// Contract: a fresh read MUST NOT mutate the shared cache. The poll loop
-	// owns currentStatus; subscribe-time fresh reads short-circuit it without
-	// writing back, so already-subscribed observers still see the cached
-	// stream until the poll loop catches up.
+	// Fresh reads use the same ordered publication path as polling. Cache replay
+	// must now preserve the clean membership accepted above.
 	afterFresh, err := wt.GetGitStatus(ctx, false)
 	if err != nil {
 		t.Fatalf("post-fresh GetGitStatus failed: %v", err)
 	}
-	if _, ok := afterFresh.Files["tracked.txt"]; !ok {
-		t.Errorf("fresh=true must not overwrite the cache; expected stale entry to remain, got Files=%v", mapKeys(afterFresh.Files))
+	if _, ok := afterFresh.Files["tracked.txt"]; ok {
+		t.Errorf("fresh snapshot was not published to the cache; got stale Files=%v", mapKeys(afterFresh.Files))
 	}
 }
 
-func TestGetGitStatusFreshUsesInteractiveAdmissionForEveryCommand(t *testing.T) {
+func TestGetGitStatusFreshReturnsBeforeBackgroundEnrichment(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	t.Cleanup(wt.Stop)
 
+	enrichmentStarted := make(chan struct{})
+	releaseEnrichment := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(releaseEnrichment)
+		}
+	}()
+	wt.gitStatusBeforeEnrich = func() {
+		close(enrichmentStarted)
+		<-releaseEnrichment
+	}
+
 	before := subproc.AdmissionSnapshot()
-	if _, err := wt.GetGitStatus(context.Background(), true); err != nil {
-		t.Fatalf("fresh GetGitStatus failed: %v", err)
+	type statusResult struct {
+		status types.GitStatusUpdate
+		err    error
+	}
+	result := make(chan statusResult, 1)
+	go func() {
+		status, err := wt.GetGitStatus(context.Background(), true)
+		result <- statusResult{status: status, err: err}
+	}()
+	waitForSignal(t, enrichmentStarted, "background enrichment gate")
+	var got statusResult
+	select {
+	case got = <-result:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fresh status waited for background enrichment")
+	}
+	if got.err != nil {
+		t.Fatalf("fresh GetGitStatus failed: %v", got.err)
+	}
+	if got.status.StatusState != gitStatusStateReady || !got.status.FilesComplete || got.status.DetailState != gitStatusDetailPending {
+		t.Fatalf("fresh status = %+v, want complete membership with pending details", got.status)
 	}
 	after := subproc.AdmissionSnapshot()
 	interactive := after.Classes[string(subproc.GitInteractive)].AcquireTotal -
@@ -307,8 +519,10 @@ func TestGetGitStatusFreshUsesInteractiveAdmissionForEveryCommand(t *testing.T) 
 		t.Fatal("fresh status did not admit any interactive Git commands")
 	}
 	if background != 0 {
-		t.Fatalf("fresh status admitted %d background Git commands, want 0", background)
+		t.Fatalf("basic status admitted %d background Git commands before enrichment was released", background)
 	}
+	close(releaseEnrichment)
+	released = true
 }
 
 // mapKeys returns the keys of a map for diagnostic output.

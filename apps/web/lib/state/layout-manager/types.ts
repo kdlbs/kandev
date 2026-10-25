@@ -46,9 +46,13 @@ export type LayoutColumn = {
   tree?: LayoutNode;
 };
 
+export type LayoutOrientation = "HORIZONTAL" | "VERTICAL";
+
 /** Complete declarative layout state. */
 export type LayoutState = {
   columns: LayoutColumn[];
+  /** Orientation of Dockview's outermost split. Older snapshots are horizontal. */
+  rootOrientation?: LayoutOrientation;
 };
 
 // ─── Layout Intent ──────────────────────────────────────────────────────────

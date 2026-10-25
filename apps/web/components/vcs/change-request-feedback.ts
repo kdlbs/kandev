@@ -1,4 +1,5 @@
 import {
+  getLocalizedGitOperationError,
   resolveChangeRequestTerminology,
   type PRCreateResult,
   type getChangeRequestTerminology,
@@ -37,6 +38,7 @@ export function getChangeRequestSuccessFeedback(
 
 export function getChangeRequestFailureFeedback(result: PRCreateResult, fallback: Terminology) {
   const terms = resolveChangeRequestTerminology(result.provider, fallback);
+  const localizedError = getLocalizedGitOperationError(result.error_code, result.error);
   if (result.branch_pushed) {
     return {
       title: t("integrations:branchPushedNotCreated", { shortName: terms.shortName }),
@@ -48,7 +50,7 @@ export function getChangeRequestFailureFeedback(result: PRCreateResult, fallback
   }
   return {
     title: t("integrations:createFailed", { shortName: terms.shortName }),
-    description: result.error || t("integrations:anErrorOccurred"),
+    description: localizedError || t("integrations:anErrorOccurred"),
     variant: "error" as const,
   };
 }

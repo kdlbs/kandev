@@ -86,7 +86,7 @@ func TestSpritesExecutorStaticSurface(t *testing.T) {
 	if exec.GetInteractiveRunner() != nil {
 		t.Fatal("sprites have no host-side interactive runner")
 	}
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil || instances != nil {
 		t.Fatalf("RecoverInstances() = %v, %v", instances, err)
 	}
@@ -396,7 +396,7 @@ func TestSpriteCreateInstanceRequestMapsEveryField(t *testing.T) {
 		Metadata: map[string]interface{}{MetadataKeyBaseBranches: map[string]string{"": "main"}},
 	}
 
-	got := spriteCreateInstanceRequest(req)
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
 
 	if got.ID != "instance-1" || got.WorkspacePath != spritesWorkspacePath {
 		t.Fatalf("request = %+v", got)

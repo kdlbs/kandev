@@ -59,13 +59,13 @@ export function findFirstMatchingCommand(
   preferredCommandId?: string,
 ): CommandItem | undefined {
   const preferredCommand = preferredCommandId
-    ? commands.find((command) => command.id === preferredCommandId)
+    ? commands.find((command) => command.id === preferredCommandId && !command.disabled)
     : undefined;
   if (preferredCommand && commandSearchScore(preferredCommand, search) > 0) {
     return preferredCommand;
   }
   return sortCommandsForSearch(commands, search).find(
-    (command) => commandSearchScore(command, search) > 0,
+    (command) => !command.disabled && commandSearchScore(command, search) > 0,
   );
 }
 
@@ -81,25 +81,46 @@ export function selectContentSearchResult(resultValues: string[], preferredValue
   return resultValues[0] ?? "";
 }
 
-export function selectCommandSearchResult(
-  commands: CommandItem[],
-  search: string,
-  leadingResultValues: string[],
-  preferredValue?: string,
-): string {
+export type CommandSearchSelectionOptions = {
+  commands: CommandItem[];
+  search: string;
+  /** Values of the task rows rendered alongside the commands, in list order. */
+  taskResultValues: string[];
+  preferredValue?: string;
+  /**
+   * True while matching commands render above the task rows. The palette only
+   * leads with tasks when nothing has been typed: once there is a query, an
+   * exact command match outranks a fuzzy task match.
+   */
+  commandsLeadResults: boolean;
+};
+
+/**
+ * Picks the highlighted row for the commands scope, which mixes commands with
+ * task rows. The default highlight follows the rendered order so Enter always
+ * runs the row the user is looking at, and a selection the user moved survives
+ * a command re-registration as long as its row is still rendered.
+ */
+export function selectCommandSearchResult(options: CommandSearchSelectionOptions): string {
+  const { commands, search, taskResultValues, preferredValue, commandsLeadResults } = options;
   const normalizedSearch = search.trim();
   if (preferredValue) {
-    if (leadingResultValues.includes(preferredValue)) return preferredValue;
-    const preferredCommand = commands.find((command) => command.id === preferredValue);
-    const preferredCommandStillVisible =
-      preferredCommand &&
-      (!normalizedSearch ||
-        findFirstMatchingCommand(commands, normalizedSearch, preferredValue)?.id ===
-          preferredValue);
-    if (preferredCommandStillVisible) return preferredValue;
+    if (taskResultValues.includes(preferredValue)) return preferredValue;
+    if (isVisibleCommand(commands, preferredValue, normalizedSearch)) return preferredValue;
   }
 
-  const firstLeadingResult = leadingResultValues[0];
-  if (firstLeadingResult) return firstLeadingResult;
-  return normalizedSearch ? (findFirstMatchingCommand(commands, normalizedSearch)?.id ?? "") : "";
+  let firstCommand = "";
+  if (normalizedSearch) {
+    firstCommand = findFirstMatchingCommand(commands, normalizedSearch)?.id ?? "";
+  } else if (commandsLeadResults) {
+    firstCommand = commands.find((command) => !command.disabled && !command.searchOnly)?.id ?? "";
+  }
+  const firstTask = taskResultValues[0] ?? "";
+  return commandsLeadResults ? firstCommand || firstTask : firstTask || firstCommand;
+}
+
+function isVisibleCommand(commands: CommandItem[], id: string, search: string): boolean {
+  const command = commands.find((item) => item.id === id);
+  if (!command || command.disabled) return false;
+  return !search || findFirstMatchingCommand(commands, search, id)?.id === id;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildGitOperationCallbacks,
+  getLocalizedGitOperationError,
   getChangeRequestTerminology,
   repositoryScopePayload,
 } from "./use-git-operations";
@@ -18,6 +19,32 @@ describe("getChangeRequestTerminology", () => {
       longName: "Pull Request",
       shortName: "PR",
     });
+  });
+});
+
+describe("getLocalizedGitOperationError", () => {
+  it.each([
+    [
+      "empty_remote_remote_changed",
+      "The remote changed before the base branch was published. Refresh the task and try again.",
+    ],
+    [
+      "empty_remote_base_publish_failed",
+      "The empty remote base branch could not be published. Check your Git access and try again.",
+    ],
+    [
+      "empty_remote_branch_publish_failed",
+      "The base branch was published, but the task branch was not. Try Push again.",
+    ],
+  ])("maps %s to localized recovery copy", (errorCode, expected) => {
+    expect(getLocalizedGitOperationError(errorCode, "raw git output")).toBe(expected);
+  });
+
+  it("keeps unknown errors and falls back when no raw message exists", () => {
+    expect(getLocalizedGitOperationError("other_error", "provider details")).toBe(
+      "provider details",
+    );
+    expect(getLocalizedGitOperationError("other_error")).toBeUndefined();
   });
 });
 

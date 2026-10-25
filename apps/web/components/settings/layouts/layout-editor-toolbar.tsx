@@ -56,7 +56,7 @@ type ActionState = LayoutEditorActionsProps & {
   perform: (command: () => boolean) => void;
 };
 
-const touchButtonClass = "min-h-11 min-w-11 cursor-pointer sm:min-h-8 sm:min-w-8";
+const touchButtonClass = "cursor-pointer";
 
 /**
  * `direction` is the sentinel handed to the layout commands and must never be
@@ -110,7 +110,7 @@ function ActionTooltip({
         <span tabIndex={disabled ? 0 : -1} className="inline-flex">
           <Button
             type="button"
-            size="icon-sm"
+            size="icon"
             variant="ghost"
             className={touchButtonClass}
             disabled={disabled}
@@ -144,7 +144,7 @@ function MenuTrigger({
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               className={touchButtonClass}
               disabled={disabled}
@@ -187,9 +187,8 @@ function AddPanelAction({ state }: { state: ActionState }) {
               >
                 <Button
                   type="button"
-                  size="sm"
                   variant="secondary"
-                  className="min-h-11 cursor-pointer shadow-md sm:min-h-8"
+                  className="cursor-pointer shadow-md"
                   disabled={disabled}
                   aria-label={t("settings:addPanel")}
                 >

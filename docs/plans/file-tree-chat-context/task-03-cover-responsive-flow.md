@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-model-directory-context", "02-add-file-tree-action"]
 plan: "plan.md"
-spec: "../../specs/ui/file-tree-chat-context.md"
+spec: "../../specs/ui/requirements/file-tree-chat-context.md"
 ---
 
 # Task 03: Cover Responsive Context Flow

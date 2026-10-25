@@ -91,6 +91,7 @@ func TestWsSendNowMapsStableErrors(t *testing.T) {
 		{name: "empty", err: orchestrator.ErrSendNowQueueEmpty, code: queueErrorCodeSendNowQueueEmpty},
 		{name: "changed", err: orchestrator.ErrSendNowQueueChanged, code: queueErrorCodeSendNowQueueChanged},
 		{name: "conflict", err: orchestrator.ErrSendNowConflict, code: queueErrorCodeSendNowConflict},
+		{name: "edit conflict", err: orchestrator.ErrSendNowEditConflict, code: "edit_conflict"},
 		{name: "turn", err: orchestrator.ErrSendNowTurnChanged, code: queueErrorCodeSendNowTurnChanged},
 		{name: "attachments", err: messagequeue.ErrSendNowAttachmentOverflow, code: queueErrorCodeSendNowAttachmentOverflow},
 		{name: "references", err: messagequeue.ErrSendNowReferenceOverflow, code: queueErrorCodeSendNowReferenceOverflow},

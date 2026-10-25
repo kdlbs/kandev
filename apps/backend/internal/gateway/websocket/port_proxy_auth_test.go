@@ -673,8 +673,16 @@ func TestPortProxyCapabilityRoundTrip(t *testing.T) {
 		t.Fatal("capability validated for the wrong port")
 	}
 
-	// Tampered payload: rejected.
-	tampered := cap[:len(cap)-2] + "00"
+	// Tampered payload: rejected. Flip the final byte to a value guaranteed to
+	// differ from the original, rather than a fixed literal: the mac suffix is
+	// hex, so appending a fixed "00" is a ~1/256 no-op whenever the genuine
+	// suffix already ends that way, which flaked this test in CI.
+	lastIdx := len(cap) - 1
+	replacement := byte('0')
+	if cap[lastIdx] == '0' {
+		replacement = '1'
+	}
+	tampered := cap[:lastIdx] + string(replacement)
 	if _, ok := handler.validateCapability(tampered, "sess-1", 5173); ok {
 		t.Fatal("tampered capability validated")
 	}

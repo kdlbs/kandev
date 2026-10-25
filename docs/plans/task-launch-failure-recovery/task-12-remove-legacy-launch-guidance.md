@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-launch-failure-classification"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 12: Remove legacy launch guidance

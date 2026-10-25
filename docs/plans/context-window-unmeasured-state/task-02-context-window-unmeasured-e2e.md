@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-render-unmeasured-context-state"]
 plan: "plan.md"
-spec: "../../specs/ui/context-window-unmeasured-state.md"
+spec: "../../specs/ui/requirements/context-window-unmeasured-state.md"
 ---
 
 # Task 02: Cover pending state on desktop and mobile

@@ -72,10 +72,13 @@ func (s *sqliteStore) initSchema() error {
 	}
 	// Existing databases: CREATE TABLE IF NOT EXISTS is a no-op, so the
 	// column must also be added via an idempotent migration (ADR 0027).
-	migrate := db.NewMigrateLogger(s.db, nil)
+	migrate := db.NewRequiredMigrateLogger(s.db, nil)
 	migrate.Apply("secrets.user_id", "ALTER TABLE secrets ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
 	migrate.Apply("secrets.scope", "ALTER TABLE secrets ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'")
 	migrate.Apply("secrets.workspace_id", "ALTER TABLE secrets ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''")
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("required secrets migration: %w", err)
+	}
 	return nil
 }
 

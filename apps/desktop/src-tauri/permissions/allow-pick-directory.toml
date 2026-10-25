@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-pick-directory"
+description = "Enables the Kandev-owned directory picker command without exposing generic dialog commands."
+commands.allow = ["pick_directory"]
+
+[[permission]]
+identifier = "deny-pick-directory"
+description = "Denies the Kandev-owned directory picker command."
+commands.deny = ["pick_directory"]

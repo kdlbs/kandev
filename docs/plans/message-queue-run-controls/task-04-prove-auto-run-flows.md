@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-add-auto-run-switch"]
 plan: "plan.md"
-spec: "../../specs/ui/message-queue-run.md"
+spec: "../../specs/ui/requirements/message-queue-run.md"
 ---
 
 # Task 04: Prove Auto-run browser flows

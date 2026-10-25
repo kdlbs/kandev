@@ -335,7 +335,7 @@ function CLIFlagRow({
         variant="ghost"
         size="icon"
         onClick={() => onRemove(index)}
-        className="h-8 w-8 shrink-0 cursor-pointer"
+        className="shrink-0 cursor-pointer"
         data-testid={`cli-flag-remove-${index}`}
         aria-label={t("agents:removeCliFlag", { name: row.flag || t("agents:flag") })}
       >

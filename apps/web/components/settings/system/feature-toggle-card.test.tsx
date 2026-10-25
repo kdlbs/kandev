@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import { FeatureToggleCard } from "./feature-toggle-card";
 
@@ -26,6 +27,8 @@ vi.mock("@kandev/ui/switch", () => ({
 }));
 
 afterEach(cleanup);
+
+const TOGGLE_LABEL = "Toggle Office mode";
 
 describe("FeatureToggleCard", () => {
   it("shows risk copy as supporting text instead of a warning alert", () => {
@@ -56,7 +59,7 @@ describe("FeatureToggleCard", () => {
       />,
     );
 
-    fireEvent.click(screen.getByLabelText("Toggle Office mode"));
+    fireEvent.click(screen.getByLabelText(TOGGLE_LABEL));
 
     expect(onChange).toHaveBeenCalledWith(true);
   });
@@ -89,7 +92,7 @@ describe("FeatureToggleCard", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Toggle Office mode")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText(TOGGLE_LABEL)).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /use default/i })).toHaveProperty("disabled", true);
     expect(screen.getByText("Controlled by launch environment")).not.toBeNull();
   });
@@ -106,7 +109,7 @@ describe("FeatureToggleCard", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Toggle Office mode")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText(TOGGLE_LABEL)).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: /use default/i })).toHaveProperty("disabled", true);
   });
 
@@ -122,6 +125,49 @@ describe("FeatureToggleCard", () => {
 
     expect(screen.getByText("Requires restart")).not.toBeNull();
     expect(screen.getByText("Pending restart")).not.toBeNull();
+  });
+});
+
+describe("FeatureToggleCard - unavailable state", () => {
+  it("disables the switch and shows the reason when the flag is unavailable on this host", () => {
+    const onChange = vi.fn();
+    render(
+      <TooltipProvider>
+        <FeatureToggleCard
+          flag={flagState({
+            availability: { available: false, reason_code: "platform_unsupported" },
+          })}
+          saving={false}
+          onChange={onChange}
+          onReset={() => undefined}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByLabelText(TOGGLE_LABEL)).toHaveProperty("disabled", true);
+    expect(screen.getByText("Unavailable")).not.toBeNull();
+    expect(
+      screen.getByText("This feature isn't supported on this operating system."),
+    ).not.toBeNull();
+  });
+
+  it("falls back to a generic unavailable message for an unrecognized reason code", () => {
+    render(
+      <TooltipProvider>
+        <FeatureToggleCard
+          flag={flagState({
+            availability: { available: false, reason_code: "some_future_reason" },
+          })}
+          saving={false}
+          onChange={() => undefined}
+          onReset={() => undefined}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(
+      screen.getByText("This feature can't be enabled on this install right now."),
+    ).not.toBeNull();
   });
 });
 

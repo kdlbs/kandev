@@ -3,9 +3,13 @@ import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import {
+  mockProgressiveStorageOverview,
   mockTemporaryArtifactOverview,
+  requestStorageMaintenanceSettings,
+  restoreStorageMaintenanceSettings,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
+import { setStoreRole } from "../../helpers/session-store";
 
 function seedOrphanWorkspace(tmpDir: string): { root: string; artifact: string } {
   const root = path.join(tmpDir, ".kandev", "tasks", "e2e-storage-orphan_abc");
@@ -55,7 +59,7 @@ test.describe("System storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
     await expect(trigger).toContainText("0.05 GB");
     await trigger.click();
@@ -65,7 +69,7 @@ test.describe("System storage maintenance", () => {
     const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
     await expect(cleanButton).toBeEnabled();
     await cleanButton.click();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("temporary-artifacts-confirmation", {
       caption: "Desktop storage confirms stale registered artifacts before quarantine",
     });
@@ -86,7 +90,7 @@ test.describe("System storage maintenance", () => {
     const overviewResponse = testPage.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/system/storage",
     );
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await overviewResponse;
     // The preceding temporary-artifact scenario loads and caches a Storage
     // snapshot. Force a fresh read after seeding this test's cache so this
@@ -129,8 +133,25 @@ test.describe("System storage maintenance", () => {
     await expect.poll(() => fs.existsSync(cache.artifact)).toBe(false);
   });
 
+  test("members cannot change the Go cache policy or run cleanup", async ({ testPage }) => {
+    await testPage.goto("/settings/system/storage");
+    await setStoreRole(testPage, "member");
+
+    await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toBeDisabled();
+    await expect(
+      testPage
+        .getByTestId("storage-policy-card")
+        .getByText("Only administrators can change storage settings or run maintenance."),
+    ).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Save changes" })).toHaveCount(0);
+
+    await testPage.getByTestId("storage-resource-go-cache-trigger").click();
+    await expect(testPage.getByTestId("storage-go-cache-clean")).toBeDisabled();
+    await expect(testPage.getByTestId("storage-run-now")).toBeDisabled();
+  });
+
   test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     const initialAnalyzedAt = await analyzedTime.getAttribute("datetime");
@@ -199,14 +220,16 @@ test.describe("System storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage");
       await overviewObserved;
 
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-      await expect(testPage.getByRole("progressbar")).toBeVisible();
+      await expect(
+        testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+      ).toBeVisible();
       await expect(testPage.getByTestId("storage-dependency-allowlist")).toContainText(
         "node_modules",
       );
@@ -229,12 +252,44 @@ test.describe("System storage maintenance", () => {
     }
   });
 
+  test("shows progressive source values and timing disclosure", async ({ testPage, prCapture }) => {
+    const progressive = await mockProgressiveStorageOverview(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Counted so far");
+    await expect(testPage.getByTestId("storage-analysis-source-go_cache")).toContainText(
+      "Measuring 1 of 4",
+    );
+    await expect(testPage.getByTestId("storage-analysis-source-quarantine")).toContainText(
+      "Waiting to measure",
+    );
+
+    progressive.complete();
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Total counted");
+    const timingHelp = testPage.getByTestId("storage-analysis-timing-help");
+    await timingHelp.hover();
+    await expect(
+      testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
+    ).toContainText("Scan duration");
+    await expect(
+      testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
+    ).toContainText("Analyze refreshes this data immediately");
+    await prCapture.screenshot("progressive-analysis", {
+      caption: "Desktop storage shows counted-so-far progress and scan timing",
+    });
+  });
+
   test("persists policy and analyzes, quarantines, and restores an orphan workspace", async ({
     testPage,
     backend,
   }) => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
+    await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
+    // The overview card is also rendered as a placeholder while its request is
+    // pending. Wait for loaded analysis data before reading its layout.
+    await expect(testPage.getByTestId("storage-analysis-total")).toBeVisible();
+    await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();
     expect(overviewBox).not.toBeNull();
@@ -344,7 +399,7 @@ test.describe("System storage maintenance", () => {
       )
       .toBe("RUNNING");
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const responsePromise = testPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -383,6 +438,154 @@ test.describe("System storage maintenance", () => {
       "succeeded",
       { timeout: 20_000 },
     );
+  });
+
+  test("cleans the Go cache during an active task when the Go-only policy is enabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    const cache = seedManagedGoCache(backend.tmpDir);
+    const baseline = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
+    const enabledSettings = {
+      ...baseline,
+      go_cache: { ...baseline.go_cache, allow_cleanup_while_busy: true },
+    };
+    let taskId = "";
+    let sessionId = "";
+    try {
+      await requestStorageMaintenanceSettings(apiClient, "PATCH", enabledSettings);
+      await testPage.goto("/settings/system/storage");
+      await testPage.getByTestId("storage-analyze").click();
+      await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+        "data-job-state",
+        "succeeded",
+        { timeout: 30_000 },
+      );
+      const overview = await testPage.evaluate(async () => {
+        const response = await fetch("/api/v1/system/storage");
+        return response.json();
+      });
+      expect(overview.summary.go_cache).toMatchObject({ owned: true });
+      expect(overview.summary.go_cache.size_bytes).toBeGreaterThan(15 * 1024 * 1024 * 1024);
+
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Go cache cleanup during task activity",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      taskId = task.id;
+      if (!task.session_id) throw new Error("createTaskWithAgent did not return session_id");
+      sessionId = task.session_id;
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(taskId);
+            return sessions.find((session) => session.id === sessionId)?.state ?? "";
+          },
+          { timeout: 20_000, message: "Waiting for initial task turn to finish" },
+        )
+        .toBe("WAITING_FOR_INPUT");
+      await apiClient.addUserMessage(
+        taskId,
+        sessionId,
+        'e2e:delay(30000)\ne2e:message("activity finished")',
+      );
+      await expect
+        .poll(
+          async () => {
+            const { sessions } = await apiClient.listTaskSessions(taskId);
+            return sessions.find((session) => session.id === sessionId)?.state ?? "";
+          },
+          { timeout: 20_000, message: "Waiting for active task Go-cache cleanup" },
+        )
+        .toBe("RUNNING");
+
+      await expect(testPage.getByTestId("storage-go-cache-busy-warning")).toBeVisible();
+      await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
+        "data-state",
+        "checked",
+      );
+      await testPage.getByTestId("storage-resource-go-cache-trigger").click();
+      const cleanupResponsePromise = testPage.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/v1/system/storage/run",
+      );
+      await testPage.getByTestId("storage-go-cache-clean").click();
+      const cleanupResponse = await cleanupResponsePromise;
+      expect(cleanupResponse.status()).toBe(202);
+      expect(cleanupResponse.request().postDataJSON()).toEqual({ resources: ["go_cache"] });
+      await expect(testPage.getByTestId("storage-busy")).toHaveCount(0);
+      await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+        "data-job-state",
+        "succeeded",
+        { timeout: 30_000 },
+      );
+      await expect.poll(() => fs.existsSync(cache.artifact)).toBe(false);
+      await expect
+        .poll(async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          return sessions.find((session) => session.id === sessionId)?.state ?? "";
+        })
+        .toBe("RUNNING");
+
+      const runsResponse = await apiClient.rawRequest(
+        "GET",
+        "/api/v1/system/storage/runs?limit=20",
+      );
+      expect(runsResponse.ok).toBe(true);
+      const { runs } = (await runsResponse.json()) as {
+        runs: Array<{
+          id: string;
+          result: Record<string, unknown>;
+          settings_snapshot: { go_cache: { allow_cleanup_while_busy: boolean } };
+        }>;
+      };
+      const run = runs.find(
+        (candidate) =>
+          candidate.result.go_cache !== undefined &&
+          candidate.settings_snapshot.go_cache.allow_cleanup_while_busy,
+      );
+      expect(run).toBeDefined();
+      await testPage.reload();
+      await testPage.getByTestId("storage-resource-go-cache-trigger").click();
+      await expect(testPage.getByTestId("storage-go-cache-inline-result")).toContainText(
+        "16 GB removed",
+      );
+      await expect(testPage.getByTestId("storage-go-cache-inline-result")).toContainText(
+        "0 GB remains",
+      );
+      const runRow = testPage.getByTestId(`storage-run-${run!.id}`);
+      await expect(runRow).toBeVisible();
+      await runRow.locator("button").click();
+      await expect(testPage.getByTestId("storage-go-cache-result")).toContainText("16 GB removed");
+      await expect(testPage.getByTestId("storage-go-cache-result")).toContainText("0 GB remains");
+      await expect(testPage.getByTestId("storage-go-cache-result")).toContainText(
+        "Go cache cleanup during active tasks was enabled for this run.",
+      );
+    } finally {
+      await restoreStorageMaintenanceSettings(apiClient, baseline);
+      if (taskId && sessionId) {
+        await expect
+          .poll(
+            async () => {
+              const { sessions } = await apiClient.listTaskSessions(taskId);
+              return sessions.find((session) => session.id === sessionId)?.state ?? "";
+            },
+            { timeout: 45_000, message: "Waiting for the active task fixture to finish" },
+          )
+          .toBe("WAITING_FOR_INPUT");
+      }
+    }
   });
 
   test("shows quarantine deadlines and clears only eligible entries", async ({
@@ -435,7 +638,7 @@ test.describe("System storage maintenance", () => {
         body: JSON.stringify({ job_id: "eligible-purge" }),
       });
     });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await expect(
       testPage.getByTestId("storage-quarantine-eligible-entry").getByText("Eligible now"),
     ).toBeVisible();

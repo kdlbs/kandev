@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow/explicit-completion-signal/spec.md"
+spec: "../../specs/tasks/requirements/workflow-explicit-completion-signal.md"
 ---
 
 # Task 01: Keep the task completion tool discoverable

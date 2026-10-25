@@ -2,12 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 
-import ExecutorEditPage from "@/app/settings/executor/[id]/page";
-import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
 import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import KubernetesExecutorPage from "@/app/settings/executors/k8s/[executorId]/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -18,23 +17,23 @@ import {
   type CrumbValues,
 } from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
+import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import { scopedCookieName } from "@/lib/routing/route-bootstrap";
-import {
-  buildSettingsInitialStateForRoute,
-  renderSettingsRoute,
-  SETTINGS_ROUTE_PATHS,
-} from "./settings-routes";
+import { buildSettingsInitialStateForRoute } from "./settings-routes.initial-state";
+import { renderSettingsRoute, SETTINGS_ROUTE_PATHS } from "./settings-routes";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
+const EXECUTOR_ID_WITH_SPACE = "executor one";
 // The merged page that Message Queue and the legacy task-actions URL both land on.
 const TASK_BEHAVIOR_PATH = "/settings/preferences/task-behavior";
 
@@ -114,7 +113,8 @@ describe("buildSettingsInitialStateForRoute", () => {
 
       expect(state.workspaces).toEqual({ items: [], activeId: null });
       expect(state.executors).toEqual({ items: [] });
-      expect(state.agentProfiles).toEqual({ items: [], version: 0 });
+      expect(state.agentProfiles?.items).toEqual([]);
+      expect(state.agentProfiles?.version).toBe(0);
       expect(state.settingsAgents).toEqual({ items: [] });
       expect(state.agentDiscovery).toEqual({ items: [], loading: false, loaded: true });
       expect(state.availableAgents).toEqual({
@@ -146,6 +146,30 @@ describe("buildSettingsInitialStateForRoute", () => {
     const state = buildState();
 
     expect(state.system).toBeUndefined();
+  });
+
+  it("stamps the agent snapshot with the request generation", () => {
+    const state = buildState({ agentProfilesVersion: 4 });
+
+    expect(state.agentProfiles?.version).toBe(4);
+  });
+});
+
+describe("current tab workspace settings hydration", () => {
+  beforeEach(() => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
+  });
+
+  it("keeps the current tab workspace ahead of the shared cookie and saved setting", () => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
+    const state = buildState({
+      workspaces: workspaceRows(["ws-1", "ws-2"]),
+      userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-2") }),
+      currentWorkspaceId: "ws-1",
+    });
+    expect(state.workspaces?.activeId).toBe("ws-1");
+    expect(state.userSettings?.workspaceId).toBe("ws-1");
   });
 });
 
@@ -203,6 +227,14 @@ describe("renderSettingsRoute", () => {
     expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
   });
 
+  it("redirects the legacy sidebar page into the Layouts sidebar tab", () => {
+    const route = renderSettingsRoute("/settings/sidebar") as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/layouts?tab=sidebar");
+  });
+
   it("redirects the legacy task actions page into Task behavior", () => {
     const route = renderSettingsRoute("/settings/general/task-actions") as ReactElement<{
       to: string;
@@ -248,11 +280,66 @@ describe("renderSettingsRoute", () => {
     expect((route as ReactElement).type).toBe(ExecutorCreatePage);
   });
 
+  it.each(["/settings/executor/exec-1", "/settings/executor/exec-1/profile/profile-1"])(
+    "delegates the legacy executor path through its type-aware route for %s",
+    (pathname) => {
+      const route = renderSettingsRoute(pathname) as ReactElement;
+
+      expect(isValidElement(route)).toBe(true);
+      expect((route.type as { name?: string }).name).toBe("LegacyExecutorSettingsRoute");
+    },
+  );
+
   it("reserves /settings/agents/browse for the install catalogue, not an agent named browse", () => {
     const route = renderSettingsRoute("/settings/agents/browse");
 
     expect(isValidElement(route)).toBe(true);
     expect(((route as ReactElement).type as { name?: string }).name).toBe("AgentsBrowsePage");
+  });
+});
+
+describe("system data and storage routes", () => {
+  it("renders the Data & Logs page composition directly", () => {
+    const route = renderSettingsRoute("/settings/system/data-storage");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(DataLogsSettings);
+  });
+
+  it("redirects legacy backups into the Database tab and target", () => {
+    const route = renderSettingsRoute("/settings/system/backups") as ReactElement<{
+      to: string;
+    }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe(
+      "/settings/system/data-storage?tab=database#setting-system-backups",
+    );
+  });
+});
+
+describe("system page breadcrumbs", () => {
+  const noRecords: CrumbValues = {
+    workspaceName: () => null,
+    agentDisplayName: () => null,
+    agentProfileName: () => null,
+    automationName: () => null,
+    executorName: () => null,
+    executorProfileName: () => null,
+    executorTypeTitle: () => null,
+    integrationTitle: () => null,
+    pluginName: () => null,
+  };
+
+  it("resolves Storage from its translated catalog label", () => {
+    expect(resolveSettingsBreadcrumbs("/settings/system/storage", (key) => key, noRecords)).toEqual(
+      {
+        parents: [{ label: "common:settings", href: "/settings", phoneOnlyLink: true }],
+        title: "system:storageTitle",
+        titleFromUrlSegment: false,
+      },
+    );
   });
 });
 
@@ -267,13 +354,13 @@ describe("renderSettingsRoute identifier decoding", () => {
     },
     {
       pathname: "/settings/executor/executor%20one/profile/profile%20one",
-      component: ProfileDetailPage,
-      identifiers: { executorId: "executor one", profileId: "profile one" },
+      component: LegacyExecutorSettingsRoute,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE, profileId: "profile one" },
     },
     {
       pathname: "/settings/executor/executor%20one",
-      component: ExecutorEditPage,
-      identifiers: { executorId: "executor one" },
+      component: LegacyExecutorSettingsRoute,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
     },
     {
       pathname: "/settings/executors/profile%20one",
@@ -288,7 +375,12 @@ describe("renderSettingsRoute identifier decoding", () => {
     {
       pathname: "/settings/executors/ssh/executor%20one",
       component: SSHExecutorPage,
-      identifiers: { executorId: "executor one" },
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
+    },
+    {
+      pathname: "/settings/executors/k8s/executor%20one",
+      component: KubernetesExecutorPage,
+      identifiers: { executorId: EXECUTOR_ID_WITH_SPACE },
     },
     {
       pathname: "/settings/workspaces/workspace%20one",
@@ -458,6 +550,7 @@ describe("settings breadcrumb coverage", () => {
     "/settings/executors/exec-profile-1",
     "/settings/executors/new/local_docker",
     "/settings/executors/ssh/exec-1",
+    "/settings/executors/k8s/exec-1",
     "/settings/executor/exec-1",
     "/settings/executor/exec-1/profile/exec-profile-1",
   ];
@@ -505,5 +598,17 @@ describe("settings breadcrumb coverage", () => {
       expect(parents.length, `${path} has no owning page crumb`).toBeGreaterThanOrEqual(2);
       expect(parents[0].label).toBe("common:settings");
     }
+  });
+});
+
+describe("workflow settings route", () => {
+  it("redirects the legacy workflow URL to the scoped workspace route", () => {
+    const route = renderSettingsRoute(
+      "/settings/workspace/demo-workspace/workflows",
+    ) as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/workspaces/demo-workspace/workflows");
   });
 });

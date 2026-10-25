@@ -167,6 +167,42 @@ func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
 	}
 }
 
+func TestManagedConversationProfileExposesOnlySelectedPluginTools(t *testing.T) {
+	log := newTestLogger(t)
+	policy := mcpprofile.ManagedToolPolicy{
+		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ConversationRevision: 3, ApprovalRevision: 2,
+		ManifestDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		AgentToolNames: []string{"read_task"},
+	}
+	profile := mcpprofile.New(mcpprofile.SurfaceManagedConversation, nil, nil).WithManagedToolPolicy(policy)
+	s := NewWithProfile(&testBackend{}, "session-1", "task-1", 10005, log, "", false, profile)
+	tools := []plugintools.Definition{
+		{
+			PluginID: "coordinator.v1", LocalName: "read_task", ExposedName: plugintools.ExposedName("coordinator.v1", "read_task"),
+			Description: "Read a task", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceManaged},
+		},
+		{
+			PluginID: "coordinator.v1", LocalName: "update_task", ExposedName: plugintools.ExposedName("coordinator.v1", "update_task"),
+			Description: "Update a task", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceManaged},
+		},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "managed", Revision: 1, Tools: tools}))
+	registered := s.mcpServer.ListTools()
+	assert.Contains(t, registered, tools[0].ExposedName)
+	assert.NotContains(t, registered, tools[1].ExposedName)
+	assert.NotContains(t, registered, "list_tasks_kandev")
+	assert.Equal(t, ModeManagedConversation, s.mode)
+
+	s.SetProfile(mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+	assert.Contains(t, s.mcpServer.ListTools(), tools[0].ExposedName)
+	assert.NotContains(t, s.mcpServer.ListTools(), "list_tasks_kandev", "profile replacement cannot widen a managed turn")
+
+	s.SetMode(ModeTask)
+	assert.Contains(t, s.mcpServer.ListTools(), tools[0].ExposedName)
+	assert.NotContains(t, s.mcpServer.ListTools(), "list_tasks_kandev", "legacy mode changes cannot widen the managed surface")
+}
+
 func TestSetPluginToolsRebuildsArgumentValidators(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -205,6 +241,30 @@ func TestSetPluginToolsRejectsMalformedSnapshotAndPreservesRegistry(t *testing.T
 		Generation: "g", Revision: 2, Tools: []plugintools.Definition{invalid},
 	})
 	require.ErrorContains(t, err, "input schema")
+	require.Contains(t, s.mcpServer.ListTools(), definition.ExposedName)
+	require.Equal(t, uint64(1), s.pluginTools.Revision)
+}
+
+func TestSetPluginToolsRejectsRootCombinatorSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	definition := plugintools.Definition{
+		PluginID: "echo", LocalName: "echo", ExposedName: plugintools.ExposedName("echo", "echo"),
+		Description: "Echo", InputSchema: []byte(`{"type":"object"}`),
+		Surfaces: []string{plugintools.SurfaceKanban},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 1, Tools: []plugintools.Definition{definition},
+	}))
+
+	invalid := definition
+	invalid.InputSchema = []byte(`{"type":"object","oneOf":[{"required":["a"]},{"required":["b"]}]}`)
+	err := s.SetPluginTools(plugintools.Snapshot{
+		Generation: "g", Revision: 2, Tools: []plugintools.Definition{invalid},
+	})
+	require.ErrorContains(t, err, "oneOf")
 	require.Contains(t, s.mcpServer.ListTools(), definition.ExposedName)
 	require.Equal(t, uint64(1), s.pluginTools.Revision)
 }
@@ -425,7 +485,7 @@ func getRegisteredToolNames(s *Server) []string {
 func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	require.NotNil(t, s)
@@ -440,14 +500,15 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_task_kandev")
 	assert.Contains(t, tools, "update_task_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.NotContains(t, tools, "transfer_task_kandev")
 	assert.Contains(t, tools, "message_task_kandev")
 	assert.Contains(t, tools, "stop_task_kandev")
 	assert.Contains(t, tools, "get_task_conversation_kandev")
-	assert.Contains(t, tools, "get_task_pr_automation_kandev")
-	assert.Contains(t, tools, "update_task_pr_automation_kandev")
+	assert.Contains(t, tools, "get_task_change_requests_kandev")
+	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
+	assert.Contains(t, tools, "report_change_request_auto_fix_outcome_kandev")
 	assert.Contains(t, tools, "get_diagnostic_bundle_kandev")
-	assert.Contains(t, tools, "get_task_mr_automation_kandev")
-	assert.Contains(t, tools, "update_task_mr_automation_kandev")
+	assert.Contains(t, tools, "manage_task_change_request_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -498,6 +559,30 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "reorder_workflow_steps_kandev")
 }
 
+// TestPlanWriteTools_DescribeContentCeiling pins
+// AC-TASKS-PLAN-CONTENT-SIZE-LIMIT-002.5: both plan write tools state the
+// byte ceiling in their registered description, so a caller can size its
+// document before its first write.
+func TestPlanWriteTools_DescribeContentCeiling(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, s)
+
+	tools := s.mcpServer.ListTools()
+	for _, name := range []string{"create_task_plan_kandev", "update_task_plan_kandev"} {
+		tool, ok := tools[name]
+		require.Truef(t, ok, "%s not registered", name)
+		contentSchema, ok := tool.Tool.InputSchema.Properties["content"].(map[string]any)
+		require.Truef(t, ok, "%s content property is not a JSON schema object", name)
+		description, ok := contentSchema["description"].(string)
+		require.Truef(t, ok, "%s content property has no description", name)
+		assert.Containsf(t, description, "262,144", "%s content property does not state the byte ceiling", name)
+	}
+}
+
 func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -515,6 +600,27 @@ func TestServerProfile_AutopilotChildHasOnlyParentQuestion(t *testing.T) {
 	rootTools := getRegisteredToolNames(root)
 	assert.NotContains(t, rootTools, "ask_parent_question_kandev")
 	assert.NotContains(t, rootTools, "ask_user_question_kandev")
+}
+
+func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	profile := mcpprofile.NewAutomation()
+	s := NewWithProfile(backend, "automation-session", "automation-task", 10005, log, "", false, profile)
+	want := []string{
+		"list_workspaces_kandev", "list_workflows_kandev", "list_workflow_steps_kandev",
+		"list_repositories_kandev", "list_tasks_kandev", "list_agents_kandev",
+		"list_executors_kandev", "list_executor_profiles_kandev", "list_related_tasks_kandev",
+		"get_task_conversation_kandev", "list_task_sessions_kandev", "create_task_kandev",
+		"update_task_kandev", "move_task_kandev", "archive_task_kandev",
+		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
+		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
+		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
+	}
+	assert.ElementsMatch(t, want, getRegisteredToolNames(s))
+	assert.NotContains(t, getRegisteredToolNames(s), "transfer_task_kandev")
 }
 
 func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
@@ -564,6 +670,7 @@ func TestServerModeConfig_RegistersCorrectTools(t *testing.T) {
 	// Config mode should have task tools
 	assert.Contains(t, tools, "list_tasks_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "transfer_task_kandev")
 	assert.Contains(t, tools, "delete_task_kandev")
 	assert.Contains(t, tools, "archive_task_kandev")
 	assert.Contains(t, tools, "update_task_state_kandev")
@@ -608,26 +715,38 @@ func TestServerModeTask_AbsentProvidersFailClosedForReviewAutomation(t *testing.
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	tools := getRegisteredToolNames(s)
 
-	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
-	assert.NotContains(t, tools, "update_task_pr_automation_kandev")
-	assert.NotContains(t, tools, "get_task_mr_automation_kandev")
-	assert.NotContains(t, tools, "update_task_mr_automation_kandev")
+	for _, name := range []string{
+		"get_task_change_requests_kandev",
+		"manage_task_change_request_kandev",
+		"update_task_change_request_automation_kandev",
+		"report_change_request_auto_fix_outcome_kandev",
+		"get_task_pr_automation_kandev",
+		"update_task_pr_automation_kandev",
+		"get_task_mr_automation_kandev",
+		"update_task_mr_automation_kandev",
+		"link_task_pr_kandev",
+		"unlink_task_pr_kandev",
+		"replace_task_pr_kandev",
+		"report_pr_auto_fix_outcome_kandev",
+	} {
+		assert.NotContains(t, tools, name)
+	}
 }
 
 func TestServerModeTask_ProviderMembership(t *testing.T) {
 	log := newTestLogger(t)
 
 	tests := []struct {
-		name      string
-		providers []string
-		wantPR    bool
-		wantMR    bool
+		name               string
+		providers          []string
+		wantChangeRequests bool
+		wantOutcome        bool
 	}{
-		{name: "github only", providers: []string{" GITHUB "}, wantPR: true},
-		{name: "gitlab only", providers: []string{"gitlab"}, wantMR: true},
-		{name: "mixed", providers: []string{"gitlab", "github", "github"}, wantPR: true, wantMR: true},
-		{name: "empty", providers: []string{}, wantPR: false, wantMR: false},
-		{name: "unsupported", providers: []string{"local", "azure"}, wantPR: false, wantMR: false},
+		{name: "github only", providers: []string{" GITHUB "}, wantChangeRequests: true, wantOutcome: true},
+		{name: "gitlab only", providers: []string{"gitlab"}, wantChangeRequests: true},
+		{name: "mixed", providers: []string{"gitlab", "github", "github"}, wantChangeRequests: true, wantOutcome: true},
+		{name: "empty", providers: []string{}, wantChangeRequests: false, wantOutcome: false},
+		{name: "unsupported", providers: []string{"local", "azure"}, wantChangeRequests: false, wantOutcome: false},
 	}
 
 	for _, tt := range tests {
@@ -636,10 +755,18 @@ func TestServerModeTask_ProviderMembership(t *testing.T) {
 			t.Cleanup(backend.Close)
 			s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, tt.providers)
 			tools := getRegisteredToolNames(s)
-			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
-			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
-			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
-			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
+			assert.Equal(t, tt.wantChangeRequests, containsTool(tools, "get_task_change_requests_kandev"))
+			assert.Equal(t, tt.wantChangeRequests, containsTool(tools, "manage_task_change_request_kandev"))
+			assert.Equal(t, tt.wantChangeRequests, containsTool(tools, "update_task_change_request_automation_kandev"))
+			assert.Equal(t, tt.wantOutcome, containsTool(tools, "report_change_request_auto_fix_outcome_kandev"))
+			for _, name := range []string{
+				"get_task_pr_automation_kandev", "update_task_pr_automation_kandev",
+				"get_task_mr_automation_kandev", "update_task_mr_automation_kandev",
+				"link_task_pr_kandev", "unlink_task_pr_kandev", "replace_task_pr_kandev",
+				"report_pr_auto_fix_outcome_kandev",
+			} {
+				assert.NotContains(t, tools, name)
+			}
 			assert.Contains(t, tools, "stop_task_kandev")
 		})
 	}
@@ -656,8 +783,18 @@ func TestServerSetProvidersPreservesModeAndRebuildsTools(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	assert.Equal(t, ModeTaskTitlePending, s.mode)
 	assert.Contains(t, tools, "set_task_title_kandev")
-	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
-	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.Contains(t, tools, "get_task_change_requests_kandev")
+	assert.Contains(t, tools, "manage_task_change_request_kandev")
+	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
+	assert.NotContains(t, tools, "report_change_request_auto_fix_outcome_kandev")
+	for _, name := range []string{
+		"get_task_pr_automation_kandev", "update_task_pr_automation_kandev",
+		"get_task_mr_automation_kandev", "update_task_mr_automation_kandev",
+		"link_task_pr_kandev", "unlink_task_pr_kandev", "replace_task_pr_kandev",
+		"report_pr_auto_fix_outcome_kandev",
+	} {
+		assert.NotContains(t, tools, name)
+	}
 }
 
 type providerRefreshTestSession struct {
@@ -709,9 +846,20 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 36, "final registry should contain the complete GitLab-only task tool set")
-	assert.Contains(t, tools, "get_task_mr_automation_kandev")
-	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	require.Len(t, tools, 41, "final registry should contain the complete GitLab-only task tool set")
+	assert.NotContains(t, tools, "get_github_rate_limit_kandev")
+	assert.Contains(t, tools, "get_task_change_requests_kandev")
+	assert.Contains(t, tools, "manage_task_change_request_kandev")
+	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
+	assert.NotContains(t, tools, "report_change_request_auto_fix_outcome_kandev")
+	for _, name := range []string{
+		"get_task_pr_automation_kandev", "update_task_pr_automation_kandev",
+		"get_task_mr_automation_kandev", "update_task_mr_automation_kandev",
+		"link_task_pr_kandev", "unlink_task_pr_kandev", "replace_task_pr_kandev",
+		"report_pr_auto_fix_outcome_kandev",
+	} {
+		assert.NotContains(t, tools, name)
+	}
 }
 
 func TestServerSetProvidersAndModeSkipNormalizedNoOps(t *testing.T) {
@@ -874,11 +1022,13 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
 	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
-	// list_task_sessions + PR automation + MR automation) + 1 add_branch_to_task +
+	// list_task_sessions) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
-	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
+	// 1 step_complete (ADR 0015) + 1 interaction + 8 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
-	// + 2 task-dependency (add/remove) + 1 rich-output = 38.
+	// + 2 task-dependency (add/remove) + 3 neutral task change-request tools +
+	// 1 neutral outcome tool + 1 rich-output. The exact count below guards
+	// the complete task-mode catalog.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -889,10 +1039,10 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 38, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
-func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
+func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
@@ -907,7 +1057,10 @@ func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
 	require.NoError(t, json.Unmarshal(serialized, &tool))
 	assert.NotContains(t, tool, "_meta", "task tools should use normal client discovery")
 
-	for _, mode := range []string{ModeOffice, ModeConfig, ModeExternal} {
+	officeServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
+	assert.Contains(t, officeServer.mcpServer.ListTools(), "step_complete_kandev", "office mode must register step_complete_kandev (ADR 0015)")
+
+	for _, mode := range []string{ModeConfig, ModeExternal} {
 		t.Run(mode, func(t *testing.T) {
 			restrictedServer := New(backend, "test-session", "test-task", 10005, log, "", false, mode)
 			assert.NotContains(t, restrictedServer.mcpServer.ListTools(), "step_complete_kandev")
@@ -922,9 +1075,10 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 34
+	// Config mode includes its existing tools, five compact settings tools, and
+	// the audited cross-workspace transfer tool.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 34, len(tools))
+	assert.Equal(t, 45, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -955,6 +1109,10 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "create_task_plan_kandev")
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
+	assert.Contains(t, tools, "edit_task_plan_kandev")
+	assert.Contains(t, tools, "list_task_plan_revisions_kandev")
+	assert.Contains(t, tools, "get_task_plan_revision_kandev")
+	assert.Contains(t, tools, "restore_task_plan_revision_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
 
 	// Office mode should have interaction tools
@@ -972,8 +1130,14 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_document_kandev")
 	assert.Contains(t, tools, "write_task_document_kandev")
 
+	// Office mode gets the ADR 0015 declarative completion signal too, so a
+	// step gated by auto_advance_requires_signal can advance without relying
+	// solely on the agent process exiting.
+	assert.Contains(t, tools, "step_complete_kandev")
+
 	// Office mode should NOT have kanban tools
 	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "create_office_task_kandev")
 	assert.NotContains(t, tools, "list_tasks_kandev")
 	assert.NotContains(t, tools, "update_task_kandev")
 	assert.NotContains(t, tools, "list_workspaces_kandev")
@@ -996,10 +1160,14 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 11
+	// 8 plan + 1 interaction + 1 related-tasks + 3 task-documents
+	// + 1 rich-output + 1 step_complete (ADR 0015) + 1 transfer = 16.
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
-	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 11, len(tools))
+	// (list_task_comments_kandev retired in favour of `agentctl kandev comment list …`).
+	// (record_step_decision_kandev retired in favour of the task-bound CLI.)
+	assert.Contains(t, tools, "step_complete_kandev", "office mode must register the ADR 0015 completion signal")
+	assert.Contains(t, tools, "transfer_task_kandev")
+	assert.Equal(t, 16, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -1016,9 +1184,11 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents + 1 rich-output + 1 decisions = 10
-	// (no ask_user_question, no delegate)
-	assert.Equal(t, 10, len(tools))
+	// 8 plan + 1 related-tasks + 3 task-documents + 1 rich-output
+	// + 1 step_complete (ADR 0015) + 1 transfer = 15
+	// (no ask_user_question, no delegate, no list_task_comments)
+	assert.Contains(t, tools, "transfer_task_kandev")
+	assert.Equal(t, 15, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
@@ -1048,6 +1218,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_mcp_config_kandev")
 	assert.Contains(t, tools, "list_executors_kandev")
 	assert.Contains(t, tools, "move_task_kandev")
+	assert.Contains(t, tools, "transfer_task_kandev")
 
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
@@ -1076,6 +1247,11 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
 	assert.NotContains(t, tools, "stop_task_kandev")
+
+	// External mode includes the question-answering tools (spec S1/S2); the
+	// agent-facing ask_user_question_kandev stays off this surface (spec S3).
+	assert.Contains(t, tools, "list_pending_questions_kandev")
+	assert.Contains(t, tools, "answer_question_kandev")
 }
 
 func TestServerModeExternal_ToolCount(t *testing.T) {
@@ -1085,10 +1261,27 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 13 workflow (incl. list_repositories + import_workflow + export_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task + 2 task-dependency = 36.
+	// Baseline 42 tools plus the five compact settings tools and the audited
+	// cross-workspace transfer tool.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 36, len(tools))
+	assert.Equal(t, 50, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
+}
+
+func TestExternalAnswerQuestionSchemaDoesNotRestrictOptionCardinality(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "", "", 0, log, "", true, ModeExternal)
+
+	answers := toolInputProperties(t, s, "answer_question_kandev")["answers"].(map[string]interface{})
+	answerItem := answers["items"].(map[string]interface{})
+	answerProperties := answerItem["properties"].(map[string]interface{})
+	selectedOptions := answerProperties["selected_options"].(map[string]interface{})
+	description := selectedOptions["description"].(string)
+
+	assert.Contains(t, description, "Zero or more option IDs")
+	assert.NotContains(t, description, "single-choice")
 }
 
 func TestNewExternal_Constructs(t *testing.T) {

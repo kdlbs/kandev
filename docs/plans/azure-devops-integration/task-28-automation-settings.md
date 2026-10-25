@@ -6,7 +6,7 @@ wave: 13
 depends_on:
   ["24-watcher-persistence", "25-watcher-polling", "26-watcher-dispatch"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 28: Azure Watcher Settings

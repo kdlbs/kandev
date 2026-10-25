@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-selection"]
 plan: "plan.md"
-spec: "../../specs/ui/slash-command-composer.md"
+spec: "../../specs/ui/requirements/slash-command-composer.md"
 ---
 
 # Task 02: Unit Tests for Slash Command Insertion

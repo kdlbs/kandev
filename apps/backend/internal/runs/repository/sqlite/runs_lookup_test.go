@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestFindInflightRunForAgent_ReturnsTheNewestQueuedOrClaimedRun pins
@@ -114,6 +114,121 @@ func TestGetClaimedRunByTaskAndAgent_ScopesToTheAgentEvenWhenAnotherAgentsClaimI
 	}
 }
 
+// TestGetClaimedRunForAgent_ReturnsTheAgentsSoleClaimAcrossTasks pins the
+// fully agent-scoped lookup used to resolve a reactivity wake's live
+// causing run: unlike GetClaimedRunByTaskID/GetClaimedRunByTaskAndAgent,
+// this ignores task boundaries entirely and reports the run the agent
+// itself currently holds claimed, whatever task (or none) it names —
+// as long as the agent holds exactly one claim (see the sibling
+// ambiguous-multiple-claims test below).
+func TestGetClaimedRunForAgent_ReturnsTheAgentsSoleClaimAcrossTasks(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	// a1's only claim is on a different task than a2's.
+	mine := seedTaskRun(t, repo, "mine-claim-other-task", "a1", "t2", "queued")
+	setStatus(t, repo, mine.ID, "claimed", timePtr(base), nil)
+	otherAgent := seedTaskRun(t, repo, "other-agent-claim", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForAgent(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for agent: %v", err)
+	}
+	if got.ID != mine.ID {
+		t.Errorf("claimed run = %q, want %q (a1's sole claim, any task)", got.ID, mine.ID)
+	}
+
+	if _, err := repo.GetClaimedRunForAgent(ctx, "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetClaimedRunForAgent_MultipleClaimsResolveAsAmbiguous pins that an
+// agent holding more than one claimed run at once (max_concurrent_sessions
+// above 1) fails closed exactly like "no claimed run" rather than
+// guessing the causing run by claimed_at recency: with no signal for
+// which claim actually caused the wake being resolved, picking the
+// newest could misattribute causation depth and parentage to the wrong
+// run.
+func TestGetClaimedRunForAgent_MultipleClaimsResolveAsAmbiguous(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	older := seedTaskRun(t, repo, "older-claim", "a1", "t1", "queued")
+	setStatus(t, repo, older.ID, "claimed", timePtr(base), nil)
+	newer := seedTaskRun(t, repo, "newer-claim-other-task", "a1", "t2", "queued")
+	setStatus(t, repo, newer.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	if _, err := repo.GetClaimedRunForAgent(ctx, "a1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("multi-claim err = %v, want sql.ErrNoRows (ambiguous, fails closed)", err)
+	}
+}
+
+// TestGetClaimedRunForCausationAttribution_ReturnsTheAgentsSoleClaimAcrossTasks
+// pins the sole-claim case, identical to GetClaimedRunForAgent's.
+func TestGetClaimedRunForCausationAttribution_ReturnsTheAgentsSoleClaimAcrossTasks(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	mine := seedTaskRun(t, repo, "mine-claim-other-task", "a1", "t2", "queued")
+	setStatus(t, repo, mine.ID, "claimed", timePtr(base), nil)
+	otherAgent := seedTaskRun(t, repo, "other-agent-claim", "a2", "t1", "queued")
+	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(base.Add(time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForCausationAttribution(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for causation attribution: %v", err)
+	}
+	if got.ID != mine.ID {
+		t.Errorf("claimed run = %q, want %q (a1's sole claim, any task)", got.ID, mine.ID)
+	}
+
+	if _, err := repo.GetClaimedRunForCausationAttribution(ctx, "a-unknown"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("unknown agent err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetClaimedRunForCausationAttribution_MultipleClaimsResolveToDeepestCausationDepth
+// pins the fix for the ambiguous-multi-claim causation-attribution gap: an
+// agent whose max_concurrent_sessions ceiling is above 1 can hold several
+// claims at once, and GetClaimedRunForAgent's claim-execution fail-closed
+// behavior (resolve to sql.ErrNoRows, same as no claim at all) is wrong
+// reused here, because resolveCausingRunID's caller then treats the wake as
+// a fresh root — silently discarding whatever causation depth every
+// candidate claim actually carried and bypassing the depth ceiling. With no
+// signal for which claim caused this wake, this resolves to the candidate
+// carrying the greatest CausationDepth: whichever claim actually caused it,
+// the computed child depth is never lower than it should be.
+func TestGetClaimedRunForCausationAttribution_MultipleClaimsResolveToDeepestCausationDepth(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	shallow := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "shallow-claim", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t1"}`, CausationDepth: 1,
+	})
+	setStatus(t, repo, shallow.ID, "claimed", timePtr(base), nil)
+	deep := mustCreateRun(t, repo, &runsmodels.Run{
+		ID: "deep-claim", AgentProfileID: "a1", Reason: "task_assigned",
+		Payload: `{"task_id":"t2"}`, CausationDepth: 4,
+	})
+	// Older claimed_at than shallow: recency must not win over depth.
+	setStatus(t, repo, deep.ID, "claimed", timePtr(base.Add(-time.Hour)), nil)
+
+	got, err := repo.GetClaimedRunForCausationAttribution(ctx, "a1")
+	if err != nil {
+		t.Fatalf("get claimed run for causation attribution: %v", err)
+	}
+	if got.ID != deep.ID {
+		t.Errorf("claimed run = %q, want %q (deepest CausationDepth among ambiguous claims)", got.ID, deep.ID)
+	}
+}
+
 // TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask pins the
 // heartbeat attribution rule: a missing or empty payload task_id counts
 // as taskless, a populated one never does.
@@ -122,12 +237,12 @@ func TestGetClaimedTasklessRunForAgent_OnlyMatchesRunsWithoutATask(t *testing.T)
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	missing := mustCreateRun(t, repo, &models.Run{
+	missing := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "missing-task-id", AgentProfileID: "a1", Reason: "heartbeat",
 		Payload: `{"note":"no task"}`,
 	})
 	setStatus(t, repo, missing.ID, "claimed", timePtr(base), nil)
-	empty := mustCreateRun(t, repo, &models.Run{
+	empty := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "empty-task-id", AgentProfileID: "a1", Reason: "heartbeat",
 		Payload: `{"task_id":""}`,
 	})
@@ -152,10 +267,10 @@ func TestGetClaimedTasklessRunForAgent_ScopedToTheAgentAndToClaimedRuns(t *testi
 	ctx := context.Background()
 	now := time.Now().UTC()
 
-	queued := mustCreateRun(t, repo, &models.Run{
+	queued := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "queued", AgentProfileID: "a1", Reason: "heartbeat",
 	})
-	otherAgent := mustCreateRun(t, repo, &models.Run{
+	otherAgent := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "other-agent", AgentProfileID: "a2", Reason: "heartbeat",
 	})
 	setStatus(t, repo, otherAgent.ID, "claimed", timePtr(now), nil)
@@ -205,7 +320,7 @@ func TestGetRunWithCosts_TasklessRunRollsUpToZero(t *testing.T) {
 	repo, writer := newTestRepoWithDB(t)
 	ctx := context.Background()
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runsmodels.Run{
 		ID: "taskless", AgentProfileID: "a1", Reason: "heartbeat",
 	})
 	seedCostEvent(t, writer, "orphan", "", 500, 50, 60, 70)
@@ -257,4 +372,72 @@ func checkInt64(t *testing.T, field string, got, want int64) {
 	if got != want {
 		t.Errorf("%s = %d, want %d", field, got, want)
 	}
+}
+
+// TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin pins the WS gateway's
+// run.subscribe authorization lookup (WO-02): the run's owning workspace
+// comes from its agent profile, the same join idiom ListRuns uses.
+func TestGetRunWorkspaceID_ResolvesViaAgentProfileJoin(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted pins the
+// deliberate choice of a raw join over GetAgentInstance: GetAgentInstance
+// filters deleted_at IS NULL, which would make a run under a soft-deleted
+// agent profile permanently unresolvable (and so permanently deniable) to
+// its own owner.
+func TestGetRunWorkspaceID_StillResolvesWhenAgentProfileSoftDeleted(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "ws-1")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	if _, err := writer.Exec(`UPDATE agent_profiles SET deleted_at = ? WHERE id = 'a1'`, time.Now().UTC()); err != nil {
+		t.Fatalf("soft-delete agent profile: %v", err)
+	}
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id after soft delete: %v", err)
+	}
+	checkString(t, "workspace_id", got, "ws-1")
+}
+
+// TestGetRunWorkspaceID_UnknownRunReturnsNoRows pins the sentinel the
+// gateway's subscribe hook denies on.
+func TestGetRunWorkspaceID_UnknownRunReturnsNoRows(t *testing.T) {
+	repo := newTestRepo(t)
+	if _, err := repo.GetRunWorkspaceID(context.Background(), "nope"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("err = %v, want sql.ErrNoRows", err)
+	}
+}
+
+// TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile pins the
+// WO-02 round-2 fix: an ordinary (non-Office) agent profile has
+// workspace_id=” (schema default, no backfill), and the join returns that
+// empty string as-is rather than an error. The gateway's subscribe hook (not
+// this repository) is responsible for denying on an empty result.
+func TestGetRunWorkspaceID_ResolvesToEmptyStringForUnscopedAgentProfile(t *testing.T) {
+	repo, writer := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, writer, "a1", "")
+	run := seedTaskRun(t, repo, "run-1", "a1", "t1", "queued")
+
+	got, err := repo.GetRunWorkspaceID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run workspace id: %v", err)
+	}
+	checkString(t, "workspace_id", got, "")
 }

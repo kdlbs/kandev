@@ -50,16 +50,28 @@ const (
 	CodePermissionDeniedByUser      Code = "permission_denied_by_user"
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
+	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
+	CodeManagedRuntimeStartup       Code = "managed_runtime_startup"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
+	CodeProviderResourceExhausted   Code = "provider_resource_exhausted"
+	// CodeAccountBlocked is a provider account restriction. Retrying cannot
+	// recover it and repeated requests can extend it, so routing holds the
+	// failing execution profile until its owner releases it.
+	CodeAccountBlocked Code = "account_blocked"
 )
+
+// HoldsUntilRelease reports whether a code suspends its execution profile
+// without expiry or probe, until an explicit owner release.
+func HoldsUntilRelease(code Code) bool {
+	return code == CodeAccountBlocked
+}
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
 // CodeResumeCorrupted. Unlike CodeNpxCacheCorrupted (whose RemediationPath is
 // a filesystem path to delete), this is a remediation *token* the UI maps to
-// the "start a fresh session" recovery action — there is nothing on disk to
-// clean; the agent's persisted reasoning state is corrupted and only a brand
-// new session recovers.
+// the "start a fresh session" recovery action. It authorizes no disk cleanup
+// and does not establish the underlying cause of a reasoning-history error.
 const RemediationStartFreshSession = "start_fresh_session"
 
 // ModelUnavailableMessage renders the actionable user-facing message for a
@@ -130,10 +142,10 @@ type Error struct {
 func ClassForCode(code Code) Class {
 	switch code {
 	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded,
-		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost:
+		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return ClassTransient
 	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
-		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured:
+		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured, CodeAccountBlocked:
 		return ClassHard
 	default:
 		return ClassUnclassified
@@ -144,16 +156,24 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.ClassifierRule)
 }
 
+// ShouldShortRetry reports whether a classified failure is worth retrying
+// against the same provider before falling back or escalating.
+func (e *Error) ShouldShortRetry() bool {
+	return e != nil && e.Class == ClassTransient && e.AutoRetryable && e.FallbackAllowed
+}
+
 // Input is the raw signal bundle adapters pass to Classify.
 type Input struct {
-	Phase         Phase
-	ProviderID    string
-	ExitCode      *int
-	StructuredErr error
-	HTTPStatus    int
-	ResetHint     *time.Time
-	Stderr        string
-	Stdout        string
+	Phase                     Phase
+	ProviderID                string
+	ExitCode                  *int
+	StructuredErr             error
+	HTTPStatus                int
+	ResetHint                 *time.Time
+	OccurredAt                time.Time // observation time for this provider diagnostic
+	Stderr                    string
+	Stdout                    string
+	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
 }
 
 const exitCodeBinaryMissing = 127
@@ -163,12 +183,43 @@ const exitCodeBinaryMissing = 127
 const statusOverloaded = 529
 
 // Classify normalizes a failure into a routing-aware Error. See package doc.
+// Classify always returns a non-nil *Error, even for an unmatched or empty
+// input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
-	excerpt := Sanitize(in.Stderr + "\n" + in.Stdout)
+	e := classify(in)
+	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
+		// Providers such as codex state the retry time only in the human
+		// notice, not in a structured field. Deriving it here lets every
+		// consumer (short retry, circuit breaker) honor it uniformly.
+		observedAt := in.OccurredAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		text := in.Stderr + "\n" + in.Stdout
+		hint := parseResetHintAt(text, observedAt)
+		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+			hint = parseResetClockHintAt(text, observedAt)
+		}
+		if hint != nil {
+			e.ResetHint = hint
+		}
+	}
+	return e
+}
+
+func classify(in Input) *Error {
+	rawText := in.Stderr + "\n" + in.Stdout
+	excerpt := Sanitize(rawText)
 	if e := classifyInjection(in, excerpt); e != nil {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
+		return applyInvariants(e)
+	}
+	if e := classifyManagedRuntimeNpmPolicy(in, rawText); e != nil {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
@@ -186,24 +237,24 @@ func Classify(in Input) *Error {
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchRuntimeEnvironmentRules(excerpt); ok {
+	if e, ok := matchRuntimeEnvironmentRulesForProvider(in.ProviderID, excerpt, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
 			// Preserve the legacy path for the path-aware remediation guard;
 			// the path is validated again before deletion.
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	if e, ok := matchLegacyRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
+	if e, ok := matchLegacyRuntimeEnvironmentRulesForProvider(in.ProviderID, rawText, rawText); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
 		e.ResetHint = in.ResetHint
 		if e.Code == CodeNpxCacheCorrupted {
-			e.RemediationPath = extractNpxCachePath(in.Stderr + "\n" + in.Stdout)
+			e.RemediationPath = extractNpxCachePath(rawText)
 		}
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
@@ -268,6 +319,11 @@ func httpStatusToCode(status int) Code {
 		return CodeSubscriptionRequired
 	case http.StatusTooManyRequests:
 		return CodeRateLimited
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusGatewayTimeout:
+		// A gateway may expose an upstream 5xx directly instead of translating
+		// it to 503. These are provider-side availability failures, not a task
+		// or agent-runtime failure, so the shared transient policy may recover.
+		return CodeProviderUnavailable
 	case http.StatusServiceUnavailable:
 		return CodeProviderUnavailable
 	case statusOverloaded:
@@ -316,6 +372,12 @@ func applyInvariants(e *Error) *Error {
 	case CodeProviderUnavailable, CodeUnknownProvider:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
+	case CodeAccountBlocked:
+		// The owner resolves the restriction with the provider. Another
+		// candidate may serve the work, but the same account must not retry.
+		e.AutoRetryable = false
+		e.FallbackAllowed = true
+		e.UserAction = false
 	case CodeProviderOverloaded:
 		// 529 Overloaded is a transient, server-side condition. Retrying the
 		// same provider after a short backoff is the right move; falling back
@@ -325,14 +387,13 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy, CodeManagedRuntimeStartup:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false
 	case CodeResumeCorrupted:
-		// The agent's persisted reasoning state is poisoned. Retrying the
-		// resume hits the same 400, and falling back to another provider
-		// can't fix a session-state problem — only a fresh session does.
+		// Reasoning-history diagnostics require manual recovery. Their
+		// classification does not authorize automatic retry or fallback.
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false
@@ -344,6 +405,13 @@ func applyInvariants(e *Error) *Error {
 		// model-availability problem. Retrying the same provider is expected to
 		// succeed (the resume token belongs to the current provider), so
 		// falling back to another provider can't fix it and isn't offered.
+		e.AutoRetryable = true
+		e.FallbackAllowed = false
+		e.UserAction = false
+	case CodeProviderResourceExhausted:
+		// Exact Cursor retriable resource exhaustion is transient and
+		// auto-retryable against the same provider without fallback or
+		// user action.
 		e.AutoRetryable = true
 		e.FallbackAllowed = false
 		e.UserAction = false

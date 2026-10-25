@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 ---
 
 # Task 06: Classify startup runtime cleanup

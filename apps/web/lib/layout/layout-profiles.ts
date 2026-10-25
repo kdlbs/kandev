@@ -11,8 +11,14 @@ import {
 } from "@/lib/state/layout-manager";
 import type { SavedLayout } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
+import { filterLayoutStateByComponents } from "@/lib/state/layout-manager/sanitize-serialized-layout";
 
 export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
+
+/** Identity of the profile that produced the currently rendered layout. */
+export type LayoutProfileIdentity =
+  | { kind: "built-in"; id: BuiltInPreset }
+  | { kind: "custom"; id: string };
 
 export type BuiltInLayoutProfileDescriptor = {
   id: BuiltInLayoutProfileId;
@@ -153,6 +159,14 @@ export function getBuiltInLayoutOverrideSourceId(
     BUILT_IN_LAYOUT_PROFILES.find(({ id }) => profile.id === getBuiltInLayoutOverrideId(id))?.id ??
     null
   );
+}
+
+/** Resolve the identity represented by a saved layout profile ID. */
+export function getLayoutProfileIdentity(profile: Pick<SavedLayout, "id">): LayoutProfileIdentity {
+  const builtInSource = getBuiltInLayoutOverrideSourceId(profile);
+  return builtInSource
+    ? { kind: "built-in", id: builtInSource }
+    : { kind: "custom", id: profile.id };
 }
 
 export function isBuiltInLayoutOverride(profile: Pick<SavedLayout, "id">): boolean {
@@ -314,7 +328,12 @@ export function validateReusableLayout(layout: unknown): ReusableLayoutValidatio
     };
   }
 
-  const normalized = normalizeReusableSessionPanels(layout);
+  const normalized = normalizeReusableSessionPanels(
+    // Drop panels whose component the renderer can no longer instantiate before
+    // validating, so a profile that references a retired component keeps
+    // applying with its surviving panels instead of being demoted to legacy.
+    filterLayoutStateByComponents(layout),
+  );
   const counts = new Map<string, number>();
   const issues = invalidActivePanelIssues(layout);
   issues.push(

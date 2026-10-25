@@ -151,7 +151,25 @@ test.describe("Office agent run detail", () => {
     await expect(otherRow).not.toHaveAttribute("aria-current", "page");
 
     // The running row carries the animated icon testid.
-    await expect(testPage.getByTestId(`recent-run-row-running-icon-${runningId}`)).toBeVisible();
+    const runningIcon = testPage.getByTestId(`recent-run-row-running-icon-${runningId}`);
+    await expect(runningIcon).toBeVisible();
+    await expect
+      .poll(() =>
+        runningIcon.evaluate((element) => ({
+          tagName: element.tagName,
+          wrapperAnimated: element.classList.contains("animate-spin"),
+          promoted: element.classList.contains("will-change-transform"),
+          svgCount: element.querySelectorAll("svg").length,
+          svgAnimated: element.querySelector("svg")?.classList.contains("animate-spin") ?? false,
+        })),
+      )
+      .toEqual({
+        tagName: "SPAN",
+        wrapperAnimated: true,
+        promoted: true,
+        svgCount: 1,
+        svgAnimated: false,
+      });
   });
 
   test("run detail renders header, sidebar highlight, conversation, and events", async ({
@@ -223,5 +241,54 @@ test.describe("Office agent run detail", () => {
     await expect(testPage.getByTestId("events-log")).toBeVisible();
     const eventRows = testPage.locator('[data-testid^="events-log-row-"]');
     await expect(eventRows).toHaveCount(4);
+  });
+
+  test("parked run links to the selected session recovery action", async ({
+    testPage,
+    apiClient,
+    officeSeed,
+  }) => {
+    const task = await apiClient.createTask(officeSeed.workspaceId, "parked-recovery-task", {
+      workflow_id: officeSeed.workflowId,
+    });
+    const session = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: officeSeed.agentId,
+    });
+    const run = await apiClient.seedRun({
+      agentProfileId: officeSeed.agentId,
+      status: "failed",
+      reason: "task_assigned",
+      taskId: task.id,
+      sessionId: session.session_id,
+      errorMessage: "Session recovery is required",
+    });
+    const response = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/office/agents/${officeSeed.agentId}/runs/${run.run_id}`,
+    );
+    expect(response.status).toBe(200);
+    const detail = (await response.json()) as Record<string, unknown> & {
+      routing?: Record<string, unknown>;
+    };
+    detail.routing = {
+      ...(detail.routing ?? {}),
+      blocked_status: "session_recovery_required",
+      session_recovery_block_id: "recovery-block-e2e",
+      session_recovery_reason: "native_state_missing",
+    };
+
+    await testPage.route(
+      `**/api/v1/office/agents/${officeSeed.agentId}/runs/${run.run_id}`,
+      (route) => route.fulfill({ status: response.status, json: detail }),
+    );
+
+    await testPage.goto(`/office/agents/${officeSeed.agentId}/runs/${run.run_id}`);
+
+    await expect(testPage.getByTestId("run-session-recovery-required")).toBeVisible();
+    await expect(testPage.getByTestId("run-session-recovery-link")).toHaveAttribute(
+      "href",
+      `/office/tasks/${task.id}?advanced&session_id=${session.session_id}`,
+    );
   });
 });

@@ -53,6 +53,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 		"office_agent_runtime",
 		"office_cost_events",
 		"office_budget_policies",
+		"office_budget_claims",
 		"runs",
 		"office_routines",
 		"office_routine_triggers",
@@ -67,6 +68,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 		"office_agent_instructions",
 		"office_labels",
 		"office_task_labels",
+		"office_agent_pause_recoveries",
 		"task_workspace_groups",
 		"task_workspace_group_members",
 	}

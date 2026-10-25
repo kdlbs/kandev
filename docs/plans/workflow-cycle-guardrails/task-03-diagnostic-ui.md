@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-mutation-guard"]
 plan: "plan.md"
-spec: "../../specs/workflow-cycle-guardrails/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cycle-guardrails.md"
 ---
 
 # Task 03: Workflow cycle diagnostic UI

@@ -6,6 +6,8 @@ import { ScheduleSelector, isValidExpression } from "./schedule-selector";
 
 const NEXT_RUN = "schedule-next-run";
 const ADOPT_TZ = "schedule-adopt-timezone";
+const FREQUENCY_SELECTOR = "schedule-frequency";
+const CUSTOM_INPUT = "schedule-custom-input";
 const CUSTOM_WEEKDAYS = "0 9 * * 1-5";
 const DAILY_9 = "0 9 * * *";
 
@@ -55,6 +57,30 @@ describe("ScheduleSelector preview", () => {
     renderSelector(null);
     expect(screen.getByTestId(NEXT_RUN).textContent).toContain("won't run on its own");
   });
+
+  it("shows the unscheduled state and lets the user create a daily schedule", () => {
+    const onChange = renderSelector(null);
+
+    expect(screen.getByTestId(FREQUENCY_SELECTOR).textContent).toBe("No schedule");
+
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "every day" }));
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ cron_expression: DAILY_9 }));
+  });
+
+  it("opens the custom editor from the unscheduled state", () => {
+    const onChange = renderSelector(null);
+
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "a custom schedule" }));
+
+    const input = screen.getByTestId(CUSTOM_INPUT);
+    fireEvent.change(input, { target: { value: "@every 2h" } });
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith({ cron_expression: "@every 2h", timezone: undefined });
+  });
 });
 
 describe("ScheduleSelector timezone migration", () => {
@@ -86,10 +112,11 @@ describe("ScheduleSelector timezone migration", () => {
   it("gives a brand new schedule the viewer's own timezone", () => {
     const onChange = renderSelector(null);
 
-    fireEvent.change(screen.getByTestId("schedule-time"), { target: { value: "07:15" } });
+    fireEvent.click(screen.getByTestId(FREQUENCY_SELECTOR));
+    fireEvent.click(screen.getByRole("option", { name: "every day" }));
 
     const emitted = onChange.mock.calls[0][0];
-    expect(emitted.cron_expression).toBe("15 7 * * *");
+    expect(emitted.cron_expression).toBe(DAILY_9);
     expect(emitted.timezone).toBeTruthy();
     expect(screen.queryByTestId(ADOPT_TZ)).toBeNull();
   });
@@ -98,13 +125,13 @@ describe("ScheduleSelector timezone migration", () => {
 describe("ScheduleSelector custom expressions", () => {
   it("opens an unrepresentable cron in the custom field, verbatim", () => {
     renderSelector({ cron_expression: CUSTOM_WEEKDAYS, timezone: "UTC" });
-    expect(screen.getByTestId("schedule-custom-input").getAttribute("value")).toBe(CUSTOM_WEEKDAYS);
+    expect(screen.getByTestId(CUSTOM_INPUT).getAttribute("value")).toBe(CUSTOM_WEEKDAYS);
   });
 
   it("rejects an unreadable expression without emitting", () => {
     const onChange = renderSelector({ cron_expression: CUSTOM_WEEKDAYS, timezone: "UTC" });
 
-    const input = screen.getByTestId("schedule-custom-input");
+    const input = screen.getByTestId(CUSTOM_INPUT);
     fireEvent.change(input, { target: { value: "not a cron" } });
     fireEvent.blur(input);
 
@@ -115,7 +142,7 @@ describe("ScheduleSelector custom expressions", () => {
   it("accepts the grammar the backend accepts", () => {
     const onChange = renderSelector({ cron_expression: CUSTOM_WEEKDAYS, timezone: "UTC" });
 
-    const input = screen.getByTestId("schedule-custom-input");
+    const input = screen.getByTestId(CUSTOM_INPUT);
     fireEvent.change(input, { target: { value: "*/10 8-18 * * 1-5" } });
     fireEvent.blur(input);
 

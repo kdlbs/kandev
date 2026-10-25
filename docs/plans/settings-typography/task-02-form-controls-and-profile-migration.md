@@ -5,7 +5,7 @@ status: in-progress
 wave: 2
 depends_on: ["01-typography-primitives-and-shells"]
 plan: "plan.md"
-spec: "../../specs/settings-typography/spec.md"
+spec: "../../specs/ui/requirements/settings-typography.md"
 ---
 
 # Task 02: Form controls and profile migration
@@ -65,7 +65,7 @@ Parallel-safe with Tasks 03 and 04 after Task 01; owned files are disjoint.
 
 ## Inputs
 
-- Spec: `docs/specs/settings-typography/spec.md`, What items 5–8 and the
+- Spec: `docs/specs/ui/requirements/settings-typography.md`, What items 5–8 and the
   mobile/long-string scenarios.
 - Plan: `plan.md`, Forms and controls section.
 - Audit: `docs/audits/settings-typography/004-normalize-settings-field-labels.md`,

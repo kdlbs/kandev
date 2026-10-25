@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["17-frontend-registration-client"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 18: Workspace Authentication UX

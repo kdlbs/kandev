@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -112,7 +114,7 @@ func TestSchedulerTick_AgentCompletedForNonLatestClaimReleasesTheCompletingAgent
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	byID := make(map[string]models.Run, len(runs))
+	byID := make(map[string]runsmodels.Run, len(runs))
 	for _, r := range runs {
 		byID[r.ID] = *r
 	}
@@ -229,7 +231,7 @@ func TestSchedulerTick_AgentFailedForNonLatestClaimReleasesTheFailingAgentsOwnRu
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	byID := make(map[string]models.Run, len(runs))
+	byID := make(map[string]runsmodels.Run, len(runs))
 	for _, r := range runs {
 		byID[r.ID] = *r
 	}
@@ -314,7 +316,7 @@ func TestSchedulerTick_StaleLifecycleEventDoesNotFinishSuccessorRun(t *testing.T
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	byID := make(map[string]models.Run, len(runs))
+	byID := make(map[string]runsmodels.Run, len(runs))
 	for _, run := range runs {
 		byID[run.ID] = *run
 	}

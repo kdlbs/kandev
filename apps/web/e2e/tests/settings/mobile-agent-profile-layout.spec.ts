@@ -53,4 +53,73 @@ test.describe("Agent settings profile layout on mobile", () => {
       new RegExp(`/settings/agents/${encodeURIComponent(agent.name)}\\?mode=create$`),
     );
   });
+
+  test("wraps the saved fallback summary without horizontal overflow", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    if (!agent || agent.profiles.length === 0) {
+      throw new Error("The E2E fixture must provide a configured agent profile");
+    }
+
+    const fallbackModel = `saved-explicit-model-${"x".repeat(128)}`;
+    const profileName = "Mobile fallback summary";
+    let profileId: string | undefined;
+
+    try {
+      await testPage.goto("/settings/agents");
+      const seededRow = testPage
+        .getByTestId("agent-profile-row")
+        .filter({ hasText: agent.profiles[0].name });
+      await expect(seededRow).toBeVisible({ timeout: 15_000 });
+
+      const profile = await apiClient.createAgentProfile(agent.id, profileName, {
+        model: agent.profiles[0].model,
+        fallback_model: fallbackModel,
+      });
+      profileId = profile.id;
+      await testPage.reload();
+
+      const row = testPage.getByTestId("agent-profile-row").filter({ hasText: profile.name });
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect
+        .poll(
+          async () =>
+            testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+      await expect(row.locator('[data-slot="badge"]')).toHaveText([
+        profile.model,
+        `fallback: ${fallbackModel}`,
+      ]);
+      const fallbackBadge = row.locator('[data-slot="badge"]').nth(1);
+      await expect(fallbackBadge).toBeVisible();
+      const geometry = await fallbackBadge.evaluate((element) => {
+        const owner = element.closest('[data-testid="agent-profile-row"]');
+        if (!owner) throw new Error("Fallback badge has no profile row");
+        return {
+          badge: element.getBoundingClientRect().toJSON(),
+          row: owner.getBoundingClientRect().toJSON(),
+          fitsWidth: element.scrollWidth <= element.clientWidth + 1,
+          fitsHeight: element.scrollHeight <= element.clientHeight + 1,
+        };
+      });
+      expect(geometry.badge.width).toBeGreaterThan(0);
+      expect(geometry.badge.height).toBeGreaterThan(0);
+      expect(geometry.badge.width).toBeLessThanOrEqual(geometry.row.width);
+      expect(geometry.fitsWidth).toBe(true);
+      expect(geometry.fitsHeight).toBe(true);
+      expect(geometry.badge.y).toBeGreaterThanOrEqual(geometry.row.y - 1);
+      expect(geometry.badge.y + geometry.badge.height).toBeLessThanOrEqual(
+        geometry.row.y + geometry.row.height + 1,
+      );
+    } finally {
+      if (profileId) {
+        await apiClient.deleteAgentProfile(profileId, true);
+      }
+    }
+  });
 });

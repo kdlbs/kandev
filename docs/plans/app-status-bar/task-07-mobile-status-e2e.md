@@ -11,7 +11,7 @@ plan: docs/plans/app-status-bar/plan.md
 
 ## Inputs
 
-[Spec scenarios](../../specs/ui/app-status-bar.md#scenarios); mobile UI language; tasks 04 and 06; configured Pixel 5 project.
+[Spec scenarios](../../specs/ui/requirements/app-status-bar.md#scenarios); mobile UI language; tasks 04 and 06; configured Pixel 5 project.
 
 ## Files
 

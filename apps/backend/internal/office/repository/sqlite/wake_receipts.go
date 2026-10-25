@@ -1,0 +1,417 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+)
+
+// StuckParentCandidate is a parent task whose non-archived children are
+// all terminal but which may not yet have received its
+// task_children_completed wake (or received it for a since-changed child
+// set). ChildSetKey is the deterministic "id:state" concatenation compared
+// directly against the last-delivered receipt — no hashing, SQLite has no
+// built-in hash function — computed here, in SQL, so the sweep stays a
+// single query per tick.
+type StuckParentCandidate struct {
+	ParentTaskID           string `db:"parent_task_id"`
+	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
+	WorkflowStepID         string `db:"workflow_step_id"`
+	ChildSetKey            string `db:"child_set_key"`
+	// NewestChildUpdatedAt is the latest updated_at among the parent's
+	// non-archived children, rendered via dialect.SecondPrecisionText so the
+	// same wall-clock second always produces the same text regardless of
+	// dialect (see ListStuckParents). ChildSetKey alone cannot distinguish a
+	// child that completed, was reopened, and completed again with the same
+	// terminal state from one that was never touched — both produce the
+	// same id:state pairs. This is the generation that changes across a
+	// reopen/re-complete cycle even when ChildSetKey does not.
+	NewestChildUpdatedAt string `db:"newest_child_updated_at"`
+}
+
+// ListStuckParents finds parent tasks that look done from their children's
+// perspective — not archived, not ephemeral, not already terminal, with at
+// least one non-archived child, and with no non-archived child left in a
+// non-terminal state — and that have not yet had a task_children_completed
+// wake delivered for their current child set, by anyone.
+//
+// The p.archived_at/is_ephemeral/state filters run over every task row
+// regardless of Office adoption; taskrepo.IsFromOfficePredicate narrows
+// that down to parents this reconciler may actually act on. HasOfficeAdoption
+// (the Tick-level gate in ParentWakeReconciler) only proves some workspace
+// somewhere has adopted Office — it says nothing about this parent's own
+// task or workspace, so without this predicate a Kanban-only parent in an
+// unrelated workspace, or in the same workspace as an Office project it has
+// no connection to, could still match every other filter and receive an
+// unrequested autonomous run. ListUnstartedTasks
+// (tasks.go, the sibling query this reconciler mirrors) applies the same
+// predicate for the same reason.
+//
+// Archived children are deliberately excluded from both the "has a child"
+// and "any non-terminal" checks below — this is a divergence from
+// AreAllChildrenTerminal (blockers.go), which counts every child
+// regardless of archived_at and so can be blocked forever by an archived
+// child stuck mid-flight. Do not "fix" this back to match
+// AreAllChildrenTerminal; the divergence is intentional so an archived
+// child can never wedge the reconciler, and a parent whose only children
+// are archived is never swept with a spurious empty child-set key.
+//
+// Every remaining filter runs in SQL, ahead of LIMIT, not in the caller
+// afterward:
+//   - the LEFT JOIN against parent_child_wake_receipts drops a candidate
+//     whose stored receipt already matches its current child set and whose
+//     delivery evidence still exists. A receipt created by the workflow
+//     engine stores a child-set operation id. A legacy receipt stores a run
+//     id, and any existing run is evidence that the wake entered the queue.
+//     Terminal execution failures stay terminal under the Office runtime
+//     contract; they require an explicit user retry and must not become a
+//     cron retry loop. A missing referenced run remains eligible because a
+//     cleanup or migration can remove the delivery evidence.
+//   - a third OR arm, newest_child_updated_at != child_generation, re-admits
+//     a candidate whose child_set_key still matches the receipt exactly. A
+//     child that completes, is reopened, and completes again with the same
+//     terminal state produces a byte-identical child_set_key (it encodes
+//     "id:state" only), so the first two arms both stay false and the
+//     re-completion would otherwise never be swept. The edge-triggered path
+//     (cascadeChildrenCompleted) also cannot catch this: its idempotency key
+//     hashes child ids only, so an identical child set collides with the
+//     run it already persisted for the first completion. child_generation
+//     is the newest_child_updated_at value recorded at delivery time, so
+//     this is an equality check between two rendered-text values, not an
+//     ordering comparison against delivered_at: tasks.updated_at is written
+//     by more than one producer in more than one text format (see
+//     recordReceipt), so ordering two differently-formatted strings is
+//     unreliable in a way equality between two same-format strings is not.
+//     Both newest_child_updated_at here and the comparison below against
+//     runs.requested_at go through dialect.SecondPrecisionText rather than
+//     comparing the raw TIMESTAMP columns as text: SQLite's CURRENT_TIMESTAMP
+//     only ever writes whole-second text, but Postgres defaults to
+//     microsecond precision, so an unnormalized comparison against
+//     child_generation (a plain TEXT column) is a type mismatch on Postgres,
+//     and reading the raw value into a Go string would carry driver-specific
+//     formatting the two dialects don't agree on.
+//   - the NOT EXISTS against runs drops a candidate with a queued or
+//     claimed task_children_completed run (still in flight, regardless of
+//     which child set it was requested for — wait for it to resolve rather
+//     than race a duplicate) or a terminal one whose wake_wave_string
+//     matches the parent's current wave string (parent-wake-wave-identity):
+//     it already delivered this exact wave, including a failed or
+//     cancelled one that must remain terminal under the Office runtime
+//     contract and be unblocked only by an explicit retry or a real
+//     wave-member change. A separate clause keeps a parent-scoped (not
+//     per-row) compatibility path for pre-upgrade rows: only when the
+//     parent has no task_children_completed run carrying a wave identity
+//     at all (wake_wave_key is empty), in any status, does a terminal run
+//     requested at or after newest_child_updated_at still block under the
+//     original timestamp rule — this is R3-A's fix, replacing a plain "any
+//     terminal run ever" check that let one finished run permanently
+//     immunize a parent against every later child-set change. The
+//     compatibility path is bounded and self-clearing: the first wave-keyed
+//     run recorded for a parent retires it for that parent from then on.
+//     queueChildrenCompletedRun and cascadeChildrenCompleted (the
+//     edge-triggered delivery paths) never write a receipt, so the receipt
+//     alone cannot tell a healthy edge-delivered wake from a lost one;
+//     evidence of delivery has to come from runs itself.
+//   - a second EXISTS, over the wave-member predicate (not archived, not
+//     ephemeral, not automation-origin — the same predicate
+//     ListWaveMembers applies), removes a parent with no possible wave from
+//     candidacy: without it such a parent would be listed every tick,
+//     found to have no wave, queue nothing, and be listed again. Additive
+//     and narrowing only — it sits
+//     beside the existing archived-only EXISTS, never replacing it.
+//   - requiring a non-empty assignee_agent_profile_id drops a candidate
+//     with no resolvable runner, and the INNER JOIN against agent_profiles
+//     drops one whose runner is paused, stopped, pending approval, or
+//     altogether missing (a dangling assignee_agent_profile_id with no
+//     matching row) — R3-B's fix: a LEFT JOIN treated "no matching row" as
+//     COALESCE'd-to-idle, which passed a dangling reference straight
+//     through as a sticky, unresolvable, LIMIT-slot-consuming candidate.
+//
+// This is an invariant, not four independent filters: any predicate that
+// can stay true for the same parent across consecutive ticks MUST be
+// applied here, before LIMIT — never in Go after ListStuckParents returns.
+// A parent with no runner, or a paused runner, does not resolve itself on
+// its own; left as a Go-side rejection it would occupy a LIMIT slot on
+// every tick forever, permanently starving any genuinely actionable
+// candidate behind it. Go-side rejection is only admissible for a
+// condition that can change between this SELECT and the write a moment
+// later (guardAgentStatus in the caller is exactly that — a cheap,
+// redundant closing of that race window, not the primary filter).
+func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
+	driver := r.ro.DriverName()
+	// Shared with the wave-member EXISTS gate below, which spells it
+	// literally with a "c." alias (matching the system design's worked
+	// SQL) — this unaliased form is what OrderedIDConcat's own
+	// "SELECT id FROM tasks WHERE <where>" subquery needs.
+	waveMemberPredicate := "parent_id = p.id AND archived_at IS NULL AND is_ephemeral = 0 AND COALESCE(origin, '') != 'automation_run'"
+	newestChildUpdatedAtText := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
+	requestedAtText := dialect.SecondPrecisionText(driver, "w.requested_at")
+	var rows []StuckParentCandidate
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		WITH stuck AS (
+			SELECT
+				p.id AS parent_task_id,
+				`+RunnerProjection("p")+` AS assignee_agent_profile_id,
+				p.workflow_step_id AS workflow_step_id,
+				COALESCE((
+					SELECT `+childSetKeyAggregate(driver)+`
+					FROM (
+						SELECT id, state FROM tasks
+						WHERE parent_id = p.id AND archived_at IS NULL
+						ORDER BY id
+					) c
+				), '') AS child_set_key,
+				p.id || '|' || COALESCE(`+dialect.OrderedIDConcat(driver, waveMemberPredicate)+`, '') AS wave_string,
+				(
+					SELECT `+newestChildUpdatedAtText+` FROM tasks c
+					WHERE c.parent_id = p.id AND c.archived_at IS NULL
+				) AS newest_child_updated_at
+			FROM tasks p
+			WHERE p.archived_at IS NULL
+			  AND p.is_ephemeral = 0
+			  AND p.state NOT IN ('COMPLETED', 'CANCELLED')
+			  AND `+taskrepo.IsFromOfficePredicate("p")+`
+			  AND EXISTS (
+			      SELECT 1 FROM tasks c
+			      WHERE c.parent_id = p.id AND c.archived_at IS NULL
+			  )
+			  AND EXISTS (
+			      SELECT 1 FROM tasks c
+			      WHERE c.parent_id = p.id
+			        AND c.archived_at IS NULL
+			        AND c.is_ephemeral = 0
+			        AND COALESCE(c.origin, '') != 'automation_run'
+			  )
+			  AND NOT EXISTS (
+			      SELECT 1 FROM tasks c
+			      WHERE c.parent_id = p.id
+			        AND c.archived_at IS NULL
+			        AND c.state NOT IN ('COMPLETED', 'CANCELLED')
+			  )
+		)
+		SELECT s.parent_task_id, s.assignee_agent_profile_id, s.workflow_step_id, s.child_set_key,
+		       s.newest_child_updated_at
+		FROM stuck s
+		LEFT JOIN parent_child_wake_receipts r ON r.parent_task_id = s.parent_task_id
+		INNER JOIN agent_profiles ap ON ap.id = s.assignee_agent_profile_id
+		WHERE s.assignee_agent_profile_id != ''
+		  AND ap.status NOT IN ('paused', 'stopped', 'pending_approval')
+		  AND (
+		      r.child_set_key IS DISTINCT FROM s.child_set_key
+		      OR (
+		          NOT EXISTS (
+		              SELECT 1 FROM runs delivered
+		              WHERE delivered.id = r.delivered_run_id
+		          )
+		          AND COALESCE(r.delivery_operation_id, '') = ''
+		      )
+		      OR s.newest_child_updated_at != COALESCE(r.child_generation, '')
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM runs w
+		      WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
+		        AND w.reason = ?
+		        AND (
+		            w.status IN ('queued', 'claimed')
+		            OR (
+		                w.status IN ('finished', 'failed', 'cancelled')
+		                AND w.wake_wave_string = s.wave_string
+		            )
+		        )
+		  )
+		  AND (
+		      EXISTS (
+		          SELECT 1 FROM runs w
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
+		            AND w.reason = ?
+		            AND w.wake_wave_key <> ''
+		      )
+		      OR NOT EXISTS (
+		          SELECT 1 FROM runs w
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
+		            AND w.reason = ?
+		            AND w.status IN ('finished', 'failed', 'cancelled')
+		            AND `+requestedAtText+` >= s.newest_child_updated_at
+		      )
+		  )
+		ORDER BY s.parent_task_id
+		LIMIT ?
+	`), reason, reason, reason, limit)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []StuckParentCandidate{}
+	}
+	return rows, nil
+}
+
+// WakeReceipt is the last-delivered task_children_completed wake for a
+// parent task, keyed by the child set it was delivered for.
+type WakeReceipt struct {
+	ParentTaskID        string    `db:"parent_task_id"`
+	ChildSetKey         string    `db:"child_set_key"`
+	DeliveredRunID      string    `db:"delivered_run_id"`
+	DeliveryOperationID string    `db:"delivery_operation_id"`
+	DeliveredAt         time.Time `db:"delivered_at"`
+	// ChildGeneration is the newest_child_updated_at value that was current
+	// when this receipt was recorded. It is the value ListStuckParents'
+	// third OR arm compares against, not DeliveredAt.
+	ChildGeneration string `db:"child_generation"`
+}
+
+// GetWakeReceipt returns the receipt for a parent task, or nil if none
+// has been recorded yet.
+func (r *Repository) GetWakeReceipt(ctx context.Context, parentTaskID string) (*WakeReceipt, error) {
+	var rec WakeReceipt
+	err := r.ro.GetContext(ctx, &rec, r.ro.Rebind(`
+		SELECT parent_task_id, child_set_key, delivered_run_id,
+		       delivery_operation_id, delivered_at, child_generation
+		FROM parent_child_wake_receipts
+		WHERE parent_task_id = ?
+	`), parentTaskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
+// UpsertWakeReceiptTx records (or updates) the delivery receipt for a
+// parent task's current child set, using a transaction the caller owns.
+// deliveredRunID is populated by legacy direct-run callers. The workflow
+// engine path uses deliveryOperationID because one trigger can fan out to
+// several runs and the engine owns their admission. childGeneration is the
+// newest_child_updated_at value the caller admitted this candidate against;
+// ListStuckParents compares it for equality against the parent's current
+// newest_child_updated_at to detect a same-child-set reopen.
+func (r *Repository) UpsertWakeReceiptTx(
+	ctx context.Context, tx *sqlx.Tx,
+	parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, childGeneration string,
+	deliveredAt time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO parent_child_wake_receipts (
+			parent_task_id, child_set_key, delivered_run_id,
+			delivery_operation_id, delivered_at, child_generation
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (parent_task_id) DO UPDATE SET
+			child_set_key = excluded.child_set_key,
+			delivered_run_id = excluded.delivered_run_id,
+			delivery_operation_id = excluded.delivery_operation_id,
+			delivered_at = excluded.delivered_at,
+			child_generation = excluded.child_generation
+	`), parentTaskID, childSetKey, deliveredRunID, deliveryOperationID, deliveredAt, childGeneration)
+	return err
+}
+
+type childSetKeyRow struct {
+	ID    string `db:"id"`
+	State string `db:"state"`
+}
+
+type childSetKeyAndGenerationRow struct {
+	ChildSetKey     string `db:"child_set_key"`
+	ChildGeneration string `db:"child_generation"`
+}
+
+// GetChildSetKey returns the deterministic key for the parent's current
+// active child set, formatted by formatChildSetKey — the same "id:state"
+// comma-joined form ListStuckParents computes in SQL via
+// childSetKeyAggregate, so the two must stay byte-identical.
+func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (string, error) {
+	var rows []childSetKeyRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", err
+	}
+	return formatChildSetKey(rows), nil
+}
+
+// GetChildSetKeyAndGeneration returns both the deterministic child-set key
+// and the generation (newest non-archived child updated_at, rendered via
+// dialect.SecondPrecisionText) for a parent's current children. Both values
+// come from one SQL statement so the edge path cannot combine a child-set
+// snapshot with a generation from a different concurrent update.
+func (r *Repository) GetChildSetKeyAndGeneration(ctx context.Context, parentTaskID string) (string, string, error) {
+	var row childSetKeyAndGenerationRow
+	query := childSetKeyAndGenerationQuery(r.ro.DriverName())
+	if err := r.ro.GetContext(ctx, &row, r.ro.Rebind(query), parentTaskID); err != nil {
+		return "", "", err
+	}
+
+	return row.ChildSetKey, row.ChildGeneration, nil
+}
+
+// GetChildSetKeyTx is the transaction-scoped counterpart to GetChildSetKey.
+// Reconciler admission uses it immediately before recording a receipt, so a
+// child-set change does not get hidden by a receipt for the old generation.
+func (r *Repository) GetChildSetKeyTx(
+	ctx context.Context, tx *sqlx.Tx, parentTaskID string,
+) (string, error) {
+	var rows []childSetKeyRow
+	if err := tx.SelectContext(ctx, &rows, tx.Rebind(`
+		SELECT id, state
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL
+		ORDER BY id
+	`), parentTaskID); err != nil {
+		return "", err
+	}
+	return formatChildSetKey(rows), nil
+}
+
+// childSetKeyAggregate renders the deterministic child-set key used by
+// ListStuckParents. Its output must match formatChildSetKey byte for byte.
+// Postgres requires ORDER BY inside STRING_AGG because subquery ordering does
+// not define aggregate input order.
+func childSetKeyAggregate(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `STRING_AGG(c.id || ':' || c.state, ',' ORDER BY c.id)`
+	}
+	return `GROUP_CONCAT(c.id || ':' || c.state, ',')`
+}
+
+// childSetKeyAndGenerationQuery reads the two values used by the edge wake
+// operation id from one child relation. A single statement gives both
+// expressions the same database snapshot, so a concurrent child update cannot
+// produce an operation id from a mixed child set and generation.
+func childSetKeyAndGenerationQuery(driver string) string {
+	return `
+		SELECT
+			COALESCE(` + childSetKeyAggregate(driver) + `, '') AS child_set_key,
+			COALESCE(` + dialect.SecondPrecisionText(driver, "MAX(c.updated_at)") + `, '') AS child_generation
+		FROM (
+			SELECT id, state, updated_at
+			FROM tasks
+			WHERE parent_id = ? AND archived_at IS NULL
+			ORDER BY id
+		) c
+	`
+}
+
+func formatChildSetKey(rows []childSetKeyRow) string {
+	var b strings.Builder
+	for i, row := range rows {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(row.ID)
+		b.WriteByte(':')
+		b.WriteString(row.State)
+	}
+	return b.String()
+}

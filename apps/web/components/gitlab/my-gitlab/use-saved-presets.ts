@@ -10,6 +10,12 @@ export type SavedPreset = {
   label: string;
   customQuery: string;
   projectFilter: string;
+  // Milestone title in effect when the query was saved, and the sidebar
+  // preset value it was saved under. Both "" when none. Presets written
+  // before this feature carry neither key; isSavedPreset tolerates a missing
+  // or non-string value for either and normalizeSavedPreset reads it as "".
+  milestone: string;
+  preset: string;
   createdAt: string;
 };
 
@@ -39,7 +45,10 @@ function publish(next: SavedPreset[]) {
   for (const l of listeners) l();
 }
 
-function isSavedPreset(p: unknown): p is SavedPreset {
+// Checks the fields every SavedPreset has always had. milestone/preset are
+// deliberately not checked here: a preset saved before this feature has
+// neither key, and that SHALL NOT disqualify it (Scenario 13).
+function isSavedPreset(p: unknown): p is Omit<SavedPreset, "milestone" | "preset"> {
   return (
     typeof p === "object" &&
     p !== null &&
@@ -52,9 +61,29 @@ function isSavedPreset(p: unknown): p is SavedPreset {
   );
 }
 
+// A missing value, or one present but not a string, reads as "" (Scenario 23).
+function normalizeStoredString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeSavedPreset(p: unknown): SavedPreset | null {
+  if (!isSavedPreset(p)) return null;
+  const raw = p as Record<string, unknown>;
+  return {
+    ...p,
+    milestone: normalizeStoredString(raw.milestone),
+    preset: normalizeStoredString(raw.preset),
+  };
+}
+
 function readServerPresets(value: unknown): SavedPreset[] | null {
   if (!Array.isArray(value)) return null;
-  return value.filter(isSavedPreset);
+  const normalized: SavedPreset[] = [];
+  for (const item of value) {
+    const preset = normalizeSavedPreset(item);
+    if (preset) normalized.push(preset);
+  }
+  return normalized;
 }
 
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({

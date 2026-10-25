@@ -119,6 +119,79 @@ test.describe("@search plan panel search", () => {
       .toBe(`${total} / ${total}`);
   });
 
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.1
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.3
+  // @covers AC-UI-PLAN-TEXT-SEARCH-001.4
+  test("finds phrases across formatting and wraps navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const content = [
+      "The quick brown fox is a readiness marker.",
+      "",
+      "release **build**",
+      "",
+      "release `build`",
+      "",
+      "release bu*il*d",
+    ].join("\n");
+    const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-formatted", {
+      description: planScript(content),
+    });
+    await openPlanPanel(testPage, session);
+    const editor = testPage.getByTestId("plan-panel").locator(".ProseMirror");
+    await expect(editor.locator("strong")).toHaveText("build");
+    await expect(editor.locator("code")).toHaveText("build");
+    await expect(editor.locator("em")).toHaveText("il");
+    const paragraphs = editor.locator("p").filter({ hasText: "release build" });
+    await expect(paragraphs).toHaveCount(3);
+
+    await openPanelSearch(testPage, "plan");
+    await panelSearchInput(testPage).fill("release build");
+    await expect(panelSearchMatchCounter(testPage)).toHaveText("1 / 3");
+    expect(
+      await paragraphs.evaluateAll((elements) =>
+        elements.map((element) =>
+          Array.from(element.querySelectorAll(".search-highlight"))
+            .map((fragment) => fragment.textContent)
+            .join(""),
+        ),
+      ),
+    ).toEqual(["release build", "release build", "release build"]);
+    const currentParagraph = paragraphs.filter({
+      has: testPage.locator(".search-highlight-current"),
+    });
+    await expect(currentParagraph).toHaveCount(1);
+    await expect(paragraphs.nth(0).locator(".search-highlight-current").first()).toBeVisible();
+    await prCapture.screenshot("plan-formatted-phrase", {
+      caption:
+        "Plan find highlights full phrases across bold, code, and mid-word italic formatting",
+    });
+
+    for (const [key, current] of [
+      ["Enter", 2],
+      ["Enter", 3],
+      ["Enter", 1],
+      ["Shift+Enter", 3],
+    ] as const) {
+      await panelSearchInput(testPage).press(key);
+      await expect(panelSearchMatchCounter(testPage)).toHaveText(`${current} / 3`);
+      await expect(currentParagraph).toHaveCount(1);
+      await expect(
+        paragraphs
+          .nth(current - 1)
+          .locator(".search-highlight-current")
+          .first(),
+      ).toBeVisible();
+    }
+    await panelSearchInput(testPage).fill("absent");
+    await expect(panelSearchMatchCounter(testPage)).toHaveText("0 / 0");
+    await expect(editor.locator(".search-highlight")).toHaveCount(0);
+  });
+
   test("P9 Close removes all highlights", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(120_000);
     const { session } = await seedTask(testPage, apiClient, seedData, "plan-search-close", {
@@ -158,5 +231,55 @@ test.describe("@search plan panel search", () => {
     await expect(panelSearchMatchCounter(testPage)).toBeVisible();
     // Bar remains visible (smoke-check)
     await expect(panelSearchBar(testPage)).toBeVisible();
+  });
+
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.1
+  // @covers AC-UI-PLAN-EDITOR-TASK-SWITCH-001.4
+  test("switches sidebar tasks while their Plan panels are open", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(180_000);
+    const pageErrors: string[] = [];
+    const routeErrors: string[] = [];
+    testPage.on("pageerror", (error) => pageErrors.push(error.message));
+    testPage.on("console", (message) => {
+      if (message.type() === "error" && /\[app\] route render failed/i.test(message.text())) {
+        routeErrors.push(message.text());
+      }
+    });
+
+    const first = await seedTask(testPage, apiClient, seedData, "Plan switch alpha", {
+      description: planScript(PLAN_CONTENT.replace("sandboxed", "alpha")),
+    });
+    await openPlanPanel(testPage, first.session);
+
+    const second = await seedTask(testPage, apiClient, seedData, "Plan switch beta", {
+      description: planScript(PLAN_CONTENT.replace("sandboxed", "beta")),
+    });
+    await openPlanPanel(testPage, second.session);
+
+    await second.session.sidebarTaskItem("Plan switch alpha").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${first.taskId}$`));
+    await expect(testPage.getByTestId("plan-panel")).toContainText("alpha plan section");
+
+    await second.session.sidebarTaskItem("Plan switch beta").click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${second.taskId}$`));
+    await expect(testPage.getByTestId("plan-panel")).toContainText("beta plan section");
+    await expect(
+      testPage.getByRole("alert").filter({ hasText: "This page couldn’t load." }),
+    ).toHaveCount(0);
+
+    await openPanelSearch(testPage, "plan");
+    await panelSearchInput(testPage).fill("fox");
+    await expect(testPage.locator(".ProseMirror .search-highlight").first()).toBeVisible();
+    await prCapture.screenshot("plan-task-switch-stable", {
+      caption: "Plan search remains available after switching sidebar tasks",
+    });
+
+    expect(pageErrors, JSON.stringify(pageErrors, null, 2)).toEqual([]);
+    expect(routeErrors, JSON.stringify(routeErrors, null, 2)).toEqual([]);
   });
 });

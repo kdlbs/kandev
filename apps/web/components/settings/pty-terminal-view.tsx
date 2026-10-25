@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -18,6 +18,13 @@ import { openExternalLink } from "@/lib/desktop/external-links";
 import { clearBufferReader, exposeBufferReader } from "@/components/task/terminal-buffer-reader";
 import { pendingPtyStarts, type PendingPtyStart } from "./pty-terminal-lifecycle";
 import { FONT } from "@/lib/theme/colors";
+import { MobileTerminalKeybar } from "@/components/task/mobile/mobile-terminal-keybar";
+import { sendPtyInput } from "@/lib/terminal/send-pty-input";
+import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
+import {
+  getFixedDarkTerminalTheme,
+  TERMINAL_MINIMUM_CONTRAST_RATIO,
+} from "@/lib/theme/terminal-theme";
 
 export type PtySessionStatus = "connecting" | "running" | "exited" | "error";
 
@@ -48,6 +55,7 @@ type PtyTerminalViewProps = {
   testIdPrefix?: string;
   className?: string;
   onStateChange?: (state: PtyTerminalState) => void;
+  mobileControls?: boolean;
 };
 
 function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAddon } {
@@ -56,7 +64,8 @@ function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAd
     cursorBlink: true,
     fontFamily: FONT.mono,
     fontSize: FONT.size,
-    theme: { background: "#0b0b0c" },
+    minimumContrastRatio: TERMINAL_MINIMUM_CONTRAST_RATIO,
+    theme: getFixedDarkTerminalTheme(),
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
@@ -165,6 +174,7 @@ type MountArgs = {
   wsRef: MutableRefObject<WebSocket | null>;
   sessionIdRef: MutableRefObject<string | null>;
   mountGenerationRef: MutableRefObject<number>;
+  sendInput: (data: string) => void;
 };
 
 type LateStartContext = {
@@ -326,11 +336,7 @@ function mountSession(args: MountArgs): () => void {
     args.sessionIdRef,
     args.wsRef,
   );
-  const dataDisposable = terminal.term.onData((data) => {
-    if (args.wsRef.current?.readyState === WebSocket.OPEN) {
-      args.wsRef.current.send(new TextEncoder().encode(data));
-    }
-  });
+  const dataDisposable = terminal.term.onData(args.sendInput);
 
   return () => {
     cancelledRef.value = true;
@@ -358,6 +364,7 @@ export function PtyTerminalView({
   testIdPrefix = "pty",
   className = "h-[420px] rounded-md bg-[#0b0b0c] p-2 overflow-hidden",
   onStateChange,
+  mobileControls = false,
 }: PtyTerminalViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -368,6 +375,19 @@ export function PtyTerminalView({
   const mountGenerationRef = useRef(0);
   const reportRef = useRef(onStateChange);
   reportRef.current = onStateChange;
+  const mobileControlsRef = useRef(mobileControls);
+  mobileControlsRef.current = mobileControls;
+  const sendInput = useCallback((data: string) => {
+    sendPtyInput(wsRef.current, data, mobileControlsRef.current);
+  }, []);
+  const focusTerminal = useCallback(() => termRef.current?.focus(), []);
+
+  useEffect(() => {
+    if (!mobileControls) return;
+    const reset = useShellModifiersStore.getState().reset;
+    reset();
+    return reset;
+  }, [mobileControls, ownerId]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -386,8 +406,22 @@ export function PtyTerminalView({
       wsRef,
       sessionIdRef,
       mountGenerationRef,
+      sendInput,
     });
-  }, [clientId, initialInput, lifecycle, ownerId, startSession]);
+  }, [clientId, initialInput, lifecycle, ownerId, startSession, sendInput]);
 
-  return <div ref={containerRef} data-testid={`${testIdPrefix}-terminal`} className={className} />;
+  return (
+    <>
+      <div ref={containerRef} data-testid={`${testIdPrefix}-terminal`} className={className} />
+      {mobileControls && (
+        <MobileTerminalKeybar
+          sessionId={sessionId}
+          visible
+          inline
+          onSend={sendInput}
+          onFocus={focusTerminal}
+        />
+      )}
+    </>
+  );
 }

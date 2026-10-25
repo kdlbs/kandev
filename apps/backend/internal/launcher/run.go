@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-func runInstalled(ctx context.Context, opts Options) int {
+func runInstalled(ctx context.Context, opts Options, build BuildInfo) int {
 	startupConfig, err := loadBootstrapConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -23,7 +23,13 @@ func runInstalled(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	bundle, err := resolveRuntimeBundle()
+	endpoints, err := resolveBackendEndpoints(startupConfig, ports.BackendPort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	ports.BackendURL = endpoints.accessURL
+	bundle, err := resolveRuntimeBundle(build)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -40,12 +46,15 @@ func runInstalled(ctx context.Context, opts Options) int {
 	}
 	return launchManaged(ctx, managedAppConfig{
 		Header:     "release: " + releaseTag,
+		Version:    normalizedBuildVersion(build.Version),
 		Mode:       "run",
 		Backend:    bundle.Launcher,
 		BackendCWD: filepath.Dir(bundle.Launcher),
+		BundleDir:  bundle.Dir,
 		Ports:      ports,
 		LogLevel:   logLevel,
 		Opts:       opts,
 		Startup:    startupConfig,
+		Endpoints:  endpoints,
 	})
 }

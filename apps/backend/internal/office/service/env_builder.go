@@ -2,13 +2,14 @@ package service
 
 import (
 	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // buildEnvVars constructs the environment variable map injected into agent
 // sessions before launch. The map includes identity, API access, and wake
 // context variables described in the agent-context spec.
 func (si *SchedulerIntegration) buildEnvVars(
-	run *models.Run,
+	run *runsmodels.Run,
 	agent *models.AgentInstance,
 	jwt, workspaceID string,
 ) map[string]string {
@@ -37,12 +38,13 @@ func (si *SchedulerIntegration) buildEnvVars(
 }
 
 // injectKandevCLI overrides KANDEV_CLI for remote executor types where the
-// host binary path does not apply. For Docker and Sprites, the agentctl
-// binary is baked into the image or uploaded, so we use the container-side path.
+// host binary path does not apply. Each value is the executor-visible path.
 func (si *SchedulerIntegration) injectKandevCLI(env map[string]string, executorType string) {
 	switch executorType {
 	case "local_docker", "sprites":
 		env["KANDEV_CLI"] = "/usr/local/bin/agentctl"
+	case "k8s":
+		env["KANDEV_CLI"] = "/opt/kandev/agentctl"
 	}
 }
 

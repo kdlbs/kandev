@@ -7,6 +7,9 @@ description: Improve Kandev's AI harness from session learnings or explicit requ
 
 Use this skill to turn lessons from real agent sessions into durable harness changes: skills, agents, subagents, commands, scripts, and always-on instruction files.
 
+For an explicitly requested session retrospective, use
+[`/retro`](../retro/SKILL.md) to filter lessons and propose shared-file edits.
+
 ## Planner Entry
 
 The planner may inventory, edit, and validate a small localized harness change
@@ -49,10 +52,18 @@ mirror unless the user explicitly requests a policy reversal.
    - Put deterministic logic in `scripts/` when agents keep retyping fragile shell/API sequences.
    - Avoid creating multiple aliases for the same behavior.
 
+   - **Separate independent policy changes:** Keep factual instruction updates
+     and CI changes required by a feature in that feature's PR.
+     Use a separate initiative for independent workflow-policy changes unless
+     the user requests a combined PR. Classify changes by purpose, not path.
+
 4. **Preserve progressive disclosure**
    - Keep `SKILL.md` concise.
    - Move platform tables, long examples, templates, and edge-case notes to `references/`.
    - Reference each supporting file explicitly from the main skill so future agents know when to load it.
+   - Review word and byte counts as well as line counts. Do not join paragraphs
+     to satisfy a line limit. Move specialized procedures into references with
+     explicit loading conditions. Keep each rule in one authoritative location.
 
 5. **Edit and validate**
    - Use `apply_patch` for file edits.

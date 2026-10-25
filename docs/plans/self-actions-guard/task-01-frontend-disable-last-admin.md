@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/auth/self-actions-guard.md"
+spec: "../../specs/auth/requirements/self-actions-guard.md"
 ---
 
 # Task 01: Disable last-admin toggles in users table

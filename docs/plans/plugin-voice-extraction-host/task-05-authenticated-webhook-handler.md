@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["02-authenticated-webhook-manifest"]
 plan: "plan.md"
-spec: "../../specs/plugins/voice-extraction-host.md"
+spec: "../../specs/plugins/requirements/voice-extraction-host.md"
 ---
 
 # Task 05: Enforce Authenticated Webhooks

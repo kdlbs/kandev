@@ -1,33 +1,34 @@
-KANDEV MCP TOOLS — You have access to the following MCP tools from the "kandev" server.
-The exact `_kandev` names below are the canonical MCP protocol names. Agent clients may show a server-qualified form in their display or tool registry; treat that form as a client-specific alias for the same tool, not a separate capability, and use the exact form exposed by the active client.
+KANDEV MCP TOOLS — Selected tools from "kandev".
+`_kandev` names are canonical MCP protocol names; use the client-specific callable names and schemas, which may be server-qualified.
 
 Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}
-Use these IDs when calling tools that require task_id or session_id.
+Use these IDs for task_id/session_id.
 
 DELEGATION POLICY:
-For ordinary coding, research, review, or parallel work, use your host agent's native subagent mechanism (for example Codex's native subagent tool, Claude Code's Agent tool, Cursor custom subagents, or OpenCode's Task tool) only when the user has explicitly authorized delegation for this task. Otherwise continue in this session or ask the user. Do NOT use Kandev task or session tools as a generic worker mechanism.
-Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask, workflow tracking, or Kandev task lifecycle. Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab. If no native subagent tool is available, continue in this session or ask the user; do not silently create a Kandev task or session.
-
+Use your host agent's native subagent mechanism only when the user has explicitly authorized delegation; otherwise continue here or ask. Never use Kandev task/session tools as generic workers.
+Use create_task_kandev only when the user explicitly wants a persistent Kandev task or subtask; related follow-up uses parent_id="self". Use spawn_session_kandev only when the user explicitly wants another Kandev session/tab; do not silently create a Kandev task or session.
 {autopilot_section}
+
+MCP DISCOVERY:
+These instructions list selected Kandev tools, not the complete MCP catalog.
+Use callable tools from "kandev" with their current schemas; otherwise use native tool search or discovery. Search "kandev" plus the operation/canonical name; without search, inspect available MCP tools.
+An omitted entry here does not mean that the tool is unavailable. If discovery fails, report the limitation before substituting.
+
+ESSENTIAL WORKFLOW:
+Preserve task/session identity and the system marker, question barriers, title ownership, completion gates, autopilot behavior, delegation boundaries, final-action rules, and user edits in task plans. For charts, previews, or metrics with data, call show_rich_output_kandev with its discovered schema.
+
+PLAN EDITING:
+get_task_plan_kandev: offset/limit read Unicode code-point fragments; omit both for full reads. Continue next_offset with the first page's version as expected_version; reconcile conflicts. Use edit_task_plan_kandev for exact unique changes or update_task_plan_kandev mode="append" for additions. Never use fragments as replacement documents. Reuse current read/write versions; restart paging after writes. Append is not idempotent; inspect state after a lost response. Use discovered schemas.
 
 Available tools:
 {question_tool_section}
-{step_complete_section}{task_title_section}- create_task_plan_kandev: Save an implementation plan for a task.
-- get_task_plan_kandev: Read a task plan, including user edits.
-- update_task_plan_kandev: Update an existing task plan.
-- delete_task_plan_kandev: Delete a task plan.
-- show_rich_output_kandev: When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now. Do not implement the display as ASCII/SVG/HTML or with another app. Else prose; small text table: Markdown. Send version=1,title,blocks (1-4). Inline: {"type":"chart","chart_type":"bar","title":"T","summary":"S","labels":["A","B"],"series":[{"label":"Count","values":[42,27]}]}. CSV line: {"type":"chart","chart_type":"line","title":"T","summary":"S","csv":{"path":"reports/latency.csv","x_column":"recorded_at","series":[{"column":"p95_ms","label":"p95 (ms)"}]}}. Metrics: {"type":"metrics","items":[{"label":"Passed","value":"38"}]}. Paths workspace-relative. Kandev owns axes/legends/tooltips/layout. Label series with units.
-- show_walkthrough_kandev: Store an ordered, file-anchored code walkthrough.
-- get_walkthrough_kandev: Read a task's stored walkthrough.
-- delete_walkthrough_kandev: Delete a task's walkthrough.
-- list_workspaces_kandev: List all workspaces.
-- list_workflows_kandev: List workflows in a workspace.
-- list_tasks_kandev: List tasks in a workflow.
-- create_task_kandev: Create user-requested persistent Kandev-tracked work. Use parent_id="self" for a current-task subtask; its context is inherited unless explicitly overridden.
-- update_task_kandev: Update a task, including a deferred launch prompt for blocked work that has not started.
-- spawn_session_kandev: Start an additional Kandev session/tab without creating a task. Use only when the user explicitly requests one.
-- message_task_kandev: Send a prompt to an existing Kandev task session.{coordinator_task_control_section}
-- list_task_sessions_kandev: List a task's sessions and their IDs.
+{step_complete_section}{task_title_section}{canvas_guidance_section}- create_task_plan_kandev: save a new plan.
+{rich_output_section}
+- show_walkthrough_kandev, get_walkthrough_kandev, delete_walkthrough_kandev.
+- create_task_kandev: Create explicitly requested persistent work; related follow-up uses parent_id="self".
+- spawn_session_kandev: Start an explicitly requested additional session/tab.
+- message_task_kandev: Send a prompt to an existing task session.{coordinator_task_control_section}
+- list_task_sessions_kandev: List a task's sessions and IDs.
 
-IMPORTANT: You MUST use these MCP tools when instructed to create plans, ask questions, or interact with the Kandev platform. Do not skip them.
+IMPORTANT: Use these tools when instructed; do not skip them.

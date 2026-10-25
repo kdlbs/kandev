@@ -30,6 +30,7 @@ test.describe("Editors menu worktree picker", () => {
       execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
         name,
+        pull_before_worktree: false,
       });
       repoIds.push(repo.id);
     }

@@ -137,6 +137,70 @@ test.describe("GitLab workflow sync", () => {
     await expect(dialog.getByTestId("workflow-sync-save")).toBeEnabled();
   });
 
+  test("removes sync through inline actions without a native dialog", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.configureGitLab(seedData.workspaceId);
+    const configResponse = await apiClient.rawRequest(
+      "POST",
+      `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      {
+        provider: "gitlab",
+        project_path: GITLAB_PROJECT,
+        branch: "main",
+        path: ".kandev/workflows",
+        interval_seconds: 300,
+        poll_enabled: true,
+      },
+    );
+    expect(configResponse.ok).toBe(true);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    let nativeDialogSeen = false;
+    testPage.on("dialog", async (nativeDialog) => {
+      nativeDialogSeen = true;
+      await nativeDialog.dismiss();
+    });
+
+    const dialog = testPage.getByTestId("workflow-sync-dialog");
+    await testPage.getByTestId("workflow-sync-open").click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("workflow-sync-remove").click();
+    await expect(dialog.getByTestId("workflow-sync-remove-confirmation")).toBeVisible();
+    await expect(testPage.getByRole("dialog")).toHaveCount(1);
+
+    await dialog
+      .getByTestId("workflow-sync-remove-confirmation")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(dialog.getByTestId("workflow-sync-remove")).toBeVisible();
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(200);
+
+    await dialog.getByTestId("workflow-sync-remove").click();
+    await dialog.getByTestId("workflow-sync-remove-confirm").click();
+    await expect(dialog).not.toBeVisible();
+    expect(nativeDialogSeen).toBe(false);
+    expect(
+      (
+        await apiClient.rawRequest(
+          "GET",
+          `/api/v1/workflow-sync/config?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+        )
+      ).status,
+    ).toBe(204);
+  });
+
   // A branch name containing a slash (a common convention, e.g.
   // "features/TICKET-123") can't always be told apart from the directory
   // that follows it when parsing a pasted link — this is exactly what

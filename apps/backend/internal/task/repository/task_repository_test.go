@@ -122,6 +122,55 @@ func TestSQLiteRepository_TaskAutopilotRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_TaskWorkflowAgentOverridesRoundTripAndUpdate(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-overrides", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-overrides", WorkspaceID: "ws-overrides", Name: "Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	overrides, err := models.NewWorkflowAgentOverrides("wf-overrides", []models.WorkflowAgentOverrideBinding{
+		{StepID: "implement", SourceProfileID: "profile-luna", ReplacementProfileID: "profile-terra"},
+	})
+	if err != nil {
+		t.Fatalf("create overrides: %v", err)
+	}
+	task := &models.Task{
+		WorkspaceID:            "ws-overrides",
+		WorkflowID:             "wf-overrides",
+		WorkflowStepID:         "implement",
+		Title:                  "Override task",
+		State:                  v1.TaskStateTODO,
+		WorkflowAgentOverrides: overrides,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	reloaded, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if got, ok := reloaded.WorkflowAgentOverrides.ReplacementFor("wf-overrides", "implement"); !ok || got != "profile-terra" {
+		t.Fatalf("reloaded replacement = %q, %v; want profile-terra, true", got, ok)
+	}
+
+	reloaded.Title = "Updated override task"
+	if err := repo.UpdateTask(ctx, reloaded); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+	reloaded, err = repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload updated task: %v", err)
+	}
+	if reloaded.WorkflowAgentOverrides == nil {
+		t.Fatal("workflow agent overrides were cleared by an unrelated update")
+	}
+}
+
 func TestSQLiteRepository_TaskNotFound(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

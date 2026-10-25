@@ -1,5 +1,7 @@
-import type { StateCreator } from "zustand";
+import type { SliceCreator } from "@/lib/state/slice-creator";
+
 import type { OfficeSlice, OfficeSliceState } from "./types";
+import type { WorkspacePauseOutcome } from "./pause-types";
 import { normalizeOfficeTask, normalizeTaskStatus } from "@/lib/api/domains/office-task-normalize";
 
 export const defaultTaskFilters = {
@@ -42,7 +44,7 @@ export const defaultOfficeState: OfficeSliceState = {
     },
     meta: null,
     isLoading: false,
-    refetchTriggers: {},
+    refetchTrigger: null,
     routing: {
       byWorkspace: {},
       knownProviders: [],
@@ -52,10 +54,18 @@ export const defaultOfficeState: OfficeSliceState = {
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
     taskQuorum: { byTaskId: {} },
+    pause: {
+      record: null,
+      status: "unknown",
+      workspaceId: null,
+      requestSeq: 0,
+      readSeq: 0,
+      appliedSeq: 0,
+    },
   },
 };
 
-type ImmerSet = StateCreator<OfficeSlice, [["zustand/immer", never]], [], OfficeSlice>;
+type ImmerSet = SliceCreator<OfficeSlice>;
 type SetFn = Parameters<ImmerSet>[0];
 
 type AgentProfiles = OfficeSlice["office"]["agentProfilesByWorkspaceId"][string];
@@ -220,6 +230,11 @@ function createTaskActions(set: SetFn) {
 }
 
 function createMiscActions(set: SetFn) {
+  // Per-store closure state for batching setOfficeRefetchTrigger calls; see
+  // that action below.
+  let pendingRefetchTypes: string[] = [];
+  let refetchFlushScheduled = false;
+
   return {
     setApprovals: (approvals: OfficeSlice["office"]["approvals"]) =>
       set((draft) => {
@@ -271,11 +286,28 @@ function createMiscActions(set: SetFn) {
       set((draft) => {
         draft.office.isLoading = loading;
       }),
-    setOfficeRefetchTrigger: (type: string) =>
-      set((draft) => {
-        const prev = draft.office.refetchTriggers[type] ?? 0;
-        draft.office.refetchTriggers[type] = prev + 1;
-      }),
+    // Same-tick calls (e.g. `task:<id>` immediately followed by `dashboard`
+    // for one WS event) are buffered and flushed as a single trigger object
+    // in a microtask. Without this, React's automatic batching of the
+    // resulting store updates only ever lets a listener observe the *last*
+    // write in the tick — any earlier type in the same burst is silently
+    // dropped for a listener whose effect hasn't run in between the two
+    // `set()` calls.
+    setOfficeRefetchTrigger: (type: string) => {
+      if (!pendingRefetchTypes.includes(type)) {
+        pendingRefetchTypes.push(type);
+      }
+      if (refetchFlushScheduled) return;
+      refetchFlushScheduled = true;
+      queueMicrotask(() => {
+        const types = pendingRefetchTypes;
+        pendingRefetchTypes = [];
+        refetchFlushScheduled = false;
+        set((draft) => {
+          draft.office.refetchTrigger = { types, timestamp: Date.now() };
+        });
+      });
+    },
   };
 }
 
@@ -357,6 +389,75 @@ function createRoutingActions(set: SetFn) {
   };
 }
 
+// Implements the workspace kill switch's "Frontend state" input table
+// (docs/specs/office/system-design/workspace-kill-switch-02.md). All four
+// GET/POST outcomes funnel through one guarded apply so the two
+// supersession guards — workspace_id match and tag freshness — cover every
+// outcome including the failure rows (F51), not only the success rows.
+function createPauseActions(set: SetFn) {
+  return {
+    // Every issued GET or POST bumps the one shared counter and takes the
+    // new value as its tag, so requests are ordered by when they were
+    // issued rather than by when their response lands.
+    beginPauseRequest: (kind: "read" | "mutate" = "read"): number => {
+      let tag = 0;
+      set((draft) => {
+        draft.office.pause.requestSeq += 1;
+        tag = draft.office.pause.requestSeq;
+        if (kind === "read") draft.office.pause.readSeq = tag;
+      });
+      return tag;
+    },
+    // Starting a read for the selected workspace: status `loading`.
+    // The record is cleared only when the workspace changed, so a
+    // same-workspace remount re-reads while the last state stays on screen.
+    // The caller issues the read separately.
+    beginPauseRead: (workspaceId: string) =>
+      set((draft) => {
+        const pause = draft.office.pause;
+        if (pause.workspaceId !== workspaceId) {
+          pause.workspaceId = workspaceId;
+          pause.record = null;
+        }
+        pause.status = "loading";
+      }),
+    applyPauseResponse: (
+      tag: number,
+      responseWorkspaceId: string,
+      activeWorkspaceId: string | null,
+      outcome: WorkspacePauseOutcome,
+    ): boolean => {
+      let applied = false;
+      set((draft) => {
+        const pause = draft.office.pause;
+        if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
+        // A newer read owns the read outcome; an earlier failure
+        // must not turn its loading state into an unavailable warning.
+        if (outcome.kind === "read-failure" && tag < pause.readSeq) return;
+        applied = true;
+        // A failed mutation learned no newer server state. Do not let it
+        // invalidate an outstanding read's success or failure.
+        if (outcome.kind === "mutate-failure") return;
+        pause.appliedSeq = tag;
+        switch (outcome.kind) {
+          case "read-success":
+          case "mutate-success":
+            pause.workspaceId = responseWorkspaceId;
+            pause.status = "known";
+            pause.record = outcome.paused ? outcome.record : null;
+            return;
+          case "read-failure":
+            // Status `error`; the record is not cleared, so a pause
+            // already read stays on screen (marked stale by the caller).
+            pause.status = "error";
+            return;
+        }
+      });
+      return applied;
+    },
+  };
+}
+
 export const createOfficeSlice: ImmerSet = (set) => ({
   ...defaultOfficeState,
   ...createAgentActions(set),
@@ -365,4 +466,5 @@ export const createOfficeSlice: ImmerSet = (set) => ({
   ...createTaskActions(set),
   ...createMiscActions(set),
   ...createRoutingActions(set),
+  ...createPauseActions(set),
 });

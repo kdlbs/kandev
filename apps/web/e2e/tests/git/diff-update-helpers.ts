@@ -58,7 +58,7 @@ export async function closePreviewPanels(testPage: Page) {
             };
           };
           const dockview = (window as TestWindow).__dockviewApi__;
-          if (!dockview) return false;
+          if (!dockview) return window.matchMedia("(max-width: 767px)").matches;
           for (const id of ["preview:file-diff", "preview:file-editor"]) {
             const panel = dockview.getPanel(id);
             if (panel) dockview.removePanel(panel);

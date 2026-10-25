@@ -17,7 +17,6 @@ test.describe("Stale workspace recovery", () => {
       workflow_filter_id: officeSeed.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
 
     // Navigate to /office — the layout should detect the stale ID,

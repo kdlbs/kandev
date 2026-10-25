@@ -80,6 +80,26 @@ describe("pluginRegistry", () => {
     }
   });
 
+  it("rolls back translations and registrations when a staged atomic commit throws", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    scoped.registerTranslations({ en: { greeting: "Hello" } });
+    scoped.registerNavItem({ id: "nav-rollback", label: "A", path: "/rollback" });
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+
+    expect(() =>
+      pluginRegistry.runAtomicMutation(() => {
+        pluginRegistry.unregisterPlugin("plugin-a");
+        scoped.registerNavItem({ id: "nav-committed", label: "A", path: "/committed" });
+        scoped.registerTranslations({ en: { greeting: "Bye" } });
+        throw new Error("staged commit failed");
+      }),
+    ).toThrow("staged commit failed");
+
+    expect(i18n.getResourceBundle("en", "plugin-plugin-a")?.greeting).toBe("Hello");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).toContain("nav-rollback");
+    expect(pluginRegistry.getNavItems().map((item) => item.id)).not.toContain("nav-committed");
+  });
+
   it("registers and returns a nav item", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
 
@@ -339,6 +359,39 @@ describe("pluginRegistry — task panels and task menu actions", () => {
     expect(pluginRegistry.getTaskMenuActions()).toHaveLength(2);
   });
 
+  it("skips unreadable task menu registrations without hiding healthy actions", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = vi.fn();
+    scoped.registerTaskMenuAction({
+      id: "broken-group",
+      label: "Broken group",
+      get group(): never {
+        throw new Error("group failed");
+      },
+      run,
+    });
+    scoped.registerTaskMenuAction({
+      id: "broken-label",
+      get label(): never {
+        throw new Error("label failed");
+      },
+      group: "primary",
+      run,
+    });
+    scoped.registerTaskMenuAction({ id: "healthy", label: "Healthy", group: "primary", run });
+
+    try {
+      expect(pluginRegistry.getTaskMenuActions("primary")).toEqual([
+        { pluginId: "plugin-a", id: "healthy", label: "Healthy", group: "primary", run },
+      ]);
+      expect(pluginRegistry.getTaskMenuActions("primary")).toHaveLength(1);
+      expect(error).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
     const scopedA = pluginRegistry.forPlugin("plugin-a");
     const scopedB = pluginRegistry.forPlugin("plugin-b");
@@ -424,6 +477,33 @@ describe("pluginRegistry — task filters", () => {
     pluginRegistry.unregisterPlugin("plugin-a");
 
     expect(pluginRegistry.getTaskFilters().map((filter) => filter.id)).toEqual(["priority"]);
+  });
+});
+
+describe("pluginRegistry — task-list facets", () => {
+  afterEach(() => cleanup("plugin-a", "plugin-b"));
+
+  it("namespaces facet identities and revokes them with their plugin", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const getValues = () => [{ value: "bug", label: "Bug", color: "#f00" }];
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues });
+
+    expect(pluginRegistry.getTaskListFacets()).toEqual([
+      { pluginId: "plugin-a", id: "tags", label: "Tag", getValues },
+    ]);
+    pluginRegistry.unregisterPlugin("plugin-a");
+    expect(pluginRegistry.getTaskListFacets()).toEqual([]);
+  });
+
+  it("rejects unsafe and duplicate plugin-local facet ids", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "Not safe", label: "Tag", getValues: () => [] }),
+    ).toThrow("URL-safe");
+    scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] });
+    expect(() =>
+      scoped.registerTaskListFacet({ id: "tags", label: "Tag", getValues: () => [] }),
+    ).toThrow("already registered");
   });
 });
 

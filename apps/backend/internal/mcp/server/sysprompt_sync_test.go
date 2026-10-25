@@ -192,24 +192,37 @@ func TestRichOutputDocs_MakeExplicitAndCSVUseDiscoverable(t *testing.T) {
 			}
 			require.NotEmpty(t, richOutputLine)
 			assert.LessOrEqual(t, utf8.RuneCountInString(richOutputLine), 750)
+			if name == "task" {
+				for _, phrase := range []string{
+					"For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now",
+					"No ASCII/SVG/HTML/separate app",
+					"discover schema/examples",
+					"Workspace-relative",
+					"Label series with units",
+					"Otherwise prose or small Markdown tables",
+					"Kandev owns layout/styling",
+				} {
+					assert.Contains(t, richOutputLine, phrase)
+				}
+				for _, recipe := range []string{inlineRecipe, csvRecipe, metricsRecipe} {
+					assert.NotContains(t, richOutputLine, recipe,
+						"task context should obtain rich-output schemas and examples through discovery")
+				}
+				return
+			}
 			for _, phrase := range []string{
-				"When user asks for chart/graph/plot/file preview/KPI/metrics with data: call now",
-				"Do not implement the display as ASCII/SVG/HTML or with another app",
-				"version=1,title,blocks (1-4)",
-				"x_column",
-				"workspace-relative",
-				"Label series with units",
-				"small text table: Markdown",
-				"Inline:",
-				"CSV line:",
-				"Metrics:",
-				"Kandev owns axes/legends/tooltips/layout",
+				"structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now",
+				"version=2,catalog_version=1,spec.root/spec.elements",
+				"workspace CSV charts", "tool discovery", "No ASCII/SVG/HTML/separate app",
+				"small Markdown tables", "Kandev owns axes, legends, tooltips, layout", "Label series with units",
 			} {
 				assert.Contains(t, richOutputLine, phrase)
 			}
-			assert.Equal(t, 1, strings.Count(richOutputLine, inlineRecipe))
-			assert.Equal(t, 1, strings.Count(richOutputLine, csvRecipe))
-			assert.Equal(t, 1, strings.Count(richOutputLine, metricsRecipe))
+			assert.NotContains(t, richOutputLine, " version=1")
+			for _, recipe := range []string{inlineRecipe, csvRecipe, metricsRecipe} {
+				assert.NotContains(t, richOutputLine, recipe)
+			}
+
 		})
 	}
 }
@@ -256,8 +269,23 @@ func TestSyspromptToolNames_ExactlyMatchMCPOfficeMode(t *testing.T) {
 
 	assert.Equal(t, registered, referenced,
 		"Office first-turn context must advertise exactly the ModeOffice tool inventory")
-	assert.NotContains(t, referenced, "step_complete_kandev")
-	assert.NotContains(t, sysprompt.OfficeContext(), "mcp__kandev__step_complete_kandev")
+	assert.Len(t, registered, 16, "Office MCP must expose the complete transfer-enabled 16-tool catalog")
+}
+
+func TestDecisionMCPTransportIsAbsentFromOfficeAndKanban(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	office := New(backend, "office-session", "office-task", 10005, log, "", false, ModeOffice)
+	kanban := New(backend, "task-session", "task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, office)
+	require.NotNil(t, kanban)
+
+	assert.NotContains(t, office.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.OfficeContext(), "record_step_decision_kandev")
+	assert.NotContains(t, kanban.mcpServer.ListTools(), "record_step_decision_kandev")
+	assert.NotContains(t, sysprompt.KandevContext(), "record_step_decision")
 }
 
 // TestSyspromptToolNames_NoBareToolReferences catches the opposite drift: a
@@ -508,5 +536,22 @@ func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 	for _, field := range requiredFields {
 		assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
 			"ChangesWalkthrough must identify required walkthrough step field %q", field)
+	}
+}
+
+func TestRichOutputEvidenceDiscoveryGuidance(t *testing.T) {
+	for _, prompt := range []string{sysprompt.KandevContext(), sysprompt.OfficeContext()} {
+		assert.Contains(t, prompt, "For structured comparisons, recorded checks, charts/graphs/plots, file previews or KPI/metrics with data, call now")
+		for _, component := range []string{"Table", "StatusList", "Callout"} {
+			assert.Contains(t, prompt, component)
+		}
+	}
+	s := newTaskModeServer(t, &testBackend{}, "task-current")
+	tool := s.mcpServer.ListTools()[richOutputToolName]
+	assert.Contains(t, tool.Tool.Description, "For structured comparisons, recorded checks")
+	assert.Contains(t, tool.Tool.Description, "Each element: {type,props,children}")
+	assert.Contains(t, tool.Tool.Description, "Table columns:{key,label}[]; rows:string[][]")
+	for _, component := range []string{"Table", "StatusList", "Callout"} {
+		assert.Contains(t, tool.Tool.Description, component)
 	}
 }

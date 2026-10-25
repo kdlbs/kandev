@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/agent-rich-output/spec.md"
+spec: "../../specs/agents/requirements/agent-rich-output.md"
 ---
 
 # Task 01: Record rich-output contract
@@ -27,7 +27,7 @@ git diff --check -- docs/specs/agent-rich-output docs/plans/agent-rich-output do
 
 ## Files likely touched
 
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 - `docs/specs/INDEX.md`
 - `docs/decisions/2026-08-14-kandev-native-agent-rich-output.md`
 - `docs/decisions/INDEX.md`

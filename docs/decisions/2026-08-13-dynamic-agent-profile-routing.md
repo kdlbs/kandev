@@ -206,10 +206,9 @@ conductor, continuation, restart recovery, and Kanban, Office, and utility
 integration. It does not add session-cost or subscription-usage plugin
 contracts. It does not add telemetry-backed rules or turn interruption.
 
-Those behaviors belong to the separate
-[Dynamic Agent Telemetry Routing](../specs/agents/dynamic-agent-telemetry-routing.md)
-feature and implementation package. An implementation of this decision must not
-implement that deferred package.
+Those behaviors belong to a separate deferred Dynamic Agent Telemetry Routing
+feature and implementation package. An implementation of this decision must
+not implement that deferred package.
 
 ### Legacy Office routing data is retained but inactive
 
@@ -295,6 +294,5 @@ a routed turn's immutable configuration snapshot includes its concrete
 execution profile and route generation.
 
 Product behavior is specified in
-[Dynamic Agent Routing](../specs/agents/dynamic-agent-routing.md). Deferred
-plugin behavior is specified separately in
-[Dynamic Agent Telemetry Routing](../specs/agents/dynamic-agent-telemetry-routing.md).
+[Dynamic Agent Routing](../specs/agents/requirements/dynamic-agent-routing.md).
+Deferred telemetry behavior has no active specification.

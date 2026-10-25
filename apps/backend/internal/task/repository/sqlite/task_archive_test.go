@@ -287,6 +287,64 @@ func TestListTasksForAutoArchivePicksOnlyStaleActiveTasksOnEligibleSteps(t *test
 	assertIDsEqual(t, "ListTasksForAutoArchive", taskIDs(got), []string{"task-stale-eligible"})
 }
 
+type autoArchiveEligibilityRepository interface {
+	ArchiveTaskIfAutoArchiveEligible(ctx context.Context, id string, expectedUpdatedAt time.Time, cascadeID string) (bool, error)
+}
+
+func TestArchiveTaskIfAutoArchiveEligibleRejectsStaleCandidate(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, archiveWorkspaceID)
+	workflows := newAutoOriginWorkflowStore(t, repo)
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-auto-archive-cas", WorkspaceID: archiveWorkspaceID, Name: "Auto archive CAS",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := workflows.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID: "step-auto-archive-cas", WorkflowID: "wf-auto-archive-cas", Name: "Done",
+		Position: 0, AutoArchiveAfterHours: 1,
+	}); err != nil {
+		t.Fatalf("CreateStep: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-auto-archive-cas", WorkspaceID: archiveWorkspaceID,
+		WorkflowID: "wf-auto-archive-cas", WorkflowStepID: "step-auto-archive-cas",
+		Title: "auto archive CAS",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	oldUpdatedAt := time.Now().UTC().Add(-48 * time.Hour)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE tasks SET updated_at = ? WHERE id = ?`), oldUpdatedAt, "task-auto-archive-cas"); err != nil {
+		t.Fatalf("age task: %v", err)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE tasks SET updated_at = ? WHERE id = ?`),
+		time.Now().UTC(), "task-auto-archive-cas"); err != nil {
+		t.Fatalf("update task after candidate query: %v", err)
+	}
+
+	cas, ok := any(repo).(autoArchiveEligibilityRepository)
+	if !ok {
+		t.Fatal("SQLite repository does not expose atomic auto-archive eligibility mutation")
+	}
+	changed, err := cas.ArchiveTaskIfAutoArchiveEligible(ctx, "task-auto-archive-cas", oldUpdatedAt, "cascade-stale")
+	if err != nil {
+		t.Fatalf("ArchiveTaskIfAutoArchiveEligible: %v", err)
+	}
+	if changed {
+		t.Fatal("stale auto-archive candidate was archived")
+	}
+	task, err := repo.GetTask(ctx, "task-auto-archive-cas")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.ArchivedAt != nil {
+		t.Fatal("stale auto-archive candidate has archived_at")
+	}
+}
+
 func TestListArchivedTasksWithActiveSessionsReturnsOnlyStuckTasks(t *testing.T) {
 	repo := newRepoForArchiveTests(t, "task-arch-running", "task-arch-done", "task-active-running")
 	ctx := context.Background()

@@ -1,6 +1,7 @@
 package share
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -23,16 +24,20 @@ type Config struct {
 func Provide(
 	writer, reader *sqlx.DB,
 	taskReader TaskReader,
+	authorizer TaskAccessAuthorizer,
 	githubResolver GitHubClientResolver,
 	log *logger.Logger,
 	cfg Config,
 ) (*HTTPHandlers, func() error, error) {
+	if authorizer == nil {
+		return nil, nil, errors.New("share: task access authorizer is required")
+	}
 	repo, err := NewRepository(writer, reader, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("share: provide repository: %w", err)
 	}
 	backend := NewWorkspaceGistBackend(githubResolver)
-	svc := New(repo, taskReader, backend, log, cfg.KandevVersion)
+	svc := New(repo, taskReader, authorizer, backend, log, cfg.KandevVersion)
 	h := NewHTTPHandlers(svc, log)
 	// Cleanup is a true no-op — the repository doesn't own its database
 	// connection (the pool is owned by cmd/kandev).

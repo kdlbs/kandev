@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/workspace-git-status.md"
+spec: "../../specs/platform/requirements/workspace-git-status.md"
 ---
 
 # Task 01: Comparison target domain and attachment persistence

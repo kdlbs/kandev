@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/workspaces/repository-secrets.md
+spec: docs/specs/workspaces/requirements/repository-secrets.md
 decision: docs/decisions/2026-08-03-scope-and-merge-repository-secrets.md
 created: 2026-08-03
 status: completed

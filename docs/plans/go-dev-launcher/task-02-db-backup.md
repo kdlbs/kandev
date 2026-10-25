@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 02: Production database backup in Go

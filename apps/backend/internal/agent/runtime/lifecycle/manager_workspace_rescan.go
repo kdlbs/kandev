@@ -58,6 +58,9 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 		WorktreeBranch:    wt.WorktreeBranch,
 		TaskWorkspacePath: wt.TaskWorkspacePath,
 	}
+	if execution != nil {
+		payload.AttemptID = execution.currentStartupAttemptID()
+	}
 	event := bus.NewEvent(events.AgentctlReady, "branch-materializer", payload)
 	if err := m.eventPublisher.eventBus.Publish(ctx, events.AgentctlReady, event); err != nil {
 		m.logger.Warn("failed to publish worktree materialized event",
@@ -99,7 +102,8 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 			zap.String("session_id", sessionID))
 		return nil
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		m.logger.Debug("rescan skipped: execution has no agentctl client",
 			zap.String("session_id", sessionID),

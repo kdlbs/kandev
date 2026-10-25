@@ -56,7 +56,7 @@ export function IntegrationAuthErrorMessage({
             : cleanIntegrationErrorMessage(error)}
         </span>
         {isAuth && (
-          <Button asChild size="sm" variant="outline" className="cursor-pointer h-7 text-xs">
+          <Button asChild size="sm" variant="outline" className="cursor-pointer text-xs">
             <Link href={reconnectHref}>{t("integrations:reconnectProvider", { name })}</Link>
           </Button>
         )}

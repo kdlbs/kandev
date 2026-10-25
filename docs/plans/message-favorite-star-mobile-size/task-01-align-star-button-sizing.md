@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/message-favorite-star-mobile-size.md"
+spec: "../../specs/ui/requirements/message-favorite-star-mobile-size.md"
 ---
 
 # Task 01: Align favorite star button sizing with sibling action icons

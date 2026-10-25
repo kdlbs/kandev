@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/prevent-agent-autostart-on-open/spec.md"
+spec: "../../specs/tasks/requirements/prevent-agent-autostart-on-open.md"
 ---
 
 # Task 01: Shared hint predicate and footer resume-button removal

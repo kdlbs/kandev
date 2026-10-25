@@ -3,7 +3,10 @@ package gitlab
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -88,19 +91,6 @@ func (c *Controller) httpClearToken(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"cleared": true})
-}
-
-func (c *Controller) httpConfigureHost(ctx *gin.Context) {
-	var req ConfigureHostRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: host is required"})
-		return
-	}
-	if err := c.service.ConfigureHost(ctx.Request.Context(), req.Host); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, gin.H{"configured": true, "host": c.service.Host()})
 }
 
 func (c *Controller) httpGetMRFeedback(ctx *gin.Context) {
@@ -222,25 +212,6 @@ func (c *Controller) httpListTaskMRs(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"task_mrs": mrs})
 }
 
-func (c *Controller) httpSyncTaskMR(ctx *gin.Context) {
-	taskID := ctx.Param("taskID")
-	if taskID == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "taskID required"})
-		return
-	}
-	var req SyncTaskMRRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "invalid payload: project_path and iid required"})
-		return
-	}
-	row, err := c.service.SyncTaskMR(ctx.Request.Context(), taskID, req.RepositoryID, req.ProjectPath, req.IID)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, row)
-}
-
 // httpSearchUserMRs surfaces the configured user's MR queue. filter is one
 // of "assigned_to_me", "created_by_me", "review_requested" (the /gitlab
 // page's tab values), or a raw GitLab API filter in `key=value` form;
@@ -284,6 +255,12 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	page, perPage := paginationFromQuery(ctx)
 	filter := ctx.Query("filter")
 	customQuery := ctx.Query("custom_query")
+	if customQuery != "" {
+		if _, err := url.ParseQuery(customQuery); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "custom_query must be a valid URL query"})
+			return
+		}
+	}
 	if customQuery == "" {
 		if filter == filterTokenReviewRequested {
 			ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "review_requested is not supported for issues"})
@@ -297,8 +274,9 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	if !ok {
 		return
 	}
+	milestone := trimGitLabWhitespace(ctx.Query("milestone"))
 	result, err := client.ListIssuesPaged(
-		ctx.Request.Context(), filter, customQuery, page, perPage,
+		ctx.Request.Context(), filter, customQuery, milestone, page, perPage,
 	)
 	if err != nil {
 		writeWorkspaceClientActionError(ctx, err, "issue search")
@@ -335,6 +313,16 @@ func (c *Controller) translateMRFilter(ctx *gin.Context, filter string) (string,
 		username = u
 	}
 	return translateUserSearchFilter(filter, username), nil
+}
+
+// trimGitLabWhitespace trims Unicode White_Space plus U+FEFF (byte order
+// mark). strings.TrimSpace already covers Unicode White_Space, including
+// U+0085 (NEL), but it does not trim U+FEFF. The extra rune keeps a pasted BOM
+// from surviving as a non-empty milestone that cannot match.
+func trimGitLabWhitespace(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\uFEFF'
+	})
 }
 
 // paginationFromQuery reads ?page=&per_page= with the same clamps SearchMRsPaged

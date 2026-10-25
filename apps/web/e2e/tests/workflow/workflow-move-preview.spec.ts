@@ -1,0 +1,301 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
+import type { Page, Request } from "@playwright/test";
+import { expect, test } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
+import { SessionPage } from "../../pages/session-page";
+import {
+  createWorkflowAgentProfiles,
+  waitForWorkflowProfileSession,
+} from "./workflow-agent-switch-helpers";
+import { waitForWorkflowMoveLifecycle } from "../task/task-workflow-agent-overrides-helpers";
+import { seedMoveOverrideFixture } from "./workflow-step-move-overrides-helpers";
+import {
+  applyHarmlessPreviewUpdate,
+  movePreviewRequestPredicate,
+  waitForPreviewTaskSessionsLoaded,
+} from "./workflow-move-preview-stability-helpers";
+
+async function injectCompetingPreview(
+  page: Page,
+  taskId: string,
+  stepId: string,
+  previousStepId: string,
+) {
+  let injected = false;
+  const matches = movePreviewRequestPredicate(taskId, stepId);
+  await page.route(`**/api/v1/tasks/${taskId}/move-preview`, async (route) => {
+    const request = route.request();
+    if (injected || !matches(request)) return route.continue();
+    injected = true;
+    await page.evaluate(
+      async ({ url, payload }) => {
+        const response = await fetch(url, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) throw new Error(`Competing preview failed: ${response.status}`);
+        await response.json();
+      },
+      {
+        url: request.url(),
+        payload: { ...request.postDataJSON(), workflow_step_id: previousStepId },
+      },
+    );
+    await route.continue();
+  });
+  return () => injected;
+}
+
+/** Observes a completed successful preview for the requested task and destination step. */
+async function waitForPreviewResult(page: Page, taskId: string, workflowStepId: string) {
+  const isPreviewRequest = movePreviewRequestPredicate(taskId, workflowStepId);
+  const request = await page.waitForEvent("requestfinished", {
+    predicate: async (request) =>
+      isPreviewRequest(request) && (await request.response())?.ok() === true,
+  });
+  const response = await request.response();
+  if (!response) throw new Error("Completed preview request has no response");
+  return response.json();
+}
+
+/** Reads the response body before later UI transitions can discard it. */
+async function openStepPreview(
+  page: Page,
+  taskId: string,
+  stepName: string,
+  workflowStepId: string,
+) {
+  await waitForPreviewTaskSessionsLoaded(page, taskId);
+  await expect(page.getByTestId(`workflow-step-${stepName}`)).toHaveAttribute(
+    "data-workflow-step-id",
+    workflowStepId,
+  );
+  const [preview] = await Promise.all([
+    waitForPreviewResult(page, taskId, workflowStepId),
+    page.getByTestId(`workflow-step-${stepName}`).hover(),
+  ]);
+  const popover = page.locator('[data-testid="workflow-step-popover"]:visible');
+  await expect(popover).toBeVisible();
+  await expect(popover.getByTestId("workflow-move-preview")).toBeVisible({ timeout: 15_000 });
+  expect(preview).toMatchObject({ task_id: taskId, workflow_step_id: workflowStepId });
+  return { popover, preview };
+}
+
+test.describe("Workflow move preview", () => {
+  test("shows a retained session model override before an in-place move", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const fixture = await seedMoveOverrideFixture(
+      testPage,
+      apiClient,
+      seedData,
+      "Desktop Move Preview Override",
+    );
+    await apiClient.setSessionModel(fixture.primarySessionId, "mock-slow");
+    await testPage.reload();
+    await fixture.session.waitForLoad();
+
+    const { popover, preview } = await openStepPreview(
+      testPage,
+      fixture.taskId,
+      "Verify",
+      fixture.targetStepId,
+    );
+    await expectPreviewFooter(popover, "workflow-step-move-here");
+    expect(preview.outcome).toBe("reuse_current");
+    expect(preview.recipient.session_id).toBe(fixture.primarySessionId);
+    expect(preview.model.after.label).toBe("mock-slow");
+    expect(preview.model.after_source).toBe("override");
+    await expect(popover.getByTestId("workflow-move-preview")).toContainText("override retained");
+
+    const moveRequest = testPage.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/v1/tasks/${fixture.taskId}/move`,
+    );
+    await popover.getByTestId("workflow-step-move-here").click();
+    expect((await moveRequest).postDataJSON()).toMatchObject({
+      workflow_step_id: fixture.targetStepId,
+    });
+    await expect
+      .poll(() => apiClient.getTask(fixture.taskId).then((task) => task.primary_session_id))
+      .toBe(fixture.primarySessionId);
+  });
+
+  test("keeps harmless updates stable and refreshes for a model change", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const fixture = await seedMoveOverrideFixture(
+      testPage,
+      apiClient,
+      seedData,
+      "Desktop Move Preview Stability",
+    );
+    const isMovePreviewRequest = movePreviewRequestPredicate(fixture.taskId, fixture.targetStepId);
+    let requestCount = 0;
+    const requestListener = (request: Request) => {
+      if (isMovePreviewRequest(request)) requestCount += 1;
+    };
+    testPage.on("request", requestListener);
+
+    try {
+      const { popover } = await openStepPreview(
+        testPage,
+        fixture.taskId,
+        "Verify",
+        fixture.targetStepId,
+      );
+      expect(requestCount).toBe(1);
+
+      let unexpectedRequest = false;
+      void testPage
+        .waitForRequest(isMovePreviewRequest)
+        .then(() => {
+          unexpectedRequest = true;
+        })
+        .catch(() => undefined);
+      for (const revision of [1, 2, 3]) {
+        await applyHarmlessPreviewUpdate(testPage, fixture.taskId, revision);
+      }
+      await dwell(
+        testPage,
+        500,
+        "negative-assertion",
+        "observe no move-preview refresh after harmless task updates",
+      );
+      expect(unexpectedRequest).toBe(false);
+      expect(requestCount).toBe(1);
+      await expect(popover.getByTestId("workflow-move-preview")).toBeVisible();
+      await expect(popover.getByTestId("workflow-move-preview-loading")).toHaveCount(0);
+
+      const movePreviewUrl = `**/api/v1/tasks/${fixture.taskId}/move-preview`;
+      let releaseHeldRequest: (() => void) | undefined;
+      let resolveHeldRequest!: () => void;
+      const heldRequest = new Promise<void>((resolve) => {
+        resolveHeldRequest = resolve;
+      });
+      let held = false;
+      await testPage.route(movePreviewUrl, async (route) => {
+        if (route.request().method() === "POST" && !held) {
+          held = true;
+          resolveHeldRequest();
+          await new Promise<void>((resolve) => {
+            releaseHeldRequest = resolve;
+          });
+        }
+        await route.continue();
+      });
+
+      try {
+        const modelUpdate = apiClient.setSessionModel(fixture.primarySessionId, "mock-slow");
+        await heldRequest;
+        expect(requestCount).toBe(2);
+        await expect(popover.getByTestId("workflow-move-preview-loading")).toBeVisible();
+        releaseHeldRequest?.();
+        await modelUpdate;
+        await expect(popover.getByTestId("workflow-move-preview")).toContainText("mock-slow");
+      } finally {
+        releaseHeldRequest?.();
+        await testPage.unroute(movePreviewUrl);
+      }
+    } finally {
+      testPage.off("request", requestListener);
+    }
+  });
+
+  test("matches other-session reuse and fresh-session creation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
+    const profileC = await apiClient.createAgentProfile(agentId, "Profile C (new)", {
+      model: "mock-fast",
+    });
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Move Preview Routing");
+    const source = await apiClient.createWorkflowStep(workflow.id, "Source", 0, {
+      is_start_step: true,
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    const bridge = await apiClient.createWorkflowStep(workflow.id, "Bridge", 1, {
+      agent_profile_id: profileB.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    const returnStep = await apiClient.createWorkflowStep(workflow.id, "Return A", 2, {
+      agent_profile_id: profileA.id,
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    const freshStep = await apiClient.createWorkflowStep(workflow.id, "Fresh C", 3, {
+      agent_profile_id: profileC.id,
+      profile_session_start_policy: "new",
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Move Preview Routing Task",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: source.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const initialSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
+    await apiClient.moveTask(task.id, workflow.id, bridge.id);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    await waitForWorkflowProfileSession(apiClient, task.id, profileB.id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const returnPreview = await openStepPreview(testPage, task.id, "Return A", returnStep.id);
+    expect(returnPreview.preview.outcome).toBe("reuse_other");
+    expect(returnPreview.preview.recipient.session_id).toBe(initialSessionId);
+    expect(returnPreview.preview.model.after.known).toBe(true);
+    const returnMove = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/tasks/${task.id}/move`,
+    );
+    await returnPreview.popover.getByTestId("workflow-step-move-here").click();
+    expect((await returnMove).ok()).toBe(true);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    await expect
+      .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id))
+      .toBe(initialSessionId);
+    expect(await waitForWorkflowProfileSession(apiClient, task.id, profileA.id)).toBe(
+      initialSessionId,
+    );
+    await waitForPreviewTaskSessionsLoaded(testPage, task.id, initialSessionId);
+
+    const wasInjected = await injectCompetingPreview(testPage, task.id, freshStep.id, source.id);
+    const freshPreview = await openStepPreview(testPage, task.id, "Fresh C", freshStep.id);
+    expect(wasInjected()).toBe(true);
+    expect(freshPreview.preview.outcome).toBe("create_new");
+    expect(freshPreview.preview.recipient.session_id ?? "").toBe("");
+    expect(freshPreview.preview.model.after.known).toBe(true);
+    const freshMove = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/api/v1/tasks/${task.id}/move`,
+    );
+    await freshPreview.popover.getByTestId("workflow-step-move-here").click();
+    expect((await freshMove).ok()).toBe(true);
+    await waitForWorkflowMoveLifecycle(apiClient, task.id);
+    const freshSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileC.id);
+    expect(freshSessionId).not.toBe(initialSessionId);
+  });
+});

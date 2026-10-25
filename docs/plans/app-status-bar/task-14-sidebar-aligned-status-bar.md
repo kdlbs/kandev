@@ -5,14 +5,14 @@ status: done
 wave: 9
 depends_on: [app-status-bar-13]
 plan: docs/plans/app-status-bar/plan.md
-spec: docs/specs/ui/app-status-bar.md
+spec: docs/specs/ui/requirements/app-status-bar.md
 ---
 
 # Sidebar-aligned status bar
 
 ## Inputs
 
-[Spec: responsive and layout contract](../../specs/ui/app-status-bar.md#responsive-and-layout-contract),
+[Spec: responsive and layout contract](../../specs/ui/requirements/app-status-bar.md#responsive-and-layout-contract),
 the root `AppSidebar` layout reservation, the existing `AppStatusSurfaceProvider`,
 and the shipped desktop/mobile status-surface E2E coverage.
 

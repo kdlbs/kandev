@@ -5,7 +5,7 @@ status: pending
 wave: 7
 depends_on: ["09-diff-finding-annotations"]
 plan: "plan.md"
-spec: "../../specs/native-code-review/spec.md"
+spec: "../../specs/agents/requirements/native-code-review.md"
 ---
 
 # Task 10: Review surface controls

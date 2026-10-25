@@ -16,6 +16,13 @@ import (
 
 const dependencyDirectoryOpenFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
 
+// RemoveDirectoryNoFollow opens every path component without following links and
+// removes the target through directory descriptors. It is safe against a
+// concurrent rename or symlink replacement redirecting deletion outside root.
+func RemoveDirectoryNoFollow(ctx context.Context, root, target string) error {
+	return removeDependencyDirectory(ctx, root, target)
+}
+
 // removeDependencyDirectory opens every path component with O_NOFOLLOW and removes
 // entries through the resulting directory descriptors. This keeps a concurrent
 // rename or symlink replacement from redirecting deletion outside the workspace.

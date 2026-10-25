@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-proto-contract"]
 plan: "plan.md"
-spec: "../../../specs/plugins/spec.md"
+spec: "../../../specs/plugins/requirements/plugins.md"
 adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
@@ -25,8 +25,9 @@ state/secrets pattern in `host.go`/`types.go`.
   `host.Sessions()`, `host.Workspaces()`, `host.Workflows()`,
   `host.AgentProfiles()`, `host.Repositories()` — each returning a small typed
   accessor (e.g. `TasksAPI.List(ctx, filter, page)`, `TasksAPI.Get(ctx, id)`,
-  `SessionsAPI.List(...)`, `SessionsAPI.CodeStats(...)`). Keep write methods off
-  the surface this phase (deferred).
+  `SessionsAPI.List(...)`, `SessionsAPI.CodeStats(...)`). The task and message
+  accessors also expose the implemented write methods, including
+  `Tasks().Create`, `Tasks().Update`, `Tasks().Move`, and `Messages().Send`.
 - **Client + server conversions**: `grpcHostClient` (plugin side) calls the
   generated data RPCs and converts responses to Go-native; `grpcHostServer`
   (kandev side) dispatches to the Go-native interface. Follow the existing

@@ -148,3 +148,68 @@ func TestResolveRepositoryRef_TrustedDescriptorRejectsCredentialsAndIncompleteId
 		t.Fatal("ResolveRepositoryRef() accepted credential-bearing/incomplete descriptor")
 	}
 }
+
+func TestResolveRepositoryRef_BrowserPluginDescriptorKeepsBuiltinHostRejection(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	_, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+		RemoteURL:      "https://forge.example.test/acme/widgets.git",
+		Provider:       "forge",
+		ProviderHost:   "https://forge.example.test",
+		ProviderRepoID: "42",
+		ProviderOwner:  "acme",
+		ProviderName:   "widgets",
+	})
+	if err == nil {
+		t.Fatal("ResolveRepositoryRef() accepted a browser-supplied plugin descriptor")
+	}
+}
+
+func TestResolveRepositoryRef_TrustedDescriptorRejectsForeignCloneOrigin(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// An owned provider must not carry a clone URL off its own origin: the
+	// clone would present that provider's managed credentials to another host.
+	_, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+		RemoteURL:                 "https://attacker.example.test/acme/widgets.git",
+		Provider:                  "bitbucket",
+		ProviderHost:              "https://bitbucket.org",
+		ProviderRepoID:            "{7c445c85}",
+		ProviderOwner:             "acme",
+		ProviderName:              "widgets",
+		TrustedProviderDescriptor: true,
+	})
+	if err == nil {
+		t.Fatal("ResolveRepositoryRef() accepted a trusted descriptor outside the provider origin")
+	}
+}
+
+func TestResolveRepositoryRef_BuiltinProviderKeepsCoreParsePath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repositoryID, _, _, err := svc.ResolveRepositoryRef(ctx, "ws-1", TaskRepositoryInput{
+		RemoteURL: "https://github.com/acme/api", Provider: "github",
+	})
+	if err != nil {
+		t.Fatalf("ResolveRepositoryRef() unexpected error: %v", err)
+	}
+	stored, err := repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.RemoteURL != "https://github.com/acme/api.git" {
+		t.Fatalf("stored remote_url = %q, want the parser-canonicalized URL", stored.RemoteURL)
+	}
+}

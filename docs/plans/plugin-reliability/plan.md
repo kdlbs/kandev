@@ -2,7 +2,7 @@
 status: implemented
 created: 2026-08-02
 owner: cfl
-spec: docs/specs/plugins/spec.md
+spec: docs/specs/plugins/requirements/plugins.md
 ---
 
 # Plugin reliability repair

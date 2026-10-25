@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: ["01-design-package"]
 plan: "plan.md"
-spec: "../../specs/bitbucket-plugin/spec.md"
+spec: "../../specs/integrations/requirements/bitbucket-plugin.md"
 ---
 
 # Task 04: Frontend plugin registry contracts

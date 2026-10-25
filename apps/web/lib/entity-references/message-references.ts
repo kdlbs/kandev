@@ -1,4 +1,5 @@
 import type { EntityReference } from "@/lib/types/entity-reference";
+import { linkToTask } from "@/lib/links";
 
 const IDENTITY_NAME = /^[a-z0-9][a-z0-9._:-]{0,127}$/;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -57,7 +58,7 @@ function hasSafeURL(reference: EntityReference): boolean {
     return false;
   }
   if (reference.provider === "kandev" && reference.kind === "task") {
-    return reference.url === `/t/${encodeURIComponent(reference.id)}`;
+    return reference.url === linkToTask(reference.id);
   }
   try {
     const parsed = new URL(reference.url);

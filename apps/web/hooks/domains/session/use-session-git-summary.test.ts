@@ -79,6 +79,23 @@ describe("deriveMultiRepoSummary", () => {
     ]);
   });
 
+  it("reports both layers for one mixed file", () => {
+    const mixed = {
+      ...file("frontend"),
+      staged_change: { status: "modified" as const },
+      unstaged_change: { status: "modified" as const },
+    };
+    const result = deriveMultiRepoSummary([repoStatus("frontend")], [mixed], ["frontend"]);
+
+    expect(result.perRepoStatus).toEqual([
+      expect.objectContaining({
+        repository_name: "frontend",
+        hasStaged: true,
+        hasUnstaged: true,
+      }),
+    ]);
+  });
+
   it("keeps base divergence separate from upstream push and pull counts", () => {
     const result = deriveMultiRepoSummary(
       [
@@ -123,5 +140,31 @@ describe("deriveMultiRepoSummary", () => {
         hasUpstream: false,
       }),
     ]);
+  });
+});
+
+describe("deriveMultiRepoSummary pending details", () => {
+  it("hides remote action counts while repository details are pending", () => {
+    const result = deriveMultiRepoSummary(
+      [
+        repoStatus("frontend", {
+          detail_state: "pending",
+          ahead: 4,
+          behind: 2,
+          remote_ahead: 3,
+          remote_behind: 1,
+        }),
+      ],
+      [],
+      ["frontend"],
+    );
+
+    expect(result.perRepoStatus[0]).toMatchObject({
+      detailsReady: false,
+      ahead: 0,
+      behind: 0,
+      pushAhead: 0,
+      pullBehind: 0,
+    });
   });
 });

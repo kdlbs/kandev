@@ -267,8 +267,14 @@ func TestPiStrategy_ProjectFileMerge(t *testing.T) {
 	if got.MCPServers["github"].Transport != "stdio" || got.MCPServers["github"].Command != "npx" || got.MCPServers["github"].Env["GITHUB_TOKEN"] != "tok" {
 		t.Errorf("github entry = %+v", got.MCPServers["github"])
 	}
+	if got.MCPServers["github"].Lifecycle != "eager" {
+		t.Errorf("github lifecycle = %q, want eager", got.MCPServers["github"].Lifecycle)
+	}
 	if got.MCPServers["stream"].Transport != "streamable-http" || got.MCPServers["stream"].URL != "https://x/mcp" {
 		t.Errorf("stream entry = %+v", got.MCPServers["stream"])
+	}
+	if got.MCPServers["stream"].Lifecycle != "eager" {
+		t.Errorf("stream lifecycle = %q, want eager", got.MCPServers["stream"].Lifecycle)
 	}
 }
 

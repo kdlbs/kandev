@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-workflow-contract-and-validation", "02-original-session-initialization", "03-runtime-rule-application", "04-editor-and-carry-analysis"]
 plan: "plan.md"
-spec: "../../specs/workflow-session-settings/spec.md"
+spec: "../../specs/tasks/requirements/workflow-session-settings.md"
 ---
 
 # Task 05: Verify Workflow Session Settings and Document the Feature

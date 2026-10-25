@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workspaces/worktree-branch-templates.md"
+spec: "../../specs/workspaces/requirements/worktree-branch-templates.md"
 ---
 
 # Task 01: Preserve Saved Worktree Branch Templates
@@ -28,7 +28,7 @@ spec: "../../specs/workspaces/worktree-branch-templates.md"
 - `apps/backend/internal/task/repository/sqlite/base_migrations.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_branch_template_migration_test.go`
 - `apps/backend/internal/task/repository/sqlite/worktree_branch_template_migration_postgres_test.go`
-- `docs/specs/workspaces/worktree-branch-templates.md`
+- `docs/specs/workspaces/requirements/worktree-branch-templates.md`
 - `docs/specs/INDEX.md`
 - `docs/plans/worktree-branch-template-persistence/plan.md`
 - `docs/plans/worktree-branch-template-persistence/task-01-preserve-branch-template.md`

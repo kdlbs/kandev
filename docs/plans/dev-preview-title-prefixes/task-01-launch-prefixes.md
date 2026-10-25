@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/dev-preview-title-prefixes/spec.md"
+spec: "../../specs/platform/requirements/dev-preview-title-prefixes.md"
 ---
 
 # Task 01: Set environment title prefixes
@@ -69,7 +69,7 @@ behavioral acceptance criteria.
 
 ## Inputs
 
-- `docs/specs/dev-preview-title-prefixes/spec.md`
+- `docs/specs/platform/requirements/dev-preview-title-prefixes.md`
 - `docs/plans/dev-preview-title-prefixes/plan.md`
 - The merged PR #2459 `KANDEV_WEB_TITLE_PREFIX` contract.
 - Existing profile precedence: explicit shell/launcher environment overrides

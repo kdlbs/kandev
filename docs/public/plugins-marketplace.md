@@ -41,11 +41,19 @@ sidebar.
   Uninstall and an **Update** button when a newer version is available.
 - **Browse**: the merged catalog across all enabled sources.
 
+When canvases are enabled, a **Canvases** tab appears beside these tabs. It
+uses the same configured sources but keeps canvas installation separate from
+native plugin installation. Canvas installation is workspace-scoped and is
+available to an authorized workspace user. Native plugin management remains
+administrator-scoped.
+
 ### Browse and install
 
 Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
 name, description, author, categories, source repository link, latest version,
 and GitHub star count. To narrow the list:
+
+![Settings > Plugins > Browse showing the plugin marketplace with search, category, sort, install status, and repository links.](../screenshots/plugin-browse.png)
 
 - **Search**: type in the search box to match plugin name or description.
 - **Category**: filter to a single category with the category dropdown.
@@ -68,15 +76,86 @@ Plugin-provided icons render on the cards. A plugin that ships an icon (via the
 manifest's `icon` field) shows it; otherwise the card falls back to a neutral
 letter tile.
 
+### Browse and install canvases
+
+Open **Settings > Plugins > Canvases** after the canvas feature is enabled.
+Choose the target workspace, then search, filter, and sort the catalog. The
+first registry preview is the cover. Open a card to review its ordered preview
+gallery, author, license, compatibility, repository, and declared permissions.
+Use **Review and install** to inspect the exact package before confirmation.
+
+The install dialog also accepts a local `.tar.gz` upload or an HTTPS direct
+link. These paths do not need a registry listing or preview images. All three
+paths inspect the package and show permissions before creating a new workspace
+canvas. A successful install shows **Open canvas**. A failed or expired review
+must be reviewed again and cannot silently install different bytes.
+
+Registry previews are remote listing metadata. Kandev does not execute an image
+or canvas application in the detail view, and preview URLs are not package
+permissions. A broken image has a placeholder and **Retry**; it does not block
+package inspection or installation.
+
 ### Keep plugins updated
 
-When the marketplace advertises a newer version than the one you have
-installed, the **Installed** tab shows an **Update to v`<version>`** button on
-that plugin's row. Clicking it reinstalls the newer tarball through the normal
-pipeline; Enable, Disable, and Uninstall are unchanged.
+Every row on the **Installed** tab shows the plugin's latest known marketplace
+version next to its installed version (e.g. "Latest v2.1.0"), so you can see
+version drift at a glance, not only when an update is available. A plugin
+that isn't in any configured source shows a "not in the marketplace" hint
+instead. That hint only appears when the check actually reached every enabled
+source: if one of your sources was unreachable, or you have no source enabled
+at all, the plugins it carries are simply left blank rather than reported as
+removed, and the header explains what went wrong.
 
-Updates are never automatic; kandev surfaces the newer version and waits for
-an explicit click. There are no update channels and no background auto-update.
+This check runs once when the page loads. Select **Check for updates** to clear
+the marketplace cache and retrieve current versions without reloading the
+page. **Sync** remains a separate action that reconciles your local plugins
+folder.
+
+The page requests the catalog from your Kandev backend. The backend caches
+each source's index for five minutes, so a page reload during that time does
+not fetch it again. The official index is a static GitHub Pages file; loading
+it does not call the GitHub Releases API.
+
+While a check is running, the header shows a "Checking for updates…"
+indicator. After the check completes, the header shows the last check time.
+If the marketplace cannot be reached, an inline error explains the problem.
+Your installed plugins and their Enable, Disable, and Uninstall actions remain
+available.
+
+Each installed row also has a visible **Settings** link. Select it to open the
+plugin's settings page, where you can change any configuration declared by the
+plugin.
+
+When the marketplace advertises a newer version than the one you have
+installed, the row shows an **Update to v`<version>`** button with the primary
+action color. Clicking it reinstalls the newer tarball through the normal
+pipeline; while it's in progress the button shows a spinner and
+Enable/Disable/Uninstall are disabled. On success the version and button
+refresh; on failure an inline error shows the reason and the button stays
+clickable so you can retry.
+
+Updates are never automatic from this button; kandev surfaces the newer
+version and waits for an explicit click. Separately, an **opt-in** background
+auto-updater can install newer versions for you; see [Auto-update
+(opt-in)](#auto-update-opt-in) below for the instance-wide and per-plugin
+toggles. There are no update channels, version pinning, or scheduled
+maintenance windows in either case.
+
+### Auto-update (opt-in)
+
+Beyond the manual **Update** button, kandev can update installed
+plugins in the background, **off by default**. An instance-wide
+**"Automatically update plugins"** switch (Settings > Plugins) sets the
+default for every installed plugin; each row also has its own switch that can
+override the default either way, with a **Reset** control to clear the
+override and inherit the default again.
+
+Only plugins that are currently **active** *and* opted in are eligible, on a
+periodic background sweep. A disabled or errored plugin is never
+auto-updated and stays on its installed version until you re-enable it. A
+failed auto-update behaves exactly like a failed manual one: the installed
+version is left untouched, or the plugin lands in the same **Error** state a
+failed manual update would.
 
 ### Add a team or corporate source
 
@@ -126,15 +205,14 @@ asset is required; a second is optional:
 - `<id>-<version>.tar.gz` (**required**); the plugin package. It carries its
   own internal `checksums.txt` covering every packaged file, which the install
   pipeline verifies on extraction.
-- `checksums.txt` (optional); the sha256 of the tarball itself. Advisory
-  provenance: the catalog reserves a `package_sha256` field for it, but the
-  index builder does not populate or enforce the digest yet, so it is included
-  only for forward compatibility.
+- `checksums.txt` (optional); the SHA-256 of the tarball itself. The registry
+  always computes `package_sha256` from the downloaded archive and, when this
+  release-level file is present, requires its digest to match before publishing.
 
 The release must pass the standard package integrity gate. The
 [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template)
-  starter repo is the recommended way to bootstrap a repo with the right layout.
-its `.github/workflows/release.yml` produces both assets automatically when you
+starter repo is the recommended way to bootstrap a repo with the right layout.
+Its `.github/workflows/release.yml` produces both assets automatically when you
 push a version tag.
 
 ### 2. Add an icon (optional)
@@ -167,13 +245,35 @@ a PR that lists it.
    pin; leave it out of submissions. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
-   (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   Your repo must have a latest release that publishes a `.tar.gz` package
-   asset (an accompanying `checksums.txt` asset is optional). An entry whose repo
-   has no release or no package asset is skipped.
+   (build + tests, no Pages deploy), resolving your entry against the GitHub
+   API. Your latest release must publish the exact `<id>-<version>.tar.gz`
+   asset. The builder verifies its internal checksums and managed manifest and
+   requires the manifest ID and version to match the curated entry and release
+   tag. A release-level `checksums.txt` is optional; when present, its package
+   digest must also match.
 3. A maintainer reviews and merges; maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.
+
+After a repository is curated, Kandev checks its latest release centrally every
+three hours. A valid new release targets publication in the official index
+within four hours under normal GitHub Actions scheduling, without a Kandev
+source commit or manual rebuild. GitHub schedules can be delayed or dropped, so
+four hours is an operational SLO rather than a hard guarantee; the daily 06:00
+UTC rebuild remains the fallback and star-count refresh.
+
+The checked-out registry list is the only allowlist. Plugin repositories do not
+receive Kandev credentials and cannot send a repository or deployment payload.
+Before publication, Kandev requires the exact `<id>-<version>.tar.gz`, verifies
+its internal checksums and managed manifest, matches the manifest ID/version to
+the curated entry and release tag, computes the package SHA-256, and compares an
+optional release-level checksum when present.
+
+If one latest release is missing or invalid, the official builder retains that
+still-curated plugin's previous record while valid peers may advance. A
+provider-wide failure leaves the published catalog unchanged. Maintainers can
+inspect the failed GitHub Actions run, annotations, and step summary; the daily
+build retries the complete catalog even when no release poll succeeded.
 
 Ranking in the catalog is **GitHub stars only**: there is no download or usage
 telemetry to game. Full submission details are in
@@ -193,15 +293,14 @@ source](#add-a-team-or-corporate-source)), and its plugins merge into the Browse
 tab alongside the official ones. This is the recommended path for a team or
 corporate registry, no PR to the main repo.
 
-The `index.json` document is the fetch contract between a source and kandev. The
-simplest way to produce one is to copy the official registry's
-`plugin-registry/` directory into your own repo; its `plugins.yaml` +
-[`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs)
-build script (zero-dependency Node) + GitHub Action resolve each listed repo's
-latest release into a full catalog record and publish the generated
-`index.json` to GitHub Pages. Point kandev at that Pages URL. The document
-shape, the build pipeline, and the source data model are specified in the
-[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/marketplace.md).
+The `index.json` document is the fetch contract between a source and kandev.
+One way to produce one is to adapt the official registry's pointer list,
+[`build-index.mjs`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/build-index.mjs),
+Go package verifier, and GitHub Actions workflows. Together they resolve each
+listed repo's latest release into a verified catalog record and publish the
+generated `index.json` to GitHub Pages. Point kandev at that Pages URL. The
+document shape, the build pipeline, and the source data model are specified in the
+[plugin marketplace spec](https://github.com/kdlbs/kandev/blob/main/docs/specs/plugins/requirements/marketplace.md).
 
 Related: [Plugins](plugins.md), [Authoring a
 plugin](plugins-authoring.md), [Plugin manifest

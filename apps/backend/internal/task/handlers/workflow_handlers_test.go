@@ -27,9 +27,10 @@ import (
 type workflowRepo struct {
 	mockRepository
 
-	workspaces  map[string]*models.Workspace
-	workflows   map[string]*models.Workflow
-	byWorkspace map[string][]*models.Workflow
+	workspaces    map[string]*models.Workspace
+	workflows     map[string]*models.Workflow
+	byWorkspace   map[string][]*models.Workflow
+	snapshotTasks []*models.Task
 
 	listErr    error
 	createErr  error
@@ -78,6 +79,15 @@ func (r *workflowRepo) ListWorkflows(_ context.Context, workspaceID string, incl
 	return r.byWorkspace[workspaceID], nil
 }
 
+func (r *workflowRepo) ListTasksForDeletion(
+	_ context.Context, workspaceID, workflowID string, page, pageSize int,
+) ([]*models.Task, int, error) {
+	if page != 1 || pageSize <= 0 {
+		return nil, 0, nil
+	}
+	return nil, 0, nil
+}
+
 func (r *workflowRepo) CreateWorkflow(_ context.Context, workflow *models.Workflow) error {
 	if r.createErr != nil {
 		return r.createErr
@@ -92,6 +102,31 @@ func (r *workflowRepo) UpdateWorkflow(_ context.Context, workflow *models.Workfl
 	}
 	r.updated = append(r.updated, workflow)
 	return nil
+}
+
+func (r *workflowRepo) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	workflow, err := r.GetWorkflow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	copy := *workflow
+	for _, field := range []struct{ target, supplied *string }{
+		{&copy.Name, update.Name}, {&copy.Description, update.Description},
+		{&copy.Prompt, update.Prompt}, {&copy.AgentProfileID, update.AgentProfileID},
+		{&copy.Source, update.Source}, {&copy.SourcePath, update.SourcePath},
+	} {
+		if field.supplied != nil {
+			*field.target = *field.supplied
+		}
+	}
+	if update.Hidden != nil {
+		copy.Hidden = *update.Hidden
+	}
+	if err := r.UpdateWorkflow(ctx, &copy); err != nil {
+		return nil, err
+	}
+	r.workflows[id] = &copy
+	return &copy, nil
 }
 
 func (r *workflowRepo) DeleteWorkflow(_ context.Context, id string) error {
@@ -112,7 +147,7 @@ func (r *workflowRepo) ReorderWorkflows(_ context.Context, workspaceID string, i
 }
 
 func (r *workflowRepo) ListTasks(context.Context, string) ([]*models.Task, error) {
-	return nil, nil
+	return r.snapshotTasks, nil
 }
 
 // stubStepLister satisfies WorkflowStepLister without a workflow repository.
@@ -563,6 +598,28 @@ func TestHTTPGetWorkflowSnapshotReturnsWorkflowStepsAndTasks(t *testing.T) {
 	require.Equal(t, "step-1", snapshot.Steps[0].ID)
 	require.Equal(t, []string{"wf-1"}, steps.calls)
 	require.Empty(t, snapshot.Tasks)
+}
+
+// TestHTTPGetWorkflowSnapshotIncludesStepOrderRevision covers the Build-phase
+// fix for missing order_revision on HTTP hydration: the frontend seeds
+// kanbanMulti.orderRevisionByStepId from this endpoint's response before
+// accepting any task.reordered WS event, so a step's current revision must
+// round-trip through the snapshot response.
+func TestHTTPGetWorkflowSnapshotIncludesStepOrderRevision(t *testing.T) {
+	repo := workflowFixture()
+	steps := &stubStepLister{steps: []*workflowmodels.WorkflowStep{
+		{ID: "step-1", WorkflowID: "wf-1", Name: "Todo", OrderRevision: 5},
+	}}
+	h := newWorkflowHandlers(t, repo, steps)
+	c, rec := newWorkflowRequest(t, http.MethodGet, "/api/v1/workflows/wf-1/snapshot", "")
+	c.Params = gin.Params{{Key: "id", Value: "wf-1"}}
+
+	h.httpGetWorkflowSnapshot(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	snapshot := decodeWorkflowSnapshot(t, rec.Body.Bytes())
+	require.Len(t, snapshot.Steps, 1)
+	require.Equal(t, int64(5), snapshot.Steps[0].OrderRevision)
 }
 
 func TestHTTPGetWorkflowSnapshotReturnsNotFoundForUnknownWorkflow(t *testing.T) {

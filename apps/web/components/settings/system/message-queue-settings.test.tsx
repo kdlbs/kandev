@@ -143,7 +143,7 @@ describe("MessageQueueSettings — per-session limit", () => {
 
     const input = await screen.findByLabelText(MAXIMUM_LABEL);
     expect(screen.getByTestId(EFFECTIVE_VALUE_ID).textContent).toBe("Unlimited");
-    expect(screen.getByText(/Set 0 for unlimited/)).toBeTruthy();
+    expect(screen.getByText(/Use 0 for unlimited/)).toBeTruthy();
     expect(input.className).toContain("h-11");
     const root = screen.getByTestId("message-queue-settings");
     expect(root.className).toContain("min-w-0");
@@ -287,13 +287,7 @@ describe("MessageQueueSettings — merge toggle", () => {
 
     expect(mergeToggle().getAttribute(ARIA_PRESSED)).toBe("true");
     expect(
-      screen.getByText(/Lets you fold a queued message into the message directly above it/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/Only adjacent messages from the same sender can be merged/),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(/combined, deduplicated entity references would exceed 100/),
+      screen.getByText(/Combine related queued messages before the agent reads them/),
     ).toBeTruthy();
   });
 
@@ -372,7 +366,7 @@ describe("MessageQueueSettings — automatic merge toggle", () => {
 
     const toggle = await screen.findByRole("button", { name: AUTO_MERGE_TOGGLE_LABEL });
     expect(toggle.getAttribute(ARIA_PRESSED)).toBe("true");
-    expect(screen.getByText(/stays as a separate queued message/)).toBeTruthy();
+    expect(screen.getByText(/Merge compatible consecutive messages automatically/)).toBeTruthy();
     const touchTarget = screen.getByTestId("message-queue-auto-merge-touch-target");
     expect(touchTarget.className).toContain("min-h-11");
     expect(touchTarget.className).toContain("min-w-11");
@@ -416,7 +410,9 @@ describe("MessageQueueSettings — automatic merge toggle", () => {
       auto_merge_enabled: false,
     });
   });
+});
 
+describe("MessageQueueSettings — automatic merge permissions and recovery", () => {
   it("stays editable for admins under a capacity environment lock", async () => {
     fetchSettingsMock.mockResolvedValueOnce(
       response({ configured: 25, effective: 50, source: "environment", locked: true }),

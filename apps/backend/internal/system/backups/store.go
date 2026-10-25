@@ -17,12 +17,18 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/jobs"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 // Snapshot is the public representation of a backup file on disk.
+// Snapshot is the metadata one backup file exposes over the API. It
+// deliberately carries no on-disk path: GET /backups is readable by any
+// authenticated user (only the mutating and downloading routes are admin
+// only), and the absolute path would disclose the install's data directory to
+// all of them. Callers name a snapshot by Name; the service resolves it to a
+// path itself via resolveSnapshotPath.
 type Snapshot struct {
 	Name      string    `json:"name"`
-	Path      string    `json:"path"`
 	SizeBytes int64     `json:"size_bytes"`
 	ModTime   time.Time `json:"mtime"`
 	Kind      string    `json:"kind"` // "auto" | "manual"
@@ -58,6 +64,10 @@ type Service struct {
 	pool         *db.Pool
 	jobs         *jobs.Tracker
 	log          *logger.Logger
+
+	// PersistenceUnavailable marks required stores unhealthy before restore
+	// closes the pool and leaves the process awaiting restart.
+	PersistenceUnavailable func()
 
 	// RestoreQuiesce stops scheduling, active executions, and database-backed
 	// workers before restore closes the shared database pool. Wired by the
@@ -121,7 +131,6 @@ func (s *Service) List() ([]Snapshot, error) {
 		}
 		out = append(out, Snapshot{
 			Name:      e.Name(),
-			Path:      filepath.Join(dir, e.Name()),
 			SizeBytes: info.Size(),
 			ModTime:   info.ModTime().UTC(),
 			Kind:      kind,
@@ -131,72 +140,37 @@ func (s *Service) List() ([]Snapshot, error) {
 }
 
 // Create starts a job that writes a manual snapshot via VACUUM INTO and
-// returns the job ID immediately.
+// returns the job ID immediately. The accepted job outlives its caller context.
 func (s *Service) Create(ctx context.Context) string {
-	return s.jobs.Start(ctx, "backup-create", func(ctx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(context.WithoutCancel(ctx), "backup-create", func(ctx context.Context) (map[string]interface{}, error) {
 		return s.runCreate(ctx)
 	})
 }
 
-func (s *Service) runCreate(_ context.Context) (map[string]interface{}, error) {
-	if err := s.ensureBackupsDir(); err != nil {
-		return nil, err
-	}
-	// A .tmp sidecar is normally renamed away on success and removed on the
-	// error paths below, but a crash between SnapshotSQLite and os.Rename
-	// leaves one behind. classify() hides it from List()/Delete(), so it can
-	// never be cleaned up through the UI and would leak disk (up to the size
-	// of the live DB) indefinitely. Sweep any leftovers before writing a new
-	// one so crash debris is reclaimed on the next manual backup.
-	s.sweepStaleTmpFiles()
-	// Nanosecond precision so double-clicks or concurrent /backups POSTs do
-	// not collide on the same filename and silently overwrite one job's
-	// snapshot with another.
-	name := fmt.Sprintf("%s%d%s", manualPrefix, time.Now().UTC().UnixNano(), dbSuffix)
-	path := filepath.Join(s.backupsDir(), name)
-	// VACUUM INTO writes the multi-hundred-MB snapshot incrementally. If we
-	// wrote directly to the final "manual-*.db" name, a concurrent List()
-	// (the UI refetches immediately after the 202) would os.Stat a
-	// half-written file and report a truncated size. Write to a ".tmp"
-	// sidecar first — classify() ignores non-.db suffixes so it is never
-	// listed — then atomically rename it into place at its full size.
-	tmpPath := path + tmpSuffix
-	size, err := persistence.SnapshotSQLite(s.pool.Writer(), tmpPath)
+func (s *Service) runCreate(ctx context.Context) (map[string]interface{}, error) {
+	receipt, err := s.createSnapshot(ctx, false)
 	if err != nil {
-		_ = os.Remove(tmpPath)
 		return nil, err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return nil, fmt.Errorf("rename snapshot into place: %w", err)
-	}
-	return map[string]interface{}{
-		"name":       name,
-		"path":       path,
-		"size_bytes": size,
-	}, nil
+	return map[string]interface{}{"name": receipt.Name, "size_bytes": receipt.SizeBytes}, nil
 }
 
-// staleTmpAge is how old a ".tmp" sidecar must be before the sweep reclaims
-// it. Concurrent backup-create jobs are not serialized (jobs.Tracker runs each
-// in its own goroutine), so a just-created sidecar may belong to another
-// in-flight VACUUM INTO. Only files older than this are treated as crash debris,
-// which keeps concurrent creates safe while still reclaiming leaked files. The
-// threshold is far above any realistic VACUUM INTO duration.
+// staleTmpAge protects recent temporary files while reclaiming crash debris.
 const staleTmpAge = 10 * time.Minute
 
-// sweepStaleTmpFiles removes leftover ".tmp" VACUUM INTO sidecars from a
-// previously crashed runCreate, skipping any modified within staleTmpAge so a
-// concurrent create's in-progress sidecar is never deleted out from under it.
-// Best-effort: read/stat/remove failures are logged and ignored so a stale
-// file never blocks a fresh backup.
+// sweepStaleTmpFiles removes abandoned legacy sidecars and private staging
+// directories. Creation owns maintenance admission while this sweep runs.
+// Boot staging debris from an interrupted pre-migration backup is reclaimed
+// here too, under the boot staging liveness window owned by persistence.
 func (s *Service) sweepStaleTmpFiles() {
+	persistence.SweepStaleBootStaging(s.backupsDir(), s.log)
 	entries, err := os.ReadDir(s.backupsDir())
 	if err != nil {
 		return
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), tmpSuffix) {
+		if (e.IsDir() || !strings.HasSuffix(e.Name(), tmpSuffix)) &&
+			(!e.IsDir() || !strings.HasPrefix(e.Name(), ".snapshot-")) {
 			continue
 		}
 		info, err := e.Info()
@@ -204,7 +178,7 @@ func (s *Service) sweepStaleTmpFiles() {
 			continue
 		}
 		p := filepath.Join(s.backupsDir(), e.Name())
-		if err := os.Remove(p); err != nil && s.log != nil {
+		if err := os.RemoveAll(p); err != nil && s.log != nil {
 			s.log.Warn("backups: failed to remove stale tmp snapshot", zap.String("path", p), zap.Error(err))
 		}
 	}
@@ -212,6 +186,7 @@ func (s *Service) sweepStaleTmpFiles() {
 
 // Restore validates the confirm token, then runs the restore as a job.
 // Returns the job ID on success, or an error if the token is wrong.
+// Accepted restore jobs outlive the caller context.
 func (s *Service) Restore(ctx context.Context, name, confirm string) (string, error) {
 	if confirm != RestoreConfirmToken {
 		return "", errRestoreConfirm
@@ -223,13 +198,18 @@ func (s *Service) Restore(ctx context.Context, name, confirm string) (string, er
 	if err != nil {
 		return "", err
 	}
-	id := s.jobs.Start(ctx, "restore", func(ctx context.Context) (map[string]interface{}, error) {
+	id := s.jobs.Start(context.WithoutCancel(ctx), "restore", func(ctx context.Context) (map[string]interface{}, error) {
 		return s.runRestore(ctx, abs)
 	})
 	return id, nil
 }
 
-func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string]interface{}, error) {
+func (s *Service) runRestore(ctx context.Context, snapshotPath string) (map[string]interface{}, error) {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if _, err := os.Stat(snapshotPath); err != nil {
 		return nil, fmt.Errorf("snapshot not found: %w", err)
 	}
@@ -237,6 +217,13 @@ func (s *Service) runRestore(_ context.Context, snapshotPath string) (map[string
 	if err := s.writeStagedRestore(snapshotPath, stagedPath); err != nil {
 		_ = os.Remove(stagedPath)
 		return nil, err
+	}
+	if _, err := verifySnapshot(ctx, stagedPath); err != nil {
+		_ = os.Remove(stagedPath)
+		return nil, fmt.Errorf("verify staged restore: %w", err)
+	}
+	if s.PersistenceUnavailable != nil {
+		s.PersistenceUnavailable()
 	}
 	if s.RestoreQuiesce != nil {
 		if err := s.RestoreQuiesce(); err != nil {
@@ -393,9 +380,14 @@ func (s *Service) writeStagedRestore(snapshotPath, stagedPath string) error {
 	if err != nil {
 		return fmt.Errorf("create staged db: %w", err)
 	}
-	if _, err := io.Copy(dst, src); err != nil {
+	written, err := io.Copy(dst, src)
+	if err != nil {
 		_ = dst.Close()
 		return fmt.Errorf("copy snapshot: %w", err)
+	}
+	if written == 0 {
+		_ = dst.Close()
+		return errors.New("restore snapshot is empty")
 	}
 	if err := dst.Sync(); err != nil {
 		_ = dst.Close()
@@ -407,6 +399,21 @@ func (s *Service) writeStagedRestore(snapshotPath, stagedPath string) error {
 // Delete removes a snapshot file. Refuses to delete pre-reset recovery
 // snapshots.
 func (s *Service) Delete(name string) error {
+	return s.DeleteContext(context.Background(), name)
+}
+
+// DeleteContext removes a snapshot while honoring cancellation while waiting
+// for shared maintenance admission.
+func (s *Service) DeleteContext(ctx context.Context, name string) error {
+	return s.deleteContext(ctx, name)
+}
+
+func (s *Service) deleteContext(ctx context.Context, name string) error {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	abs, err := s.resolveSnapshotPath(name)
 	if err != nil {
 		return err

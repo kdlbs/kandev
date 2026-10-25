@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 01: Backend log sinks

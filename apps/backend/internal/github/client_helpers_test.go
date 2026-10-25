@@ -2,10 +2,28 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 )
+
+func assertPRCommentHTMLURL(t *testing.T, comment PRComment, want string) {
+	t.Helper()
+	encoded, err := json.Marshal(comment)
+	if err != nil {
+		t.Fatalf("marshal PR comment: %v", err)
+	}
+	var payload struct {
+		HTMLURL string `json:"html_url"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("unmarshal PR comment: %v", err)
+	}
+	if payload.HTMLURL != want {
+		t.Errorf("html_url = %q, want %q", payload.HTMLURL, want)
+	}
+}
 
 // TestNewPRStatus_MarksOutcomeFieldsPopulatedNotClosureAttribution covers
 // AC-10: newPRStatus (the single convergence point for REST and gh CLI
@@ -228,6 +246,14 @@ func (c *feedbackConcurrencyClient) ListCheckRuns(ctx context.Context, _ string,
 	return c.checks, nil
 }
 
+func (c *feedbackConcurrencyClient) ListWorkflowRuns(context.Context, string, string, string) ([]WorkflowRun, error) {
+	return nil, nil
+}
+
+func (c *feedbackConcurrencyClient) ListWorkflowRunJobs(context.Context, string, string, int64, int) ([]WorkflowJob, error) {
+	return nil, nil
+}
+
 func (c *feedbackConcurrencyClient) wait(ctx context.Context, request string) error {
 	c.started <- request
 	if c.fail != "" && c.fail != request {
@@ -374,23 +400,14 @@ func TestConvertRawCheckRunsEmpty(t *testing.T) {
 }
 
 func TestConvertRawComments(t *testing.T) {
-	now := time.Now()
-	raw := []ghComment{
-		{
-			ID:        1,
-			Path:      "main.go",
-			Line:      42,
-			Side:      "RIGHT",
-			Body:      "Looks good",
-			CreatedAt: now,
-			UpdatedAt: now,
-			User: struct {
-				Login     string `json:"login"`
-				AvatarURL string `json:"avatar_url"`
-				Type      string `json:"type"`
-			}{Login: "alice", AvatarURL: "https://avatar.example.com/alice", Type: "User"},
-		},
+	var rawComment ghComment
+	if err := json.Unmarshal([]byte(`{"id":1,"path":"main.go","line":42,"side":"RIGHT","body":"Looks good",
+		"created_at":"2026-01-05T12:00:00Z","updated_at":"2026-01-05T12:00:00Z",
+		"html_url":"https://github.com/acme/widget/pull/42#discussion_r1",
+		"user":{"login":"alice","avatar_url":"https://avatar.example.com/alice","type":"User"}}`), &rawComment); err != nil {
+		t.Fatalf("decode raw comment: %v", err)
 	}
+	raw := []ghComment{rawComment}
 
 	comments := convertRawComments(raw)
 
@@ -412,6 +429,7 @@ func TestConvertRawComments(t *testing.T) {
 	if comments[0].AuthorIsBot {
 		t.Error("expected non-bot comment")
 	}
+	assertPRCommentHTMLURL(t, comments[0], "https://github.com/acme/widget/pull/42#discussion_r1")
 }
 
 func TestConvertRawIssueComments(t *testing.T) {
@@ -502,6 +520,38 @@ func TestConvertRawStatusContextsAndMergeChecks(t *testing.T) {
 	}
 	if merged[1].Conclusion != checkStatusSuccess {
 		t.Errorf("expected success conclusion, got %q", merged[1].Conclusion)
+	}
+}
+
+func TestConvertRawCheckRunsPreservesProviderIdentity(t *testing.T) {
+	conclusion := checkConclusionSuccess
+	checks := convertRawCheckRuns([]ghCheckRun{{
+		ID: 41, Name: "Preview / package", Status: checkStatusCompleted, Conclusion: &conclusion,
+		App: &struct {
+			ID   int64  `json:"id"`
+			Slug string `json:"slug"`
+		}{ID: 17, Slug: "github-actions"},
+		CheckSuite: struct {
+			ID int64 `json:"id"`
+		}{ID: 101},
+	}})
+	if len(checks) != 1 {
+		t.Fatalf("converted checks = %d, want one", len(checks))
+	}
+	if got := checks[0]; got.ID != 41 || got.AppID != 17 || got.AppSlug != "github-actions" || got.CheckSuiteID != 101 {
+		t.Fatalf("provider identity = %+v", got)
+	}
+}
+
+func TestMergeChecksPreservesDistinctProviderIdentity(t *testing.T) {
+	checks := []CheckRun{
+		{ID: 11, AppID: 1, AppSlug: "buildkite", Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionFail},
+		{ID: 12, AppID: 2, AppSlug: "github-actions", Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionSuccess},
+		{ID: 13, AppID: 2, AppSlug: "github-actions", CheckSuiteID: 22, Name: "CI / test", Source: checkSourceCheckRun, Status: "completed", Conclusion: checkConclusionSuccess},
+	}
+	merged := mergeChecks(checks, nil)
+	if len(merged) != len(checks) {
+		t.Fatalf("merged checks = %#v, want all distinct applications and suites", merged)
 	}
 }
 
@@ -653,6 +703,15 @@ func TestHasFailingChecks(t *testing.T) {
 			{Status: "completed", Conclusion: "success"},
 			{Status: "completed", Conclusion: "failure"},
 		}, true},
+		{"cancelled only is not an issue", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionCancelled},
+		}, false},
+		{"timed out", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionTimedOut},
+		}, true},
+		{"action required", []CheckRun{
+			{Status: "completed", Conclusion: checkConclusionActionRequired},
+		}, true},
 		{"in progress", []CheckRun{
 			{Status: "in_progress", Conclusion: ""},
 		}, false},
@@ -697,6 +756,13 @@ func TestCountCheckResults(t *testing.T) {
 			wantTotal: 1, wantPass: 1,
 		},
 		{
+			name: "cancelled is excluded",
+			checks: []CheckRun{
+				{Status: checkStatusCompleted, Conclusion: checkConclusionCancelled},
+			},
+			wantTotal: 0, wantPass: 0,
+		},
+		{
 			name: "failures count toward total but not passing",
 			checks: []CheckRun{
 				{Status: checkStatusCompleted, Conclusion: checkConclusionSuccess},
@@ -714,6 +780,31 @@ func TestCountCheckResults(t *testing.T) {
 					total, passing, tt.wantTotal, tt.wantPass)
 			}
 		})
+	}
+}
+
+func TestCancelledCheckPolicy(t *testing.T) {
+	cancelled := CheckRun{Status: checkStatusCompleted, Conclusion: checkConclusionCancelled}
+	failure := CheckRun{Status: checkStatusCompleted, Conclusion: checkConclusionFail}
+	running := CheckRun{Status: "in_progress"}
+
+	if got := computeOverallCheckStatus([]CheckRun{cancelled}); got != "" {
+		t.Fatalf("cancelled-only status = %q, want empty non-success state", got)
+	}
+	if total, passing := countCheckResults([]CheckRun{cancelled}); total != 0 || passing != 0 {
+		t.Fatalf("cancelled-only counts = (%d, %d), want (0, 0)", total, passing)
+	}
+	if hasFailingChecks([]CheckRun{cancelled}) {
+		t.Fatal("cancelled-only feedback was classified as an issue")
+	}
+	if got := computeOverallCheckStatus([]CheckRun{cancelled, running}); got != checkStatusPending {
+		t.Fatalf("cancelled plus running state = %q, want pending", got)
+	}
+	if got := computeOverallCheckStatus([]CheckRun{cancelled, failure}); got != checkConclusionFail {
+		t.Fatalf("cancelled plus failure state = %q, want failure", got)
+	}
+	if !hasFailingChecks([]CheckRun{{Status: checkStatusCompleted, Conclusion: checkConclusionTimedOut}}) {
+		t.Fatal("timed-out check was not classified as a failure issue")
 	}
 }
 

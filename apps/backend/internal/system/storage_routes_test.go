@@ -169,7 +169,9 @@ func newStorageRoutesTestRouter(t *testing.T) *gin.Engine {
 func newStorageRoutesTestRouterWithMutations(t *testing.T, mutations storage.Mutations) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	router := gin.New()
+	// The synthetic identity is what httpmw injects while auth is disabled, so
+	// this router reproduces single-user mode exactly.
+	router := systemRouterForSyntheticIdentity()
 	connection, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)

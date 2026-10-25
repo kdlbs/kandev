@@ -1,7 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { Repository } from "@/lib/types/http";
+import type { StoreApi } from "zustand";
 import { SpaRoutes } from "./spa-routes";
 
 const mocks = vi.hoisted(() => ({
@@ -10,16 +13,45 @@ const mocks = vi.hoisted(() => ({
   listWorkflows: vi.fn(),
   fetchUserSettings: vi.fn(),
   fetchJson: vi.fn(),
+  tasksPage: vi.fn(),
 }));
 
 const DEFAULT_WORKSPACE_ID = "ws-default";
 const SELECTED_WORKSPACE_ID = "ws-selected";
+const EXISTING_WORKFLOW_ID = "wf-existing";
+const EXISTING_REPOSITORY_ID = "repo-existing";
+const TASKS_PAGE_TEST_ID = "tasks-page";
+const GITHUB_PAGE_TEST_ID = "github-page";
+const WORKSPACE_ID_ATTRIBUTE = "data-workspace-id";
 const TEST_TIMESTAMP = "2026-06-24T00:00:00Z";
+
+let store: StoreApi<AppState>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function CaptureStore() {
+  store = useAppStoreApi();
+  return null;
+}
 
 vi.mock("@/app/github/github-page-client", () => ({
   GitHubPageClient: ({ workspaceId }: { workspaceId?: string }) => (
-    <div data-testid="github-page" data-workspace-id={workspaceId ?? ""} />
+    <div data-testid={GITHUB_PAGE_TEST_ID} data-workspace-id={workspaceId ?? ""} />
   ),
+}));
+
+vi.mock("@/app/tasks/tasks-page-client", () => ({
+  TasksPageClient: (props: unknown) => {
+    const activeId = useAppStoreApi().getState().workspaces.activeId;
+    mocks.tasksPage(props, activeId);
+    return <div data-testid={TASKS_PAGE_TEST_ID} data-workspace-id={activeId ?? ""} />;
+  },
 }));
 
 vi.mock("@/app/page-client", () => ({
@@ -53,8 +85,9 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
+// eslint-disable-next-line max-lines-per-function -- route recovery cases share one boot fixture
 describe("SpaRoutes data-backed workspace context", () => {
-  it("passes the selected workspace to the kanban home client", () => {
+  it("passes the selected workspace to the kanban home client after bootstrap", async () => {
     mockGitHubWorkspaceBootstrap();
     window.history.replaceState({}, "", `/?workspaceId=${SELECTED_WORKSPACE_ID}`);
 
@@ -64,9 +97,11 @@ describe("SpaRoutes data-backed workspace context", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId("kanban-page").getAttribute("data-workspace-id")).toBe(
-      SELECTED_WORKSPACE_ID,
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("kanban-page").getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+        SELECTED_WORKSPACE_ID,
+      );
+    });
   });
 
   it("keeps the currently active workspace when opening GitHub from another workspace", async () => {
@@ -113,7 +148,329 @@ describe("SpaRoutes data-backed workspace context", () => {
 
     await expectSelectedWorkspace();
   });
+
+  it("retains workflows after a failed refresh", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("workflow read failed"));
+    mocks.listRepositories.mockRejectedValueOnce(new Error("repository read failed"));
+    mocks.fetchJson.mockRejectedValueOnce(new Error("step read failed"));
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId(GITHUB_PAGE_TEST_ID)).toBeTruthy());
+    expect(store.getState().workflows.items).toEqual([
+      expect.objectContaining({ id: EXISTING_WORKFLOW_ID }),
+    ]);
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([
+      expect.objectContaining({ id: EXISTING_REPOSITORY_ID }),
+    ]);
+  });
+
+  it("accepts a successful empty list", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(store.getState().workflows.items).toEqual([]));
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([]);
+  });
+
+  it("applies partial successes", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockResolvedValueOnce({
+      workflows: [workflow("wf-new", SELECTED_WORKSPACE_ID)],
+    });
+    mocks.listRepositories.mockRejectedValueOnce(new Error("repository read failed"));
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() =>
+      expect(store.getState().workflows.items).toEqual([expect.objectContaining({ id: "wf-new" })]),
+    );
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([
+      expect.objectContaining({ id: EXISTING_REPOSITORY_ID }),
+    ]);
+    expect(store.getState().workspaceContextRead.errors.repositories).toBe("transient");
+  });
+
+  it("settles route-owned pending reads before recovering a later transient failure", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const oldWorkflows = deferred<{ workflows: Array<Record<string, unknown>> }>();
+    const oldRepositories = deferred<{ repositories: Repository[] }>();
+    const oldSteps = deferred<{ steps: Array<Record<string, unknown>>; total: number }>();
+    mocks.listWorkflows.mockReturnValueOnce(oldWorkflows.promise);
+    mocks.listRepositories.mockReturnValueOnce(oldRepositories.promise);
+    mocks.fetchJson.mockReturnValueOnce(oldSteps.promise);
+
+    const first = render(
+      <StateProvider>
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.pending).toMatchObject({
+        workflows: true,
+        repositories: true,
+        steps: true,
+      }),
+    );
+    first.unmount();
+    expect(store.getState().workspaceContextRead.pending).toEqual({
+      workflows: false,
+      repositories: false,
+      steps: false,
+    });
+
+    await act(async () => {
+      oldWorkflows.resolve({ workflows: [] });
+      oldRepositories.resolve({ repositories: [] });
+      oldSteps.resolve({ steps: [], total: 0 });
+    });
+
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("temporary workflow failure"));
+    mocks.listRepositories.mockResolvedValueOnce({ repositories: [] });
+    mocks.fetchJson.mockResolvedValueOnce({ steps: [], total: 0 });
+    const second = render(
+      <StateProvider>
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.errors.workflows).toBe("transient"),
+    );
+
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+    act(() => store.getState().requestWorkspaceContextRefresh());
+    await waitFor(() => expect(store.getState().workspaceContextRead.errors.workflows).toBeNull());
+    second.unmount();
+  });
 });
+
+describe("Tasks URL workspace ownership", () => {
+  it("marks metadata ready only after the route reads finish, including empty lists", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const workflows = deferred<{ workflows: never[] }>();
+    mocks.listWorkflows.mockReturnValueOnce(workflows.promise);
+    window.history.replaceState({}, "", `/tasks?workspace=${DEFAULT_WORKSPACE_ID}&workflow=all`);
+    renderTasksWorkspace();
+    await waitFor(() => expect(mocks.listWorkflows).toHaveBeenCalled());
+    expect(screen.getByRole("status").textContent).toContain("Tasks");
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    await act(async () => workflows.resolve({ workflows: [] }));
+    await waitFor(() =>
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: true,
+        repositories: true,
+      }),
+    );
+  });
+
+  // @covers AC-TASKS-LIST-ARCHIVE-FILTERS-004.1
+  it("activates the URL workspace before mounting List and retains the complete query", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const href = `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived&workflow=all&repository=all&q=needle&sort=title_desc&group=none`;
+    window.history.replaceState({}, "", href);
+    renderTasksWorkspace();
+
+    await waitFor(() =>
+      expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+        SELECTED_WORKSPACE_ID,
+      ),
+    );
+    expect(mocks.tasksPage.mock.calls.every((call) => call[1] === SELECTED_WORKSPACE_ID)).toBe(
+      true,
+    );
+    expect(window.location.pathname + window.location.search).toBe(href);
+    expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, expect.anything());
+  });
+
+  it("does not broaden an unknown URL workspace to the saved workspace", async () => {
+    mockGitHubWorkspaceBootstrap();
+    window.history.replaceState({}, "", "/tasks?workspace=missing&archive=archived");
+    renderTasksWorkspace();
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Workspace not found");
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    expect(mocks.listWorkflows).not.toHaveBeenCalled();
+    expect(store.getState().workspaces.activeId).toBe(DEFAULT_WORKSPACE_ID);
+  });
+
+  it("retries a failed workspace lookup without exposing its internal error", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error("private workspace diagnostic"));
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived`,
+    );
+    renderTasksWorkspace();
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Failed to load route");
+    expect(screen.queryByText("private workspace diagnostic")).toBeNull();
+    expect(mocks.tasksPage).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+        SELECTED_WORKSPACE_ID,
+      ),
+    );
+  });
+
+  it("resolves each workspace when history changes an already mounted List", async () => {
+    mockGitHubWorkspaceBootstrap();
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?workspace=${SELECTED_WORKSPACE_ID}&archive=archived`,
+    );
+    renderTasksWorkspace();
+    await waitFor(() => expect(store.getState().workspaces.activeId).toBe(SELECTED_WORKSPACE_ID));
+
+    for (const workspaceId of [DEFAULT_WORKSPACE_ID, SELECTED_WORKSPACE_ID]) {
+      const href = `/tasks?workspace=${workspaceId}&archive=archived&q=retained&workflow=all&repository=all`;
+      await act(async () => {
+        window.history.pushState({}, "", href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId(TASKS_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
+          workspaceId,
+        ),
+      );
+      expect(window.location.pathname + window.location.search).toBe(href);
+    }
+  });
+});
+
+it.each(["workflows", "repositories"] as const)(
+  "keeps successful metadata ready when the %s read fails",
+  async (failed) => {
+    mockGitHubWorkspaceBootstrap();
+    const read = failed === "workflows" ? mocks.listWorkflows : mocks.listRepositories;
+    read.mockRejectedValueOnce(new Error("metadata read failed"));
+    window.history.replaceState({}, "", `/tasks?workspace=${SELECTED_WORKSPACE_ID}`);
+    renderTasksWorkspace();
+    await waitFor(() =>
+      expect(mocks.tasksPage.mock.calls.at(-1)?.[0].initialMetadataLoaded).toEqual({
+        workflows: failed !== "workflows",
+        repositories: failed !== "repositories",
+      }),
+    );
+  },
+);
+
+function renderTasksWorkspace() {
+  return render(
+    <StateProvider
+      initialState={{
+        workspaces: {
+          items: [workspaceState(DEFAULT_WORKSPACE_ID), workspaceState(SELECTED_WORKSPACE_ID)],
+          activeId: DEFAULT_WORKSPACE_ID,
+        },
+      }}
+    >
+      <CaptureStore />
+      <SpaRoutes />
+    </StateProvider>,
+  );
+}
 
 function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: Error } = {}) {
   window.history.replaceState({}, "", "/github");
@@ -141,13 +498,18 @@ function mockGitHubWorkspaceBootstrap({ workspacesError }: { workspacesError?: E
 
 async function expectSelectedWorkspace() {
   await waitFor(() => {
-    expect(screen.getByTestId("github-page").getAttribute("data-workspace-id")).toBe(
+    expect(screen.getByTestId(GITHUB_PAGE_TEST_ID).getAttribute(WORKSPACE_ID_ATTRIBUTE)).toBe(
       SELECTED_WORKSPACE_ID,
     );
   });
-  expect(mocks.listWorkflows).toHaveBeenCalledWith(SELECTED_WORKSPACE_ID, {
-    cache: "no-store",
-  });
+  expect(mocks.listWorkflows).toHaveBeenCalledWith(
+    SELECTED_WORKSPACE_ID,
+    expect.objectContaining({
+      cache: "no-store",
+      includeHidden: false,
+      init: { signal: expect.any(AbortSignal) },
+    }),
+  );
 }
 
 function workspace(id: string) {
@@ -180,4 +542,28 @@ function workflow(id: string, workspaceId: string) {
     created_at: TEST_TIMESTAMP,
     updated_at: TEST_TIMESTAMP,
   };
+}
+
+function repository(id: string): Repository {
+  return {
+    id,
+    workspace_id: SELECTED_WORKSPACE_ID,
+    name: id,
+    source_type: "local",
+    path: `/tmp/${id}`,
+    local_path: `/tmp/${id}`,
+    provider: "",
+    provider_repo_id: "",
+    provider_owner: "",
+    provider_name: "",
+    default_branch: "main",
+    worktree_branch_prefix: "task/",
+    pull_before_worktree: false,
+    setup_script: "",
+    cleanup_script: "",
+    dev_script: "",
+    copy_files: "",
+    created_at: TEST_TIMESTAMP,
+    updated_at: TEST_TIMESTAMP,
+  } as unknown as Repository;
 }

@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/missing-task-route-recovery/spec.md"
+spec: "../../specs/tasks/requirements/missing-task-route-recovery.md"
 ---
 
 # Task 01: Restore fallback boot context

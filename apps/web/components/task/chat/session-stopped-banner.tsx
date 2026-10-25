@@ -1,22 +1,23 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import {
-  IconAlertTriangle,
-  IconCircleCheck,
-  IconPlayerPlay,
-  IconPlus,
-  IconRefresh,
-} from "@tabler/icons-react";
+import { IconAlertTriangle, IconCircleCheck, IconPlayerStop } from "@tabler/icons-react";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAppStore } from "@/components/state-provider";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
+import {
+  useSessionRecoveryActions,
+  type SessionRecoveryActions,
+} from "@/hooks/domains/session/use-session-recovery-actions";
+import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
 
 export type SessionStoppedBannerMode = "recoverable" | "completed";
-
 export type SessionStoppedBannerProps = {
   mode: SessionStoppedBannerMode;
   showDialog: boolean;
@@ -28,184 +29,481 @@ export type SessionStoppedBannerProps = {
   detail?: string;
   resumeLabel?: string;
   resumingLabel?: string;
+  uncertainDelivery?: boolean;
+  deliveryRecoveryPhase?: "reconnecting" | "uncertain";
+  recoveryActions?: SessionRecoveryActions;
 };
 
-async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: "resume" | "fresh_start",
-): Promise<boolean> {
-  const client = getWebSocketClient();
-  if (!client) return false;
-  try {
-    await client.request(
-      "session.recover",
-      { task_id: taskId, session_id: sessionId, action },
-      30000,
-    );
-    return true;
-  } catch {
-    return false;
+export function useSessionProfileExists(sessionId: string | null): boolean {
+  return useAppStore((s) => {
+    const profileId = sessionId ? s.taskSessions.items[sessionId]?.agent_profile_id : null;
+    return Boolean(profileId && s.agentProfiles.items.some((profile) => profile.id === profileId));
+  });
+}
+
+type RecoveryTranslator = ReturnType<typeof useTranslation>["t"];
+type StoppedRecoveryProps = SessionStoppedBannerProps & { actions: SessionRecoveryActions };
+
+function managedCloneRecoveryChoice(onRelocateRequested: () => void, t: RecoveryTranslator) {
+  return {
+    kind: "relocate_and_resume" as const,
+    label: t("task:managedCloneRelocateResume"),
+    testId: "managed-clone-relocate-button",
+    onClick: onRelocateRequested,
+  };
+}
+
+function uncertainDeliveryRecoveryChoices(
+  props: StoppedRecoveryProps,
+  t: RecoveryTranslator,
+): RecoveryChoice[] {
+  if (!props.taskId || !props.sessionId) return [];
+  const choices: RecoveryChoice[] = [];
+  if (props.actions.deliveryHistoryGap || props.actions.deliveryResumeAvailable) {
+    choices.push({
+      kind: "resume",
+      label: t("task:resume"),
+      testId: "recovery-resume-button",
+      onClick: () => void props.actions.handleRecover("resume"),
+    });
+  }
+  if (!props.actions.deliveryHistoryGap) {
+    choices.push({
+      kind: "retry_connection",
+      label: t("task:retryConnection"),
+      testId: "recovery-retry-connection-button",
+      onClick: () => void props.actions.handleRecover("retry_connection"),
+    });
+  }
+  return choices;
+}
+
+function sessionRecoveryChoices(
+  props: StoppedRecoveryProps,
+  profileExists: boolean,
+  t: RecoveryTranslator,
+): RecoveryChoice[] {
+  const choices: RecoveryChoice[] = [];
+  const { recoveryError, handleRecover, handleRetry } = props.actions;
+  const completed = props.mode === "completed";
+
+  if (props.taskId && props.sessionId) {
+    choices.push({
+      kind: "resume",
+      label: props.resumeLabel ?? t("task:resume"),
+      disclosure:
+        !completed && props.actions.providerRestoredResumeEligible
+          ? t("task:providerRestoredResumeDisclosure")
+          : undefined,
+      disabled: !profileExists,
+      testId: "recovery-resume-button",
+      onClick: () => {
+        if (recoveryError) void handleRetry();
+        else void handleRecover("resume");
+      },
+    });
+  }
+  if (props.taskId) {
+    choices.push({
+      kind: "fresh_start",
+      label: completed ? t("task:newAgent") : t("task:startFreshSession"),
+      testId: completed ? "completed-session-new-agent-button" : "recovery-fresh-button",
+      onClick: () => {
+        if (completed || !profileExists) props.onShowDialog(true);
+        else void handleRecover("fresh_start");
+      },
+    });
+  }
+  return choices;
+}
+
+function addOptionalRecoveryChoices(
+  choices: RecoveryChoice[],
+  actions: SessionRecoveryActions,
+  t: RecoveryTranslator,
+) {
+  if (actions.recoveryError && !actions.guardDetails) {
+    choices.push({
+      kind: "restore",
+      label: t("task:restoreReadOnlyWorkspace"),
+      testId: "recovery-restore-workspace-button",
+      onClick: () => void actions.handleRestore(),
+    });
+  }
+  if (actions.branchDetails) {
+    choices.push({
+      kind: "resume_new_branch",
+      label: t("task:continueOnNewBranch"),
+      testId: "recovery-new-branch-button",
+      onClick: () => void actions.handleNewBranch(),
+    });
+  }
+  if (actions.continuationDetails) {
+    choices.push({
+      kind: "continue_from_history",
+      label: t("task:continueFromHistory"),
+      testId: "recovery-continue-from-history-button",
+      onClick: () => void actions.handleContinueFromHistory(),
+    });
   }
 }
 
-function RecoverableSessionActions({
-  onShowDialog,
+function useStoppedRecoveryChoices(
+  props: StoppedRecoveryProps,
+  profileExists: boolean,
+  onRelocateRequested: () => void,
+): RecoveryChoice[] {
+  const { t } = useTranslation();
+  if (props.uncertainDelivery && props.mode !== "completed") {
+    return uncertainDeliveryRecoveryChoices(props, t);
+  }
+
+  if (props.actions.recoveryNoticeKind === "inspection_busy") {
+    return [
+      {
+        kind: "resume",
+        label: props.resumeLabel ?? t("task:resume"),
+        disabled: !profileExists,
+        testId: "recovery-resume-button",
+        onClick: () => void props.actions.handleRetry(),
+      },
+    ];
+  }
+
+  if (
+    props.actions.managedCloneRecoveryStamp ||
+    props.actions.workspaceRecoveryMatchesCurrentFailure
+  ) {
+    return [managedCloneRecoveryChoice(onRelocateRequested, t)];
+  }
+  const choices = sessionRecoveryChoices(props, profileExists, t);
+  addOptionalRecoveryChoices(choices, props.actions, t);
+  return choices;
+}
+
+function UncertainDeliveryActions({
+  actions,
+  busyAction,
+  blocked,
   taskId,
   sessionId,
-  resumeLabel,
-  resumingLabel,
-}: Pick<
-  SessionStoppedBannerProps,
-  "onShowDialog" | "taskId" | "sessionId" | "resumeLabel" | "resumingLabel"
->) {
+}: {
+  actions: RecoveryChoice[];
+  busyAction: SessionRecoveryActions["busyAction"];
+  blocked: boolean;
+  taskId: string | null;
+  sessionId: string | null;
+}) {
   const { t } = useTranslation();
-  const resumeText = resumeLabel ?? t("task:resume");
-  const resumingText = resumingLabel ?? t("task:resuming");
-  const [isResuming, setIsResuming] = useState(false);
-  const [isStartingFresh, setIsStartingFresh] = useState(false);
-
-  const profileExists = useAppStore((s) => {
-    if (!sessionId) return false;
-    const agentProfileId = s.taskSessions.items[sessionId]?.agent_profile_id;
-    return (
-      !!agentProfileId && s.agentProfiles.items.some((p: { id: string }) => p.id === agentProfileId)
-    );
-  });
-
-  const handleRecover = useCallback(
-    async (action: "resume" | "fresh_start") => {
-      if (!sessionId || !taskId) return;
-      const setBusy = action === "resume" ? setIsResuming : setIsStartingFresh;
-      setBusy(true);
-      const ok = await requestSessionRecover(taskId, sessionId, action);
-      if (!ok) setBusy(false);
-    },
-    [sessionId, taskId],
-  );
-
-  const handleResume = useCallback(() => handleRecover("resume"), [handleRecover]);
-  const handleFreshStart = useCallback(() => {
-    if (!profileExists) {
-      onShowDialog(true);
-      return;
+  const { stop } = useSessionActions({ taskId, sessionId });
+  const [stopping, setStopping] = useState(false);
+  const [stopFailed, setStopFailed] = useState(false);
+  const [stopRequested, setStopRequested] = useState(false);
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    setStopFailed(false);
+    try {
+      if (await stop()) setStopRequested(true);
+      else setStopFailed(true);
+    } catch {
+      setStopFailed(true);
+    } finally {
+      setStopping(false);
     }
-    void handleRecover("fresh_start");
-  }, [profileExists, onShowDialog, handleRecover]);
+  }, [stop]);
 
   return (
-    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-      {sessionId && taskId && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span
-              className="inline-flex w-full sm:w-auto"
-              data-testid="failed-session-resume-wrapper"
-            >
-              <Button
-                variant="default"
-                size="sm"
-                data-testid="recovery-resume-button"
-                className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-                onClick={handleResume}
-                disabled={isResuming || !profileExists}
-              >
-                <IconPlayerPlay className="h-3.5 w-3.5" />
-                {isResuming ? resumingText : resumeText}
-              </Button>
-            </span>
-          </TooltipTrigger>
-          {!profileExists && (
-            <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
-          )}
-        </Tooltip>
+    <div className="min-w-0">
+      <RecoveryActions
+        actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
+        busy={busyAction !== null}
+        busyAction={busyAction}
+        blocked={blocked}
+        trailingActions={
+          <Button
+            type="button"
+            variant="outline"
+            aria-label={t("task:stop")}
+            disabled={stopping || !taskId || !sessionId}
+            onClick={() => void handleStop()}
+            data-testid="recovery-stop-button"
+            className={controlSizingClassName(
+              "standard",
+              "h-auto min-h-7 w-full cursor-pointer gap-1.5 whitespace-normal py-0.5 md:w-auto",
+            )}
+          >
+            <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
+            {stopping ? t("task:stopping") : t("task:stop")}
+          </Button>
+        }
+      />
+      {stopFailed && (
+        <p
+          role="status"
+          data-testid="delivery-stop-failed"
+          className="mt-2 text-xs text-muted-foreground"
+        >
+          {t("task:deliveryStopFailed")}
+        </p>
       )}
-      <Button
-        variant="outline"
-        size="sm"
-        className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-        onClick={handleFreshStart}
-        disabled={isStartingFresh}
-        data-testid="recovery-fresh-button"
-      >
-        <IconRefresh className="h-3.5 w-3.5" />
-        {isStartingFresh ? t("task:starting") : t("task:startFreshSession")}
-      </Button>
+      {stopRequested && (
+        <p
+          role="status"
+          data-testid="delivery-stop-outcome-unconfirmed"
+          className="text-xs text-muted-foreground"
+        >
+          {t("task:deliveryStopOutcomeUnconfirmed")}
+        </p>
+      )}
     </div>
   );
 }
 
-export function SessionStoppedBanner({
-  mode,
-  showDialog,
-  onShowDialog,
-  taskId,
-  sessionId,
-  workspaceId,
-  message,
-  detail,
-  resumeLabel,
-  resumingLabel,
-}: SessionStoppedBannerProps) {
-  const { t } = useTranslation();
-  const isCompleted = mode === "completed";
-  const bannerMessage = isCompleted
-    ? t("task:sessionCompleted")
-    : (message ?? t("task:agentHasStopped"));
+function stoppedRecoveryCause(
+  actions: SessionRecoveryActions,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (actions.branchDetails) return t("task:branchIsNoLongerAvailable");
+  const message = actions.guardDetails
+    ? sanitizeSessionErrorDetails(actions.recoveryError?.message, 240)
+    : "";
+  const fallback =
+    actions.manualRecoveryFailure?.operation === "restore_workspace"
+      ? t("task:failedToRestoreWorkspace")
+      : t("task:failedToResumeSession");
+  return message || fallback;
+}
 
+function stoppedSessionTitle(
+  state: {
+    completed: boolean;
+    managedCloneRecovery: boolean;
+    uncertainDelivery: boolean;
+    deliveryRecoveryPhase: "reconnecting" | "uncertain" | undefined;
+    message: string;
+  },
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (state.managedCloneRecovery) return t("task:managedCloneRelocationTitle");
+  if (state.completed) return t("task:sessionCompleted");
+  if (state.uncertainDelivery && state.deliveryRecoveryPhase === "reconnecting") {
+    return t("task:durableDeliveryReconnecting");
+  }
+  if (state.uncertainDelivery) return t("task:durableDeliveryUncertain");
+  return sanitizeSessionErrorDetails(state.message, 240) || t("task:agentHasStopped");
+}
+
+function stoppedRecoveryErrorMessage(
+  actions: SessionRecoveryActions,
+  managedCloneRecovery: boolean,
+  cause: string,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (!actions.recoveryError) return null;
+  if (managedCloneRecovery && actions.lastFailedAction !== "relocate_and_resume") return null;
+  if (managedCloneRecovery) return t("task:failedToResumeSession");
+  return cause;
+}
+
+function StoppedSessionMessages({
+  props,
+  title,
+  profileExists,
+  managedCloneRecovery,
+  recoveryErrorMessage,
+}: {
+  props: StoppedRecoveryProps;
+  title: string;
+  profileExists: boolean;
+  managedCloneRecovery: boolean;
+  recoveryErrorMessage: string | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <p className="wrap-anywhere text-sm">{title}</p>
+      {managedCloneRecovery && !props.actions.workspaceRecovery && (
+        <p className="mt-1 wrap-anywhere text-sm text-muted-foreground">
+          {t("task:managedCloneRelocationBody")}
+        </p>
+      )}
+      {props.sessionId && !profileExists && (
+        <p className="mt-1 text-xs text-muted-foreground">{t("task:agentProfileNoLongerExists")}</p>
+      )}
+      {recoveryErrorMessage && (
+        <p
+          role="status"
+          data-testid="session-recovery-error"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {recoveryErrorMessage}
+        </p>
+      )}
+      {props.actions.recoveryNotice && (
+        <p role="status" className="mt-1 text-xs text-muted-foreground">
+          {props.actions.recoveryNotice}
+        </p>
+      )}
+      {props.actions.deliveryRecoveryNotice && (
+        <p
+          role="status"
+          data-testid="delivery-recovery-result"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {props.actions.deliveryRecoveryNotice}
+        </p>
+      )}
+    </>
+  );
+}
+
+function StoppedSessionRecoveryControls({
+  props,
+  choices,
+  blocked,
+}: {
+  props: StoppedRecoveryProps;
+  choices: RecoveryChoice[];
+  blocked: boolean;
+}) {
+  const { busyAction } = props.actions;
+  if (props.uncertainDelivery && props.mode !== "completed") {
+    return (
+      <UncertainDeliveryActions
+        actions={choices}
+        busyAction={busyAction}
+        blocked={blocked}
+        taskId={props.taskId}
+        sessionId={props.sessionId}
+      />
+    );
+  }
+  return (
+    <RecoveryActions
+      actions={choices}
+      busy={busyAction !== null}
+      busyAction={busyAction}
+      blocked={blocked}
+      workspaceRecovery={
+        choices.some((choice) => choice.kind === "relocate_and_resume") ||
+        props.actions.workspaceRecovery?.runner_live
+          ? props.actions.workspaceRecovery
+          : null
+      }
+      workspaceRecoveryReadyApplies={props.actions.workspaceRecoveryMatchesCurrentFailure ?? false}
+      workspaceRecoveryRepositoryName={props.actions.workspaceRecoveryRepositoryName}
+      workspaceRecoveryStatusCheck={
+        props.actions.managedCloneRecoveryStamp ||
+        props.actions.workspaceRecoveryMatchesCurrentFailure ||
+        props.actions.workspaceRecovery?.runner_live
+          ? props.actions.workspaceRecoveryStatusCheck
+          : "idle"
+      }
+      onCheckWorkspaceRecoveryStatus={() => void props.actions.checkWorkspaceRecoveryStatus()}
+    />
+  );
+}
+
+function StoppedSessionContent(props: StoppedRecoveryProps) {
+  const { t } = useTranslation();
+  const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
+  const profileExists = useSessionProfileExists(props.sessionId);
+  const { busyAction, guardDetails } = props.actions;
+  const completed = props.mode === "completed";
+  const blocked = Boolean(guardDetails && !guardDetails.retryable);
+  const managedCloneRecovery =
+    Boolean(props.actions.managedCloneRecoveryStamp) ||
+    props.actions.workspaceRecoveryMatchesCurrentFailure === true;
+  const choices = useStoppedRecoveryChoices(props, profileExists, () =>
+    setRelocationConfirmationOpen(true),
+  );
+  const cause = stoppedRecoveryCause(props.actions, t);
+  const recoveryErrorMessage = stoppedRecoveryErrorMessage(
+    props.actions,
+    managedCloneRecovery,
+    cause,
+    t,
+  );
+  const title = props.actions.deliveryHistoryGap
+    ? t("task:deliveryHistoryGapTitle")
+    : stoppedSessionTitle(
+        {
+          completed,
+          managedCloneRecovery,
+          uncertainDelivery: Boolean(props.uncertainDelivery),
+          deliveryRecoveryPhase: props.deliveryRecoveryPhase,
+          message: props.message ?? "",
+        },
+        t,
+      );
+  const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
       <div
-        data-testid={isCompleted ? "completed-session-banner" : "failed-session-banner"}
-        data-session-stopped-mode={mode}
-        className="overflow-hidden rounded border border-border"
+        data-testid={completed ? "completed-session-banner" : "failed-session-banner"}
+        data-session-stopped-mode={props.mode}
+        className="min-w-0 rounded border border-border p-3"
       >
-        <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 flex-1 items-start gap-2 text-sm text-muted-foreground">
-            {isCompleted ? (
-              <IconCircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-green-500" />
-            ) : (
-              <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+        <div className="flex min-w-0 items-start gap-2">
+          <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <StoppedSessionMessages
+              props={props}
+              title={title}
+              profileExists={profileExists}
+              managedCloneRecovery={managedCloneRecovery}
+              recoveryErrorMessage={recoveryErrorMessage}
+            />
+            <StoppedSessionRecoveryControls props={props} choices={choices} blocked={blocked} />
+            {props.actions.deliveryHistoryGap && (
+              <SessionErrorDetails>
+                {t("task:deliveryHistoryGapRange", {
+                  first: props.actions.deliveryHistoryGap.firstSequence,
+                  last: props.actions.deliveryHistoryGap.lastSequence,
+                })}
+              </SessionErrorDetails>
             )}
-            <span className="min-w-0 break-words">{bannerMessage}</span>
-            {detail && (
-              <span className="min-w-0 break-words text-xs text-muted-foreground">({detail})</span>
+            {!props.uncertainDelivery && (
+              <SessionErrorDetails>
+                {[props.message, props.detail, props.actions.recoveryError?.message]
+                  .filter(Boolean)
+                  .join("\n")}
+              </SessionErrorDetails>
             )}
           </div>
-
-          {isCompleted ? (
-            <Button
-              variant="default"
-              size="sm"
-              data-testid="completed-session-new-agent-button"
-              className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:w-auto"
-              onClick={() => {
-                if (taskId) onShowDialog(true);
-              }}
-              disabled={!taskId}
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-              {t("task:newAgent")}
-            </Button>
-          ) : (
-            <RecoverableSessionActions
-              onShowDialog={onShowDialog}
-              taskId={taskId}
-              sessionId={sessionId}
-              resumeLabel={resumeLabel}
-              resumingLabel={resumingLabel}
-            />
-          )}
         </div>
       </div>
-      {taskId && (
+      {props.taskId && (
         <NewSessionDialog
-          open={showDialog}
-          onOpenChange={onShowDialog}
-          taskId={taskId}
-          workspaceId={workspaceId}
+          open={props.showDialog}
+          onOpenChange={props.onShowDialog}
+          taskId={props.taskId}
+          workspaceId={props.workspaceId}
         />
       )}
+      <ManagedCloneRelocationConfirmation
+        open={relocationConfirmationOpen}
+        targetKey={`${props.sessionId ?? ""}:${props.actions.managedCloneRecoveryStamp ?? ""}`}
+        onOpenChange={setRelocationConfirmationOpen}
+        onConfirm={() => props.actions.handleManagedCloneRelocation()}
+        disabled={busyAction !== null}
+      />
     </>
+  );
+}
+
+function LocalStoppedSession(props: SessionStoppedBannerProps) {
+  const actions = useSessionRecoveryActions({
+    taskId: props.taskId ?? "",
+    sessionId: props.sessionId ?? "",
+  });
+  return <StoppedSessionContent {...props} actions={actions} />;
+}
+
+export function SessionStoppedBanner(props: SessionStoppedBannerProps) {
+  return props.recoveryActions ? (
+    <StoppedSessionContent {...props} actions={props.recoveryActions} />
+  ) : (
+    <LocalStoppedSession {...props} />
   );
 }

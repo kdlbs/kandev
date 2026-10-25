@@ -6,7 +6,7 @@ import { type Page, expect } from "@playwright/test";
 import { dwell } from "../../helpers/causal-waits";
 
 export async function tapTerminalTab(testPage: Page): Promise<void> {
-  await testPage.getByRole("button", { name: "Terminal" }).tap();
+  await testPage.getByRole("button", { name: "Terminal", exact: true }).tap();
 }
 
 export async function switchToTerminalPanel(testPage: Page): Promise<void> {
@@ -39,7 +39,7 @@ export async function focusTerminalForTyping(testPage: Page): Promise<void> {
 }
 
 async function remountTerminalPanel(testPage: Page): Promise<void> {
-  const chatTab = testPage.getByRole("button", { name: "Chat" });
+  const chatTab = testPage.getByRole("button", { name: "Chat", exact: true });
   if (await chatTab.isVisible()) {
     await chatTab.tap();
     // The point of the detour through Chat is to unmount the terminal panel, so

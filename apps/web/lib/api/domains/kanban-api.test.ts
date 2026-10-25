@@ -2,12 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachTaskWorkspaceSources,
   detachTask,
+  deleteTaskAfterUserAction,
+  deleteTask,
+  getTaskDeletePreflight,
   listTasksByWorkspace,
+  querySidebarTasks,
+  moveTask,
+  previewWorkflowMove,
+  previewTaskWorkspaceSources,
+  reorderStepTasks,
+  updateTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
+import { ApiError } from "../client";
 
 const fetchSpy = vi.fn<typeof fetch>();
 const API_BASE_URL = "http://api.test";
+const CONFIRMATION_ID = "confirmation-1";
+const SECOND_CONFIRMATION_ID = "confirmation-2";
+const WORKFLOW_ID = "workflow-1";
 
 beforeEach(() => {
   fetchSpy.mockReset();
@@ -15,6 +28,137 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("deleteTask", () => {
+  it("sends cascade and discard consent independently", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await deleteTask(
+      "task-1",
+      {
+        cascade: true,
+        discardWorktreeChanges: true,
+        confirmationId: CONFIRMATION_ID,
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(
+      `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
+    );
+    expect(init?.method).toBe("DELETE");
+    expect(new Headers(init?.headers).get("X-Kandev-Task-Delete-Confirmation")).toBe(
+      CONFIRMATION_ID,
+    );
+  });
+});
+
+describe("moveTask completion override", () => {
+  it("binds a human override to the selected task move", async () => {
+    const taskId = "task-1";
+    const workflowId = WORKFLOW_ID;
+    const completionStepId = "step-done";
+    const overrideReason = "Accepted by the release owner";
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ task: { id: taskId, workflow_step_id: completionStepId } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await moveTask(
+      taskId,
+      {
+        workflow_id: workflowId,
+        workflow_step_id: completionStepId,
+        completion_override: { expected_revision: 4, reason: overrideReason },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy.mock.calls[0]).toMatchObject([
+      `${API_BASE_URL}/api/v1/tasks/${taskId}/move`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: workflowId,
+          workflow_step_id: completionStepId,
+          completion_override: { expected_revision: 4, reason: overrideReason },
+        }),
+      },
+    ]);
+  });
+});
+
+describe("getTaskDeletePreflight", () => {
+  it("posts the exact scope and bypasses caches", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ requires_discard_consent: true, confirmation_id: CONFIRMATION_ID }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await expect(
+      getTaskDeletePreflight(["task-1", "task-2"], true, true, { baseUrl: API_BASE_URL }),
+    ).resolves.toEqual({ requires_discard_consent: true, confirmation_id: CONFIRMATION_ID });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/delete-preflight`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        task_ids: ["task-1", "task-2"],
+        cascade: true,
+        discard_worktree_changes: true,
+      }),
+      cache: "no-store",
+    });
+  });
+});
+
+describe("deleteTaskAfterUserAction", () => {
+  it("records a fresh native preview before a confirmed app cleanup", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            requires_discard_consent: false,
+            confirmation_id: SECOND_CONFIRMATION_ID,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await deleteTaskAfterUserAction("task-1", { cascade: true }, { baseUrl: API_BASE_URL });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [, previewInit] = fetchSpy.mock.calls[0];
+    expect(previewInit).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        task_ids: ["task-1"],
+        cascade: true,
+        discard_worktree_changes: false,
+      }),
+    });
+    const [deleteUrl, deleteInit] = fetchSpy.mock.calls[1];
+    expect(deleteUrl).toBe(`${API_BASE_URL}/api/v1/tasks/task-1?cascade=true`);
+    expect(new Headers(deleteInit?.headers).get("X-Kandev-Task-Delete-Confirmation")).toBe(
+      SECOND_CONFIRMATION_ID,
+    );
+  });
+});
 
 describe("detachTask", () => {
   it("posts without a body to the canonical detach endpoint", async () => {
@@ -32,6 +176,112 @@ describe("detachTask", () => {
     expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/child-1/detach`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
+  });
+});
+
+describe("updateTask", () => {
+  it("carries priority as a partial-update field", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: "task-1", priority: "critical" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await updateTask("task-1", { priority: "critical" }, { baseUrl: API_BASE_URL });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1`);
+    expect(init).toMatchObject({
+      method: "PATCH",
+      body: JSON.stringify({ priority: "critical" }),
+    });
+  });
+});
+
+describe("reorderStepTasks", () => {
+  it("PUTs the band and ordered ids to the hyphenated collection route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          workflow_step_id: "step-1",
+          revision: 1,
+          tasks: [
+            { id: "task-b", position: 0 },
+            { id: "task-a", position: 1 },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await reorderStepTasks(
+      "step-1",
+      { band: "admitted", ordered_task_ids: ["task-b", "task-a"] },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/workflow-steps/step-1/tasks/reorder`);
+    expect(init?.method).toBe("PUT");
+    expect(init?.body).toBe(
+      JSON.stringify({ band: "admitted", ordered_task_ids: ["task-b", "task-a"] }),
+    );
+    expect(result.revision).toBe(1);
+    expect(result.tasks).toEqual([
+      { id: "task-b", position: 0 },
+      { id: "task-a", position: 1 },
+    ]);
+  });
+
+  it("surfaces a step_changed conflict as an ApiError carrying the authoritative order", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          code: "step_changed",
+          workflow_step_id: "step-1",
+          revision: 3,
+          tasks: [{ id: "task-a", position: 0 }],
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      reorderStepTasks(
+        "step-1",
+        { band: "admitted", ordered_task_ids: ["task-a"] },
+        { baseUrl: API_BASE_URL },
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      body: { code: "step_changed", revision: 3 },
+    });
+  });
+
+  it("surfaces an invalid_reorder rejection with no task list", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "invalid_reorder" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await reorderStepTasks(
+        "step-1",
+        { band: "admitted", ordered_task_ids: [] },
+        { baseUrl: API_BASE_URL },
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(400);
+    expect((caught as ApiError).body).toEqual({ code: "invalid_reorder" });
   });
 });
 
@@ -113,6 +363,52 @@ describe("attachTaskWorkspaceSources", () => {
   });
 });
 
+describe("previewTaskWorkspaceSources", () => {
+  it("posts placement and returns the server preview", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: "task-1",
+          revision: "rev-1",
+          workspace_path: "/workspace/task-1/repo",
+          placement: "kandev_directory",
+          sources: [
+            {
+              repository_id: "repo-1",
+              repository_name: "payments",
+              workspace_relative_path: "repo/kandev/payments",
+            },
+          ],
+          supported_placements: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      previewTaskWorkspaceSources(
+        "task-1",
+        {
+          sources: [{ kind: "repository", repository_id: "repo-1", base_branch: "main" }],
+          repository_placement: "kandev_directory",
+        },
+        { baseUrl: API_BASE_URL },
+      ),
+    ).resolves.toMatchObject({ revision: "rev-1", placement: "kandev_directory" });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/workspace-sources/preview`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        sources: [{ kind: "repository", repository_id: "repo-1", base_branch: "main" }],
+        repository_placement: "kandev_directory",
+      }),
+    });
+  });
+});
+
 describe("listTasksByWorkspace", () => {
   it("requests the archived-only mode without changing the existing list contract", async () => {
     fetchSpy.mockResolvedValueOnce(
@@ -133,4 +429,229 @@ describe("listTasksByWorkspace", () => {
       `${API_BASE_URL}/api/v1/workspaces/ws-1/tasks?page=2&page_size=100&only_archived=true&sort=updated_desc`,
     );
   });
+});
+
+describe("querySidebarTasks", () => {
+  it("posts the bounded complete-view query to the additive route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          query_key: "query-key",
+          page: 1,
+          page_size: 100,
+          total_entries: 2,
+          total_tasks: 1,
+          total_visible_tasks: 1,
+          has_previous: false,
+          has_next: false,
+          entries: [{ kind: "task", task_id: "task-1", task: { id: "task-1" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const query = {
+      filters: [{ dimension: "archived", op: "is", value: true }],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "none",
+      collapsed_group_keys: [],
+      collapsed_task_ids: [],
+      page: 1,
+      page_size: 100,
+      locale: "en",
+    };
+
+    await expect(
+      querySidebarTasks("ws-1", query, { baseUrl: API_BASE_URL }),
+    ).resolves.toMatchObject({
+      query_key: "query-key",
+      total_visible_tasks: 1,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/workspaces/ws-1/sidebar/query`);
+    expect(init).toMatchObject({ method: "POST", body: JSON.stringify(query) });
+  });
+});
+
+describe("moveTask", () => {
+  const workflowId = WORKFLOW_ID;
+  const workflowStepId = "step-2";
+
+  it("normalizes one-shot entry options and omits blank values", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      {
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          instructions: "  Start the verification pass.  ",
+          skip_step_prompt: true,
+        },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          skip_step_prompt: true,
+          instructions: "Start the verification pass.",
+        },
+      }),
+    );
+  });
+
+  it("keeps destination-only move payloads unchanged", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      { workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({ workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 }),
+    );
+  });
+});
+
+describe("previewWorkflowMove", () => {
+  it("posts normalized options with a no-store cache policy", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          task_id: "task-1",
+          workflow_step_id: "step-2",
+          evaluated_at: "2026-09-14T00:00:00Z",
+          outcome: "create_new",
+          model: {
+            before: { known: false },
+            after: { known: true, label: "gpt-5.6-luna" },
+          },
+          context_reset: false,
+          context_reset_state: "unchanged",
+          source_disposition: "park",
+          dispatch: "prompt",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await previewWorkflowMove(
+      "task-1",
+      {
+        workflow_id: WORKFLOW_ID,
+        workflow_step_id: "step-2",
+        entry_options: {
+          instructions: "  inspect the destination  ",
+          reset_context: true,
+        },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/move-preview`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        workflow_id: WORKFLOW_ID,
+        workflow_step_id: "step-2",
+        entry_options: {
+          reset_context: true,
+          instructions: "inspect the destination",
+        },
+      }),
+    });
+    expect((init as RequestInit).cache).toBe("no-store");
+  });
+});
+
+it("binds keep-files deletion to the explicit retain mode", async () => {
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const params = { confirmationId: CONFIRMATION_ID, workspaceCleanup: "retain" as const };
+  await deleteTask("task-1", params, { baseUrl: API_BASE_URL });
+  expect(fetchSpy.mock.calls[0][0]).toBe(
+    `${API_BASE_URL}/api/v1/tasks/task-1?workspace_cleanup=retain`,
+  );
+});
+
+it("requests retain confirmation without granting discard consent", async () => {
+  fetchSpy.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({ confirmation_id: "retain-ticket", requires_discard_consent: false }),
+      { status: 200 },
+    ),
+  );
+  await Reflect.apply(getTaskDeletePreflight, undefined, [
+    ["task-1"],
+    false,
+    false,
+    { baseUrl: API_BASE_URL },
+    { workspaceCleanup: "retain" },
+  ]);
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+    workspace_cleanup: "retain",
+    discard_worktree_changes: false,
+  });
+});
+
+it("sends separate unknown-workspace consent in preview and deletion", async () => {
+  fetchSpy.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        confirmation_id: "ack",
+        requires_discard_consent: true,
+        workspace_inspection: "unknown",
+      }),
+      { status: 200 },
+    ),
+  );
+  fetchSpy.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await Reflect.apply(getTaskDeletePreflight, undefined, [
+    ["task-1"],
+    false,
+    true,
+    { baseUrl: API_BASE_URL },
+    { workspaceCleanup: "delete", allowUnverifiedWorkspaceChanges: true },
+  ]);
+  expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toMatchObject({
+    allow_unverified_workspace_changes: true,
+    discard_worktree_changes: true,
+  });
+  await deleteTask(
+    "task-1",
+    { confirmationId: "ack", discardWorktreeChanges: true, allowUnverifiedWorkspaceChanges: true },
+    { baseUrl: API_BASE_URL },
+  );
+  expect(String(fetchSpy.mock.calls[1][0])).toContain("allow_unverified_workspace_changes=true");
 });

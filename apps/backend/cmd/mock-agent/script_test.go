@@ -214,6 +214,50 @@ e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}"})`
 	})
 }
 
+func TestSubstitutePlanVersionPlaceholder(t *testing.T) {
+	args := map[string]any{
+		"expected_version": "{plan_version}",
+		"content":          "unchanged",
+	}
+
+	substituteScriptPlaceholders(args, "", "write-v2")
+
+	if args["expected_version"] != "write-v2" {
+		t.Fatalf("expected_version = %q, want %q", args["expected_version"], "write-v2")
+	}
+	if args["content"] != "unchanged" {
+		t.Fatalf("content = %q, want unchanged", args["content"])
+	}
+}
+
+func TestExtractPlanVersion(t *testing.T) {
+	tests := []struct {
+		name   string
+		result string
+		want   string
+	}{
+		{
+			name:   "write acknowledgement",
+			result: "Plan updated, version=write-v2. Plan content is omitted from this response.",
+			want:   "write-v2",
+		},
+		{
+			name:   "read metadata",
+			result: `Plan metadata:\n{"version":"write-v3","content_bytes":12}\nbody`,
+			want:   "write-v3",
+		},
+		{name: "missing", result: "Plan content without version", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractPlanVersion(tt.result); got != tt.want {
+				t.Fatalf("extractPlanVersion(%q) = %q, want %q", tt.result, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExtractRegexMatch(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -12,6 +12,7 @@ export function useDiffFileComments(
   sessionId: string,
   filePath: string,
   repositoryId?: string,
+  repositoryName?: string,
 ): DiffComment[] {
   const byId = useCommentsStore((state) => state.byId);
   const sessionIds = useCommentsStore((state) => state.bySession[sessionId]);
@@ -27,12 +28,18 @@ export function useDiffFileComments(
     for (const id of sessionIds) {
       const comment = byId[id];
       if (comment && isDiffComment(comment) && comment.filePath === filePath) {
+        if (
+          repositoryName !== undefined &&
+          comment.repositoryName !== undefined &&
+          comment.repositoryName !== repositoryName
+        )
+          continue;
         if (repositoryId && comment.repositoryId && comment.repositoryId !== repositoryId) continue;
         result.push(comment);
       }
     }
     return result.length === 0 ? EMPTY_COMMENTS : result;
-  }, [byId, sessionIds, filePath, repositoryId]);
+  }, [byId, sessionIds, filePath, repositoryId, repositoryName]);
 }
 
 const EMPTY_BY_FILE: Record<string, DiffComment[]> = {};

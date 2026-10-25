@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // setupLivenessPipe creates a pipe and configures the command to pass the
@@ -41,4 +42,23 @@ func closeChildPipeEnd(cmd *exec.Cmd) {
 	if len(cmd.ExtraFiles) > 0 {
 		_ = cmd.ExtraFiles[0].Close()
 	}
+}
+
+// clearInheritedLivenessPipeEnv removes any KANDEV_PARENT_PIPE_FD the
+// launcher process itself inherited from its own ambient environment (for
+// example when it is itself running under a survivable agentctl launch).
+// Used when the pipe is deliberately not armed for this launch (kill-path
+// #1 disabled, AC-EXECUTORS-SURVIVAL-001.2): without this, a stale inherited
+// value would point the child at an FD 3 that ExtraFiles never set up,
+// which monitorParentLiveness would misinterpret rather than correctly
+// treating as absent.
+func clearInheritedLivenessPipeEnv(cmd *exec.Cmd) {
+	filtered := cmd.Env[:0]
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, "KANDEV_PARENT_PIPE_FD=") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	cmd.Env = filtered
 }

@@ -11,9 +11,11 @@ import { useTranslation } from "react-i18next";
 export function TaskUnarchiveButton({
   taskId,
   onUnarchived,
+  mobile = false,
 }: {
   taskId?: string | null;
   onUnarchived?: (taskId: string) => void;
+  mobile?: boolean;
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -45,7 +47,7 @@ export function TaskUnarchiveButton({
     <Button
       size="sm"
       variant="outline"
-      className="h-7 cursor-pointer px-2"
+      className={mobile ? "h-11 min-w-11 cursor-pointer px-2" : "h-7 cursor-pointer px-2"}
       disabled={isPending}
       onClick={handleClick}
       data-testid="task-unarchive-button"

@@ -9,7 +9,7 @@ depends_on:
   - "05-consume-task-summaries"
   - "06-idempotent-message-submission"
 plan: "plan.md"
-spec: "../../specs/platform/bounded-task-status-delivery.md"
+spec: "../../specs/platform/requirements/bounded-task-status-delivery.md"
 ---
 
 # Task 07: Prove Bounded Task Traffic

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,19 +18,25 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/portutil"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 )
 
-// queryValueTrue is the string "true" used in query parameter comparisons.
-const queryValueTrue = "true"
+const (
+	queryValueTrue     = "true"
+	invalidRequestBody = "invalid request body"
+)
 
 type ProcessHandlers struct {
-	service      *service.Service
-	lifecycleMgr *lifecycle.Manager
-	logger       *logger.Logger
+	service             *service.Service
+	lifecycleMgr        *lifecycle.Manager
+	cursorMCPRecovery   cursorMCPRecoveryManager
+	terminalSvc         cursorMCPRecoveryTerminalService
+	cursorMCPRecoveryMu sync.Mutex
+	logger              *logger.Logger
 }
 
 func RegisterProcessRoutes(
@@ -37,11 +44,16 @@ func RegisterProcessRoutes(
 	svc *service.Service,
 	lifecycleMgr *lifecycle.Manager,
 	log *logger.Logger,
-) {
+) *ProcessHandlers {
 	handlers := &ProcessHandlers{
 		service:      svc,
 		lifecycleMgr: lifecycleMgr,
 		logger:       log.WithFields(zap.String("component", "task-process-handlers")),
+	}
+	if lifecycleMgr != nil {
+		if recovery, ok := any(lifecycleMgr).(cursorMCPRecoveryManager); ok {
+			handlers.cursorMCPRecovery = recovery
+		}
 	}
 	api := router.Group("/api/v1")
 	processes := api.Group("/task-sessions/:id/processes")
@@ -63,10 +75,21 @@ func RegisterProcessRoutes(
 
 	// Session-level ACP operations (mode/model switching)
 	session := api.Group("/task-sessions/:id")
+	session.GET("/agentctl/metrics", handlers.httpGetAgentctlMetrics)
 	session.POST("/set-mode", handlers.httpSetSessionMode)
 	session.POST("/set-model", handlers.httpSetSessionModel)
 	session.POST("/set-config-option", handlers.httpSetSessionConfigOption)
 	session.POST("/authenticate", handlers.httpAuthenticate)
+	session.POST("/mcp/authenticate", handlers.httpAuthenticateCursorMCP)
+	session.POST("/mcp/retry", handlers.httpRetryCursorMCP)
+	session.POST("/html-previews", handlers.httpPublishWorkspacePreview)
+	return handlers
+}
+
+// SetTerminalService wires first-class ordinary task terminals used by native
+// Cursor MCP authentication commands.
+func (h *ProcessHandlers) SetTerminalService(terminals cursorMCPRecoveryTerminalService) {
+	h.terminalSvc = terminals
 }
 
 type httpStartProcessRequest struct {
@@ -86,7 +109,7 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 	var body httpStartProcessRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		h.logger.Warn("start process invalid request body", zap.String("session_id", sessionID), zap.Error(err))
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	h.logger.Debug("start process request",
@@ -493,6 +516,18 @@ func resolveScriptCommand(
 func (h *ProcessHandlers) denySessionAccess(c *gin.Context, sessionID string) bool {
 	if err := h.service.AuthorizeSessionAccess(c.Request.Context(), sessionID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return true
+	}
+	return false
+}
+
+func (h *ProcessHandlers) denySessionExecutionAccess(c *gin.Context, sessionID string) bool {
+	if err := h.service.AuthorizeSessionScope(c.Request.Context(), sessionID, authz.ScopeSessionExec); err != nil {
+		if service.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "insufficient permissions for this action"})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		}
 		return true
 	}
 	return false

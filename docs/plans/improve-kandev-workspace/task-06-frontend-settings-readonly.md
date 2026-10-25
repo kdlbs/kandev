@@ -1,6 +1,6 @@
 # task-06: Frontend read-only settings for the dedicated workspace
 
-Spec: `docs/specs/improve-kandev/spec.md` — "Dedicated workspace immutability"
+Spec: `docs/specs/workspaces/requirements/improve-kandev.md` — "Dedicated workspace immutability"
 Plan: `docs/plans/improve-kandev-workspace/plan.md` — Phase 2, Wave 6.
 Depends on: task-04, task-05.
 

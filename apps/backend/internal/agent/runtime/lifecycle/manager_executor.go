@@ -9,6 +9,14 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// RegisterExecutorBackend adds a runtime backend before the manager starts.
+func (m *Manager) RegisterExecutorBackend(backend ExecutorBackend) {
+	if backend == nil || m.executorRegistry == nil {
+		return
+	}
+	m.executorRegistry.Register(backend)
+}
+
 // getExecutorBackend returns the appropriate runtime for the given executor type.
 // If the executor type is empty or the runtime is not available, behavior depends on executorFallbackPolicy.
 func (m *Manager) getExecutorBackend(executorType string) (ExecutorBackend, error) {
@@ -21,6 +29,9 @@ func (m *Manager) getExecutorBackend(executorType string) (ExecutorBackend, erro
 		rt, err := m.executorRegistry.GetBackend(runtimeName)
 		if err == nil {
 			return rt, nil
+		}
+		if runtimeName == executor.NameUnknown || runtimeName == executor.NamePluginRemote {
+			return nil, fmt.Errorf("required executor runtime %q is unavailable: %w", runtimeName, err)
 		}
 
 		// Handle fallback based on policy

@@ -1,6 +1,6 @@
 # task-07: E2E settings guards for the dedicated workspace
 
-Spec: `docs/specs/improve-kandev/spec.md` — "Dedicated workspace immutability"
+Spec: `docs/specs/workspaces/requirements/improve-kandev.md` — "Dedicated workspace immutability"
 Plan: `docs/plans/improve-kandev-workspace/plan.md` — Phase 2, Wave 7.
 Depends on: task-06.
 

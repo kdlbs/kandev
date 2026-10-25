@@ -1,4 +1,17 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import type { ApiClient } from "../../helpers/api-client";
+
+async function waitForSSHSession(apiClient: ApiClient, executorId: string, taskId: string) {
+  await expect
+    .poll(
+      async () =>
+        (await apiClient.listSSHSessions(executorId)).some(
+          (session: { task_id: string }) => session.task_id === taskId,
+        ),
+      { message: "SSH session should be running", timeout: 60_000 },
+    )
+    .toBe(true);
+}
 
 /**
  * CRUD against the SSH executor record + profile. Asserts type, config map,
@@ -69,6 +82,7 @@ test.describe("ssh executor CRUD", () => {
         timeout: 60_000,
       })
       .toBe("ssh");
+    await waitForSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     // Mutate the executor's name. Backend should accept silently; running
     // sessions retain their snapshot of host/user/etc. in metadata.
@@ -102,6 +116,7 @@ test.describe("ssh executor CRUD", () => {
         timeout: 60_000,
       })
       .toBe("ssh");
+    await waitForSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     const before = await apiClient.listSSHSessions(seedData.sshExecutorId);
     const beforeRow = before.find((s) => s.task_id === task.id);

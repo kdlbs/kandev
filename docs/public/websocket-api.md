@@ -30,15 +30,15 @@ An action constant alone is not evidence that an action is registered or emitted
 1. Prefer the UI, CLI, MCP tools, or documented HTTP routes for supported integrations.
 2. If you need the WebSocket, connect to `/ws` and send one JSON request per frame.
 3. Correlate responses by `id`, refetch after reconnects, and treat notifications as invalidation hints.
-4. Protect the endpoint: it has no client authentication boundary.
+4. Protect the endpoint. Authentication is experimental and disabled by default, so an ordinary install has no client authentication boundary.
 
 ## Security and network boundary
 
-The current `/ws` upgrade handler does **not authenticate clients**. It reads `?token=` or the `Authorization` header but does not validate or use the value; JWT validation is still a code TODO. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
+The experimental [Authentication & Users](authentication.md) feature is disabled by default. In that mode, `/ws` gives every client the synthetic single-user administrator identity. When authentication is enabled, the upgrade requires a valid browser session, bearer token, or `?token=<PAT>` fallback for clients that cannot send headers. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
 
 The raw gateway rejects every action whose name starts with `mcp.` using a `FORBIDDEN` error before the shared dispatcher runs. This prevents raw clients from forging task or session identity that trusted MCP adapters inject; it is not user authentication. Internal MCP actions remain available through their mode-scoped MCP adapters and trusted in-process dispatch paths.
 
-Treat every client that can reach the backend as fully trusted for the remaining WebSocket surface. Actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
+With authentication disabled, treat every client that can reach the backend as fully trusted. Actions can create and delete data, start agents and shells, read and change files, run Git operations, reveal stored secrets, and invoke configured integrations. Authentication does not replace TLS or isolate shared executors, agent credentials, and the host filesystem. Do not expose port `38429` directly to an untrusted LAN or the internet. Bind to loopback, firewall the port, or put Kandev behind an authenticated reverse proxy that terminates TLS and restricts access. See [Configuration](configuration.md) and [Run as a Service](run-as-a-service.md).
 
 The upgrade does enforce an origin policy for browser clients:
 
@@ -47,7 +47,7 @@ The upgrade does enforce an origin policy for browser clients:
 - Different loopback names or addresses are accepted when both origin and request hosts are loopback, such as `localhost` and `127.0.0.1` on different ports.
 - Origins must be well-formed `http` or `https` origins with no path, query, fragment, or user information. Other cross-site origins are rejected.
 
-When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. Do not rely on the ignored token parameter for access control.
+When proxying, preserve a request host that matches the public page's origin and forward WebSocket upgrades. The origin policy ignores `?token=` when deciding whether to accept an origin, but the authentication layer still accepts it as a PAT fallback when authentication is enabled. Prefer the bearer header where the client supports it, and do not treat a query PAT as a substitute for TLS or the origin policy.
 
 ## Wire envelope
 
@@ -133,7 +133,12 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 | Hub-wide broadcast queue  | 256 messages                      | Global publishers block when this internal queue is saturated; delivery to each client can still drop at that client's queue.                                                                  |
 | Request dispatch          | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`.                                                                                           |
 
-There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
+Ordinary notifications have no sequence number, durable replay,
+acknowledgement, or exactly-once guarantee. They are invalidation hints: after
+a reconnect, gap, or dropped frame, refetch authoritative state through the
+appropriate list/get request or HTTP route. The Host-owned prompt-history
+conversation stream is a separate ordered internal exception documented in
+the plugin contract below.
 
 ### Prompt attachments
 
@@ -164,9 +169,26 @@ Subscription actions are handled by the gateway before the normal dispatcher:
 | `run.subscribe` / `run.unsubscribe`                       | `{"run_id":"..."}`                   | Routes future `run.event.appended` messages for one Office run. No snapshot is replayed.                                                                                                              |
 | `system.metrics.subscribe` / `system.metrics.unsubscribe` | `{}`                                 | Starts/stops delivery of live `system.metrics.updated` snapshots and contributes to metrics collection interest.                                                                                      |
 
-All subscriptions are connection-local and are removed on disconnect. `session.subscribe` and `session.focus` can send an initial live snapshot, but other subscriptions do not replay missed notifications. For an Office run, fetch the REST snapshot before subscribing and reconcile again after a gap.
+All ordinary subscriptions are connection-local and are removed on
+disconnect. Ordinary `session.subscribe` and `session.focus` can send an
+initial live snapshot, but other ordinary subscriptions do not replay missed
+notifications. For an Office run, fetch the REST snapshot before subscribing
+and reconcile again after a gap.
 
 The first-party web client reconnects by default: at most 10 attempts, starting at 1 second, multiplying delay by 1.5, capped at 30 seconds. On open it flushes frames queued while disconnected, then resubscribes to tasks, sessions, focus state, runs, the default user, and metrics. Its ordinary request timeout defaults to 5 seconds; selected Git and PR requests use longer timeouts. A custom client must implement its own backoff, resubscription, refetch, and timeout policy.
+
+### Host-only prompt-history conversation stream
+
+The browser `host.conversation` facade uses an internal ordered session stream
+that is not a caller-visible WebSocket API. It has Host-minted per-consumer
+identities, monotonic sequence numbers, durable cursors, subscribe readiness,
+ACKs, reconnect replay, and terminal session-removal barriers. Its migrated
+event names are `message.added`, `message.updated`, `message.deleted`,
+`session.turn.started`, `session.turn.completed`, and `session.removed`.
+The authoritative request, ACK, result, event, and compatibility rules are in
+the Host-only conversation wire contract in
+`docs/plans/plugins/PLUGIN-API.md`; ordinary subscription behavior above does
+not override that internal contract.
 
 ## Core task and session requests
 
@@ -204,6 +226,40 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
+`task.move` accepts an optional one-shot `entry_options` object:
+
+- Normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`. Empty optional strings are omitted, and the values never mutate workflow defaults.
+- Reset is additive. Instructions are appended after the destination step's normal prompt.
+- `skip_step_prompt` suppresses the destination prompt and task-description fallback for this entry. With instructions, the agent starts a turn carrying only those instructions. Without instructions, no turn starts and the task lands idle.
+- A successful response includes the normalized options when supplied, plus a `move_id` correlating options retained for a deferred move.
+- HTTP and WebSocket moves keep the session-or-auto-start acceptance rule.
+
+The agent tool has additional rules:
+
+- `move_task_kandev` accepts the same options. Its legacy `prompt` aliases `entry_options.instructions`; conflicting non-empty values are rejected.
+- Manual targets reject agent prompts and options, even when the task has a session. See [agent move guidance](agent-communication.md#move-a-task-with-entry-options) for recipient semantics and the workaround.
+- A step change requested by a `RUNNING` or `STARTING` session uses the deferred MCP path. Complete options persist through turn completion, WIP promotion, and restart.
+- A same-step request without options returns `disposition: "applied"` with the stored task; no retry is needed.
+
+```json
+{
+  "id": "move-1",
+  "type": "request",
+  "action": "task.move",
+  "payload": {
+    "id": "task-uuid",
+    "workflow_id": "workflow-uuid",
+    "workflow_step_id": "qa-step-uuid",
+    "position": 0,
+    "entry_options": {
+      "reset_context": true,
+      "instructions": "Run the checkout regression first.",
+      "skip_step_prompt": true
+    }
+  }
+}
+```
+
 ### Launch a session
 
 `session.launch` always requires `task_id`. Explicit `intent` values are `prepare`, `start`, `start_created`, `resume`, `workflow_step`, and `restore_workspace`. Other fields are `session_id`, `agent_profile_id`, `executor_id`, `executor_profile_id`, `prompt`, `plan_mode`, `workflow_step_id`, `priority`, `launch_workspace`, `skip_message_record`, `auto_start`, and `attachments`.
@@ -226,11 +282,96 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 
+### Repair preserved workspace inventory
+
+`session.recover` accepts the task-scoped `repair_workspace_inventory` action when a Worktree resume fails because the canonical environment inventory is missing or has a stale branch-slot identity. This is a preservation-only recovery action, not a general database editor. The server derives the workspace, repository, environment, row, path, and branch from the authorized task and session; clients provide only `task_id`, `session_id`, `action`, and a non-empty retry-stable `idempotency_key`. The key remains bound to the original session and derived checkout identity after repair; reusing it for another session conflicts. Active borrowers of the same environment block repair, and inherited resumes must pass the environment owner’s preservation attestation. Repositories with external Git clean/process filters require manual recovery.
+
+```json
+{
+  "id": "repair-inventory-1",
+  "type": "request",
+  "action": "session.recover",
+  "payload": {
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "action": "repair_workspace_inventory",
+    "idempotency_key": "incident-2026-09-01-attempt-1"
+  }
+}
+```
+
+The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again, and matching post-repair evidence must be durably recorded, before the resume proceeds through the normal fail-closed inventory validator.
+
+The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+After a completed positive repair, ordinary Resume and additional-session launch allow a later branch switch or rename when the recorded current branch matches the same registered Git worktree. Later commits and file edits remain intact, and the original repair receipt remains unchanged. Existing receipts support this check without a migration.
+
+Use ordinary Resume after a branch change. An explicit repair retry with the original key still requires the original request identity. Incomplete or failed repair evidence still blocks admission, and workspace recovery does not clear an independent `unknown_prompt_outcome` block or replay its prompt.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+
+Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
+
 ### Search work-item references over HTTP
 
 The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspaceId/mentions/search?q=<plain-text>&limit=<per-source-limit>&exclude_task_id=<optional-task-id>`. `q` is required after trimming and accepts 1–200 Unicode characters. `limit` defaults to 5 and is clamped to 1–10. When supplied, `exclude_task_id` must belong to the requested workspace.
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
+
+### Workflow snapshot coverage
+
+Workflow and workspace snapshot responses can include `task_coverage` alongside
+`tasks`: `workspace_id`, `workflow_id`, `membership: "active"`, `total`, `complete`,
+and `ordering_profile`. The total describes the collection before `task_limit`
+truncation. Boot snapshots use `taskCoverage` for the same metadata and mark
+omitted rows incomplete. Missing metadata never establishes completeness.
+
+The workflow list with `include_hidden=true` can also include
+`task_workflow_coverage`, containing `workspace_id`, `workflow_ids`, and `complete`.
+It identifies every scope containing eligible active tasks, including hidden
+workflows and the empty identifier for unassigned tasks. Empty scopes need no task
+fetch. The boot workflow state carries this as `taskWorkflowCoverage`.
+
+The web client evaluates complete resident views with the verified
+`sqlite_nocase_v1` ordering profile. `server_only` and unknown profiles retain
+server evaluation. Complete active coverage cannot satisfy archived views.
+WebSocket updates maintain shared task records; a reconnect gap invalidates
+coverage until an authoritative snapshot recovers it.
+
+### Query sidebar tasks over HTTP
+
+When a view is not covered by current workspace data, the web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
 
 ### Send a user turn
 
@@ -253,9 +394,13 @@ A successful response returns the normalized query and an ordered `groups` array
 
 `message.queue.add` accepts the same optional array. `message.queue.update` also accepts it and treats the array as a replacement: send `[]` after removing every generated reference link so stale metadata is cleared. Queue status and message responses return validated entries under `metadata.entity_references`.
 
-Ordinary `message.queue.add` admissions use the default-on automatic-merge setting. Capacity is enforced first. The newly admitted row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, plan mode, metadata, attachments, context files, and entity references; the merged context-file union is capped at 200 descriptors. Otherwise it remains separate. A successful fold returns the surviving earlier row's `entry_id`, while a fallback returns the new row's ID. The final state is published through `message.queue.status_changed`. Automatic merging applies only to later ordinary admissions, not existing rows, explicit append/coalesce/restore/retry/send-now operations, or the independent manual merge action.
+Every browser queue read or mutation requires the exact `task_id`, `session_id`, and `session_incarnation_id` triplet. This applies to `message.queue.get`, `message.queue.add`, `message.queue.append`, `message.queue.cancel`, `message.queue.drain`, `message.queue.update`, `message.queue.remove`, `message.queue.merge`, `message.queue.reorder`, `message.queue.send_now`, `message.queue.auto_run.set`, and `message.queue.auto_merge.set`. The gateway authorizes the task/session pair and the queue layer compares the supplied incarnation before acting. A deleted or replaced session returns the same non-enumerating not-found response as an inaccessible session; the request is not redirected to a new session with the same textual ID and clients must not retry it against a freshly looked-up identity.
 
-`message.queue.merge` folds a queued entry into the entry directly above it. The payload requires `session_id` and `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's id) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap (the merge is rejected atomically; neither row changes).
+Ordinary `message.queue.add` admissions use one effective automatic-merge policy snapshot. An untouched session inherits the current install-wide value and its global revision. `message.queue.auto_merge.set` accepts required `enabled` and creates a persistent explicit session override; later global changes no longer affect that session. The newly admitted row folds only into its immediate pending predecessor when both rows have the same strict source and compatible task, model, plan mode, metadata, attachments, context files, and entity references; the merged context-file union is capped at 200 descriptors. An eligible direct fold can succeed at or above capacity because it adds no row. A staged-attachment admission at or above capacity is rejected before a fold or attachment claim. Otherwise, capacity or incompatibility leaves the admission rejected or separate as applicable. A successful fold returns the surviving earlier row's `entry_id`, while a separate admission returns the new row's ID. Automatic merging applies only to later ordinary admissions, not existing rows, explicit append/coalesce/restore/retry/send-now operations, or the independent manual merge action.
+
+`message.queue.get`, the Auto-merge mutation response, and `message.queue.status_changed` expose `task_id`, `session_id`, `session_incarnation_id`, `status_epoch`, `status_generation`, `auto_merge_available`, `auto_merge_enabled`, `auto_merge_source`, and `auto_merge_revision` with the queue entries and existing Auto-run/manual-merge fields. `status_epoch` is the session incarnation. Within an epoch, clients apply only increasing status generations. `auto_merge_available:false` means the backend could not establish authoritative policy and the control must remain disabled; it is not an OFF value. A `session` source is an explicit override; a `global` source remains inherited. Session and global revisions are monotonic within their own source. Internal task-only recount events have explicit task scope and are not session status.
+
+`message.queue.merge` folds a queued entry into the entry directly above it. In addition to the required identity triplet, its payload requires `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's ID) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap. The overflow rejection is atomic; neither row changes.
 
 If the agent is busy, use the `message.queue.*` operations rather than retrying `message.add`. Permission prompts are represented in persisted/session message data; answer one with `permission.respond`. Its payload requires `session_id` and `pending_id`, plus `option_id` unless `cancelled:true`; optional `rejected:true` distinguishes an explicit denial from dismissing the prompt.
 
@@ -276,7 +421,7 @@ websocat ws://127.0.0.1:38429/ws
 
 ## Registered request action catalog
 
-The following 310 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
+The following 279 unique action names have concrete dispatcher registrations in the current backend. The 12 subscription/focus actions in the previous table are additional gateway-handled requests. Availability can still depend on a configured integration, handler mode, or service; registration does not supply credentials, provider installation, a running executor, or permission to external systems.
 
 Payloads are not uniform. Read the corresponding handler request struct before building a non-first-party client. Names below are exact, including `vscode.openFile` and underscore-separated `user_shell.*` actions.
 
@@ -329,6 +474,54 @@ task.walkthrough.get
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
 
+### Session list projection
+
+`task.session.list` and `GET /api/v1/tasks/{id}/sessions` return compact membership and status rows. The caller must have access to the task. Rows retain session and repository identity, pending actions, runtime activity, cancellation revisions, and parked-work revisions.
+
+Metadata includes the latest agent error and, when available, the current model ID and display name. It excludes other model choices, configuration options, preparation records, and delivery-recovery state. Use `GET /api/v1/task-sessions/{id}` when full session details are needed. An explicit `last_agent_error: null` clears a retained error.
+
+### Partial workflow updates
+
+`workflow.update` and REST `PATCH /api/v1/workflows/:id` change only supplied
+`name`, `description`, `prompt`, and `agent_profile_id` fields. Omitted fields
+and JSON `null` retain stored values; explicit empty strings clear them. Concurrent
+updates to different fields retain both edits across backend services. Supplying
+all four fields, as the workflow editor does, replaces all four values.
+
+Responses and `workflow.updated` events describe the row observed by each write.
+Concurrent events may arrive in a different order from writes. Reconcile with
+`workflow.get` after a gap or an uncertain request outcome.
+
+### Partial task updates
+
+`task.update` and REST `PATCH /api/v1/tasks/:id` change only supplied fields. Concurrent
+ordinary updates to different fields retain both edits, including requests handled by
+separate backend services. Omitted fields and JSON `null` retain current values; explicit
+empty strings keep the field's existing clear behavior, and `repositories: []` clears
+repository associations.
+
+A supplied `metadata` object retains the existing replacement or pending-title merge
+behavior. It does not merge arbitrary keys from competing requests. Server-owned
+lifecycle and handoff records remain protected, and an explicit title resolves pending
+agent naming.
+
+The REST `PATCH /api/v1/tasks/:id/port-forwarding` preference uses the explicit
+metadata merge path. Concurrent admitted merges preserve different ordinary top-level
+keys and omitted task fields across backend services. Supplying the same key uses the
+last committed value. This does not extend ordinary metadata replacement or later
+full-snapshot writes into per-key merges, and nested/null behavior keeps the current
+pending-title database semantics.
+
+GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
+including concurrent port-forwarding preference changes. A link replaces the complete
+issue identity together; unlink removes its five issue keys. Legacy issue-watch metadata
+remains separate. These operations retain the ordinary task update notification path.
+
+This guarantee covers ordinary partial updates and participating field-scoped writes.
+Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
+and notifications may observe a later commit; they do not establish a total event order
+or an exact mutation receipt.
+
 ### Sessions, messages, agents, and orchestration
 
 ```text
@@ -354,11 +547,15 @@ message.add
 message.list
 message.queue.add
 message.queue.append
+message.queue.auto_merge.set
+message.queue.auto_run.set
 message.queue.cancel
 message.queue.drain
 message.queue.get
 message.queue.merge
 message.queue.remove
+message.queue.reorder
+message.queue.send_now
 message.queue.update
 message.search
 
@@ -380,6 +577,8 @@ permission.respond
 ```
 
 `agent.launch`, `agent.stdin`, and related calls are lower-level agent controls. Task clients should normally use `session.launch`, `message.add`, and `session.stop`. Constants such as `agent.prompt`, `message.get`, and `session.set_mode` currently have no dispatcher registration and are deliberately absent.
+
+`message.list` accepts `session_id`, `limit`, `before`, `after`, and `sort`. Set `include_turns: true` to receive `turns` and `turn_coverage` with the message page. The equivalent HTTP option is `GET /api/v1/task-sessions/{id}/messages?include_turns=true`. Turn context comes from the same reader snapshot as the messages and contains only turns referenced by those messages plus the current active turn. The response has at most one turn per distinct message turn ID and one additional active turn. `turn_coverage.message_ids` lists the returned messages covered by the read; `turn_coverage.active_turn_id` is the active turn observed by that snapshot, or `null` when none was active. Without `include_turns`, the response keeps its message-only shape.
 
 ### Repositories, executors, files, Git, and terminals
 
@@ -489,6 +688,7 @@ automation.enable
 automation.get
 automation.list
 automation.run.delete
+automation.run.stop
 automation.runs.delete_all
 automation.runs.list
 automation.runs.list_workspace
@@ -504,6 +704,29 @@ automation.webhook.reveal_secret
 ```
 
 These are trusted local-administration operations. In particular, `secrets.reveal` and `automation.webhook.reveal_secret` make the lack of WebSocket authentication security-critical.
+
+`secrets.delete` accepts `{ "id": "<secret-id>", "workspace_id": "<optional-workspace-id>", "force": false }`.
+A Workspace secret requires its `workspace_id`. A referenced secret returns `CONFLICT` with `details.code: "secret_in_use"` and `details.references`.
+References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
+An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
+The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
+`GET /api/v1/secrets/:id/references` performs the same authorized reference lookup without changing the secret and returns `{ "references": [...] }`. Add `?workspace_id=<workspace-id>` for a Workspace secret. Settings uses this endpoint before it enables deletion; the later `DELETE` still repeats the check.
+
+With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.
+The HTTP override is `?force=true`, combined with `workspace_id` for Workspace secrets.
+Force does not bypass authorization. Reference lookup failures return `INTERNAL_ERROR` (HTTP `500`) and leave the secret intact.
+
+`automation.run.stop` requires `automation_id` and `run_id`. It cancels the
+selected open run's exact task/session/turn binding and returns `{run_id,
+status}`. A stale or terminal binding returns not found; it never stops another
+turn that happens to share the same task or session.
+
+Automation payloads expose `task_mode` (`automation_run` or `normal_task`) and
+`repository_mode` (`workspace_default`, `selected`, or `none`). Hidden runs may
+omit workflow and repository data and use a Local scratch workspace. Normal
+tasks require a workflow and remain visible in Kanban and the sidebar. A
+repository-required provider trigger rejects `repository_mode=none` before it
+creates an `AutomationRun`.
 
 ### GitHub and GitLab
 
@@ -537,48 +760,12 @@ github.task_pr.get
 github.task_pr.sync
 github.task_prs.list
 
-gitlab.action_presets.list
-gitlab.action_presets.reset
-gitlab.action_presets.update
 gitlab.check_session_mr
-gitlab.cleanup.issue_tasks
-gitlab.cleanup.review_tasks
-gitlab.issue_watches.create
-gitlab.issue_watches.delete
-gitlab.issue_watches.list
-gitlab.issue_watches.trigger
-gitlab.issue_watches.trigger_all
-gitlab.issue_watches.update
-gitlab.mr.approve
-gitlab.mr.discussion.new
-gitlab.mr.discussion.resolve
-gitlab.mr.merge
-gitlab.mr.set_assignees
-gitlab.mr.set_labels
-gitlab.mr.unapprove
-gitlab.mr_commits.get
-gitlab.mr_feedback.get
-gitlab.mr_files.get
-gitlab.mr_watches.delete
-gitlab.mr_watches.list
-gitlab.project.branches
-gitlab.project.merge_methods.get
-gitlab.projects.list
-gitlab.projects.search
-gitlab.review_watches.create
-gitlab.review_watches.delete
-gitlab.review_watches.list
-gitlab.review_watches.trigger
-gitlab.review_watches.trigger_all
-gitlab.review_watches.update
-gitlab.stats
-gitlab.status
-gitlab.task_mr.get
-gitlab.task_mr.sync
-gitlab.task_mrs.list
 ```
 
 Provider actions make outbound calls with the backend's configured GitHub or GitLab identity. Status and registration do not imply a provider is authenticated, reachable, or authorized for a repository.
+
+GitLab UI queries and mutations use the authenticated `/api/v1/gitlab/...` HTTP routes. The only remaining GitLab WebSocket request action is `gitlab.check_session_mr`, which refreshes a session's linked merge request.
 
 ### Jira, Linear, and Sprites
 
@@ -668,13 +855,31 @@ mcp.write_task_document
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 
+The `mcp.get_task_plan` shim accepts optional `offset`, `limit`, and
+`expected_version` from the agent tool. Offset and limit count Unicode code
+points. Supplying either selects an exact bounded fragment; omitting both
+preserves the full read. Partial results include the snapshot version, whole
+plan lengths, returned lengths, `has_more`, and `next_offset`; a stale expected
+version returns a conflict without content. These fields do not change the
+browser's `task.plan.get` contract. Use
+[the MCP plan-read guide](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for defaults, bounds, and examples.
+
 ## Emitted notifications and recipients
+
+Executor and executor-profile configuration notifications are sent only to
+eligible recipients. Ownership changes also emit the payload-free
+`executor.catalogue.invalidated` notification so clients discard cached
+configuration and refetch their permitted catalogue, including when access was
+revoked. Failed eligibility resolution does not broadcast private executor
+configuration.
+
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.
 
-### Global broadcasts
+### Shared broadcaster notifications
 
-Their normal live event path broadcasts to every connected client, which must filter by IDs in the payload. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
+Their normal live event path uses a shared broadcaster. With authentication disabled, or when an event has no workspace context, it sends the event to every connected client. With authentication enabled and workspace reach resolves successfully, workspace-carrying events are narrowed to the permitted readers. The regular workspace broadcaster currently falls back to global delivery if both reach and owner resolution fail; only selected sensitive event paths use the fail-closed variant. Do not rely on notification fan-out as a tenant-isolation boundary while this experimental limitation remains. Session subscribe/focus hydration can also send selected state actions directly to the requesting client.
 
 ```text
 workspace.created
@@ -688,6 +893,7 @@ workflow.step.updated
 workflow.step.deleted
 agent.profile.created
 agent.profile.updated
+agent.profile.mcp_config.updated
 agent.profile.deleted
 task.created
 task.updated
@@ -733,6 +939,8 @@ agent.install.finished
 github.task_pr.updated
 github.task_ci_options.updated
 github.rate_limit.updated
+gitlab.task_mr.updated
+gitlab.task_mr_options.updated
 system.job.update
 ```
 
@@ -830,14 +1038,14 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | subscribed run      | `run.event.appended`              | Future events only; there is no replay cursor.                                                                                                                                                                                                                               |
 | metrics subscribers | `system.metrics.updated`          | Live resource snapshot; collection interest follows subscribers.                                                                                                                                                                                                             |
 
-Routing is an efficiency mechanism, not an access-control boundary. The server does not authenticate resource ownership, global messages can contain IDs for other workspaces, and a client can request arbitrary subscription IDs.
+Routing is an efficiency mechanism, not the access-control boundary. With authentication enabled, the server resolves the caller's identity, checks workspace subscriptions, and normally filters workspace fan-out by reach; domain authorization still decides which actions the caller may perform. Because ordinary fan-out can fall back to global delivery on resolution errors as described above, use authorized read requests as the source of truth. With authentication disabled, the synthetic administrator retains the original single-user reach.
 
 </details>
 
 ## Reconnect and troubleshooting
 
 - **Upgrade returns 403:** inspect the browser `Origin` and proxy `Host`. The hostnames must match exactly or both be loopback; ports may differ. A scheme other than `http`/`https` or an origin containing a path is rejected.
-- **Connection works locally but is unsafe remotely:** this is expected with the current unauthenticated handler and `0.0.0.0` default. Add a protected proxy or bind/firewall the backend before allowing network access.
+- **Connection works locally but is unsafe remotely:** this is expected with authentication disabled and the `0.0.0.0` default. Enable authentication deliberately and add TLS, or bind/firewall the backend behind a protected proxy before allowing network access.
 - **Request times out but the mutation happened:** the response may have been dropped or the socket may have closed while the server-side handler continued. Query current state before deciding whether to retry.
 - **Notifications stop or state looks stale:** reconnect, resubscribe, and refetch. Check whether the client is consuming frames quickly enough to avoid the 256-frame drop-new queue.
 - **Session stream is missing:** send `session.subscribe`; for an actively displayed session also send `session.focus`. Verify the payload's `session_id` matches exactly.
@@ -846,5 +1054,9 @@ Routing is an efficiency mechanism, not an access-control boundary. The server d
 - **Responses arrive in the wrong order:** this is normal concurrent dispatch. Match by unique `id`, never arrival order.
 
 Dedicated `/terminal/*target` and `/lsp/:sessionId` WebSockets, plus `/vscode/:sessionId/*path` and `/port-proxy/:sessionId/:port/*path` proxies, are separate protocols. They do not use this JSON envelope and should not be sent `/ws` actions.
+
+The browser language-server socket at `/lsp/:sessionId?language=...` carries raw LSP JSON-RPC plus private Kandev control frames. Browser continuity is on by default in shipped profiles. The restart-required `features.lspBrowserContinuity` flag remains as a kill switch; an explicit false value restores browser-owned cleanup. With continuity enabled, a browser close or temporary network loss detaches the window while its task-host lease keeps running for up to one hour. Reopening the task within that hour can reattach to that lease without another `initialize`; each window and duplicated tab has its own lease. **Stop**, two minutes with no open editor, one hour detached, task-runtime shutdown, backend shutdown, or capacity eviction releases a lease. Reattachment cancels the detached deadline; an attached lease does not expire. `KANDEV_LSP_MAX_CONNECTIONS` counts attached and detached leases; at capacity, Kandev evicts the least-recently detached lease, or rejects a new request when all leases are attached. When continuity is disabled, closing the browser socket stops its process as before.
+
+The browser shows **Reconnecting** for an uncertain transport loss and retries attachment. A browser-reported `1005` or `1006`, graceful backend restart close `1001`, or backend transport close `4009` does not confirm that the language-server process exited. Close `4006` means the task-host process exited; the editor clears that generation's providers and diagnostics and offers **Retry**. Close `4010` means the task runtime stopped, so the editor ends the lease without reconnecting it. A backend restart releases leases, so the next connection starts a fresh process and repeats project analysis.
 
 Related guides: [Configuration](configuration.md), [Executors](executors.md), [Git Operations](git-operations.md), [Operations](operations.md), [Workflow Import / Export](workflow-import-export.md), and [Workflow Sync](workflow-sync.md).

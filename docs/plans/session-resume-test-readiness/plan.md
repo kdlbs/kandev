@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-resume-runtime-recovery/spec.md
+spec: docs/specs/agents/requirements/agent-resume-runtime-recovery.md
 created: 2026-08-12
 status: completed
 ---

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/agents.md
+spec: docs/specs/office/requirements/agents.md
 created: 2026-07-22
 status: implemented
 ---

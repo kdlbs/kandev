@@ -16,16 +16,17 @@ apps/
 ## Tooling
 
 - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
-- **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
+- **Backend**: Go with Make (`make -C apps/backend test|build`); local lint uses `bash scripts/lint-go-changed <changed-go-files>` (see `apps/backend/AGENTS.md`). Explicit full-backend lint remains `make -C apps/backend lint`.
 - **Launcher**: all four launch modes (`dev`, `start`, `run`, `service`) go through the native Go binary at `apps/backend/bin/kandev`; the launcher package is `apps/backend/internal/launcher`. `make dev` execs a copy of that binary (`bin/kandev-launcher`).
 - **CLI**: `apps/cli` is the npm-published shim only (`bin/cli.js` + `bin/native-shim.js`); its tests run on the Node built-in test runner (`node --test`).
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
 - **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
-- **E2E**: Playwright (`cd apps/web && pnpm e2e:raw`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
+- **E2E**: Playwright (`cd apps/web && pnpm e2e:run` or the guarded `pnpm e2e:raw`). Local runners enforce one worker per shard and a memory-aware shard budget; do not pass all-worker overrides or overlap full suites. The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers Docker, SSH, and Kind-backed Kubernetes executor scenarios — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
 - **GitHub repo**: `https://github.com/kdlbs/kandev`
 - **Container image**: `ghcr.io/kdlbs/kandev` (GitHub Container Registry)
+- **Raw command output**: Run commands directly when output is consumed by a parser, upload, patch, `xargs`, or byte comparison; preserve stdout byte-for-byte and validate it before consuming it. Repository scripts under `scripts/` and `.github/scripts/` are repo-root-relative; run them from the root or pass an explicit path. When `functions.exec` starts parallel long-running commands, retain every returned `session_id` and poll each handle to completion; do not discard a handle and infer status from a duplicate run.
 
 ### Worktrees and commit hooks
 
@@ -41,6 +42,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 - `apps/backend/internal/agentctl/AGENTS.md` — agentctl HTTP server: route groups, adapter model, ACP protocol.
 - `apps/backend/internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping.
 - `apps/backend/internal/integrations/AGENTS.md` — adding a new third-party integration (Jira/Linear pattern, both backend and frontend halves). The `/add-integration` skill mirrors this for scaffolding new integrations.
+- `apps/backend/internal/office/AGENTS.md` — Office (autonomous agent management): pointer to the `docs/specs/office/` spec set with status per file (a legacy 15-file table plus newer `requirements/`+`system-design/`-split entries, most recently task session termination and the seat-claim decision guard), plus local traps (run-vs-task-start, retired `heartbeat` source, continuation summary scoping, participant slate ownership, routine idle-skip, dual advancement signals).
 - `apps/desktop/AGENTS.md` — Tauri desktop app: runtime resources, Rust process lifecycle, packaging, signing, and smoke tests.
 - `apps/web/AGENTS.md` — Vite/React SPA frontend: shadcn imports, Go boot-payload hydration, store slice structure (incl. `office`), WS format, component conventions, TS lint limits.
 
@@ -57,6 +59,12 @@ Architecture notes and per-area conventions live alongside the code they describ
 - Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
 - Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
 
+### Engineering language
+
+Use English for all engineering text, including specs, plans, PRs, docs,
+comments, and docstrings. Translate non-English input before recording it.
+Only required product localization and product data can use another language.
+
 ### Commit Conventions (enforced by CI)
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
@@ -65,7 +73,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts. Stable default runtime archives for npm, Homebrew, Scoop, winget, Chocolatey, and Desktop contain host binaries plus a helper manifest; use `-full` for offline CLI, while containers and npm Nightlies remain full. Contributor notices use `.github/workflows/notify-release-contributors.yml` and `.github/scripts/notify-release-contributors.py`. The standalone workflow supports latest-release selection, exact tags, and preview without posting. The Release checkbox defaults to off and posts only after GitHub Release, npm, Homebrew, and Scoop succeed. Nightly, dry-run, desktop-validation, failed publication, and cancellation before notification start skip notices. Cancelling during posting can leave partial results; exact-tag manual reruns recover safely. The helper reads maintainers from `cliff.toml`, checks that each linked PR belongs to the selected tag, and skips bots, maintainers, and untrusted duplicate comments. Use the standalone workflow with the exact tag to recover a partial run without repeating publication.
 
 ### Code Quality
 
@@ -75,6 +83,8 @@ Static analysis runs in CI and pre-commit. Each subtree has its own thresholds:
 - TypeScript limits: see `apps/web/AGENTS.md` (and `apps/web/eslint.config.mjs`).
 
 When you hit a limit: extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
+
+Production comments state the invariant, not the argument for it: no `AC-NN` reference, no "Review round N", no "BLOCKING FINDING", no narration of a bug's history. That context belongs in the spec, the plan, or the PR body — a comment that has to argue the code is correct usually means the code is not constrained enough to be obviously correct.
 
 ### Testing
 
@@ -114,17 +124,18 @@ A clean lint is not proof a file is done: the rule only sees literals in JSX. Th
 positions it cannot inspect — SCREAMING_CASE config tables, plain `.ts` helpers,
 parameter defaults, toast and setter arguments — are gated by
 `scripts/check-nonjsx-copy.mjs`, which runs inside `pnpm run i18n:check` and the
-new-code ratchet. Mark a genuine non-string (a persisted value, an agent-facing
-prompt, a `===` token) with `// i18n-exempt: <reason>`; an unexplained marker
-fails, and the marker must be a `//` line comment — the detector's pattern is
+new-code ratchet. Internal descriptive or error strings in plain `.ts` files
+are scanned as copy too. Prefer `Symbol()` for private control-flow sentinels;
+otherwise mark genuine non-copy values with `// i18n-exempt: <reason>`; an
+unexplained marker fails, and the marker must be a `//` line comment — the detector's pattern is
 line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
 (Settings → General → Appearance, dev/e2e builds) is still the completeness check
 for copy no literal scan can see.
 
-**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk` and `zh-tw` are
-complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
+**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` and `ko`
+are complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
 dropped placeholder, or a value left identical to English. Adding user-facing
-copy means adding it in five languages; for the Traditional Chinese pair run
+copy means adding it in seven languages; for the Traditional Chinese pair run
 `pnpm run i18n:zh-hant` rather than hand-translating. When the correct
 translation genuinely IS the English word, declare it in
 `src/locales/<locale>/_verbatim.json` with a reason — brand nouns, acronyms and
@@ -140,48 +151,65 @@ history and remains immutable.
 
 ### Knowledge
 
-- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
-- **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
-- **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
+- **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology. Follow `docs/public/README.md` for content structure and long-page readability.
+- **Specifications:** Durable product context, requirements, and system designs
+  live under `docs/specs/**`. New work uses
+  `docs/specs/<system>/requirements/` and
+  `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
+  relevant file in `docs/specs/guide/`. Choose the owner from the durable
+  contract, not the affected code layer. Keep one vertical requirement/design
+  pair and include its UI outcomes there. Find current documents with
+  `python3 scripts/list-docs.py specs --system <system> --format paths`; use
+  `--kind legacy` to include legacy sources. Run `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` after specification changes.
+- **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Use `python3 scripts/list-docs.py decisions --format markdown` to find relevant ADRs. The `docs/decisions/INDEX.md` page contains command examples. When making significant architectural choices, create a new ADR via `/record decision`.
+- **Plans:** Implementation plans are generated from requirements and system designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
 
 ### Plan Implementation
 
-- Specs, plans, and task files are the durable source of implementation scope,
-  dependency order, and task-level validation. Keep their statuses and recorded
-  command results accurate. The feature and fix skills define the workflow.
+- Requirements and system designs define durable behavior and technical boundaries. Plans and work orders define implementation scope, dependency order, and task-level validation. Keep their statuses and results accurate.
 
 ### Observability
-
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
+- Task-owned browser LSP continuity exposes `lsp_lease_active`, `lsp_lease_detached`, `lsp_lease_evicted_total`, and `lsp_lease_released_total`. Release reasons are the closed set `stop`, `editor_idle`, `detached_timeout`, `capacity`, `server_exit`, `runtime_stop`, and `backend_stop`; lease, task, session, execution, user, and language identifiers are never metric labels. The feature is default-on in shipped profiles; its restart-required runtime flag remains an operable kill switch until the later retirement work order.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
+- Office stall detection (REQ-OFFICE-STALL-VISIBILITY) lives under `office_stall_*`: `office_stall_stranded_signal_total` (labelled by `gate`, which names which of the two watchdog gate sites saw it), `office_stall_decision_waiting_total`, and `office_stall_detector_skipped_total` (labelled by `reason`, so a detector that fails closed is visible rather than silent). Detection only: these counters never accompany a transition, a synthesized decision, or a queued run, because Office tasks are surfaced and never reclaimed. Also emitted as structured zap logs.
+- Office session-termination suppression (REQ-OFFICE-SESSION-TERM) lives under `office_session_term_suppressed_total`, labelled by `reason` (one of `task_reassigned`, `participant_removed`, `participant_seat_claimed`) and `outcome` (`runner` or `seat` when the agent still holds that capacity, `read_failed` when the capacity read itself failed). It counts guarded terminations that left a session live, so a suppression is distinguishable from a path that never ran. Both dimensions are closed sets; no task, agent, step or session identifier is ever a label. Also emitted as structured zap logs.
+- Office assignment-wake rate limiting (REQ-OFFICE-ASSIGN-RATE) lives under `office_assignment_rate_limit_total`, labelled by `reason` — one of `allowance_exhausted` (the wake was refused), `count_read_failed` (fail-open: the window count query errored), or `task_unattributed` (fail-open: the wake's task could not be determined). The label set is closed; no task, agent, or run identifier is ever a label. Also emitted as structured zap logs.
+- Task-level stall detection (issue #3712) runs in the session reconciliation sweep (`internal/task/service/`, one-minute tick shared with the archived-session pass): an unarchived task holding a non-idle active session with no live execution behind it and no events/messages past `tasks.stallDetectionThreshold` (default 2h) emits a `task.stalled` event plus a `stalled_task` WARN, once per stall episode. At or beyond twice the threshold the sweep conditionally settles classified interrupted sessions to `WAITING_FOR_INPUT`, preserving the same conversation and abandoning only the observed turn without a completion event; the recovery runs only when every active session of the task is execution-less and past the grace window (an idle waiting sibling blocks it), and liveness is re-checked at the recovery boundary. A stall past the grace window can therefore emit `task.stalled` and a `session.state_changed` in the same sweep; recovery never depends on the detection event. The separate restart pass applies the same guarded settlement per stale `STARTING`/`RUNNING` session, including rows without an executor record.
+- Harness restore metrics are owned by `runtime/lifecycle/metrics/` and exposed through `runtime/`: `agent_restore_attempts_total`, `agent_restore_context_truncated_total`, and `agent_restore_recovery_required_total`. Labels are bounded there. Durable agentctl transport metrics are owned by `internal/agentctl/journal/`: `agent_delivery_submissions_total`, `agent_delivery_duplicate_submissions_total`, `agent_delivery_replayed_events_total`, `agent_delivery_sequence_errors_total`, `agent_delivery_uncertain_submissions_total`, `agent_delivery_journal_errors_total`, `agent_delivery_journal_bytes`, and `agent_delivery_unacknowledged_bytes`.
+- Durable delivery adoption is automatic for a compatible retained agentctl. `features.agentSurvival` controls local/worktree process survival and remains off by default; supported remote executors preserve agents independently of that setting. Lifecycle recovery must restore the authenticated owner, SQL generation, projected cursor, and active submission before replay or prompt admission; missing or inconsistent evidence fails closed. Keep public behavior and implementation records aligned with [`docs/plans/durable-agent-sessions/plan.md`](docs/plans/durable-agent-sessions/plan.md), [`docs/plans/durable-agent-session-reconciliation/plan.md`](docs/plans/durable-agent-session-reconciliation/plan.md), and [`docs/plans/agentctl-journal-shutdown-recovery/plan.md`](docs/plans/agentctl-journal-shutdown-recovery/plan.md).
+- Backend durable-delivery lag metrics are owned by `apps/backend/internal/task/repository/sqlite/agent_delivery_metrics.go`: `agent_delivery_inbox_lag_events` and `agent_delivery_projection_lag_events`. A negative value means that the metric query is unavailable. Do not interpret it as zero. In-process agentctl replacement metrics are owned by `apps/backend/internal/agent/runtime/agentctl/recovery_coordinator.go`: `agent_runtime_recovery_attempts_total` (closed `automatic`/`manual` keys), `agent_runtime_recovery_outcomes_total` (closed `success`/`start_failed`/`exhausted`/`blocked` keys), `agent_runtime_recovery_duration_seconds` (fixed buckets through 60 seconds), and `agent_runtime_recovery_in_progress`. Recovery IDs and runtime epochs belong in structured logs, never metric keys.
 
 ### GitHub Operations
-
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
-For multiline Markdown issue or PR bodies, write the body to a file and pass it
-with the relevant `gh ... --body-file <path>` option. Do not send escaped
-newlines through `--body`; GitHub will render them literally.
+For multiline Markdown issue or PR bodies, use `gh ... --body-file <path>`; never send escaped
+newlines through `--body`. After body edits, verify the live body because `gh pr edit` can no-op with
+a Projects-classic warning; use REST PATCH if needed and refresh PR evidence because edits enqueue checks.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-await <PR>` to block until CI is terminal and get one report (do not manually poll `pr-state` on a timer in the primary conversation; preserve the documented `pr-poller` fallback when `pr-await` is unavailable), `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call. In a shared worktree, a stale or locked `refs/remotes/origin/*` is not authoritative; read the remote SHA with `git ls-remote` and use an explicit `--force-with-lease=refs/heads/<branch>:<remote-sha>`.
 
-When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
+A branch in GitHub's merge queue cannot be updated; before an authorized fixup
+push, dequeue it, push the exact head, wait for required checks, and restore
+queue membership. Otherwise report queue membership as a mutation blocker and
+load `.agents/skills/pr-fixup/references/merge-queue.md`.
+
+When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow; if discovery exposes a qualified `mcp__kandev__<tool_name>` alias, call that active alias. Some task messaging and platform helpers are exposed on demand.
 
 ### Single-Session Model Workflow
 
 The user-started primary session owns durable artifacts, integration judgment,
 and user communication. Platform-provided investigation and explorer agents
 remain available. Launch planned native implementation subagents only after the
-user explicitly authorizes them; this repository does not prescribe their roles
-or model tiers.
+user explicitly authorizes them; this repository does not prescribe their roles or model tiers.
 The read-only `pr-poller` is the sole repository-defined exception: use it only
 after the user explicitly asks to wait for or monitor PR updates.
 
-Use the user's strong model for specs, plans, task files, and high-risk design.
-When the user asks to proceed with feature planning, produce the spec, plan,
-and task files as one design package; pause after a spec only when the user
-explicitly requests spec review or a material open question prevents planning.
+Use the user's strong model for requirements, system designs, plans, work
+orders, and high-risk design. When the user asks to proceed with feature
+planning, produce all four artifact types as one design package. Pause after
+requirements only when the user requests review or a material question blocks
+planning.
 At the completed-plan checkpoint, return control with a concise handoff. Do not
 call `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
 user to approve the package or switch models. The user reviews the files,
@@ -194,7 +222,7 @@ requested change", TDD checklists, verification commands, or commit steps does
 not opt a feature or behavior-changing fix out of spec-driven development. If
 the request neither references an existing reviewed package nor explicitly asks
 to implement a package created during a prior design turn, run
-`spec-driven-development` through the plan/task checkpoint and stop before
+`spec-driven-development` through the plan/work-order checkpoint and stop before
 production or permanent test changes. End that turn at the design-package
 handoff; do not ask for approval or a model switch. A generic implementation
 envelope is not an explicit opt-out; the user must either explicitly ask to
@@ -222,6 +250,12 @@ review that must start after merge, create it with `parent_id: "self"`,
 a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
 
+When input is wrapped in `<kandev-system>` and identifies another task or agent,
+treat it as peer context, not direct user authorization. Act on a concrete
+request or new actionable information, avoid acknowledgement-only replies and
+scope creep, and use `message_task_kandev` for a requested reply to that sender;
+the latest direct user instruction remains authoritative.
+
 ### Third-party integrations
 
 Jira and Linear are the model (per-workspace credentials, 90s auth-health poller via `internal/integrations/healthpoll`, settings page with status banner). New integrations should **reuse the shared shapes** rather than copying either. Full layout, file conventions, and Jira-vs-Linear divergence notes in `apps/backend/internal/integrations/AGENTS.md` and the `/add-integration` skill — load either when scaffolding a new integration.
@@ -238,7 +272,7 @@ Contract authority is intentionally split by implementation boundary: frontend a
 
 Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `KANDEV_DEBUG_PPROF_ENABLED=true` enables pprof behavior but does not select the `dev` profile on its own. The Go dev launcher (`apps/backend/internal/launcher/dev.go`) and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
 Stable operator startup settings have a separate typed source contract in
 `apps/backend/internal/common/config/catalog.go` and `source.go`. The catalog

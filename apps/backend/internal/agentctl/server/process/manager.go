@@ -4,6 +4,7 @@ package process
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,14 +19,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
+	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -42,6 +50,14 @@ const (
 	StatusError    Status = "error"
 )
 
+// defaultUpdatesChannelCapacity is the updates channel buffer size used when
+// InstanceConfig.DetachedEventLimit is left at its Go zero value -- the
+// common case for tests and any other caller that builds a config.InstanceConfig
+// directly instead of going through Config.NewInstanceConfig. It matches the
+// agentctl.detachedEventLimit catalog tunable's own default
+// (AC-EXECUTORS-SURVIVAL-001.6).
+const defaultUpdatesChannelCapacity = 100
+
 // errorWrapper wraps an error so it can be stored in atomic.Value (which cannot store nil)
 type errorWrapper struct {
 	err error
@@ -49,11 +65,24 @@ type errorWrapper struct {
 
 // PendingPermission represents a permission request waiting for user response
 type PendingPermission struct {
-	ID         string
-	Request    *adapter.PermissionRequest
-	ResponseCh chan *adapter.PermissionResponse
-	CreatedAt  time.Time
+	ID                string
+	RequestID         string
+	Request           *adapter.PermissionRequest
+	Snapshot          streams.PendingAgentPermission
+	ResponseCh        chan *adapter.PermissionResponse
+	CreatedAt         time.Time
+	State             string
+	AutoApproveOption *adapter.PermissionOption
 }
+
+// PermissionOperationError carries a stable code across the agentctl stream.
+type PermissionOperationError struct {
+	Code string
+}
+
+func (e *PermissionOperationError) Error() string { return e.Code }
+
+const maxPermissionTombstones = 256
 
 // PermissionNotification is sent when the agent requests permission
 type PermissionNotification struct {
@@ -80,11 +109,38 @@ const processDefaultExitGrace = 5 * time.Second
 
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
+const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg    *config.InstanceConfig
-	logger *logger.Logger
+	cfg                      *config.InstanceConfig
+	logger                   *logger.Logger
+	managedGitTools          installedManagedGitTools
+	materializeGitHelperPath string
+
+	// deliveryJournal is opened before any agent process starts. A configured
+	// but unreadable journal is an admission error, never a legacy fallback.
+	deliveryJournal             *journal.Journal
+	deliveryJournalErr          error
+	deliveryWriter              *deliveryEventWriter
+	shellDeliveryMu             sync.Mutex
+	shellDelivery               map[shellDeliveryKey]shellDeliveryBaseline
+	deliveryJournalMu           sync.RWMutex
+	deliveryJournalClose        sync.Once
+	deliveryJournalCloseErr     error
+	deliveryWakeOnce            sync.Once
+	deliveryWakeCh              chan struct{}
+	deliverySubmissionMu        sync.Mutex
+	deliveryActiveMu            sync.RWMutex
+	deliveryActiveID            string
+	deliveryHealth              DeliveryHealth
+	deliveryPausedWriters       int
+	deliveryBlocked             bool
+	deliveryPressureCancelledID string
+	deliveryPressureTerminalID  string
+	deliveryCancellationFailed  bool
+	deliveryPromptMu            sync.Mutex
+	deliveryPromptByGeneration  map[uint64]string
 
 	// Process state
 	cmd                *exec.Cmd
@@ -93,18 +149,23 @@ type Manager struct {
 	stdin              io.WriteCloser
 	stdout             io.ReadCloser
 	stderr             io.ReadCloser
+	stderrPipeMu       sync.Mutex
+	stderrReader       io.ReadCloser
+	stderrWriter       io.WriteCloser
 	status             atomic.Value // Status
 	exitCode           atomic.Int32
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer    []string
-	stderrMu        sync.RWMutex
-	stderrConsumer  adapter.StderrLineConsumer
-	stderrSanitizer adapter.StderrLineSanitizer
+	stderrBuffer          []string
+	stderrBufferTruncated bool
+	stderrMu              sync.RWMutex
+	stderrConsumer        adapter.StderrLineConsumer
+	stderrSanitizer       adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
+	passthrough      *PassthroughOwner
 	// repoTrackers holds per-repository trackers for multi-repo task roots.
 	// Each tracker stamps RepositoryName onto its emitted events and shares
 	// subscriber channels with the root via the Manager fan-out.
@@ -121,7 +182,9 @@ type Manager struct {
 	// by workspace operations and repository-child discovery. It is guarded by
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
-	workspaceSourceRoots []string
+	workspaceSourceRoots           []string
+	workspaceFileExclusions        []string
+	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
 	// rescans can't both observe an empty tracker set and double-bootstrap
 	// (or both append duplicate trackers for the same new child). The
@@ -161,6 +224,20 @@ type Manager struct {
 	// from branch-only overrides. Updating one target must not race tracker
 	// creation or rewrite siblings' authoritative state.
 	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -174,6 +251,10 @@ type Manager struct {
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
 
+	// workspacePreview owns ephemeral loopback static servers for current
+	// editor-buffer HTML previews. It is closed with the agentctl instance.
+	workspacePreview *WorkspacePreviewManager
+
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
 
@@ -181,15 +262,18 @@ type Manager struct {
 	shellMgr *shell.Manager
 
 	// Protocol adapter for agent communication
-	adapter    adapter.AgentAdapter
-	adapterCfg *adapter.Config
+	adapter                 adapter.AgentAdapter
+	adapterCfg              *adapter.Config
+	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
 	updatesCh chan adapter.AgentEvent
 
 	// Pending permission requests waiting for user response
-	pendingPermissions map[string]*PendingPermission
-	permissionMu       sync.RWMutex
+	pendingPermissions       map[string]*PendingPermission
+	permissionTombstones     map[string]string
+	permissionTombstoneOrder []string
+	permissionMu             sync.RWMutex
 
 	// VS Code server manager (lazy-initialized on demand)
 	vscode   *VscodeManager
@@ -207,18 +291,38 @@ type Manager struct {
 	finalCommand string
 
 	// Synchronization
-	mu               sync.RWMutex
-	wg               sync.WaitGroup
-	stopCh           chan struct{}
-	doneCh           chan struct{}
-	startMu          sync.Mutex
-	admissionMu      sync.Mutex
-	admissionCount   int
-	admissionDrained chan struct{}
-	stopping         bool
-	lifetimeCtx      context.Context
-	lifetimeCancel   context.CancelFunc
-	mainReapPending  atomic.Bool
+	mu     sync.RWMutex
+	wg     sync.WaitGroup
+	stopCh chan struct{}
+	// stopChSnapshot mirrors stopCh for readers that must not take mu: Stop
+	// holds mu.Lock() for its entire teardown, including waiting for
+	// waitForExit to finish, so a stop-aware blocking send reached from that
+	// same goroutine (e.g. the exit-error send in waitForExit) would deadlock
+	// against Stop if it read stopCh under mu.RLock() instead. Start and
+	// startOneShot store the freshly created channel here in the same place
+	// they assign stopCh itself.
+	stopChSnapshot atomic.Value // chan struct{}
+	shutdownIntent atomic.Pointer[atomic.Bool]
+	doneCh         chan struct{}
+	// attachedCount is the live count of backend event-stream connections
+	// (see attachment.go). Zero value correctly starts an instance detached.
+	attachedCount atomic.Int32
+	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
+	turnOutcomeMu         sync.RWMutex
+	turnOutcomeRecorder   TurnOutcomeRecorder
+	turnOutcomeInstanceID string
+	startMu               sync.Mutex
+	admissionMu           sync.Mutex
+	admissionCount        int
+	admissionDrained      chan struct{}
+	stopping              bool
+	lifetimeCtx           context.Context
+	lifetimeCancel        context.CancelFunc
+	mainReapPending       atomic.Bool
+	startupEvidenceMu     sync.Mutex
+	startupGeneration     uint64
+	startupEvidence       *types.ManagedStartupEvidence
+	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -262,6 +366,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -324,15 +436,30 @@ func (m *Manager) BeginStop() {
 // NewManager creates a new process manager
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
+	updatesChannelCapacity := cfg.DetachedEventLimit
+	if updatesChannelCapacity <= 0 {
+		updatesChannelCapacity = defaultUpdatesChannelCapacity
+	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		cfg:                  cfg,
-		logger:               log.WithFields(zap.String("component", "process-manager")),
-		updatesCh:            make(chan adapter.AgentEvent, 100),
-		pendingPermissions:   make(map[string]*PendingPermission),
-		lifetimeCtx:          lifetimeCtx,
-		lifetimeCancel:       lifetimeCancel,
-		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		cfg:                        cfg,
+		logger:                     log.WithFields(zap.String("component", "process-manager")),
+		managedGitTools:            installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
+		materializeGitHelperPath:   config.InstalledGitCredentialHelperPath(),
+		updatesCh:                  make(chan adapter.AgentEvent, updatesChannelCapacity),
+		pendingPermissions:         make(map[string]*PendingPermission),
+		lifetimeCtx:                lifetimeCtx,
+		lifetimeCancel:             lifetimeCancel,
+		deliveryPromptByGeneration: make(map[uint64]string),
+		workspaceSourceRoots:       canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:              append([]string(nil), cfg.AgentEnv...),
+	}
+	if cfg.DurableJournalPath != "" {
+		m.deliveryJournal, m.deliveryJournalErr = journal.Open(journal.Config{Path: cfg.DurableJournalPath})
+		if m.deliveryJournalErr == nil {
+			sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+			m.deliveryJournalErr = m.deliveryJournal.ClassifyAbandonedDispatches(lifetimeCtx, sessionID, incarnationID, m.DeliveryStreamID(), generation)
+		}
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -346,10 +473,365 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		false,
 	)
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
+	m.workspacePreview = NewWorkspacePreviewManager(log)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
+	m.passthrough = newPassthroughOwner(m)
 	return m
+}
+
+// DeliveryJournal returns the owner-scoped journal and its initialization
+// result. A configured storage failure is returned to admission callers so it
+// cannot be misreported as a legacy-compatible peer.
+func (m *Manager) DeliveryJournal() (*journal.Journal, error) {
+	if m == nil {
+		return nil, fmt.Errorf("process manager is nil")
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	if m.deliveryJournalErr != nil {
+		return nil, m.deliveryJournalErr
+	}
+	if m.deliveryJournal == nil {
+		return nil, journal.ErrJournalCorrupt
+	}
+	return m.deliveryJournal, nil
+}
+
+// DeliveryWakeups returns the bounded notification channel for committed
+// journal output. The journal remains the source of truth; a wake only tells a
+// stream writer to read from its own cursor.
+func (m *Manager) DeliveryWakeups() <-chan struct{} {
+	if !m.deliveryJournalAvailable() {
+		return nil
+	}
+	m.deliveryWakeOnce.Do(func() {
+		m.deliveryWakeCh = make(chan struct{}, 1)
+	})
+	return m.deliveryWakeCh
+}
+
+func (m *Manager) signalDeliveryWakeup() {
+	if m.DeliveryWakeups() == nil {
+		return
+	}
+	select {
+	case m.deliveryWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func (m *Manager) deliveryJournalAvailable() bool {
+	if m == nil {
+		return false
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	return m.cfg != nil && m.cfg.DurableJournalPath != "" && m.deliveryJournal != nil && m.deliveryJournalErr == nil
+}
+
+// DeliveryCapability is the initialization-time protocol advertisement. A
+// manager without an explicitly retained journal remains a genuine legacy
+// peer; a configured journal failure is reported as unavailable instead.
+func (m *Manager) DeliveryCapability() journal.StorageCapability {
+	if m == nil || m.cfg == nil || m.cfg.DurableJournalPath == "" {
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_not_durable"}
+	}
+	m.deliveryJournalMu.RLock()
+	defer m.deliveryJournalMu.RUnlock()
+	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
+	}
+	// Stream records are replayable and can be acknowledged by the connected
+	// backend while a session is starting. Only an unsettled prompt outcome
+	// makes a new prompt unsafe to admit here; recovery status still reports
+	// unacknowledged stream records through the full descriptor.
+	unresolved, err := m.deliveryJournal.HasUnresolvedSubmissions(context.Background())
+	if err != nil {
+		return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Reason: "storage_unavailable"}
+	}
+	return journal.StorageCapability{Version: journal.CurrentProtocolVersion, Durable: true, Unresolved: unresolved}
+}
+
+// DeliveryRecoveryDescriptor returns the authenticated instance's durable
+// identity and bounded retained-work evidence. A configured journal failure is
+// returned to the caller; it must never look like an empty legacy journal.
+func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID string) (journal.RecoveryDescriptor, error) {
+	if m == nil || m.cfg == nil {
+		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
+	}
+	currentStreamID := m.DeliveryStreamID()
+	if streamID == "" {
+		streamID = currentStreamID
+	}
+	if streamID != currentStreamID {
+		return journal.RecoveryDescriptor{}, journal.ErrOwnerMismatch
+	}
+	capability := m.DeliveryCapability()
+	if !capability.Durable {
+		if capability.Reason == "storage_not_durable" {
+			return journal.RecoveryDescriptor{
+				StorageCapability: capability,
+				SessionID:         m.cfg.SessionID,
+				IncarnationID:     m.DeliveryIncarnationID(),
+				HarnessGeneration: m.DeliveryHarnessGeneration(),
+				StreamID:          currentStreamID,
+			}, nil
+		}
+		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.RecoveryDescriptor{}, err
+	}
+	descriptor, err := deliveryJournal.RecoveryDescriptor(
+		ctx,
+		m.cfg.SessionID,
+		m.DeliveryIncarnationID(),
+		m.DeliveryHarnessGeneration(),
+		currentStreamID,
+	)
+	if err != nil {
+		return journal.RecoveryDescriptor{}, err
+	}
+	descriptor.StorageCapability = capability
+	return descriptor, nil
+}
+
+// DeliveryStreamID returns the stable transport stream identity. Agentctl
+// instance IDs identify a process incarnation and may change during executor
+// replacement; the Kandev session owns the retained event stream.
+func (m *Manager) DeliveryStreamID() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.DeliveryStreamID != "" {
+		return m.cfg.DeliveryStreamID
+	}
+	if m.cfg.SessionID != "" {
+		return m.cfg.SessionID
+	}
+	return m.cfg.InstanceID
+}
+
+// RolloverDeliveryStream changes only the retained transport identity after
+// the current stream is idle and settled. Native harness generation and the
+// active ACP conversation remain unchanged; callers persist the corresponding
+// backend checkpoint before admitting the next submission.
+func (m *Manager) RolloverDeliveryStream(ctx context.Context, replacementID string) error {
+	if m == nil || replacementID == "" {
+		return journal.ErrOwnerMismatch
+	}
+	if m.activeDeliverySubmissionID() != "" {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	oldID := m.DeliveryStreamID()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if err := deliveryJournal.RolloverStream(ctx, oldID, journal.Stream{
+		StreamID: replacementID, SessionID: sessionID, IncarnationID: incarnationID, HarnessGeneration: generation,
+	}); err != nil {
+		return err
+	}
+	m.deliveryJournalMu.Lock()
+	if m.cfg != nil {
+		m.cfg.DeliveryStreamID = replacementID
+	}
+	m.deliveryJournalMu.Unlock()
+	return nil
+}
+
+// DeliveryIncarnationID returns the durable Kandev session lifetime that owns
+// this agentctl instance. The stream ID fallback preserves legacy test and
+// standalone configurations that do not provide continuity metadata.
+func (m *Manager) DeliveryIncarnationID() string {
+	if m == nil || m.cfg == nil {
+		return ""
+	}
+	if m.cfg.DeliveryIncarnationID != "" {
+		return m.cfg.DeliveryIncarnationID
+	}
+	return m.DeliveryStreamID()
+}
+
+// DeliveryHarnessGeneration returns the native conversation generation for
+// durable owner fencing. A missing value is the first generation for legacy
+// configurations and is never treated as an unknown owner.
+func (m *Manager) DeliveryHarnessGeneration() uint64 {
+	if m == nil || m.cfg == nil || m.cfg.DeliveryHarnessGeneration == 0 {
+		return 1
+	}
+	return m.cfg.DeliveryHarnessGeneration
+}
+
+// AdmitDeliverySubmission records a submission and advances it to accepted
+// before the caller acknowledges admission. Dispatch is a separate operation
+// because an accepted record can safely wait for reconciliation.
+func (m *Manager) AdmitDeliverySubmission(ctx context.Context, submission journal.Submission) (journal.Submission, error) {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.Submission{}, err
+	}
+	if err := m.refreshDeliveryPressure(ctx, deliveryJournal, ""); err != nil {
+		return journal.Submission{}, err
+	}
+	m.deliveryActiveMu.RLock()
+	blocked := m.deliveryBlocked
+	m.deliveryActiveMu.RUnlock()
+	if blocked {
+		return journal.Submission{}, errDeliveryPressure
+	}
+	if submission.StreamID == "" {
+		submission.StreamID = m.DeliveryStreamID()
+	}
+	return (&SubmissionDelivery{Journal: deliveryJournal}).Admit(ctx, submission)
+}
+
+// DispatchDeliverySubmission reconciles the immutable submission before it
+// invokes the harness. The manager-level lock prevents two requests in this
+// process from both observing accepted and dispatching the same prompt.
+func (m *Manager) DispatchDeliverySubmission(
+	ctx context.Context,
+	id string,
+	call func(context.Context) error,
+) (journal.Submission, error) {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.Submission{}, err
+	}
+	m.deliverySubmissionMu.Lock()
+	defer m.deliverySubmissionMu.Unlock()
+	if err := m.refreshDeliveryPressure(ctx, deliveryJournal, ""); err != nil {
+		return journal.Submission{}, err
+	}
+	m.deliveryActiveMu.Lock()
+	if m.deliveryBlocked {
+		m.deliveryActiveMu.Unlock()
+		return journal.Submission{}, errDeliveryPressure
+	}
+	m.deliveryActiveID = id
+	m.deliveryActiveMu.Unlock()
+	defer func() {
+		m.deliveryActiveMu.Lock()
+		m.deliveryActiveID = ""
+		m.deliveryActiveMu.Unlock()
+	}()
+	stopping := m.shutdownIntent.Load()
+	return (&SubmissionDelivery{Journal: deliveryJournal, Stopping: stopping}).Dispatch(ctx, id, call)
+}
+
+func (m *Manager) activeDeliverySubmissionID() string {
+	m.deliveryActiveMu.RLock()
+	defer m.deliveryActiveMu.RUnlock()
+	return m.deliveryActiveID
+}
+
+// TrackDeliverySubmission associates a prompt generation with its immutable
+// submission. The ACP prompt call returns before the terminal event is
+// emitted, so the active-dispatch marker cannot be the only source of that
+// association.
+func (m *Manager) TrackDeliverySubmission(submissionID string, promptGeneration uint64) {
+	if m == nil || submissionID == "" {
+		return
+	}
+	m.deliveryPromptMu.Lock()
+	if m.deliveryPromptByGeneration == nil {
+		m.deliveryPromptByGeneration = make(map[uint64]string)
+	}
+	m.deliveryPromptByGeneration[promptGeneration] = submissionID
+	m.deliveryPromptMu.Unlock()
+}
+
+func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string {
+	active := m.activeDeliverySubmissionID()
+	m.deliveryPromptMu.Lock()
+	defer m.deliveryPromptMu.Unlock()
+	mapped := m.deliveryPromptByGeneration[update.PromptGeneration]
+	if update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError {
+		delete(m.deliveryPromptByGeneration, update.PromptGeneration)
+	}
+	if update.DeliverySubmissionID != "" {
+		return update.DeliverySubmissionID
+	}
+	if mapped != "" {
+		return mapped
+	}
+	if active != "" {
+		return active
+	}
+	return ""
+}
+
+// DeliverySubmissionIdentity returns the durable owner identity used by
+// prompt submissions. The instance ID changes with a replacement agentctl;
+// the Kandev session remains the stable conversation identity.
+func (m *Manager) DeliverySubmissionIdentity() (sessionID, incarnationID string, generation uint64) {
+	if m == nil || m.cfg == nil {
+		return "", "", 0
+	}
+	return m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration()
+}
+
+// RetireDeliverySubmission seals explicitly recovered work. A native resume
+// acknowledgement requires an idle dispatcher and the current owner identity.
+func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recoveryGeneration uint64) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
+		generation != recoveryGeneration || submission.HarnessGeneration > generation ||
+		(submission.HarnessGeneration == generation && !journal.HasUnprovenOutcome(submission)) {
+		return journal.ErrOwnerMismatch
+	}
+	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
+	return err
+}
+
+// CancelDeliverySubmission settles one prompt after an explicit user cancel.
+// Unlike retirement, cancellation is valid in the current harness generation
+// and preserves the record as an auditable terminal outcome.
+func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(adapter.AgentEvent{
+		Type:                 adapter.EventTypeComplete,
+		SessionID:            submission.SessionID,
+		DeliverySubmissionID: id,
+		Data:                 map[string]any{"stop_reason": "cancelled"},
+	})
+	if err != nil {
+		return err
+	}
+	err = deliveryJournal.CancelSubmission(ctx, id, journal.Event{
+		SessionID: submission.SessionID, IncarnationID: submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID,
+		SubmissionID: id, Type: adapter.EventTypeComplete, Terminal: true, Payload: payload,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		m.signalDeliveryWakeup()
+	}
+	return err
 }
 
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the
@@ -402,10 +884,84 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 	}
 }
 
+// SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
+// on every current tracker. The update is serialized with tracker rescans so
+// newly created trackers inherit the same filter.
+func (m *Manager) SetWorkspaceFileExclusions(paths []string) {
+	canonical := canonicalWorkspaceFileExclusions(paths)
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+	m.repoTrackersMu.Lock()
+	if sameStringSlice(m.workspaceFileExclusions, canonical) {
+		m.repoTrackersMu.Unlock()
+		return
+	}
+	m.workspaceFileExclusions = canonical
+	m.workspaceFileExclusionRevision++
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
+	m.repoTrackersMu.Unlock()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetRecoveryArtifactExclusions(canonical)
+		}
+	}
+}
+
+func canonicalWorkspaceFileExclusions(paths []string) []string {
+	set := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if clean != string(filepath.Separator) {
+			set[clean] = struct{}{}
+		}
+	}
+	canonical := make([]string, 0, len(set))
+	for path := range set {
+		canonical = append(canonical, path)
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
+func (m *Manager) currentWorkspaceFileExclusions() []string {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return append([]string(nil), m.workspaceFileExclusions...)
+}
+
+func (m *Manager) currentWorkspaceFileExclusionRevision() uint64 {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return m.workspaceFileExclusionRevision
+}
+
+// SetUserInputRequestHandler configures protocol-native question routing before
+// the agent process starts. Adapters without question support ignore it.
+func (m *Manager) SetUserInputRequestHandler(handler adapter.UserInputRequestHandler) {
+	m.userInputRequestHandler = handler
+}
+
 func (m *Manager) currentWorkspaceSourceRoots() []string {
 	m.repoTrackersMu.RLock()
 	defer m.repoTrackersMu.RUnlock()
 	return append([]string(nil), m.workspaceSourceRoots...)
+}
+
+// WorkspaceSourceRoots returns the live, current source-root allowlist
+// (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots" reconstruction
+// row: read back from the adopted instance, never pushed). A rescan or
+// rebind changes this in place, so callers always see the value this
+// instance is enforcing right now, not a snapshot from creation.
+func (m *Manager) WorkspaceSourceRoots() []string {
+	return m.currentWorkspaceSourceRoots()
 }
 
 // lookupBaseBranch reads the task's recorded base branch for a given
@@ -556,6 +1112,55 @@ func (m *Manager) snapshotTrackers() (*WorkspaceTracker, []*WorkspaceTracker) {
 	return m.workspaceTracker, repos
 }
 
+// GitPollStats aggregates completed git-status poll tick counts and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// Backs the diagnostic agentctl_git_poll_ms metric (api.handleSystemMetrics).
+// count == 0 means no tracker has completed a tick yet.
+func (m *Manager) GitPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.GitPollTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
+// MonitorPollStats aggregates completed workspace monitor scans and their
+// mean duration across this instance's root and per-repo workspace trackers.
+// The initial scan is included. count == 0 means no scan has completed yet.
+func (m *Manager) MonitorPollStats() (count int64, meanMillis float64) {
+	root, trackers := m.snapshotTrackers()
+	var totalCount, totalNanos int64
+	accumulate := func(wt *WorkspaceTracker) {
+		if wt == nil {
+			return
+		}
+		c, n := wt.MonitorTickStats()
+		totalCount += c
+		totalNanos += n
+	}
+	accumulate(root)
+	for _, t := range trackers {
+		accumulate(t)
+	}
+	if totalCount == 0 {
+		return 0, 0
+	}
+	return totalCount, float64(totalNanos) / float64(totalCount) / float64(time.Millisecond)
+}
+
 // StartAllWorkspaceTrackers starts root + per-repo trackers (idempotent) so file-change events fire in passthrough mode.
 func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	root, trackers := m.snapshotTrackers()
@@ -567,9 +1172,14 @@ func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	}
 }
 
-// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+// stopWorkspaceTrackers stops root, per-repo, and lazy trackers idempotently.
 func (m *Manager) stopWorkspaceTrackers() {
 	root, trackers := m.snapshotTrackers()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
 	if root != nil {
 		root.Stop()
 	}
@@ -646,9 +1256,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(context.Background(), t)
+	m.prepareTrackerComparisonTarget(t, false)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -829,7 +1439,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -915,6 +1527,20 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	}()
 }
 
+// RefreshWorkspace performs one file and Git scan across the root and all
+// repository trackers. Lifecycle uses this at turn completion; the manual
+// refresh surface uses it as an explicit access retry.
+func (m *Manager) RefreshWorkspace(ctx context.Context, trigger string) {
+	trigger = NormalizeWorkspaceTrigger(trigger)
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.RefreshWorkspace(ctx, trigger)
+	}
+	for _, tracker := range trackers {
+		tracker.RefreshWorkspace(ctx, trigger)
+	}
+}
+
 // GitOperator returns the git operator for git operations against the
 // workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {
@@ -980,6 +1606,27 @@ func (m *Manager) gitEnvironment() []string {
 	return append([]string(nil), m.cfg.AgentEnv...)
 }
 
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
+}
+
 // resolveSubpath normalises and validates a repo subpath relative to
 // cfg.WorkDir. Returns ("", "", nil) for the root (empty/"."); otherwise
 // returns the cleaned relative path and the absolute full path.
@@ -1038,6 +1685,53 @@ func (m *Manager) ResolveRepoSubdir(subpath string) (string, error) {
 	return full, err
 }
 
+// PublishWorkspacePreview publishes a current HTML editor buffer under the
+// selected workspace or repository root.
+func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (WorkspacePreviewResponse, error) {
+	if m.workspacePreview == nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
+	if err != nil {
+		return WorkspacePreviewResponse{}, err
+	}
+	return m.workspacePreview.Publish(root, req)
+}
+
+// CloseWorkspacePreview stops all ephemeral preview servers owned by this
+// agentctl process.
+func (m *Manager) CloseWorkspacePreview(ctx context.Context) error {
+	if m.workspacePreview == nil {
+		return nil
+	}
+	return m.workspacePreview.Close(ctx)
+}
+
+func (m *Manager) resolveWorkspacePreviewRoot(repo string) (string, error) {
+	_, root, err := m.resolveSubpath(repo)
+	if err != nil {
+		return "", err
+	}
+	canonicalRoot, err := canonicalPreviewDirectory(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve preview root: %w", err)
+	}
+	canonicalWorkDir, err := canonicalPreviewDirectory(m.cfg.WorkDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	if previewPathWithinRoot(canonicalWorkDir, canonicalRoot) {
+		return canonicalRoot, nil
+	}
+	for _, sourceRoot := range m.currentWorkspaceSourceRoots() {
+		canonicalSourceRoot, sourceErr := canonicalPreviewDirectory(sourceRoot)
+		if sourceErr == nil && previewPathWithinRoot(canonicalSourceRoot, canonicalRoot) {
+			return canonicalRoot, nil
+		}
+	}
+	return "", fmt.Errorf("%w: preview root escapes workspace", ErrWorkspacePreviewPathInvalid)
+}
+
 // JoinRepoPath validates a repo subpath and returns the workspace-relative
 // path obtained by joining `subpath` and `path`. Empty `subpath` returns
 // `path` unchanged (single-repo workspaces). Used by file content / update
@@ -1056,16 +1750,30 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 
 // Start starts the agent process
 func (m *Manager) Start(ctx context.Context) error {
+	_, err := m.StartWithGeneration(ctx)
+	return err
+}
+
+// StartWithGeneration starts the agent process and returns the generation
+// created by this call while startup remains serialized against replacement.
+func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
+	if m.passthrough.Live() {
+		return 0, fmt.Errorf("passthrough agent is already running")
+	}
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("agent is already running")
+		return 0, fmt.Errorf("agent is already running")
+	}
+	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
+		m.status.Store(StatusError)
+		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
@@ -1084,49 +1792,67 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		return m.startOneShot()
+		if err := m.startOneShot(); err != nil {
+			return 0, err
+		}
+		return m.ProcessGeneration(), nil
 	}
 
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
+	return m.startManagedProcess()
+}
 
+func (m *Manager) startManagedProcess() (uint64, error) {
 	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
+	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
+		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		return formatAgentStartError(err, m.cfg.AgentEnv)
+		if !m.cfg.LaunchWrapper.IsZero() {
+			return 0, errors.New("wrapped agent process failed to start")
+		}
+		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
+	}
+	processGeneration := m.beginManagedStartupGeneration()
+	if err := m.closeStderrWriter(); err != nil {
+		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
 		reapErr := killAndWaitStartedCommand(m.cmd)
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
 	m.processLifecycle = processLifecycle
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
+	m.shutdownIntent.Store(&atomic.Bool{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
@@ -1140,14 +1866,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		default:
 			reapErr = killAndWaitStartedCommand(m.cmd)
 		}
+		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
-	// Start stderr reader and exit waiter
+	// Start stderr reader and exit waiter. Keep the completion channel local to
+	// this process generation so a delayed reader cannot signal a replacement.
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
-	go m.readStderr()
-	go m.waitForExit()
+	go m.readStderr(stderrDone)
+	go m.waitForExitGeneration(stderrDone, processGeneration)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1166,19 +1895,26 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
-	return nil
+	return processGeneration, nil
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
 // The adapter manages its own per-prompt subprocess lifecycle internally.
 func (m *Manager) startOneShot() error {
+	m.cfg.AgentEnv = launchwrapper.StripControlCredentials(m.cfg.AgentEnv)
+	if err := m.prepareOneShotArgs(); err != nil {
+		m.status.Store(StatusError)
+		return err
+	}
 	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
+	m.shutdownIntent.Store(&atomic.Bool{})
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1202,32 +1938,25 @@ func (m *Manager) startOneShot() error {
 // buildAdapterConfig constructs the adapter configuration and initialises the
 // protocol adapter, including merging any adapter-provided environment variables.
 func (m *Manager) buildAdapterConfig() error {
-	mcpServers := make([]adapter.McpServerConfig, len(m.cfg.McpServers))
-	for i, mcp := range m.cfg.McpServers {
-		mcpServers[i] = adapter.McpServerConfig{
-			Name:    mcp.Name,
-			URL:     mcp.URL,
-			Type:    mcp.Type,
-			Command: mcp.Command,
-			Args:    mcp.Args,
-			Env:     mcp.Env,
-			Headers: mcp.Headers,
-		}
+	mcpServers, err := m.adapterMCPServers()
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
-		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
+		AutoApprove:               m.adapterAutoApprove(),
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
 		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
 		RequiresProcessKill:       m.cfg.RequiresProcessKill,
 		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
-	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
+	// One-shot adapters spawn a new subprocess per prompt.
 	continueArgs := m.cfg.ContinueArgs
 	if continueArgs == nil && m.cfg.ContinueCommand != "" {
 		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
@@ -1273,6 +2002,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1285,20 +2015,27 @@ func (m *Manager) buildFinalCommand() error {
 	cmdArgs = append(cmdArgs, m.cfg.AgentArgs[1:]...)
 	cmdArgs = append(cmdArgs, extraArgs...)
 
-	m.finalCommand = strings.Join(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...), " ")
-
-	m.logger.Debug("final agent command",
-		zap.String("binary", m.cfg.AgentArgs[0]),
-		zap.Strings("args", cmdArgs),
-		zap.Int("extra_args_count", len(extraArgs)))
+	m.cfg.AgentEnv = launchwrapper.StripControlCredentials(m.cfg.AgentEnv)
+	finalArgs, err := m.prepareSessionArgs(append([]string{m.cfg.AgentArgs[0]}, cmdArgs...))
+	if err != nil {
+		return err
+	}
+	if err := m.prepareOneShotArgs(); err != nil {
+		return err
+	}
+	m.finalCommand = strings.Join(finalArgs, " ")
+	if !m.cfg.LaunchWrapper.IsZero() {
+		m.finalCommand = "[wrapped agent]"
+	}
+	cmdArgs = finalArgs[1:]
 
 	// NOTE: We intentionally don't use exec.CommandContext here because we don't want
 	// the HTTP request context to kill the agent process when the request completes.
-	m.cmd = exec.Command(m.cfg.AgentArgs[0], cmdArgs...)
+	m.cmd = exec.Command(finalArgs[0], cmdArgs...)
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1405,13 +2142,45 @@ func (m *Manager) startProcessPipes() error {
 		_ = m.stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	m.stderr, err = m.cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
 		_ = m.stdin.Close()
 		_ = m.stdout.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+	m.stderr = stderrReader
+	m.stderrPipeMu.Lock()
+	m.stderrReader = stderrReader
+	m.stderrWriter = stderrWriter
+	m.stderrPipeMu.Unlock()
+	m.cmd.Stderr = stderrWriter
 	return nil
+}
+
+func (m *Manager) closeStderrReader() error {
+	m.stderrPipeMu.Lock()
+	reader := m.stderrReader
+	m.stderrReader = nil
+	m.stderrPipeMu.Unlock()
+	if reader == nil {
+		return nil
+	}
+	return reader.Close()
+}
+
+func (m *Manager) closeStderrWriter() error {
+	m.stderrPipeMu.Lock()
+	writer := m.stderrWriter
+	m.stderrWriter = nil
+	m.stderrPipeMu.Unlock()
+	if writer == nil {
+		return nil
+	}
+	return writer.Close()
+}
+
+func (m *Manager) closeStderrPipe() error {
+	return errors.Join(m.closeStderrWriter(), m.closeStderrReader())
 }
 
 // startAgentShell auto-creates a shell session when ShellEnabled is configured.
@@ -1464,6 +2233,13 @@ func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequ
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
 	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	if err != nil {
+		return req, err
+	}
+	req.Args = append([]string(nil), req.Args...)
+	if err := managedruntime.PrepareNPMProjectPrefix(req.Args); err != nil {
+		return req, errors.New("managed npm project prefix could not be prepared")
+	}
 	return req, err
 }
 
@@ -1487,7 +2263,19 @@ func lookupEnvValue(env []string, key string) string {
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, false, wrapper...)
+}
+
+// ConfigureWithEnvironment sets the agent command and replaces the complete
+// effective indexed Git configuration block supplied by env. Ordinary
+// instance variables that are absent from env remain available to the agent.
+// This must be called before Start() if the instance was created without a command.
+func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent bool, wrapper ...launchwrapper.Spec) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, continueCommand, continueArgs, continueArgsPresent, true, wrapper...)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool, wrapper ...launchwrapper.Spec) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1495,6 +2283,10 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		return fmt.Errorf("cannot configure while agent is running")
 	}
 
+	spec, err := configuredLaunchWrapper(wrapper, agentArgsPresent)
+	if err != nil {
+		return err
+	}
 	args := agentArgs
 	if !agentArgsPresent {
 		args = config.ParseCommand(command)
@@ -1513,15 +2305,19 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		}
 	}
 
-	m.cfg.AgentCommand = command
-	m.cfg.AgentArgs = args
-
-	// Set approval policy if provided (for Codex)
-	if approvalPolicy != "" {
-		m.cfg.ApprovalPolicy = approvalPolicy
+	// Compose the environment before changing any other configuration so a
+	// malformed indexed Git block leaves the instance fully unchanged.
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
+	if err != nil {
+		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
 
-	// Store continue command for one-shot adapters (e.g., Amp)
+	m.cfg.AgentCommand = command
+	m.cfg.AgentArgs = args
+	m.cfg.LaunchWrapper = launchwrapper.Profile(spec.Argv)
+	m.cfg.LaunchWrapperRequired = !spec.IsZero()
+
+	// Store continue command for one-shot adapters
 	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
 		m.cfg.ContinueArgs = continueArgs
@@ -1530,21 +2326,108 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ContinueArgs = continueArgs
 	}
 
-	// Merge additional env vars
-	if len(env) > 0 {
-		for k, v := range env {
-			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
-		}
+	m.cfg.AgentEnv = mergedEnv
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 
-	m.logger.Info("agent configured",
-		zap.String("command", command),
-		zap.Strings("args", args),
-		zap.String("approval_policy", m.cfg.ApprovalPolicy),
-		zap.String("continue_command", continueCommand),
-		zap.Int("env_count", len(env)))
+	m.logger.Info("agent configured", zap.Int("env_count", len(env)), zap.Bool("wrapped", !spec.IsZero()))
 
 	return nil
+}
+
+type installedManagedGitTools struct {
+	helperPath string
+	shimDir    string
+	bashEnv    string
+}
+
+func installedManagedGitToolsFromEnvironment(env []string) installedManagedGitTools {
+	values := environmentMapFromSlice(env)
+	return installedManagedGitTools{
+		helperPath: values[githubauth.CredentialHelperPathEnv],
+		shimDir:    values[githubauth.CredentialCLIShimDirEnv],
+		bashEnv:    values[githubauth.CredentialCLIBashEnvEnv],
+	}
+}
+
+func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, overlay map[string]string, replaceIndexed bool, tools installedManagedGitTools) ([]string, error) {
+	base := environmentMapFromSlice(current)
+	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
+	config.DeactivateManagedGitTools(
+		base,
+		base[githubauth.CredentialCLIShimDirEnv],
+		base[githubauth.CredentialCLIBashEnvEnv],
+	)
+	githubauth.RemoveManagedCredentialEnvironment(base)
+	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
+			!githubauth.IsManagedGitCredentialConfigEntry(index, entries, managed)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remove generated Git credential helpers: %w", err)
+	}
+	if replaceIndexed {
+		// A complete environment owns the entire indexed block, including an
+		// empty block. Remove the previous block unconditionally so a logout or
+		// policy change cannot retain stale generated entries.
+		filtered, err = gitconfigenv.Filter(filtered, func(int, []gitconfigenv.Entry) bool { return false })
+		if err != nil {
+			return nil, fmt.Errorf("replace indexed Git configuration: %w", err)
+		}
+	}
+	if len(filtered) == 0 && len(overlay) == 0 {
+		return nil, nil
+	}
+	merged, err := gitconfigenv.Merge(filtered, overlay)
+	if err != nil {
+		return nil, err
+	}
+	activateManagedGitToolsForCurrentAuthorization(merged, tools)
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+merged[key])
+	}
+	return result, nil
+}
+
+func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools installedManagedGitTools) {
+	if env[githubauth.CredentialBrokerURLEnv] == "" || env[githubauth.CredentialLeaseEnv] == "" {
+		return
+	}
+	if env[githubauth.CredentialHelperPathEnv] == "" {
+		env[githubauth.CredentialHelperPathEnv] = tools.helperPath
+	}
+	shimDir := tools.shimDir
+	if shimDir == "" {
+		shimDir = env[githubauth.CredentialCLIShimDirEnv]
+	}
+	bashEnv := tools.bashEnv
+	if bashEnv == "" {
+		bashEnv = env[githubauth.CredentialCLIBashEnvEnv]
+	}
+	// Incoming snapshots can already carry managed PATH and BASH_ENV entries.
+	// Unwrap those owned entries before rebuilding the active environment.
+	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
+	config.ActivateManagedGitTools(env, shimDir, bashEnv)
+}
+
+func environmentMapFromSlice(env []string) map[string]string {
+	result := make(map[string]string, len(env))
+	for _, entry := range env {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			continue
+		}
+		result[entry[:eq]] = entry[eq+1:]
+	}
+	return result
 }
 
 // createAdapter creates the appropriate protocol adapter based on configuration.
@@ -1562,7 +2445,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -1579,6 +2462,9 @@ func (m *Manager) createAdapter() error {
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
+	if setter, ok := m.adapter.(adapter.UserInputRequestHandlerSetter); ok {
+		setter.SetUserInputRequestHandler(m.userInputRequestHandler)
+	}
 
 	return nil
 }
@@ -1586,6 +2472,7 @@ func (m *Manager) createAdapter() error {
 // forwardUpdates forwards updates from the adapter to the manager's channel
 func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-chan struct{}) {
 	defer m.wg.Done()
+	defer m.closeDeliveryEventWriter()
 
 	updatesCh := agentAdapter.Updates()
 	for {
@@ -1594,15 +2481,163 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+			persisted, err := m.persistDeliveryEvent(update)
+			if err != nil {
+				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
+				// A configured journal is the commit-before-publish boundary. Stop
+				// forwarding when it cannot commit so the backend never observes an
+				// event that cannot be replayed after a disconnect.
+				m.recordDeliveryStorageFailure(err)
+				m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
+				return
+			}
+			update = persisted
+			if update.Type == "" {
+				continue
+			}
+			m.recordTerminalOutcome(&update)
+			if update.DeliverySequence > 0 && m.deliveryJournalAvailable() {
+				m.signalDeliveryWakeup()
+				continue
+			}
 			select {
 			case m.updatesCh <- update:
 			case <-stopCh:
 				return
 			}
 		case <-stopCh:
+			m.drainDeliveryUpdates(updatesCh)
 			return
 		}
 	}
+}
+
+func (m *Manager) drainDeliveryUpdates(updates <-chan adapter.AgentEvent) {
+	for {
+		select {
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
+			persisted, err := m.persistDeliveryEvent(update)
+			if err != nil {
+				m.recordDeliveryStorageFailure(err)
+				return
+			}
+			m.recordTerminalOutcome(&persisted)
+			m.signalDeliveryWakeup()
+		default:
+			return
+		}
+	}
+}
+
+func (m *Manager) closeDeliveryEventWriter() {
+	m.deliveryJournalMu.RLock()
+	writer := m.deliveryWriter
+	m.deliveryJournalMu.RUnlock()
+	if writer != nil {
+		writer.close()
+	}
+}
+
+// persistDeliveryEvent establishes the journal commit-before-publish barrier.
+// The normalized event is kept as an opaque payload here; backend projection
+// remains the owner of canonical task messages and workflow effects.
+func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
+	update = streams.BoundGenericToolEvent(update)
+	m.deliveryJournalMu.Lock()
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
+	deliveryJournal := m.deliveryJournal
+	if deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
+		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
+		m.deliveryWriter = newDeliveryEventWriter(m)
+	}
+	writer := m.deliveryWriter
+	m.deliveryJournalMu.Unlock()
+	if !configured {
+		return update, nil
+	}
+	if deliveryJournal == nil {
+		_, err := m.DeliveryJournal()
+		return update, err
+	}
+	if writer != nil {
+		return writer.persist(context.Background(), update)
+	}
+	committed, err := m.persistDeliveryBatch(context.Background(), []adapter.AgentEvent{update})
+	if err != nil {
+		return update, err
+	}
+	return committed[0], nil
+}
+
+func (m *Manager) persistDeliveryBatchRaw(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
+	m.deliveryJournalMu.RLock()
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
+	deliveryJournal := m.deliveryJournal
+	deliveryJournalErr := m.deliveryJournalErr
+	m.deliveryJournalMu.RUnlock()
+	if !configured {
+		return updates, nil
+	}
+	if deliveryJournal == nil {
+		if deliveryJournalErr != nil {
+			return updates, deliveryJournalErr
+		}
+		return updates, journal.ErrJournalCorrupt
+	}
+	events := make([]journal.Event, len(updates))
+	for i, update := range updates {
+		payload, err := json.Marshal(update)
+		if err != nil {
+			return updates, err
+		}
+		sessionID := ""
+		if m.cfg != nil {
+			sessionID = m.cfg.SessionID
+		}
+		if sessionID == "" {
+			sessionID = update.SessionID
+		}
+		streamID := m.DeliveryStreamID()
+		incarnationID := streamID
+		harnessGeneration := m.DeliveryHarnessGeneration()
+		if m.DeliveryIncarnationID() != "" {
+			incarnationID = m.DeliveryIncarnationID()
+		}
+		if streamID == "" {
+			return updates, fmt.Errorf("durable delivery stream identity is missing")
+		}
+		if sessionID == "" {
+			sessionID = streamID
+		}
+		events[i] = journal.Event{
+			SessionID:         sessionID,
+			IncarnationID:     incarnationID,
+			HarnessGeneration: harnessGeneration,
+			StreamID:          streamID,
+			SubmissionID:      m.deliverySubmissionIDForEvent(update),
+			Type:              update.Type,
+			Payload:           payload,
+			Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
+		}
+	}
+	committed, err := m.appendDeliveryWithRecovery(ctx, deliveryJournal, events)
+	if err != nil {
+		return updates, err
+	}
+	for i := range updates {
+		updates[i].DeliveryStreamID = committed[i].StreamID
+		updates[i].DeliveryIncarnationID = committed[i].IncarnationID
+		updates[i].DeliveryHarnessGeneration = committed[i].HarnessGeneration
+		updates[i].DeliverySequence = committed[i].Sequence
+		updates[i].DeliverySubmissionID = committed[i].SubmissionID
+	}
+	m.signalDeliveryWakeup()
+	return updates, nil
 }
 
 // GetUpdates returns the channel for agent event notifications
@@ -1619,33 +2654,47 @@ func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 // SendErrorEventWithProviderError sends an error event with optional safe
 // provider details. The details are already normalized by the adapter and are
 // never populated from the manager's raw stderr ring.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): the agent ERROR
+// event must park on a full channel rather than being dropped, since it is
+// one of the events most likely to matter across a detached gap.
 func (m *Manager) SendErrorEventWithProviderError(
 	errorMessage string,
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
 ) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
-	}:
-	default:
-		m.logger.Warn("updates channel full, could not send error event")
 	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable error event", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
+	m.sendUpdateBlocking(event)
 }
 
 // PublishMCPAttachment forwards safe MCP attachment evidence through the
 // existing agent update stream. Diagnostics are best effort: an overloaded
 // consumer must never delay the agent process or create a second stream.
 func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:          streams.EventTypeMCPAttachment,
 		MCPAttachment: &evidence,
-	}:
-	default:
+	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment event", err)
+		return
+	} else {
+		event = persisted
+	}
+	if m.sendUpdateNonBlockingRecorded(event) {
+		return
+	} else {
 		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
 			zap.String("attempt_id", evidence.AttemptID),
 			zap.String("server_name", evidence.ServerName),
@@ -1656,12 +2705,19 @@ func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
 // PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
 // the existing non-blocking agent update stream.
 func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	event := adapter.AgentEvent{
 		Type:                 streams.EventTypeMCPAttachment,
 		MCPAttachmentAttempt: &attempt,
-	}:
-	default:
+	}
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logMCPAttachmentCommitError("failed to commit durable MCP attachment attempt", err)
+		return
+	} else {
+		event = persisted
+	}
+	if m.sendUpdateNonBlockingRecorded(event) {
+		return
+	} else {
 		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
 			zap.String("attempt_id", attempt.AttemptID))
 	}
@@ -1672,6 +2728,17 @@ func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.adapter
+}
+
+// GetAdapterForGeneration validates and captures the adapter while startup is
+// serialized, so a stale request cannot select a replacement process adapter.
+func (m *Manager) GetAdapterForGeneration(generation uint64) (adapter.AgentAdapter, bool) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if generation != 0 && generation != m.ProcessGeneration() {
+		return nil, false
+	}
+	return m.GetAdapter(), true
 }
 
 // GetSessionID returns the current session ID from the adapter.
@@ -1696,13 +2763,50 @@ func (m *Manager) Stop(ctx context.Context) error {
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
+	passthroughErr := m.passthrough.StopAll(ctx)
+	passthroughErr = errors.Join(passthroughErr, m.cleanupPassthroughFiles(ctx))
+	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
-		return fmt.Errorf("wait for process admission to drain: %w", err)
+		// Close durable storage even when an owner misses the drain deadline.
+		// Late readers then fail with a typed closed-journal error, and cannot
+		// mistake shutdown for an empty successful replay.
+		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
-	return m.stop(ctx)
+	stopErr := m.stop(ctx)
+	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
+}
+
+func (m *Manager) closeDeliveryJournal() error {
+	if m == nil {
+		return nil
+	}
+	m.deliveryJournalClose.Do(func() {
+		m.deliveryJournalMu.Lock()
+		m.deliveryJournalErr = journal.ErrJournalClosed
+		writer := m.deliveryWriter
+		m.deliveryJournalMu.Unlock()
+		if writer != nil {
+			writer.close()
+		}
+		m.deliveryJournalMu.Lock()
+		defer m.deliveryJournalMu.Unlock()
+		if m.deliveryJournal == nil {
+			return
+		}
+		m.deliveryJournalCloseErr = m.deliveryJournal.Close()
+		m.deliveryJournal = nil
+		m.deliveryJournalErr = journal.ErrJournalClosed
+		if m.deliveryJournalCloseErr != nil {
+			m.deliveryJournalErr = errors.Join(journal.ErrJournalClosed, m.deliveryJournalCloseErr)
+		}
+	})
+	return m.deliveryJournalCloseErr
 }
 
 func (m *Manager) stop(ctx context.Context) error {
+	if err := m.passthrough.StopAll(ctx); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1713,6 +2817,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1728,18 +2836,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}
@@ -1751,8 +2859,11 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.Int("pid", m.agentPID()),
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
+	if stopping := m.shutdownIntent.Load(); stopping != nil {
+		stopping.Store(true)
+	}
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)
@@ -1772,6 +2883,14 @@ func (m *Manager) agentPID() int {
 		return 0
 	}
 	return m.cmd.Process.Pid
+}
+
+// AgentPID returns the running agent subprocess's PID, or 0 if no process is
+// running. Exposed for the background-workload liveness probe (spec
+// docs/specs/disambiguate-waiting/spec.md), which walks this PID's
+// transitive descendant set.
+func (m *Manager) AgentPID() int {
+	return m.agentPID()
 }
 
 func (m *Manager) agentProtocol() string {
@@ -1832,6 +2951,9 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 // It reports whether this call closed stopCh, i.e. whether goroutines were just
 // released and still need draining.
 func (m *Manager) closeAdapterAndStdin() bool {
+	if stopping := m.shutdownIntent.Load(); stopping != nil {
+		stopping.Store(true)
+	}
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {
@@ -1840,7 +2962,6 @@ func (m *Manager) closeAdapterAndStdin() bool {
 	}
 	m.logger.Debug("adapter closed")
 
-	m.logger.Debug("closing stop channel")
 	closedStopCh := false
 	if m.stopCh != nil && m.stopChClosed.CompareAndSwap(false, true) {
 		close(m.stopCh)
@@ -1895,7 +3016,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
@@ -2189,12 +3310,19 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
-// readStderr reads and logs stderr from the agent
-func (m *Manager) readStderr() {
+type stderrReadResult struct {
+	readErr   error
+	sawOutput bool
+}
+
+// readStderr reads and logs stderr from the agent.
+func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 	defer m.wg.Done()
 
 	scanner := bufio.NewScanner(m.stderr)
+	result := stderrReadResult{}
 	for scanner.Scan() {
+		result.sawOutput = true
 		rawLine := stripANSI(scanner.Text())
 		if m.stderrConsumer != nil {
 			// Protocol-specific consumers inspect the line in memory. Their
@@ -2203,9 +3331,15 @@ func (m *Manager) readStderr() {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
-		line, keep := rawLine, true
-		if m.stderrSanitizer != nil {
-			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+		line, keep := safeManagedNpmStderrLine(rawLine)
+		if !keep && m.cfg != nil && !m.cfg.LaunchWrapper.IsZero() {
+			continue
+		}
+		if !keep {
+			line, keep = rawLine, true
+			if m.stderrSanitizer != nil {
+				line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+			}
 		}
 		if !keep || line == "" {
 			continue
@@ -2216,8 +3350,27 @@ func (m *Manager) readStderr() {
 		m.appendStderr(line)
 	}
 
-	if err := scanner.Err(); err != nil {
-		m.logger.Debug("stderr reader error", zap.Error(err))
+	result.readErr = scanner.Err()
+	if result.readErr != nil {
+		m.logger.Debug("stderr reader error", zap.Error(result.readErr))
+	}
+	stderrDone <- result
+	close(stderrDone)
+}
+
+func (m *Manager) waitForStderrDrain(stderrDone <-chan stderrReadResult) (complete bool, sawOutput bool) {
+	if stderrDone == nil {
+		return false, false
+	}
+	timer := time.NewTimer(processStderrDrainTimeout)
+	defer timer.Stop()
+	select {
+	case result, ok := <-stderrDone:
+		return ok && result.readErr == nil, !ok || result.sawOutput
+	case <-timer.C:
+		m.logger.Warn("timed out waiting for agent stderr to drain")
+		_ = m.closeStderrReader()
+		return false, true
 	}
 }
 
@@ -2240,6 +3393,7 @@ func (m *Manager) appendStderr(line string) {
 	if len(m.stderrBuffer) >= defaultStderrBufferSize {
 		// Ring buffer: drop oldest line
 		m.stderrBuffer = m.stderrBuffer[1:]
+		m.stderrBufferTruncated = true
 	}
 	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
 }
@@ -2254,21 +3408,43 @@ func (m *Manager) GetRecentStderr() []string {
 	return result
 }
 
+func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result, !m.stderrBufferTruncated
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
+	m.stderrBufferTruncated = false
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit() {
+func (m *Manager) waitForExit(stderrDone <-chan stderrReadResult) {
+	m.waitForExitGeneration(stderrDone, m.ProcessGeneration())
+}
+
+func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, generation uint64) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
 	pid := m.agentPID()
+	// The manager owns stderr's read/write pipe, so Wait can reap the process
+	// without closing the reader. The reader drains the pipe concurrently.
 	err := m.cmd.Wait()
+	// Wait has observed process exit; now bound the reader drain in case a child
+	// process inherited the stderr writer and kept the pipe open.
+	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
+	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
+	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
@@ -2282,28 +3458,39 @@ func (m *Manager) waitForExit() {
 			m.exitCode.Store(int32(exitCode))
 		}
 		// Include recent stderr for better error diagnostics
-		recentStderr := m.GetRecentStderr()
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
 			zap.Strings("recent_stderr", recentStderr))
 
-		// Send error event to the updates channel so UI can display it
+		// Send error event to the updates channel so UI can display it. This is
+		// a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the only report
+		// that the agent process died at all, so it must park on a full
+		// channel rather than being dropped. sendUpdateBlocking selects
+		// against the stop-channel snapshot rather than m.mu-guarded state
+		// deliberately: Stop holds m.mu for its entire teardown, including
+		// waiting on this same waitForExit goroutine to finish, so reading
+		// stopCh under m.mu here would deadlock against it.
 		errorMsg := fmt.Sprintf("Agent process exited with code %d", exitCode)
 		if len(recentStderr) > 0 {
 			errorMsg = fmt.Sprintf("%s: %s", errorMsg, strings.Join(recentStderr, "; "))
 		}
-		select {
-		case m.updatesCh <- adapter.AgentEvent{
+		event := adapter.AgentEvent{
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
-				"exit_code":     exitCode,
-				"recent_stderr": recentStderr,
+				"exit_code":          exitCode,
+				"recent_stderr":      recentStderr,
+				"process_generation": generation,
+				"startup_evidence":   evidence,
 			},
-		}:
-		default:
-			m.logger.Warn("updates channel full, could not send exit error event")
+		}
+		m.recordTerminalOutcome(&event)
+		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
+			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
+		} else {
+			event = persisted
+			m.sendUpdateBlockingRecorded(event)
 		}
 	default:
 		m.exitCode.Store(0)
@@ -2361,31 +3548,73 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("pending_id", pendingID),
 		zap.String("session_id", req.SessionID),
 		zap.String("tool_call_id", req.ToolCallID),
-		zap.String("title", req.Title),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	// If auto-approve is enabled, immediately approve with the first "allow" option
-	if m.cfg.AutoApprovePermissions {
-		return m.autoApprovePermission(req)
+	// A coordinator session's agentctl instance does not consult its own
+	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+	// injected-MCP approval; only the exact seven-tool coordinator allowlist
+	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	switch {
+	case m.cfg.McpMode == mcpmode.Coordinator:
+		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
+			return response, nil
+		}
+	case m.RequiresManagedToolPolicy():
+		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+			return response, nil
+		}
+		toolName := ""
+		if req.ToolName != nil {
+			toolName = *req.ToolName
+		}
+		m.logger.Warn("managed agent tool policy denied a native permission request",
+			zap.String("reason", "native_tool_denied"),
+			zap.String("tool_name", toolName))
+		return &adapter.PermissionResponse{Cancelled: true}, nil
+	}
+
+	// A coordinator session never takes the blanket or injected-tool approval:
+	// only its allowlist above decides, and anything else waits for a person.
+	var autoApproveOption *adapter.PermissionOption
+	if m.cfg.McpMode != mcpmode.Coordinator {
+		var response *adapter.PermissionResponse
+		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
+			return response, nil
+		}
 	}
 
 	// Create pending permission with response channel
+	createdAt := time.Now().UTC()
 	pending := &PendingPermission{
-		ID:         pendingID,
-		Request:    req,
-		ResponseCh: make(chan *adapter.PermissionResponse, 1),
-		CreatedAt:  time.Now(),
+		ID:                pendingID,
+		RequestID:         uuid.NewString(),
+		Request:           req,
+		ResponseCh:        make(chan *adapter.PermissionResponse, 1),
+		CreatedAt:         createdAt,
+		State:             streams.PermissionStatusPending,
+		AutoApproveOption: autoApproveOption,
 	}
+	pending.Snapshot = m.permissionSnapshot(pending)
 
 	// Store pending permission
 	m.permissionMu.Lock()
+	if replaced := m.pendingPermissions[pendingID]; replaced != nil {
+		m.addPermissionTombstoneLocked(replaced.RequestID, streams.PermissionErrorStale)
+		select {
+		case replaced.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+	}
 	m.pendingPermissions[pendingID] = pending
 	m.permissionMu.Unlock()
 
 	// Clean up when done
 	defer func() {
 		m.permissionMu.Lock()
-		delete(m.pendingPermissions, pendingID)
+		if current := m.pendingPermissions[pendingID]; current == pending {
+			delete(m.pendingPermissions, pendingID)
+			m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorStale)
+		}
 		m.permissionMu.Unlock()
 	}()
 
@@ -2406,68 +3635,142 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
+		// Claim the terminal transition ourselves so a concurrent resolve/cancel/
+		// respond call that is already past the state check cannot also "win" and
+		// report success for a request this goroutine is about to stop listening on.
+		if _, err := m.consumePermission(pendingID, pending.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
+			// Someone else consumed it first; deliver whatever they sent instead of
+			// fabricating our own cancellation.
+			select {
+			case resp := <-pending.ResponseCh:
+				return resp, nil
+			default:
+				return &adapter.PermissionResponse{Cancelled: true}, nil
+			}
+		}
 		// Send cancellation notification so the backend can update the permission message status
 		m.sendPermissionCancelledNotification(pending)
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 }
 
-// autoApprovePermission automatically approves a permission request
-// by selecting the first "allow" option, or the first option if no allow option exists
-func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, error) {
-	if len(req.Options) == 0 {
-		m.logger.Warn("no options available for auto-approve, cancelling")
-		return &adapter.PermissionResponse{Cancelled: true}, nil
-	}
+// autoApprovePermission answers a permission request by selecting the first
+// offered option whose kind is an allow. It reports false when no such option
+// exists, including for an empty option list, so the caller falls through to
+// the pending permission flow rather than answering with an option the provider
+// meant as a refusal.
+type autoApprovalDecision struct {
+	response *adapter.PermissionResponse
+	option   adapter.PermissionOption
+}
 
-	// Find the first "allow" option
+// nonCoordinatorAutoApproval returns either the option the blanket
+// auto-approve selected, or an immediate response for an injected Kandev tool.
+// The backend must persist a selected option before it resolves the live
+// request, so the caller keeps the provider waiting until that durable claim
+// succeeds.
+func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.cfg.AutoApprovePermissions {
+		if decision, approved := m.autoApprovePermission(req); approved {
+			return &decision.option, nil
+		}
+	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return nil, response
+	}
+	return nil, nil
+}
+
+func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {
 	var selectedOption *adapter.PermissionOption
 	for i := range req.Options {
-		opt := &req.Options[i]
-		if opt.Kind == "allow_once" || opt.Kind == "allow_always" {
-			selectedOption = opt
+		if isAllowPermissionKind(req.Options[i].Kind) {
+			selectedOption = &req.Options[i]
 			break
 		}
 	}
-
-	// If no allow option, use the first option
 	if selectedOption == nil {
-		selectedOption = &req.Options[0]
+		m.logger.Info("auto-approve found no allow option, prompting instead",
+			zap.Int("option_count", len(req.Options)))
+		return autoApprovalDecision{}, false
 	}
 
 	m.logger.Info("auto-approving permission request",
 		zap.String("option_id", selectedOption.OptionID),
-		zap.String("option_name", selectedOption.Name),
 		zap.String("kind", string(selectedOption.Kind)))
 
-	return &adapter.PermissionResponse{
-		OptionID: selectedOption.OptionID,
-	}, nil
+	return autoApprovalDecision{
+		response: &adapter.PermissionResponse{OptionID: selectedOption.OptionID},
+		option:   *selectedOption,
+	}, true
 }
 
 // sendPermissionNotification sends a permission request notification through the updates channel.
-// Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
-// auto-cancels the permission so the agent doesn't hang waiting for a response.
-func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
-	// Convert options to streams.PermissionOption (types.PermissionOption is an alias)
-	options := make([]streams.PermissionOption, len(pending.Request.Options))
-	copy(options, pending.Request.Options)
-
+//
+// This is the eighth COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the
+// only one of the eight that must branch on attached/detached state, rather
+// than always parking: while ATTACHED, a blocking send with a five-second
+// timeout is a deliberate safety valve against a stalled UI, and must
+// survive unchanged -- auto-cancelling the permission so the agent doesn't
+// hang waiting for a response. While DETACHED, that same auto-cancel would
+// silently deny every permission the agent asks for, five seconds apart, so
+// it must park instead: the wait ends either because a backend later
+// attaches (which starts draining the channel, satisfying the same select
+// sendUpdateBlocking already performs) or because the instance stops.
+// permissionRequestEvent builds the stream event describing a permission
+// request. Shared by the pending flow and by the auto-approved record so both
+// present the same redacted snapshot to the backend.
+func (m *Manager) permissionRequestEvent(pending *PendingPermission) adapter.AgentEvent {
+	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
+	for i, option := range pending.Snapshot.Options {
+		options[i] = streams.PermissionOption{
+			OptionID: option.OptionID,
+			Name:     option.Name,
+			Kind:     option.Kind,
+		}
+	}
 	event := adapter.AgentEvent{
 		Type:              adapter.EventTypePermissionRequest,
-		SessionID:         pending.Request.SessionID,
+		SessionID:         m.permissionSessionID(pending),
 		ToolCallID:        pending.Request.ToolCallID,
+		RequestID:         pending.RequestID,
 		PendingID:         pending.ID,
-		PermissionTitle:   pending.Request.Title,
+		PermissionTitle:   pending.Snapshot.Title,
 		PermissionOptions: options,
-		ActionType:        pending.Request.ActionType,
-		ActionDetails:     pending.Request.ActionDetails,
+		ActionType:        pending.Snapshot.Action.Type,
+		ActionDetails:     permissionActionDetailsForEvent(pending.Snapshot.Action),
 	}
+	if pending.AutoApproveOption != nil {
+		event.AutoApprovedOptionID = pending.AutoApproveOption.OptionID
+		event.AutoApprovedOptionKind = string(pending.AutoApproveOption.Kind)
+		event.AutoApprovalSource = streams.PermissionDecisionSourceAutoApprove
+		event.AutoApprovalPending = true
+	}
+	return event
+}
+
+func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
+	event := m.permissionRequestEvent(pending)
 
 	m.logger.Info("sending permission notification via updates channel",
 		zap.String("pending_id", pending.ID),
-		zap.String("title", pending.Request.Title),
 		zap.String("action_type", pending.Request.ActionType))
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable permission notification", zap.Error(err))
+		select {
+		case pending.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
+		default:
+		}
+		return
+	} else {
+		event = persisted
+	}
+
+	if !m.IsAttached() {
+		m.sendUpdateBlocking(event)
+		return
+	}
 
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -2487,51 +3790,276 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 // sendPermissionCancelledNotification sends a notification that a permission request was cancelled.
 // This happens when the context is cancelled (e.g., agent completes or user stops the task)
 // before the user responds to the permission request.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): it must park on a
+// full channel rather than being dropped.
 func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
 	event := adapter.AgentEvent{
 		Type:      adapter.EventTypePermissionCancelled,
-		SessionID: pending.Request.SessionID,
+		SessionID: m.permissionSessionID(pending),
+		RequestID: pending.RequestID,
 		PendingID: pending.ID,
 	}
 
 	m.logger.Info("sending permission cancelled notification",
 		zap.String("pending_id", pending.ID),
 		zap.String("session_id", pending.Request.SessionID))
+	if persisted, err := m.persistDeliveryEvent(event); err != nil {
+		m.logger.Error("failed to commit durable permission cancellation", zap.Error(err))
+		return
+	} else {
+		event = persisted
+	}
 
+	m.sendUpdateBlocking(event)
+}
+
+func (m *Manager) permissionSessionID(pending *PendingPermission) string {
+	if m.cfg != nil && m.cfg.SessionID != "" {
+		return m.cfg.SessionID
+	}
+	if pending != nil && pending.Request != nil {
+		return pending.Request.SessionID
+	}
+	return ""
+}
+
+func (m *Manager) permissionSnapshot(pending *PendingPermission) streams.PendingAgentPermission {
+	title, titleRedacted := securityutil.SanitizePermissionText(pending.Request.Title)
+	action := securityutil.ProjectPermissionAction(
+		pending.Request.ActionType,
+		pending.Request.Title,
+		pending.Request.ActionDetails,
+	)
+	options := make([]streams.PermissionChoice, 0, len(pending.Request.Options))
+	for _, option := range pending.Request.Options {
+		name, nameRedacted := securityutil.SanitizePermissionText(option.Name)
+		action.Redacted = action.Redacted || nameRedacted
+		options = append(options, streams.PermissionChoice{
+			OptionID: option.OptionID,
+			Name:     name,
+			Kind:     option.Kind,
+		})
+	}
+	action.Redacted = action.Redacted || titleRedacted
+	taskID := ""
+	if m.cfg != nil {
+		taskID = m.cfg.TaskID
+	}
+	return streams.PendingAgentPermission{
+		TaskID:     taskID,
+		SessionID:  m.permissionSessionID(pending),
+		RequestID:  pending.RequestID,
+		PendingID:  pending.ID,
+		ToolCallID: pending.Request.ToolCallID,
+		Title:      title,
+		Action: streams.PermissionAction{
+			Type:        action.Type,
+			Description: action.Description,
+			Command:     action.Command,
+			CWD:         action.CWD,
+			Path:        action.Path,
+			Destination: action.Destination,
+			Server:      action.Server,
+			Tool:        action.Tool,
+			Redacted:    action.Redacted,
+		},
+		Options:   options,
+		CreatedAt: pending.CreatedAt,
+		Status:    streams.PermissionStatusPending,
+	}
+}
+
+func permissionActionDetailsForEvent(action streams.PermissionAction) map[string]any {
+	projected := securityutil.PermissionActionProjection{
+		Type:        action.Type,
+		Description: action.Description,
+		Command:     action.Command,
+		CWD:         action.CWD,
+		Path:        action.Path,
+		Destination: action.Destination,
+		Server:      action.Server,
+		Tool:        action.Tool,
+		Redacted:    action.Redacted,
+	}
+	return securityutil.PermissionActionDetailsForEvent(projected)
+}
+
+// ListPendingPermissions returns bounded immutable snapshots of live requests.
+func (m *Manager) ListPendingPermissions() []streams.PendingAgentPermission {
+	m.permissionMu.RLock()
+	permissions := make([]streams.PendingAgentPermission, 0, len(m.pendingPermissions))
+	for _, pending := range m.pendingPermissions {
+		if pending == nil || pending.State != streams.PermissionStatusPending {
+			continue
+		}
+		snapshot := pending.Snapshot
+		snapshot.Options = append([]streams.PermissionChoice(nil), pending.Snapshot.Options...)
+		permissions = append(permissions, snapshot)
+	}
+	m.permissionMu.RUnlock()
+
+	sort.Slice(permissions, func(i, j int) bool {
+		if permissions[i].CreatedAt.Equal(permissions[j].CreatedAt) {
+			return permissions[i].RequestID < permissions[j].RequestID
+		}
+		return permissions[i].CreatedAt.Before(permissions[j].CreatedAt)
+	})
+	if len(permissions) > 100 {
+		permissions = permissions[:100]
+	}
+	return permissions
+}
+
+// consumePermission is the single terminal-transition chokepoint for a live
+// permission request. Every path that can end a request generation — explicit
+// resolve, explicit cancel, the internal respond endpoint, or the request
+// context finishing — must go through this so exactly one caller observes a
+// pending->resolving transition and delivers the response; every later caller
+// gets a stable error instead of silently "succeeding" against an entry
+// nobody is listening on anymore. optionalRequestID empty skips the identity
+// check (RespondToPermission has no requestID). validate runs after the
+// pending/requestID/state checks but before the state mutates, so a rejected
+// option (for example) never claims the transition.
+func (m *Manager) consumePermission(
+	pendingID, optionalRequestID string,
+	validate func(*PendingPermission) error,
+	resp *adapter.PermissionResponse,
+	terminalCode string,
+) (*PendingPermission, error) {
+	m.permissionMu.Lock()
+	defer m.permissionMu.Unlock()
+
+	pending := m.pendingPermissions[pendingID]
+	if pending == nil {
+		code := m.permissionTombstones[optionalRequestID]
+		if code == "" {
+			code = streams.PermissionErrorNotFound
+		}
+		return nil, &PermissionOperationError{Code: code}
+	}
+	if optionalRequestID != "" && pending.RequestID != optionalRequestID {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorStale}
+	}
+	if pending.State != streams.PermissionStatusPending {
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorInProgress}
+	}
+	if validate != nil {
+		if err := validate(pending); err != nil {
+			return nil, err
+		}
+	}
+
+	pending.State = streams.PermissionStatusResolving
 	select {
-	case m.updatesCh <- event:
-		// Sent successfully
+	case pending.ResponseCh <- resp:
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, terminalCode)
+		return pending, nil
 	default:
-		m.logger.Warn("updates channel full, dropping permission cancelled notification",
-			zap.String("pending_id", pending.ID))
+		delete(m.pendingPermissions, pendingID)
+		m.addPermissionTombstoneLocked(pending.RequestID, streams.PermissionErrorDeliveryFailed)
+		return nil, &PermissionOperationError{Code: streams.PermissionErrorDeliveryFailed}
+	}
+}
+
+// ResolvePermission validates and consumes one exact live request generation.
+// The provider response is sent at most once while the identity lock is held.
+func (m *Manager) ResolvePermission(requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
+	var selected *streams.PermissionChoice
+	validate := func(pending *PendingPermission) error {
+		for i := range pending.Snapshot.Options {
+			if pending.Snapshot.Options[i].OptionID == optionID {
+				selected = &pending.Snapshot.Options[i]
+				return nil
+			}
+		}
+		return &PermissionOperationError{Code: streams.PermissionErrorOptionNotOffered}
+	}
+	_, err := m.consumePermission(pendingID, requestID, validate,
+		&adapter.PermissionResponse{OptionID: optionID}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	m.logger.Info("resolved permission request",
+		zap.String("request_id", requestID),
+		zap.String("pending_id", pendingID),
+		zap.String("option_id", optionID))
+	return &streams.PermissionResolveResponse{
+		RequestID:  requestID,
+		PendingID:  pendingID,
+		OptionID:   optionID,
+		OptionKind: selected.Kind,
+		Status:     "resolved",
+	}, nil
+}
+
+// CancelPermission dismisses one exact live request generation. This is an
+// internal compatibility path for the web UI when a provider offers no reject
+// option; it is deliberately separate from option-only external resolution.
+func (m *Manager) CancelPermission(requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
+	_, err := m.consumePermission(pendingID, requestID, nil,
+		&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		return nil, err
+	}
+	return &streams.PermissionCancelResponse{RequestID: requestID, PendingID: pendingID, Status: "cancelled"}, nil
+}
+
+func (m *Manager) addPermissionTombstoneLocked(requestID, code string) {
+	if requestID == "" {
+		return
+	}
+	if m.permissionTombstones == nil {
+		m.permissionTombstones = make(map[string]string)
+	}
+	if _, exists := m.permissionTombstones[requestID]; !exists {
+		m.permissionTombstoneOrder = append(m.permissionTombstoneOrder, requestID)
+	}
+	m.permissionTombstones[requestID] = code
+	for len(m.permissionTombstoneOrder) > maxPermissionTombstones {
+		oldest := m.permissionTombstoneOrder[0]
+		m.permissionTombstoneOrder = m.permissionTombstoneOrder[1:]
+		delete(m.permissionTombstones, oldest)
 	}
 }
 
 // RespondToPermission responds to a pending permission request
 func (m *Manager) RespondToPermission(pendingID string, optionID string, cancelled bool) error {
-	m.permissionMu.RLock()
-	pending, ok := m.pendingPermissions[pendingID]
-	m.permissionMu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("pending permission not found: %s", pendingID)
+	validate := func(pending *PendingPermission) error {
+		if !cancelled && !permissionOffersOption(pending, optionID) {
+			return fmt.Errorf("permission option not offered: %s", optionID)
+		}
+		return nil
 	}
-
+	_, err := m.consumePermission(pendingID, "", validate, &adapter.PermissionResponse{
+		OptionID:  optionID,
+		Cancelled: cancelled,
+	}, streams.PermissionErrorAlreadyResolved)
+	if err != nil {
+		var opErr *PermissionOperationError
+		if errors.As(err, &opErr) {
+			return fmt.Errorf("pending permission %s: %s", pendingID, opErr.Code)
+		}
+		return err
+	}
 	m.logger.Info("responding to permission request",
 		zap.String("pending_id", pendingID),
 		zap.String("option_id", optionID),
 		zap.Bool("cancelled", cancelled))
+	return nil
+}
 
-	// Send response (non-blocking since channel is buffered)
-	select {
-	case pending.ResponseCh <- &adapter.PermissionResponse{
-		OptionID:  optionID,
-		Cancelled: cancelled,
-	}:
-		return nil
-	default:
-		return fmt.Errorf("response channel full for pending permission: %s", pendingID)
+func permissionOffersOption(pending *PendingPermission, optionID string) bool {
+	if pending == nil || pending.Request == nil {
+		return false
 	}
+	for _, option := range pending.Request.Options {
+		if option.OptionID == optionID {
+			return true
+		}
+	}
+	return false
 }
 
 // CancelPendingPermissions cancels all pending permission requests.
@@ -2547,10 +4075,10 @@ func (m *Manager) CancelPendingPermissions() {
 	for _, p := range pending {
 		m.logger.Info("cancelling pending permission before new prompt",
 			zap.String("pending_id", p.ID))
-		select {
-		case p.ResponseCh <- &adapter.PermissionResponse{Cancelled: true}:
-		default:
-		}
+		// Best-effort: another terminal path may have already consumed this
+		// exact generation between the snapshot above and this call.
+		_, _ = m.consumePermission(p.ID, p.RequestID, nil,
+			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorAlreadyResolved)
 	}
 }
 

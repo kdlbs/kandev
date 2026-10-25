@@ -25,6 +25,7 @@ type UseAnnotationRendererOpts = {
   onButtonLeave: () => void;
   handleCommentSubmit: (content: string) => void;
   handleCommentSubmitAndRun?: (content: string) => void;
+  submitDisabled: boolean;
   handleCommentUpdate: (commentId: string, content: string) => void;
   handleCommentDelete: (commentId: string) => void;
   handleCommentRun?: (comment: DiffComment) => void;
@@ -42,6 +43,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     onButtonLeave,
     handleCommentSubmit,
     handleCommentSubmitAndRun,
+    submitDisabled,
     handleCommentUpdate,
     handleCommentDelete,
     handleCommentRun,
@@ -81,6 +83,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
             <CommentForm
               onSubmit={handleCommentSubmit}
               onSubmitAndRun={handleCommentSubmitAndRun}
+              submitDisabled={submitDisabled}
               onCancel={() => {
                 setShowCommentForm(false);
                 setSelectedLines(null);
@@ -126,6 +129,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
       handleCommentUpdate,
       handleCommentSubmit,
       handleCommentSubmitAndRun,
+      submitDisabled,
       handleRevertBlock,
       onButtonEnter,
       onButtonLeave,

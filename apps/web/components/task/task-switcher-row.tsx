@@ -1,10 +1,12 @@
 "use client";
 
+import { memo, type ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
 import { dispatchSidebarRowClick } from "./task-switcher-click";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 
 export type SubtaskToggleInfo = {
   subtaskCount: number;
@@ -14,6 +16,9 @@ export type SubtaskToggleInfo = {
 
 export type TaskRowProps = {
   task: TaskSwitcherItem;
+  nestCandidateTasks?: TaskSwitcherItem[];
+  getNestCandidateTasks?: () => TaskSwitcherItem[];
+  getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
   isSubTask?: boolean;
   depth?: number;
   subtaskToggle?: SubtaskToggleInfo;
@@ -22,10 +27,13 @@ export type TaskRowProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   showActivityTime?: boolean;
+  /** False when the list is grouped by repository and the header already names it. */
+  showRepository?: boolean;
+  taskRowPresentation?: SidebarTaskRowPresentation;
   onSelectTask: (taskId: string) => void;
   onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
-  onArchiveTask?: (taskId: string) => void;
+  onArchiveTask?: (taskId: string, opts?: { cascade?: boolean }) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
@@ -36,10 +44,14 @@ export type TaskRowProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
+  archivingTaskId?: string | null;
+  isArchiving?: boolean;
   selectedTaskIds?: Set<string>;
   onToggleSelectTask?: (taskId: string) => void;
   onSelectTaskRange?: (taskId: string) => void;
@@ -55,8 +67,15 @@ function archiveAware<T>(value: T | undefined, isArchived: boolean): T | undefin
   return isArchived ? undefined : value;
 }
 
-function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
+type SelectedTaskRowProps = Omit<TaskRowProps, "activeTaskId" | "selectedTaskId"> & {
+  isSelected: boolean;
+};
+
+function getContextMenuProps(props: SelectedTaskRowProps, isArchived: boolean) {
   return {
+    nestCandidateTasks: props.nestCandidateTasks,
+    getNestCandidateTasks: props.getNestCandidateTasks,
+    getNestHierarchyTasks: props.getNestHierarchyTasks,
     onEditTask: archiveAware(props.onEditTask, isArchived),
     onRenameTask: archiveAware(props.onRenameTask, isArchived),
     onArchiveTask: archiveAware(props.onArchiveTask, isArchived),
@@ -70,10 +89,13 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
     onLinkLinearIssue: archiveAware(props.onLinkLinearIssue, isArchived),
     onLinkSentryIssue: archiveAware(props.onLinkSentryIssue, isArchived),
     onMoveToStep: archiveAware(props.onMoveToStep, isArchived),
+    onRequestMoveOptions: archiveAware(props.onRequestMoveOptions, isArchived),
+    onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     onTogglePin: archiveAware(props.onTogglePin, isArchived),
     isPinned: isArchived ? false : props.isPinned,
     pinnedTaskIds: props.pinnedTaskIds,
     isDeleting: props.deletingTaskId === props.task.id,
+    isArchiving: props.isArchiving && props.archivingTaskId === props.task.id,
     selectedTaskIds: archiveAware(props.selectedTaskIds, isArchived),
     onBulkArchive: archiveAware(props.onBulkArchive, isArchived),
     onBulkDelete: props.onBulkDelete,
@@ -85,14 +107,15 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
 }
 
 type TaskRowItemProps = Pick<
-  TaskRowProps,
+  SelectedTaskRowProps,
   | "task"
   | "isSubTask"
   | "depth"
   | "subtaskToggle"
-  | "activeTaskId"
-  | "selectedTaskId"
+  | "isSelected"
   | "showActivityTime"
+  | "showRepository"
+  | "taskRowPresentation"
   | "onSelectTask"
   | "selectedTaskIds"
   | "onToggleSelectTask"
@@ -100,16 +123,17 @@ type TaskRowItemProps = Pick<
   | "deletingTaskId"
   | "isPinned"
   | "stepsByWorkflowId"
-> & { isArchived: boolean };
+> & { isArchived: boolean; archiveConfirmation?: ReactNode };
 
 function TaskRowItem({
   task,
   isSubTask,
   depth,
   subtaskToggle,
-  activeTaskId,
-  selectedTaskId,
+  isSelected,
   showActivityTime,
+  showRepository,
+  taskRowPresentation,
   onSelectTask,
   selectedTaskIds,
   onToggleSelectTask,
@@ -118,9 +142,9 @@ function TaskRowItem({
   isPinned,
   stepsByWorkflowId,
   isArchived,
+  archiveConfirmation,
 }: TaskRowItemProps) {
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
-  const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
   const stepId = task.workflowStepId;
   const isDeleting = deletingTaskId === task.id;
 
@@ -142,29 +166,37 @@ function TaskRowItem({
       }
       title={task.title}
       autopilot={task.autopilot}
+      priority={task.priority}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
       interrupted={task.interrupted}
+      parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
+      isPendingRemoval={task.isPendingRemoval}
       isSelected={isSelected}
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
+      remoteExecutorId={task.remoteExecutorId}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
       workflowStepId={task.workflowStepId}
+      automaticColor={task.automaticColor}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}
       updatedAt={task.updatedAt}
       lastActivityAt={task.lastActivityAt}
       showActivityTime={showActivityTime}
-      repositories={task.repositories}
+      repositoryPath={task.repositoryPath}
+      showRepository={showRepository}
+      taskRowPresentation={taskRowPresentation}
       prInfo={task.prInfo}
       queuedCount={task.queuedCount}
       wipQueue={task.wipQueue}
+      launchQueue={task.launchQueue}
       issueInfo={task.issueInfo}
       agentErrorMessage={task.agentErrorMessage}
       isSubTask={isSubTask}
@@ -176,11 +208,25 @@ function TaskRowItem({
       onClick={() => onSelectTask(task.id)}
       isDeleting={isDeleting}
       isPinned={isArchived ? false : isPinned}
+      archiveConfirmation={archiveConfirmation}
     />
   );
 }
 
-export function TaskRow(props: TaskRowProps) {
+export const TaskRow = memo(function TaskRow({
+  activeTaskId,
+  selectedTaskId,
+  ...props
+}: TaskRowProps) {
+  return (
+    <SelectedTaskRow
+      {...props}
+      isSelected={props.task.id === activeTaskId || props.task.id === selectedTaskId}
+    />
+  );
+});
+
+const SelectedTaskRow = memo(function SelectedTaskRow(props: SelectedTaskRowProps) {
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
   return (
@@ -200,4 +246,4 @@ export function TaskRow(props: TaskRowProps) {
       />
     </TaskItemWithContextMenu>
   );
-}
+});

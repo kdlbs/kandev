@@ -16,6 +16,7 @@
  */
 
 import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
@@ -103,15 +104,21 @@ export function KanbanTaskShell({
 // background-running task reads distinctly and never as done,
 // and carry the sidebar's rich "needs me" reading — pending clarification /
 // permission — so the header distinguishes waiting-for-input.
+function simpleTaskPendingFallback(task: Task | null) {
+  if (!task) return {};
+  return {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
+    statusSummary: task.status_summary,
+    primarySessionState: task.primary_session_state,
+    primarySessionPendingAction: task.primary_session_pending_action,
+  };
+}
+
 function simpleTaskHeaderData(task: Task | null) {
   return {
     primarySessionId: task?.primary_session_id,
-    pendingFallback: {
-      taskId: task?.id,
-      taskPendingAction: task?.task_pending_action,
-      primarySessionState: task?.primary_session_state,
-      primarySessionPendingAction: task?.primary_session_pending_action,
-    },
+    pendingFallback: simpleTaskPendingFallback(task),
     identifier: task?.id?.slice(0, 8),
     title: task?.title ?? t("tasks:loading"),
     state: task?.state ?? null,
@@ -147,11 +154,21 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {
   const { t } = useTranslation();
-  const href = target === "office" ? `/office/tasks/${taskId}` : `/t/${taskId}`;
   const label = target === "office" ? t("tasks:openInOfficeView") : t("tasks:openInAdvancedView");
+  if (target === "kanban") {
+    return (
+      <TaskLink
+        taskId={taskId}
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
+        data-testid="task-cross-link"
+      >
+        {label}
+      </TaskLink>
+    );
+  }
   return (
     <Link
-      href={href}
+      href={`/office/tasks/${taskId}`}
       className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer"
       data-testid="task-cross-link"
     >

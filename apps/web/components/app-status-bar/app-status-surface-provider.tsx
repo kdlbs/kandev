@@ -22,6 +22,8 @@ import { AppStatusDrawer } from "./app-status-drawer";
 import { connectionIssueDetails } from "./connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 import { AgentRuntimeUnavailableAlert } from "./agent-runtime-unavailable-alert";
+import { BackendReloadRequiredAlert } from "./backend-reload-required-alert";
+import { useBackendGenerationGuard } from "@/hooks/domains/system/use-backend-generation-guard";
 
 type AppStatusDrawerContextValue = {
   enabled: boolean;
@@ -111,6 +113,7 @@ function drawerTriggerVisibilityClass(connectionOnly: boolean) {
 }
 
 export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) {
+  useBackendGenerationGuard();
   const [drawerOpen, setStatusDrawerOpen] = useState(false);
   const pathname = usePathname();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -162,6 +165,7 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
     <AppStatusDrawerContext.Provider value={drawer}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <AgentRuntimeUnavailableAlert />
+        <BackendReloadRequiredAlert />
         {children}
         {(useDrawerSurface ? drawerEnabled : inlineStatusBarVisible) &&
           (useDrawerSurface ? (

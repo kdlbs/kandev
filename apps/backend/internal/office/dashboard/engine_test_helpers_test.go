@@ -52,6 +52,12 @@ func (fakeSessionResolver) GetTaskSessionByTaskID(
 	return nil, taskmodels.ErrTaskSessionNotFound
 }
 
+func (fakeSessionResolver) GetTaskSession(
+	_ context.Context, _ string,
+) (*taskmodels.TaskSession, error) {
+	return nil, taskmodels.ErrTaskSessionNotFound
+}
+
 // noopCallbackRegistry satisfies engine.CallbackRegistry. Never consulted by
 // RecordParticipantDecision/EvaluateStepQuorum (only HandleTrigger's action
 // evaluation path uses it), so no test wires a real callback here.
@@ -244,6 +250,15 @@ func (r singleTaskSessionResolver) GetTaskSessionByTaskID(
 	ctx context.Context, taskID string,
 ) (*taskmodels.TaskSession, error) {
 	return r.GetActiveTaskSessionByTaskID(ctx, taskID)
+}
+
+func (r singleTaskSessionResolver) GetTaskSession(
+	_ context.Context, id string,
+) (*taskmodels.TaskSession, error) {
+	if r.session != nil && id == r.session.ID {
+		return r.session, nil
+	}
+	return nil, taskmodels.ErrTaskSessionNotFound
 }
 
 // newTestEngineDispatcherWithReevaluation is like newTestEngineDispatcher but

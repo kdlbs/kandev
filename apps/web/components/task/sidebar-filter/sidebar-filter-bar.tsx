@@ -1,7 +1,9 @@
 "use client";
 
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useMemo, useRef } from "react";
-import { IconAdjustments, IconPlus } from "@tabler/icons-react";
+import { IconFilter, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
@@ -10,6 +12,7 @@ import type { CommandItem } from "@/lib/commands/types";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { cn } from "@/lib/utils";
 import { SidebarViewChips } from "./sidebar-view-chips";
+import { SidebarFilterIndicators } from "@/components/task/sidebar-filter/sidebar-filter-indicators";
 import { SidebarFilterPopover } from "./sidebar-filter-popover";
 import { useSidebarViewPopover } from "./use-sidebar-view-popover";
 import { useTranslation } from "react-i18next";
@@ -50,11 +53,9 @@ function useSidebarCommands(
 export function SidebarFilterBar() {
   const { t } = useTranslation();
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const views = useAppStore((s) => s.sidebarViews.views);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
-  const hasDraft = !!draft && draft.baseViewId === activeViewId;
   const {
     open,
     onOpenChange,
@@ -65,6 +66,8 @@ export function SidebarFilterBar() {
   } = useSidebarViewPopover();
 
   useRegisterCommands(useSidebarCommands(views, onOpenChange, setActiveView));
+
+  if (!workspaceId) return null;
 
   return (
     <div
@@ -81,7 +84,7 @@ export function SidebarFilterBar() {
         variant="ghost"
         size="sm"
         className={cn(
-          "h-10 shrink-0 cursor-pointer px-2 text-[11px] md:h-6",
+          "h-11 shrink-0 cursor-pointer px-2 text-[11px] md:h-7 [@media(pointer:coarse)]:min-h-11",
           newViewDisabledReason && "cursor-not-allowed opacity-45",
         )}
         onClick={() => {
@@ -109,6 +112,7 @@ export function SidebarFilterBar() {
         {t("task:newView")}
       </Button>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}
@@ -119,17 +123,12 @@ export function SidebarFilterBar() {
             type="button"
             variant="ghost"
             size="icon"
-            className="h-10 w-10 shrink-0 cursor-pointer md:h-6 md:w-6"
+            className="relative h-11 w-11 shrink-0 cursor-pointer md:h-7 md:w-7 [@media(pointer:coarse)]:size-11"
             data-testid="sidebar-filter-gear"
             aria-label={t("task:sidebarFilters")}
           >
-            <IconAdjustments className="h-4 w-4" />
-            {hasDraft && (
-              <span
-                className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-amber-500 md:right-1 md:top-1"
-                data-testid="sidebar-filter-gear-indicator"
-              />
-            )}
+            <IconFilter className="h-4 w-4" />
+            <SidebarFilterIndicators />
           </Button>
         }
       />

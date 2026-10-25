@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-mcp-stop-handler"]
 plan: "plan.md"
-spec: "../../specs/tasks/parent-child-task-stop.md"
+spec: "../../specs/tasks/requirements/parent-child-task-stop.md"
 ---
 
 # Task 04: Task MCP stop tool

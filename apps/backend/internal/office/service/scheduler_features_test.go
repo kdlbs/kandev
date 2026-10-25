@@ -29,7 +29,7 @@ func TestCooldown_RecentFinish_GuardAllows(t *testing.T) {
 	}
 
 	// Queue a run.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -69,7 +69,7 @@ func TestCooldown_PastCooldown_ClaimedNormally(t *testing.T) {
 	}
 
 	// Queue a run.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -97,7 +97,7 @@ func TestRetry_FailedRun_RetriedWithBackoff(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestRetry_FifthFailure_MarkedFailed(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -402,7 +402,7 @@ func TestIdleSkip_HeartbeatNoTasks_Skipped(t *testing.T) {
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -457,15 +457,16 @@ func TestIdleSkip_HeartbeatWithActionableTasks_Proceeds(t *testing.T) {
 	// Assign an IN_PROGRESS task to this agent.
 	insertActionableTask(t, svc, "task-inprog-1", agent.ID, "IN_PROGRESS")
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
 	service.RunSchedulerTick(svc, ctx)
 
-	// Run should have proceeded to launch (mock called or at least not skipped).
-	// Since there is no task_id in the payload the scheduler logs but does not
-	// call StartTask (launchOrLog path). Verify the run was finished normally.
+	// This test only asserts the idle-skip guard did not trigger (the point
+	// of the test). Since the payload carries no task_id, launchAgent still
+	// fails the run afterward (WO-35) — that terminal outcome is covered by
+	// scheduler_taskless_launch_test.go, not here.
 	entries, err := svc.ListActivity(ctx, "ws-1", 50)
 	if err != nil {
 		t.Fatalf("list activity: %v", err)
@@ -498,7 +499,7 @@ func TestIdleSkip_HeartbeatSkipDisabled_Proceeds(t *testing.T) {
 		`UPDATE agent_profiles SET skip_idle_runs = 0 WHERE id = ?`, agent.ID)
 
 	// No tasks assigned.
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -534,7 +535,7 @@ func TestIdleSkip_NonHeartbeatRun_NotSkipped(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
 		VALUES ('task-event-1', 'ws-1', 'Event Task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-event-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-event-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -568,7 +569,7 @@ func TestIdleSkip_CEODefaultFalse_NotSkipped(t *testing.T) {
 	}
 	// CEO has no tasks, but skip_idle_runs defaults to false.
 
-	if err := svc.QueueRun(ctx, ceo.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, ceo.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 

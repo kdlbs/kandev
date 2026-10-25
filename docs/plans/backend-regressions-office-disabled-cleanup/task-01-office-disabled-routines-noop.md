@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/cron-office-disabled-safety.md"
+spec: "../../specs/platform/requirements/cron-office-disabled-safety.md"
 parallel-safe: true
 ---
 
@@ -66,7 +66,7 @@ packages, no shared schema/contract/config).
 
 ## Inputs
 
-- Repair spec: `docs/specs/platform/cron-office-disabled-safety.md`.
+- Repair spec: `docs/specs/platform/requirements/cron-office-disabled-safety.md`.
 - Confirmed 22 recurring panics in `~/.kandev/logs/backend-logs.log`.
 
 ## Output contract

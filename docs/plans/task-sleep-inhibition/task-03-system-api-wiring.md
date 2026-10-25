@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-lifecycle-service", "02-native-platform-inhibitors"]
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 03: System API wiring

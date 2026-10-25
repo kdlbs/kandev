@@ -5,7 +5,7 @@ status: complete
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-cleanup.md"
+spec: "../../specs/tasks/system-design/runtime-cleanup.md"
 parallel-safe: false
 ---
 
@@ -82,7 +82,7 @@ consistent. Not parallel-safe.
 
 ## Inputs
 
-- Amended spec: `docs/specs/tasks/runtime-cleanup.md` (confirmed-dead
+- Amended spec: `docs/specs/tasks/system-design/runtime-cleanup.md` (confirmed-dead
   not-found-as-stopped bullets, failure modes, and scenarios).
 - Existing runtime-aware liveness: `lifecycle.RowProcessLiveness` /
   `models.ProcessLiveness` and `RowMustBePreserved`

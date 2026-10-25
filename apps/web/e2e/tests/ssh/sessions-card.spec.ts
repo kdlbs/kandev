@@ -1,5 +1,22 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { SSHSettingsPage } from "../../pages/SSHSettingsPage";
+
+async function waitForTaskSSHSession(apiClient: ApiClient, executorID: string, taskID: string) {
+  let row: Awaited<ReturnType<ApiClient["listSSHSessions"]>>[number] | undefined;
+  await expect
+    .poll(
+      async () => {
+        row = (await apiClient.listSSHSessions(executorID)).find(
+          (session) => session.task_id === taskID,
+        );
+        return row !== undefined;
+      },
+      { message: "wait for this task's SSH runtime row", timeout: 60_000 },
+    )
+    .toBe(true);
+  return row!;
+}
 
 /**
  * SSHSessionsCard — table of active sessions for the executor. Mirrors
@@ -38,9 +55,7 @@ test.describe("ssh sessions card", () => {
       })
       .toBe("ssh");
 
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const row = sessions.find((s) => s.task_id === task.id);
-    expect(row).toBeDefined();
+    const row = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     const page = new SSHSettingsPage(testPage);
     await page.gotoExisting(seedData.sshExecutorId);
@@ -79,6 +94,8 @@ test.describe("ssh sessions card", () => {
       })
       .toBe("ssh");
 
+    await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
+
     await page.sessionsRefresh.click();
     await expect(page.sessionsTable).toBeVisible({ timeout: 10_000 });
   });
@@ -101,8 +118,7 @@ test.describe("ssh sessions card", () => {
         timeout: 60_000,
       })
       .toBe("ssh");
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const row = sessions[0];
+    const row = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     const page = new SSHSettingsPage(testPage);
     await page.gotoExisting(seedData.sshExecutorId);
@@ -135,8 +151,7 @@ test.describe("ssh sessions card", () => {
         timeout: 60_000,
       })
       .toBe("ssh");
-    const sessions = await apiClient.listSSHSessions(seedData.sshExecutorId);
-    const row = sessions[0];
+    const row = await waitForTaskSSHSession(apiClient, seedData.sshExecutorId, task.id);
 
     const page = new SSHSettingsPage(testPage);
     await page.gotoExisting(seedData.sshExecutorId);

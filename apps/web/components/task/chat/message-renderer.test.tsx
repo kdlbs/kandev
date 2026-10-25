@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageRenderer } from "./message-renderer";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
+const REMOVED_PAYLOAD = "removed secret";
+
 const fallbackOpenFile = vi.hoisted(() => vi.fn());
 const useOpenFileAtLine = vi.hoisted(() =>
   vi.fn((onOpenFile: ((path: string) => void) | undefined) => (path: string) => onOpenFile?.(path)),
@@ -14,6 +16,18 @@ vi.mock("@/hooks/use-panel-actions", () => ({
 
 vi.mock("@/hooks/use-file-editors", () => ({
   useOpenFileAtLine,
+}));
+
+vi.mock("@/components/task/chat/messages/action-message", () => ({
+  ActionMessage: ({ comment }: { comment: { content: string } }) => (
+    <div data-testid="action-message-renderer">{comment.content}</div>
+  ),
+}));
+
+vi.mock("@/components/task/chat/messages/status-message", () => ({
+  StatusMessage: ({ comment }: { comment: { content: string } }) => (
+    <div data-testid="status-message-renderer">{comment.content}</div>
+  ),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -116,4 +130,81 @@ describe("MessageRenderer markdown file links", () => {
     expect(onOpenFile).toHaveBeenCalledWith("apps/web/AGENTS.md");
     expect(fallbackOpenFile).not.toHaveBeenCalled();
   });
+});
+
+it.each(["tool_read", "tool_edit", "tool_search", "tool_call"])(
+  "renders removed %s details without old payloads",
+  (type) => {
+    const view = render(
+      <MessageRenderer
+        comment={message({
+          type: type as Message["type"],
+          content: "Retained title",
+          metadata: {
+            status: "complete",
+            title: "Retained title",
+            payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" },
+            normalized: {
+              generic: { output: REMOVED_PAYLOAD },
+              read_file: { output: { content: REMOVED_PAYLOAD } },
+              modify_file: { mutations: [{ content: REMOVED_PAYLOAD }] },
+              code_search: { output: { files: [REMOVED_PAYLOAD] } },
+              http_request: { response: REMOVED_PAYLOAD },
+            },
+          },
+        })}
+        isTaskDescription={false}
+      />,
+    );
+    expect(view.getByText("Retained title")).toBeTruthy();
+    expect(view.getByText("Completed")).toBeTruthy();
+    expect(view.getByTestId("tool-payload-removed").textContent).toMatch(/Tool details removed on/);
+    expect(view.queryByText(REMOVED_PAYLOAD)).toBeNull();
+    view.unmount();
+  },
+);
+
+it("suppresses dismissed Git push errors for direct renderer callers", () => {
+  const view = render(
+    <MessageRenderer
+      comment={message({
+        type: "error",
+        content: "Git push failed: remote rejected the branch",
+        metadata: {
+          git_operation_error: true,
+          operation: "push",
+          git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+          actions: [
+            { type: "ws_request", label: "Fix", params: { method: "agent.prompt", payload: {} } },
+          ],
+        },
+      })}
+      isTaskDescription={false}
+    />,
+  );
+
+  expect(view.container.firstChild).toBeNull();
+});
+
+it("routes retained provider turn failures through the settled action renderer", () => {
+  render(
+    <MessageRenderer
+      comment={message({
+        type: "status",
+        content: "Selected model is at capacity.",
+        metadata: {
+          variant: "error",
+          failure_scope: "turn",
+          runtime_retained: true,
+          recovery_actions: false,
+        },
+      })}
+      isTaskDescription={false}
+    />,
+  );
+
+  expect(screen.getByTestId("action-message-renderer").textContent).toBe(
+    "Selected model is at capacity.",
+  );
+  expect(screen.queryByTestId("status-message-renderer")).toBeNull();
 });

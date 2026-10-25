@@ -5,7 +5,7 @@ status: done
 wave: 14
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 14: Attest supported background lifecycles

@@ -24,11 +24,33 @@ function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
 }
 
 const C = (c: Omit<FilterClause, "id">): FilterClause => ({ id: "c1", ...c });
+const LAST_ACTIVITY_SORT_KEY = "lastActivityAt";
+const TEST_DATE_EARLY = "2026-04-01";
 
 describe("applyFilters — basics", () => {
   it("returns all when no clauses", () => {
     const tasks = [task({ id: "a" }), task({ id: "b" })];
     expect(applyFilters(tasks, [])).toHaveLength(2);
+  });
+});
+
+describe("applySort — effective color", () => {
+  it("uses the row's effective token and lets later rules break ties", () => {
+    const sorted = applySort(
+      [
+        task({ id: "red-old", effectiveColorToken: "red", updatedAt: "2026-01-01" }),
+        task({ id: "blue-new", effectiveColorToken: "blue", updatedAt: "2026-02-01" }),
+        task({ id: "red-new", effectiveColorToken: "red", updatedAt: "2026-03-01" }),
+      ],
+      {
+        key: "color",
+        color: "red",
+        direction: "desc",
+        thenBy: [{ key: "updatedAt", direction: "desc" }],
+      },
+    );
+
+    expect(sorted.map((entry) => entry.id)).toEqual(["red-new", "red-old", "blue-new"]);
   });
 });
 
@@ -150,6 +172,36 @@ describe("applyFilters — per-dimension", () => {
   });
 });
 
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.2
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.3
+// @covers AC-UI-REPOSITORY-FILTER-NONE-001.4
+describe("applyFilters — missing repository", () => {
+  const tasks = [
+    task({ id: "none", workflowId: "wf" }),
+    task({ id: "first", workflowId: "wf", repositoryPath: "org/first" }),
+    task({ id: "second", workflowId: "wf", repositoryPath: "org/second" }),
+    task({ id: "other-workflow", workflowId: "other" }),
+  ];
+
+  it.each<{ op: FilterClause["op"]; value: FilterClause["value"]; expected: string[] }>([
+    { op: "is", value: "undefined", expected: ["none"] },
+    { op: "in", value: ["undefined"], expected: ["none"] },
+    { op: "in", value: ["undefined", "org/first"], expected: ["none", "first"] },
+    { op: "in", value: ["org/first"], expected: ["first"] },
+    { op: "is_not", value: "undefined", expected: ["first", "second"] },
+    { op: "not_in", value: ["undefined", "org/first"], expected: ["second"] },
+    { op: "in", value: [], expected: [] },
+    { op: "not_in", value: [], expected: ["none", "first", "second"] },
+  ])("matches $op $value while applying other clauses", ({ op, value, expected }) => {
+    const result = applyFilters(tasks, [
+      C({ dimension: "repository", op, value }),
+      { id: "workflow", dimension: "workflow", op: "is", value: "wf" },
+    ]);
+
+    expect(result.map((task) => task.id)).toEqual(expected);
+  });
+});
+
 describe("applyFilters — repository (#1213)", () => {
   // The saved clause value is the filter option value, and the board sets each
   // task's repositoryPath — BOTH via repositorySlug. For a local repo the slug
@@ -179,6 +231,25 @@ describe("applyFilters — repository (#1213)", () => {
     ];
     const out = applyFilters(tasks, [C({ dimension: "repository", op: "is", value: optionValue })]);
     expect(out.map((t) => t.id)).toEqual(["a"]);
+  });
+
+  it("filters projected multi-repository tasks by their primary repository", () => {
+    const out = applyFilters(
+      [
+        task({
+          id: "multi",
+          repositoryPath: "org/primary",
+          repositories: ["org/primary", "org/secondary"],
+          repositoryLinks: [
+            { repository_id: "repo-primary", position: 0 },
+            { repository_id: "repo-secondary", position: 1 },
+          ],
+        }),
+      ],
+      [C({ dimension: "repository", op: "is", value: "org/primary" })],
+    );
+
+    expect(out.map((item) => item.id)).toEqual(["multi"]);
   });
 });
 
@@ -219,7 +290,7 @@ describe("applyFilters — titleMatch + combos", () => {
 });
 
 describe("applySort", () => {
-  const early = "2026-04-01";
+  const early = TEST_DATE_EARLY;
   const middle = "2026-04-03";
   const late = "2026-04-05";
   const a = task({ id: "a", state: "REVIEW", updatedAt: early, title: "Zeta" });
@@ -253,7 +324,7 @@ describe("applySort", () => {
           createdAt: early,
         }),
       ],
-      { key: "lastActivityAt", direction: "desc" },
+      { key: LAST_ACTIVITY_SORT_KEY, direction: "desc" },
     );
     expect(out.map((t) => t.id)).toEqual(["activity", "updated-fallback", "created-fallback"]);
   });
@@ -261,7 +332,7 @@ describe("applySort", () => {
   it("keeps lastActivityAt stable for equal timestamps", () => {
     const out = applySort(
       [task({ id: "first", lastActivityAt: late }), task({ id: "second", lastActivityAt: late })],
-      { key: "lastActivityAt", direction: "asc" },
+      { key: LAST_ACTIVITY_SORT_KEY, direction: "asc" },
     );
     expect(out.map((t) => t.id)).toEqual(["first", "second"]);
   });
@@ -328,6 +399,147 @@ describe("applyGroup — state", () => {
   });
 });
 
+describe("applyGroup — repository combinations", () => {
+  it("groups a projected multi-repository task by every repository slug", () => {
+    const repositories = ["owner/repo,one", "owner/repo-two"];
+    const out = applyGroup(
+      [
+        task({
+          id: "multi",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0]).toMatchObject({
+      key: `__repo_combination__:${JSON.stringify(repositories)}`,
+      label: "owner/repo,one, owner/repo-two",
+    });
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["multi"]);
+  });
+
+  it("keeps equal combinations together and separates different ordered combinations", () => {
+    const first = ["owner/repo-a", "owner/repo-b"];
+    const reversed = [...first].reverse();
+    const out = applyGroup(
+      [
+        task({
+          id: "first",
+          repositories: first,
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-b", position: 1 },
+          ],
+        }),
+        task({
+          id: "same",
+          repositories: [...first],
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-b", position: 1 },
+          ],
+        }),
+        task({
+          id: "reversed",
+          repositories: reversed,
+          repositoryLinks: [
+            { repository_id: "repo-b", position: 0 },
+            { repository_id: "repo-a", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(2);
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(first)}`,
+      `__repo_combination__:${JSON.stringify(reversed)}`,
+    ]);
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["first", "same"]);
+    expect(out.groups[1].tasks.map((item) => item.id)).toEqual(["reversed"]);
+  });
+
+  it("keeps incomplete multi-repository metadata in the generic group", () => {
+    const out = applyGroup(
+      [
+        task({
+          id: "incomplete",
+          repositories: ["owner/repo-a"],
+          repositoryLinks: [
+            { repository_id: "repo-a", position: 0 },
+            { repository_id: "repo-missing", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0].key).toBe("__multi__");
+    expect(out.groups[0].label).toBe("Multi-repo");
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["incomplete"]);
+  });
+});
+
+describe("applyGroup — repository combination edge cases", () => {
+  it("accepts duplicate canonical slugs when each repository link resolves", () => {
+    const repositories = ["org/api", "org/api"];
+    const out = applyGroup(
+      [
+        task({
+          id: "duplicate-slug",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-local-api", position: 0 },
+            { repository_id: "repo-remote-api", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups).toHaveLength(1);
+    expect(out.groups[0]).toMatchObject({
+      key: `__repo_combination__:${JSON.stringify(repositories)}`,
+      label: "org/api, org/api",
+    });
+  });
+
+  it("sorts combination groups before single-repo groups and unassigned last", () => {
+    const repositories = ["org/one", "org/two"];
+    const out = applyGroup(
+      [
+        task({ id: "single", repositoryPath: "org/three" }),
+        task({ id: "single-other", repositoryPath: "org/four" }),
+        task({ id: "unassigned" }),
+        task({
+          id: "combo",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(repositories)}`,
+      "org/four",
+      "org/three",
+      "__unassigned__",
+    ]);
+  });
+});
+
 describe("applyGroup", () => {
   it("wraps all tasks in single pseudo-group when group=none", () => {
     const tasks = [task({ id: "a" }), task({ id: "b" })];
@@ -358,6 +570,31 @@ describe("applyGroup", () => {
     expect(out.groups).toHaveLength(1);
     expect(out.groups[0].label).toBe("org/only");
     expect(out.groups[0].tasks).toHaveLength(2);
+  });
+
+  it("does not merge unassigned into a named repository combination group", () => {
+    const repositories = ["org/one", "org/two"];
+    const out = applyGroup(
+      [
+        task({
+          id: "multi",
+          repositories,
+          repositoryLinks: [
+            { repository_id: "repo-one", position: 0 },
+            { repository_id: "repo-two", position: 1 },
+          ],
+        }),
+        task({ id: "unassigned" }),
+      ],
+      "repository",
+    );
+
+    expect(out.groups.map((group) => group.key)).toEqual([
+      `__repo_combination__:${JSON.stringify(repositories)}`,
+      "__unassigned__",
+    ]);
+    expect(out.groups[0].tasks.map((item) => item.id)).toEqual(["multi"]);
+    expect(out.groups[1].tasks.map((item) => item.id)).toEqual(["unassigned"]);
   });
 
   it("separates subtasks from root tasks", () => {
@@ -419,6 +656,7 @@ describe("applyView (integration)", () => {
       filters: [{ id: "f1", dimension: "isPRReview", op: "is", value: false }],
       sort: { key: "updatedAt", direction: "desc" },
       group: "none",
+      groupIndent: true,
       collapsedGroups: [],
     };
     const tasks = [
@@ -439,6 +677,7 @@ describe("applyView — pinned tasks", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -504,6 +743,7 @@ describe("applyView — custom sort", () => {
     filters: [],
     sort: { key: "custom", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -523,7 +763,7 @@ describe("applyView — custom sort", () => {
   it("places tasks not in orderedTaskIds after listed ones, newest createdAt first", () => {
     const tasks = [
       task({ id: "a", title: "Alpha", createdAt: "2026-01-01" }),
-      task({ id: "b", title: "Beta", createdAt: "2026-04-01" }),
+      task({ id: "b", title: "Beta", createdAt: TEST_DATE_EARLY }),
       task({ id: "c", title: "Gamma", createdAt: "2026-02-01" }),
     ];
     const out = applyView(tasks, customView, { pinnedTaskIds: [], orderedTaskIds: ["c"] });
@@ -606,6 +846,7 @@ describe("applyView — subtaskOrderByParentId", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
   const parentId = "p1";
@@ -661,6 +902,53 @@ describe("applyView — subtaskOrderByParentId", () => {
     });
     expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["a2", "a1"]);
     expect(out.subTasksByParentId.get("p2")?.map((t) => t.id)).toEqual(["b1", "b2"]);
+  });
+});
+
+describe("applyView — Last activity tree overrides", () => {
+  it("keeps pin and manual subtask order ahead of tree sorting without changing Updated", () => {
+    const lastActivityView: SidebarView = {
+      id: "activity",
+      name: "Activity",
+      filters: [],
+      sort: { key: LAST_ACTIVITY_SORT_KEY, direction: "desc" },
+      group: "none",
+      groupIndent: true,
+      collapsedGroups: [],
+    };
+    const tasks = [
+      task({ id: "parent", lastActivityAt: TEST_DATE_EARLY, updatedAt: TEST_DATE_EARLY }),
+      task({
+        id: "child",
+        parentTaskId: "parent",
+        lastActivityAt: "2026-04-10",
+        updatedAt: "2026-04-03",
+      }),
+      task({
+        id: "sibling",
+        parentTaskId: "parent",
+        lastActivityAt: "2026-04-02",
+        updatedAt: "2026-04-08",
+      }),
+      task({ id: "peer", lastActivityAt: "2026-04-04", updatedAt: "2026-04-05" }),
+    ];
+
+    const activity = applyView(tasks, lastActivityView, {
+      pinnedTaskIds: ["peer"],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { parent: ["sibling", "child"] },
+    });
+    expect(activity.groups[0].tasks.map((item) => item.id)).toEqual(["peer", "parent"]);
+    expect(activity.subTasksByParentId.get("parent")?.map((item) => item.id)).toEqual([
+      "sibling",
+      "child",
+    ]);
+
+    const updated = applyView(tasks, {
+      ...lastActivityView,
+      sort: { key: "updatedAt", direction: "desc" },
+    });
+    expect(updated.groups[0].tasks.map((item) => item.id)).toEqual(["peer", "parent"]);
   });
 });
 

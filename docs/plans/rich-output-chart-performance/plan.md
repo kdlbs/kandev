@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/agent-rich-output/spec.md
+spec: docs/specs/agents/requirements/agent-rich-output.md
 created: 2026-08-16
 status: complete
 ---
@@ -121,7 +121,7 @@ builds and equivalent single-tab/background-tab comparisons.
 
 ### Durable artifacts
 
-- `docs/specs/agent-rich-output/spec.md`
+- `docs/specs/agents/requirements/agent-rich-output.md`
 - `docs/plans/rich-output-chart-performance/plan.md`
 - `docs/plans/rich-output-chart-performance/task-01-defer-and-stabilize-charts.md`
 - `docs/plans/rich-output-chart-performance/task-02-rich-output-motion-setting.md`

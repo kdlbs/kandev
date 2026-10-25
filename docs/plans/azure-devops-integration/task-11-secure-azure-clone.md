@@ -5,7 +5,7 @@ status: done
 wave: 6
 depends_on: ["10-remote-repository-contracts"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 11: Secure Azure Repository Materialization

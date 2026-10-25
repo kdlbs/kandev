@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/auth/session-ip-refresh.md"
+spec: "../../specs/auth/requirements/session-ip-refresh.md"
 ---
 
 # Task 01: Store and service session-IP refresh

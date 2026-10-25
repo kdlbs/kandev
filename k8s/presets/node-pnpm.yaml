@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: PodTemplate
+template:
+  spec:
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containers:
+      - name: kandev-agent
+        image: ghcr.io/kdlbs/kandev-worker@sha256:REPLACE_WITH_NODE_PNPM_DIGEST
+        imagePullPolicy: IfNotPresent
+        env:
+          - name: NPM_CONFIG_PREFIX
+            value: /workspace/.npm-global
+          - name: PNPM_HOME
+            value: /workspace/.pnpm
+          - name: PATH
+            value: /workspace/.pnpm:/workspace/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL

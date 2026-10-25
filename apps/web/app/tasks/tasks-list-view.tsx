@@ -1,38 +1,60 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { TasksListArchiveMode } from "@/lib/tasks/tasks-list-query";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
+
+import { useMemo, useRef, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
-import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import { type Repository, type Task } from "@/lib/types/http";
 import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import { TasksListControls } from "./tasks-list-controls";
-import {
-  TASK_STATE_ORDER,
-  type TasksListGroup,
-  type TasksListSort,
-} from "@/lib/tasks/tasks-list-options";
+import type { TasksListFilterProps } from "./tasks-list-filters";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
+import type { TFunction } from "i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { TaskListFacetValue } from "@/lib/plugins/types";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 
-export type TasksListViewProps = {
+import {
+  buildTaskSections,
+  type TaskTreeNode,
+  type TaskListSection,
+  type TaskListStepPreviews,
+  type TaskListWorkflow,
+} from "@/lib/tasks/task-list-sections";
+
+import {
+  TaskListResultAnnouncement,
+  TaskListResultBoundary,
+  type TasksListReadFeedbackProps,
+} from "./tasks-list-read-feedback";
+
+export type { TasksListReadFeedbackProps } from "./tasks-list-read-feedback";
+
+export type TasksListViewProps = TasksListReadFeedbackProps & {
+  filters?: TasksListFilterProps;
   total: number;
-  showArchived: boolean;
-  setShowArchived: (show: boolean) => void;
-  tasksListSort: TasksListSort;
-  onTasksListSortChange: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  onTasksListGroupChange: (group: TasksListGroup) => void;
+  archiveMode: TasksListArchiveMode;
+  setArchiveMode: (mode: TasksListArchiveMode) => void;
+  tasksListSort: string;
+  onTasksListSortChange: (sort: string) => void;
+  tasksListGroup: string;
+  onTasksListGroupChange: (group: string) => void;
+  facetOptions?: ReadonlyArray<{ value: string; label: string }>;
+  facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   pageCount: number;
@@ -43,14 +65,18 @@ export type TasksListViewProps = {
   deletingTaskId: string | null;
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleUnarchive: (taskId: string) => Promise<void>;
-  handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  handleDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRefresh?: () => void | Promise<void>;
 };
 
 export function TasksListView({
   total,
-  showArchived,
-  setShowArchived,
+  filters,
+  readError,
+  unavailableFilter,
+  onRetry,
+  archiveMode,
+  setArchiveMode,
   tasksListSort,
   onTasksListSortChange,
   tasksListGroup,
@@ -69,57 +95,83 @@ export function TasksListView({
   handleUnarchive,
   handleDelete,
   onRefresh,
+  facetOptions,
+  facetValues = {},
+  workflowStepPreviews = {},
 }: TasksListViewProps) {
+  const { t } = useTranslation();
+  const hasFilters = hasListFilters(filters);
+  const issue = readError || unavailableFilter;
   // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
-    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
+    <div className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6" data-testid="tasks-list-view">
       <div className="space-y-4">
+        <TaskListResultAnnouncement busy={isLoading} issue={Boolean(issue)} total={total} />
         <TasksListControls
-          showArchived={showArchived}
-          onShowArchivedChange={setShowArchived}
+          filters={filters}
+          total={total}
+          isLoading={isLoading || Boolean(issue)}
+          archiveMode={archiveMode}
+          onArchiveModeChange={setArchiveMode}
           tasksListSort={tasksListSort}
           onTasksListSortChange={onTasksListSortChange}
           tasksListGroup={tasksListGroup}
           onTasksListGroupChange={onTasksListGroupChange}
+          facetOptions={facetOptions}
         />
-        <TaskRows
-          tasks={tasks}
-          workflows={workflows}
-          repositories={repositories}
-          showTaskDetails={showTaskDetails}
-          tasksListGroup={tasksListGroup}
-          isLoading={isLoading}
-          deletingTaskId={deletingTaskId}
-          onArchive={handleArchive}
-          onUnarchive={handleUnarchive}
-          onDelete={handleDelete}
-          onRowClick={handleRowClick}
-        />
-        <TasksPagination
-          total={total}
-          pageCount={pageCount}
-          pagination={pagination}
-          onPaginationChange={setPagination}
-        />
+        <TaskListResultBoundary
+          readError={readError}
+          unavailableFilter={unavailableFilter}
+          onRetry={onRetry}
+          onClearFilters={filters?.onClearFilters}
+        >
+          <TaskRows
+            emptyMessage={listEmptyMessage(t, hasFilters, archiveMode)}
+            onClearFilters={hasFilters ? filters?.onClearFilters : undefined}
+            tasks={tasks}
+            workflows={workflows}
+            repositories={repositories}
+            showTaskDetails={showTaskDetails}
+            tasksListGroup={tasksListGroup}
+            isLoading={isLoading}
+            deletingTaskId={deletingTaskId}
+            onArchive={handleArchive}
+            onUnarchive={handleUnarchive}
+            onDelete={handleDelete}
+            onRowClick={handleRowClick}
+            facetValues={facetValues}
+            workflowStepPreviews={workflowStepPreviews}
+          />
+        </TaskListResultBoundary>
+        {!isLoading && !issue && (
+          <TasksPagination
+            total={total}
+            pageCount={pageCount}
+            pagination={pagination}
+            onPaginationChange={setPagination}
+          />
+        )}
       </div>
     </div>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
 }
 
-type TaskTreeNode = {
-  task: Task;
-  children: TaskTreeNode[];
-  level: number;
-};
+function hasListFilters(filters?: TasksListFilterProps) {
+  return Boolean(
+    filters &&
+    (filters.searchQuery || filters.workflowId !== null || filters.repositoryId !== null),
+  );
+}
 
-type TaskListSection = {
-  key: string;
-  title: string | null;
-  nodes: TaskTreeNode[];
-};
+function listEmptyMessage(t: TFunction, filtered: boolean, mode: TasksListArchiveMode) {
+  if (filtered) return t("tasks:noMatchingTasks");
+  return t(mode === "archived" ? "tasks:noArchivedTasks" : "tasks:noTasksFound");
+}
 
 function TaskRows({
+  emptyMessage,
+  onClearFilters,
   tasks,
   workflows,
   repositories,
@@ -131,42 +183,57 @@ function TaskRows({
   onUnarchive,
   onDelete,
   onRowClick,
+  facetValues = {},
+  workflowStepPreviews = {},
 }: {
+  emptyMessage: string;
+  onClearFilters?: () => void;
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
-  tasksListGroup: TasksListGroup;
+  tasksListGroup: string;
   isLoading: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
+  facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
 }) {
-  const { t, i18n } = useTranslation();
-  const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
-  const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
-  // `groupForTask` resolves its headings from the catalog (the no-workflow /
-  // no-repository fallbacks, and now the task-state vocabulary). Without the
-  // language in the deps a section header keeps the previous locale until the
-  // task list itself changes.
-  const sections = useMemo(
-    () => buildTaskSections(tasks, { groupBy: tasksListGroup, workflowMap, repoMap }),
-    [repoMap, tasks, tasksListGroup, workflowMap, i18n.language],
-  );
+  const { t } = useTranslation();
+  const sections = useTaskListSections({
+    tasks,
+    workflows,
+    repositories,
+    tasksListGroup,
+    facetValues,
+    workflowStepPreviews,
+  });
 
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
+      <div
+        role="status"
+        className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground"
+      >
         {t("tasks:loadingTasks")}
       </div>
     );
   }
   if (tasks.length === 0) {
     return (
-      <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        {t("tasks:noTasksFound")}
+      <div
+        role="status"
+        className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground"
+      >
+        <p>{emptyMessage}</p>
+        {onClearFilters && (
+          <Button variant="ghost" className="mt-3 cursor-pointer" onClick={onClearFilters}>
+            {t("tasks:clearFilters")}
+          </Button>
+        )}
       </div>
     );
   }
@@ -191,107 +258,44 @@ function TaskRows({
   );
 }
 
-function buildTaskSections(
-  tasks: Task[],
-  {
-    groupBy,
-    workflowMap,
-    repoMap,
-  }: {
-    groupBy: TasksListGroup;
-    workflowMap: Map<string, string>;
-    repoMap: Map<string, string>;
-  },
-): TaskListSection[] {
-  const roots = buildTaskTree(tasks);
-  if (groupBy === "none") {
-    return [{ key: "all", title: null, nodes: roots }];
-  }
+function useTaskListSections({
+  tasks,
+  workflows,
+  repositories,
+  tasksListGroup,
+  facetValues = {},
+  workflowStepPreviews = {},
+}: Pick<
+  TasksListViewProps,
+  "tasks" | "workflows" | "repositories" | "tasksListGroup" | "facetValues" | "workflowStepPreviews"
+>) {
+  const { i18n } = useTranslation();
+  const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
+  const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
+  // Section headings resolve from the active locale even when the tasks do not change.
+  const sections = useMemo(
+    () =>
+      buildTaskSections(tasks, {
+        groupBy: tasksListGroup,
+        workflowMap,
+        repoMap,
+        facetValues,
+        workflows,
+        workflowStepPreviews,
+      }),
+    [
+      facetValues,
+      repoMap,
+      tasks,
+      tasksListGroup,
+      workflowMap,
+      workflows,
+      workflowStepPreviews,
+      i18n.language,
+    ],
+  );
 
-  const sections = new Map<string, TaskListSection>();
-  for (const node of roots) {
-    const { key, title } = groupForTask(node.task, groupBy, workflowMap, repoMap);
-    const section = sections.get(key) ?? { key, title, nodes: [] };
-    section.nodes.push(node);
-    sections.set(key, section);
-  }
-
-  return Array.from(sections.values()).sort((a, b) => compareSection(a, b, groupBy));
-}
-
-function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
-  const childrenByParent = new Map<string, Task[]>();
-  const taskIds = new Set(tasks.map((task) => task.id));
-  const roots: Task[] = [];
-
-  for (const task of tasks) {
-    if (task.parent_id && taskIds.has(task.parent_id)) {
-      const siblings = childrenByParent.get(task.parent_id) ?? [];
-      siblings.push(task);
-      childrenByParent.set(task.parent_id, siblings);
-    } else {
-      roots.push(task);
-    }
-  }
-
-  const visited = new Set<string>();
-
-  const buildNode = (task: Task, level: number): TaskTreeNode | null => {
-    if (visited.has(task.id)) return null;
-    visited.add(task.id);
-    return {
-      task,
-      level,
-      children: (childrenByParent.get(task.id) ?? [])
-        .map((child) => buildNode(child, level + 1))
-        .filter((node): node is TaskTreeNode => node !== null),
-    };
-  };
-
-  const nodes = roots
-    .map((task) => buildNode(task, 0))
-    .filter((node): node is TaskTreeNode => node !== null);
-  for (const task of tasks) {
-    const node = buildNode(task, 0);
-    if (node) nodes.push(node);
-  }
-
-  return nodes;
-}
-
-function groupForTask(
-  task: Task,
-  groupBy: TasksListGroup,
-  workflowMap: Map<string, string>,
-  repoMap: Map<string, string>,
-) {
-  if (groupBy === "workflow") {
-    const title = workflowMap.get(task.workflow_id);
-    if (!title) return { key: "workflow:none", title: t("tasks:noWorkflow") };
-    return { key: `workflow:${task.workflow_id || "none"}`, title };
-  }
-  if (groupBy === "repository") {
-    const primaryRepo = primaryTaskRepository(task.repositories);
-    if (!primaryRepo) return { key: "repository:none", title: t("tasks:noRepository") };
-    const repoId = primaryRepo?.repository_id ?? "none";
-    const title = repoMap.get(repoId);
-    if (!title) return { key: "repository:none", title: t("tasks:noRepository") };
-    return { key: `repository:${repoId}`, title };
-  }
-  const title = formatTaskStateLabel(task.state);
-  return { key: `state:${task.state}`, title };
-}
-
-function compareSection(a: TaskListSection, b: TaskListSection, groupBy: TasksListGroup): number {
-  if (groupBy === "state") {
-    const aIndex = TASK_STATE_ORDER.indexOf(a.key.replace("state:", "") as Task["state"]);
-    const bIndex = TASK_STATE_ORDER.indexOf(b.key.replace("state:", "") as Task["state"]);
-    return (
-      (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) -
-      (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex)
-    );
-  }
-  return (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" });
+  return sections;
 }
 
 function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {
@@ -318,7 +322,7 @@ function TaskListRow({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -388,7 +392,7 @@ function TaskListSectionView({
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
   const rows = flattenTaskTree(section.nodes);
@@ -396,6 +400,12 @@ function TaskListSectionView({
     <section className="space-y-2" data-testid="tasks-list-section">
       {section.title && (
         <div className="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-normal text-muted-foreground">
+          {section.color && (
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: section.color }}
+            />
+          )}
           <span>{section.title}</span>
           <span className="text-muted-foreground/70">{rows.length}</span>
         </div>
@@ -439,7 +449,7 @@ function UnarchiveRowAction({
           <Button
             variant="ghost"
             size="icon"
-            className="h-9 w-9 cursor-pointer"
+            className="cursor-pointer"
             data-testid="tasks-list-unarchive"
             disabled={isPending}
             onClick={async () => {
@@ -486,18 +496,25 @@ function TaskRowActions({
   onArchiveOpenChange: (open: boolean) => void;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
-  onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (taskId: string, opts?: DeleteTaskParams) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const workspaceMode = workspaceModeFromMetadata(task.metadata);
+  const archiveAnchorRef = useRef<HTMLButtonElement>(null);
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
-    <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
-      {!isArchived && (
+    <div
+      className={`flex items-center gap-1 ${showArchiveConfirm && !isFinePointer ? "flex-wrap" : ""}`}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {!isArchived && (!showArchiveConfirm || isFinePointer) && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
+              ref={archiveAnchorRef}
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => onArchiveOpenChange(true)}
             >
               <IconArchive className="h-4 w-4 text-muted-foreground" />
@@ -514,7 +531,7 @@ function TaskRowActions({
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 cursor-pointer"
+              className="cursor-pointer"
               disabled={isDeleting}
               onClick={() => onDeleteOpenChange(true)}
             >
@@ -536,11 +553,13 @@ function TaskRowActions({
         taskId={task.id}
         isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(workspaceMode)}
         isDeleting={isDeleting}
-        onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
+        onConfirm={(options) => onDelete(task.id, options)}
       />
-      <TaskArchiveConfirmDialog
+      <TaskArchiveConfirmation
         open={showArchiveConfirm}
+        anchorRef={archiveAnchorRef}
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}

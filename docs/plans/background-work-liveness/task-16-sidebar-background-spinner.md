@@ -6,7 +6,7 @@ wave: 16
 depends_on:
   ["14-attest-background-lifecycles", "15-publish-active-subagent-counts"]
 plan: "plan.md"
-spec: "../../specs/platform/background-work-liveness.md"
+spec: "../../specs/platform/requirements/background-work-liveness.md"
 ---
 
 # Task 16: Align the sidebar background spinner

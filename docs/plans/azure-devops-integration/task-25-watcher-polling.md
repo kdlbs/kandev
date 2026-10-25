@@ -5,7 +5,7 @@ status: completed
 wave: 12
 depends_on: ["24-watcher-persistence"]
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 25: Azure Watcher Polling

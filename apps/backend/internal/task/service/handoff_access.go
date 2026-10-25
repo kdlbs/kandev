@@ -97,17 +97,26 @@ func canWriteDocuments(ctx context.Context, repo taskLookup, currentTaskID, targ
 
 // loadAccessPair resolves both tasks and runs the always-required guards:
 // non-empty IDs and matching workspaces. Returns (current, target, true)
-// only when access evaluation should proceed.
+// only when access evaluation should proceed. A not-found task (the
+// repository's ErrTaskNotFound sentinel, which embeds the raw task id)
+// normalizes to a plain deny rather than propagating — callers must not
+// leak the identifier via a raw error message.
 func loadAccessPair(ctx context.Context, repo taskLookup, currentTaskID, targetTaskID string) (*models.Task, *models.Task, bool, error) {
 	if currentTaskID == "" || targetTaskID == "" {
 		return nil, nil, false, nil
 	}
 	current, err := repo.GetTask(ctx, currentTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, nil, false, nil
+		}
 		return nil, nil, false, err
 	}
 	target, err := repo.GetTask(ctx, targetTaskID)
 	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return nil, nil, false, nil
+		}
 		return nil, nil, false, err
 	}
 	if current == nil || target == nil {
@@ -150,7 +159,13 @@ func inAncestorChain(ctx context.Context, repo taskLookup, currentID, targetID s
 
 // ancestorIDs walks parent_id up from taskID, returning the chain of
 // ancestor IDs (excluding taskID itself). The walk stops at empty
-// parent_id or after ancestorWalkHopCap hops, whichever comes first.
+// parent_id or after ancestorWalkHopCap hops, whichever comes first. A
+// not-found parent also stops the walk (returning the chain accumulated
+// so far) rather than propagating the repository's identifier-embedding
+// error — mirroring loadAccessPair's not-found normalization. A dangling
+// parent_id is reachable via ordinary delete_task_kandev usage (deleting
+// a task without reparenting its children), not just corrupt data, so
+// this must degrade to a benign outcome rather than leak.
 func ancestorIDs(ctx context.Context, repo taskLookup, taskID string) ([]string, error) {
 	var out []string
 	current := taskID
@@ -158,6 +173,9 @@ func ancestorIDs(ctx context.Context, repo taskLookup, taskID string) ([]string,
 	for i := 0; i < ancestorWalkHopCap; i++ {
 		t, err := repo.GetTask(ctx, current)
 		if err != nil {
+			if errors.Is(err, repository.ErrTaskNotFound) {
+				return out, nil
+			}
 			return nil, err
 		}
 		if t == nil || t.ParentID == "" {

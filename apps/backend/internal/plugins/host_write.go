@@ -7,10 +7,9 @@
 // Every write routes through the same first-party layer the REST/MCP API uses,
 // never a repository — that is how task.* events fire and how a message reaches
 // the agent through the orchestrator's real delivery path (queue when the
-// session is running, resume/start it otherwise). The service types can't be
-// referenced here without an import cycle (see SetDataSources' doc), so task
-// writes go through a narrow taskWriter interface and message delivery through a
-// narrow taskMessenger interface, both satisfied by backendapp adapters.
+// session is running, resume/start it otherwise). Task writes and message
+// delivery go through narrow taskWriter and taskMessenger interfaces,
+// satisfied by backendapp adapters.
 package plugins
 
 import (
@@ -49,6 +48,21 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	Priority       string
+	// StartAgent reports that the caller will launch an agent for this task
+	// right after creation. The adapter maps it onto CreateTaskRequest so step
+	// resolution sends the task to the first step that runs agents rather than
+	// to the workflow's parking start step.
+	StartAgent bool
+}
+
+// ExactTaskCreateInput adds the stable source identity and durable operation
+// identity used by the exact Host create path.
+type ExactTaskCreateInput struct {
+	Task          TaskCreateInput
+	ExternalID    string
+	OperationID   string
+	PayloadDigest string
 }
 
 // TaskLaunchInput contains validated launch fields for a freshly-created
@@ -70,6 +84,121 @@ type TaskUpdateInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
+}
+
+// ExactTaskUpdateInput is the plugin-host-local shape passed to the task
+// service adapter after approval, idempotency, and resource-version checks.
+type ExactTaskUpdateInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	Title                   *string
+	Description             *string
+	State                   *string
+	Priority                *string
+	Labels                  *[]string
+	AssigneeUserID          *string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+}
+
+// TaskMoveInput is the plugins-local task-move request a taskWriter adapter
+// translates into internal/task/service.MoveTaskWithOptions. Unlike
+// TaskUpdateInput's WorkflowStepID (rejected on the plugin path), Move
+// transitions a task through the same path the board's own move uses.
+// WorkflowID nil means inherit the task's current workflow; a pointer to ""
+// is rejected before reaching the adapter (see taskReader.Move). Source is
+// the "plugin:<id>" provenance the host stamps as the ADR 0015 actor id (a
+// plugin cannot set it).
+type TaskMoveInput struct {
+	TaskID         string
+	WorkflowStepID string
+	WorkflowID     *string
+	Position       int32
+	Source         string
+}
+
+// ExactTaskMoveInput carries the Host's durable operation identity to the
+// shared workflow move service.
+type ExactTaskMoveInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+	Move                    TaskMoveInput
+}
+
+type ExactTaskArchiveInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskRelationInput struct {
+	WorkspaceID                    string
+	TaskID                         string
+	RelatedTaskID                  string
+	ExpectedTaskResourceVersion    string
+	ExpectedRelatedResourceVersion string
+	OperationID                    string
+	PayloadDigest                  string
+	ClaimFence                     taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskMessageInput struct {
+	WorkspaceID                    string
+	TaskID                         string
+	SessionID                      string
+	ExpectedTaskResourceVersion    string
+	ExpectedSessionResourceVersion string
+	Content                        string
+	Source                         string
+	OperationID                    string
+	PayloadDigest                  string
+	ClaimFence                     taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskCompletionCriteriaInput struct {
+	TaskID                      string
+	WorkspaceID                 string
+	ExpectedTaskResourceVersion string
+	ExpectedRevision            int64
+	OperationID                 string
+	PayloadDigest               string
+	ClaimFence                  taskmodels.TaskManagementClaimFence
+	Criteria                    []taskmodels.TaskCompletionCriterion
+}
+
+type ExactTaskCompletionEvidenceInput struct {
+	TaskID                      string
+	WorkspaceID                 string
+	ExpectedTaskResourceVersion string
+	ExpectedRevision            int64
+	OperationID                 string
+	PayloadDigest               string
+	ClaimFence                  taskmodels.TaskManagementClaimFence
+	CriterionID                 string
+	Evidence                    taskmodels.TaskCompletionEvidence
+}
+
+// TaskMoveResult is the outcome of a plugin-initiated move. Transitioned and
+// FromStepID mirror internal/task/service.MoveTaskResult's write-transaction
+// sourced fields — they must come from the result, not be re-derived from
+// Task, because a step-changing move's post-commit refresh replaces Task with
+// a plain read that carries neither transient field (see
+// taskmodels.Task.FromStepID's doc). QueuedForStepID is read directly off the
+// returned Task since it is a persisted field, unaffected by that refresh.
+type TaskMoveResult struct {
+	Task         *taskmodels.Task
+	Transitioned bool
+	FromStepID   string
 }
 
 // PluginMessageResult is the outcome of delivering a message to a task session,
@@ -79,14 +208,46 @@ type PluginMessageResult struct {
 	Status    string
 }
 
-// taskWriter is the narrow slice of the task service the CreateTask/UpdateTask
-// RPCs need, adapted by backendapp to avoid an internal/task/service import
-// cycle. Both methods return the persisted *taskmodels.Task so the reader can
-// map it to the wire DTO.
+// taskWriter is the narrow slice of the task service the
+// CreateTask/UpdateTask/MoveTask RPCs need, adapted by backendapp to avoid an
+// internal/task/service import cycle. Create/Update return the persisted
+// *taskmodels.Task so the reader can map it to the wire DTO; Move returns the
+// richer TaskMoveResult (see its doc for why).
 type taskWriter interface {
 	CreateTask(ctx context.Context, in TaskCreateInput) (*taskmodels.Task, error)
 	UpdateTask(ctx context.Context, in TaskUpdateInput) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
+	MoveTask(ctx context.Context, in TaskMoveInput) (*TaskMoveResult, error)
+}
+
+type exactTaskWriter interface {
+	UpdateTaskExact(ctx context.Context, in ExactTaskUpdateInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskCreateWriter interface {
+	CreateTaskExact(ctx context.Context, in ExactTaskCreateInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskMoveWriter interface {
+	MoveTaskExact(ctx context.Context, in ExactTaskMoveInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskArchiveWriter interface {
+	ArchiveTaskExact(ctx context.Context, in ExactTaskArchiveInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskRelationWriter interface {
+	AddTaskRelationExact(ctx context.Context, in ExactTaskRelationInput) (alreadyApplied bool, err error)
+	RemoveTaskRelationExact(ctx context.Context, in ExactTaskRelationInput) (alreadyApplied bool, err error)
+}
+
+type exactTaskMessageMessenger interface {
+	SendMessageExact(ctx context.Context, in ExactTaskMessageInput) (queueID string, alreadyApplied bool, err error)
+}
+
+type exactTaskCompletionGateWriter interface {
+	SetTaskCompletionCriteriaExact(ctx context.Context, in ExactTaskCompletionCriteriaInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error)
+	VerifyTaskCompletionCriterionExact(ctx context.Context, in ExactTaskCompletionEvidenceInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error)
 }
 
 // taskMessenger delivers a prompt to a task session through the orchestrator's
@@ -138,68 +299,94 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if r.host.taskWriter == nil {
 		return r.host.UnimplementedHostData.Tasks().Create(ctx, in)
 	}
-	if in.Title == "" {
-		return nil, invalidArgument("title is required")
-	}
-	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
+	prepared, launch, err := r.prepareCreate(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.host.validatePluginTaskRepositories(in.Repositories); err != nil {
-		return nil, err
-	}
-	launch, err := taskLaunchInput(in.Launch)
-	if err != nil {
-		return nil, err
-	}
-	if in.StartAgent {
-		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
-			return nil, err
-		}
-	}
-	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	created, err := r.host.taskWriter.CreateTask(ctx, TaskCreateInput{
-		WorkspaceID:    workspaceID,
-		WorkflowID:     workflowID,
-		WorkflowStepID: strDeref(in.WorkflowStepID),
-		Title:          in.Title,
-		Description:    in.Description,
-		ParentID:       strDeref(in.ParentID),
-		Source:         r.host.pluginSource(),
-		Repositories:   in.Repositories,
-		Launch:         launch,
-		Metadata:       metadata,
-		PlanMode:       launch.PlanMode,
-	})
+	created, err := r.host.taskWriter.CreateTask(ctx, prepared)
 	if err != nil {
 		return nil, err
 	}
 	if in.StartAgent {
 		r.host.startTaskBestEffort(ctx, created.ID, launch)
 	}
-	dto := taskModelToDTO(created)
-	return &dto, nil
+	items := []pluginsdk.Task{taskModelToDTO(created)}
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{created}, false, "CreateTask"); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
-func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
-	if !r.host.capabilities.CanWrite(resourceTasks) {
+func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskInput) (TaskCreateInput, TaskLaunchInput, error) {
+	if in.Title == "" {
+		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument("title is required")
+	}
+	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
+	}
+	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	if err := r.host.validatePluginTaskRepositories(in.Repositories); err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	launch, err := taskLaunchInput(in.Launch)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	if in.StartAgent {
+		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+			return TaskCreateInput{}, TaskLaunchInput{}, err
+		}
+	}
+	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	return TaskCreateInput{
+		WorkspaceID: workspaceID, WorkflowID: workflowID,
+		WorkflowStepID: strDeref(in.WorkflowStepID), Title: in.Title,
+		Description: in.Description, ParentID: strDeref(in.ParentID),
+		Source: r.host.pluginSource(), Repositories: in.Repositories,
+		Launch: launch, Metadata: metadata, PlanMode: launch.PlanMode,
+		Priority: in.Priority, StartAgent: in.StartAgent,
+	}, launch, nil
+}
+
+// writeTaskUpdate performs UpdateTask's validation and mutation without
+// attaching pull requests or the dependency projection, returning the raw
+// model. A caller that folds this write into a larger response alongside
+// another write (the canvas PATCH route's Update+Move body) must derive once
+// on whichever result is actually serialized, not once per write it makes;
+// taskReader.Update wraps this for the ordinary single-write callers (gRPC,
+// and every other webapp route), attaching immediately after.
+func (h *pluginHost) writeTaskUpdate(ctx context.Context, in pluginsdk.UpdateTaskInput) (*taskmodels.Task, error) {
+	if !h.capabilities.CanWrite(resourceTasks) {
 		return nil, permissionDenied(apiWriteCapability(resourceTasks))
 	}
-	if r.host.taskWriter == nil {
-		return r.host.UnimplementedHostData.Tasks().Update(ctx, in)
+	if h.taskWriter == nil {
+		_, err := h.UnimplementedHostData.Tasks().Update(ctx, in)
+		return nil, err
 	}
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
-	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
+	if in.WorkflowStepID != nil {
+		return nil, invalidArgument(
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps",
+		)
+	}
+	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
+	}
+	updated, err := h.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
+		Priority:       in.Priority,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -207,8 +394,70 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 		}
 		return nil, err
 	}
-	dto := taskModelToDTO(updated)
-	return &dto, nil
+	return updated, nil
+}
+
+func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	updated, err := r.host.writeTaskUpdate(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	items := []pluginsdk.Task{taskModelToDTO(updated)}
+	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{updated}, false, "UpdateTask"); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
+}
+
+func (r taskReader) Move(ctx context.Context, in pluginsdk.MoveTaskInput) (*pluginsdk.MoveTaskOutcome, error) {
+	if !r.host.capabilities.CanWrite(resourceTasks) {
+		return nil, permissionDenied(apiWriteCapability(resourceTasks))
+	}
+	if r.host.taskWriter == nil {
+		return r.host.UnimplementedHostData.Tasks().Move(ctx, in)
+	}
+	if in.TaskID == "" {
+		return nil, invalidArgument("task_id is required")
+	}
+	if in.WorkflowStepID == "" {
+		return nil, invalidArgument("workflow_step_id is required")
+	}
+	if in.WorkflowID != nil && *in.WorkflowID == "" {
+		return nil, invalidArgument("workflow_id must not be empty when present")
+	}
+	if in.Position < 0 {
+		return nil, invalidArgument("position must not be negative")
+	}
+	result, err := r.host.taskWriter.MoveTask(ctx, TaskMoveInput{
+		TaskID:         in.TaskID,
+		WorkflowStepID: in.WorkflowStepID,
+		WorkflowID:     in.WorkflowID,
+		Position:       in.Position,
+		Source:         r.host.pluginSource(),
+	})
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, taskNotFound(in.TaskID)
+		}
+		return nil, err
+	}
+	var queuedForStepID *string
+	if result.Task.QueuedForStepID != "" {
+		q := result.Task.QueuedForStepID
+		queuedForStepID = &q
+	}
+	items := []pluginsdk.Task{taskModelToDTO(result.Task)}
+	r.host.attachPullRequests(ctx, items)
+	if err := r.host.attachDependencies(ctx, items, []*taskmodels.Task{result.Task}, false, "MoveTask"); err != nil {
+		return nil, err
+	}
+	return &pluginsdk.MoveTaskOutcome{
+		Task:            &items[0],
+		Transitioned:    result.Transitioned,
+		QueuedForStepID: queuedForStepID,
+		FromStepID:      result.FromStepID,
+	}, nil
 }
 
 // resolveCreatePlacement fills the workspace and workflow a created task lands
@@ -427,8 +676,9 @@ func hasExecutorProfile(profiles []*taskmodels.ExecutorProfile, id string) bool 
 	return false
 }
 
-// PluginOwnedTaskTrees returns a manager whose preview and delete operations
-// require api_write:tasks and exact source provenance on every traversed node.
+// PluginOwnedTaskTrees returns a manager whose preview is source-provenance
+// scoped. Delete remains present for wire compatibility but requires a native
+// task deletion preview that this legacy API cannot carry, so it is denied.
 func (h *pluginHost) PluginOwnedTaskTrees() pluginsdk.PluginOwnedTaskTreeManager {
 	return pluginOwnedTaskTreeManager{host: h}
 }
@@ -440,61 +690,17 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 	if err != nil {
 		return nil, err
 	}
-	return tasksToDTOs(tasks), nil
+	dtos := tasksToDTOs(tasks)
+	m.host.attachPullRequests(ctx, dtos)
+	if err := m.host.attachDependencies(ctx, dtos, tasks, true, "PreviewPluginOwnedTaskTree"); err != nil {
+		return nil, err
+	}
+	return dtos, nil
 }
 
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {
-	tasks, err := m.host.pluginOwnedTaskTree(ctx, rootTaskID)
-	if err != nil {
-		// Deletion is a retry boundary. A prior attempt may have removed the
-		// root before its caller persisted progress, so absence is success.
-		if status.Code(err) == codes.NotFound {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	if m.host.taskWriter == nil {
-		return m.host.UnimplementedHostData.PluginOwnedTaskTrees().Delete(ctx, rootTaskID)
-	}
-	if err := m.host.rejectMixedOwnershipDelete(ctx, tasks); err != nil {
-		return nil, err
-	}
-	deleted := make([]string, 0, len(tasks))
-	deleteCtx := context.WithoutCancel(ctx)
-	for index := len(tasks) - 1; index >= 0; index-- {
-		if err := m.host.taskWriter.DeleteTask(deleteCtx, tasks[index].ID); err != nil {
-			return deleted, fmt.Errorf("delete plugin-owned task tree after deleting %d task(s): %w", len(deleted), err)
-		}
-		deleted = append(deleted, tasks[index].ID)
-	}
-	return deleted, nil
-}
-
-func (h *pluginHost) rejectMixedOwnershipDelete(ctx context.Context, ownedTasks []*taskmodels.Task) error {
-	if len(ownedTasks) == 0 {
-		return nil
-	}
-	ownedIDs := make(map[string]struct{}, len(ownedTasks))
-	for _, task := range ownedTasks {
-		ownedIDs[task.ID] = struct{}{}
-	}
-	workspaceTasks, err := h.fetchTasksForWorkspaces(ctx, []string{ownedTasks[0].WorkspaceID}, true, true)
-	if err != nil {
-		return err
-	}
-	for _, task := range workspaceTasks {
-		if _, parentWillBeDeleted := ownedIDs[task.ParentID]; !parentWillBeDeleted {
-			continue
-		}
-		if _, childWillBeDeleted := ownedIDs[task.ID]; childWillBeDeleted {
-			continue
-		}
-		return status.Error(
-			codes.FailedPrecondition,
-			"plugin-owned task tree contains adopted or user-owned children; detach them before deleting",
-		)
-	}
-	return nil
+	_, _ = ctx, rootTaskID
+	return nil, status.Error(codes.PermissionDenied, "native_human_confirmation_required")
 }
 
 func (h *pluginHost) pluginOwnedTaskTree(ctx context.Context, rootTaskID string) ([]*taskmodels.Task, error) {

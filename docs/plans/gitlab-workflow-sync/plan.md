@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/gitlab-workflow-sync/spec.md
+spec: docs/specs/integrations/requirements/gitlab-workflow-sync.md
 created: 2026-08-06
 updated: 2026-08-06
 status: done

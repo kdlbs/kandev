@@ -23,6 +23,59 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStartWithGenerationReturnsNoGenerationWhenJournalIsUnavailable(t *testing.T) {
+	journalErr := errors.New("journal unavailable")
+	manager := &Manager{
+		cfg:                &config.InstanceConfig{DurableJournalPath: "unavailable"},
+		deliveryJournalErr: journalErr,
+	}
+	manager.status.Store(StatusStopped)
+
+	generation, err := manager.StartWithGeneration(context.Background())
+
+	assert.Zero(t, generation)
+	require.ErrorIs(t, err, journalErr)
+}
+
+func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
+	log := newTestLogger(t)
+	rootDir, cleanupRoot := setupTestRepo(t)
+	t.Cleanup(cleanupRoot)
+	repoDir, cleanupRepo := setupTestRepo(t)
+	t.Cleanup(cleanupRepo)
+	thirdDir, cleanupThird := setupTestRepo(t)
+	t.Cleanup(cleanupThird)
+
+	root := NewWorkspaceTracker(rootDir, log)
+	firstRepo := NewWorkspaceTrackerForRepo(repoDir, "first", log)
+	secondRepo := NewWorkspaceTrackerForRepo(thirdDir, "second", log)
+	t.Cleanup(root.Stop)
+	t.Cleanup(firstRepo.Stop)
+	t.Cleanup(secondRepo.Stop)
+
+	trackers := []*WorkspaceTracker{root, firstRepo, secondRepo}
+	for _, tracker := range trackers {
+		tracker.SetPollMode(PollModePaused)
+		tracker.accessDenied.Store(true)
+	}
+
+	mgr := &Manager{
+		logger:           log,
+		workspaceTracker: root,
+		repoTrackers:     []*WorkspaceTracker{firstRepo, secondRepo},
+	}
+	mgr.RefreshWorkspace(context.Background(), "unsupported_trigger")
+
+	for i, tracker := range trackers {
+		if got := tracker.GetPollMode(); got != PollModeFast {
+			t.Errorf("tracker %d poll mode = %q, want fast", i, got)
+		}
+		if tracker.accessDenied.Load() {
+			t.Errorf("tracker %d retained access denial after manual refresh", i)
+		}
+	}
+}
+
 func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
 	m := &Manager{
 		updatesCh: make(chan adapter.AgentEvent, 1),
@@ -86,7 +139,7 @@ func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
 		logger:         newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr()
+	m.readStderr(make(chan stderrReadResult, 1))
 
 	got := []string{<-consumer.lines, <-consumer.lines}
 	want := []string{"quota", "plain"}
@@ -116,10 +169,11 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 	cmd := exec.Command(os.Args[0], "-test.run=TestManagerProcessExitHelper")
 	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_PROCESS_EXIT_HELPER=1")
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	cmd.Stderr = stderrWriter
 	m := &Manager{
 		cmd:       cmd,
 		stderr:    stderr,
@@ -132,12 +186,25 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 		groupAliveFn: func(int) bool { return false },
 	}
 	m.status.Store(StatusRunning)
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		_ = stderrWriter.Close()
+		_ = stderr.Close()
+		m.wg.Wait()
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	generation := m.beginManagedStartupGeneration()
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatalf("close parent stderr pipe: %v", err)
+	}
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
-	go m.readStderr()
-	m.waitForExit()
+	go m.readStderr(stderrDone)
+	m.waitForExit(stderrDone)
 	m.wg.Wait()
 
 	event := <-m.updatesCh
@@ -147,6 +214,10 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
+	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
+		t.Fatalf("startup evidence = %#v, want complete ordinary exit evidence for generation %d", data["startup_evidence"], generation)
 	}
 	recent, ok := data["recent_stderr"].([]string)
 	if !ok || !slices.Equal(recent, []string{"OpenCode provider failure"}) {
@@ -272,8 +343,11 @@ func TestStartProcessPipes_CreatesAllPipes(t *testing.T) {
 	assert.NotNil(t, m.stdout, "stdout pipe should be created")
 	assert.NotNil(t, m.stderr, "stderr pipe should be created")
 
-	// Clean up
-	_ = m.stdin.Close()
+	t.Cleanup(func() {
+		_ = m.stdin.Close()
+		_ = m.stdout.Close()
+		_ = m.closeStderrPipe()
+	})
 }
 
 func TestStartProcessPipes_FailsAfterProcessStarted(t *testing.T) {
@@ -433,6 +507,7 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 			AgentEnv:                  []string{"PATH=/usr/bin"},
 			Protocol:                  agent.ProtocolACP,
 			NotificationQueueCapacity: 4096,
+			PromptCancelJoinTimeout:   12 * time.Second,
 		},
 		logger: newTestLogger(t),
 	}
@@ -444,6 +519,9 @@ func TestBuildAdapterConfigForwardsNotificationQueueCapacity(t *testing.T) {
 
 	if got := m.adapterCfg.NotificationQueueCapacity; got != 4096 {
 		t.Fatalf("adapter notification queue capacity = %d, want 4096", got)
+	}
+	if got := m.adapterCfg.PromptCancelJoinTimeout; got != 12*time.Second {
+		t.Fatalf("adapter prompt cancel join timeout = %s, want 12s", got)
 	}
 }
 

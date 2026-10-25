@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -12,17 +13,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type retryingTransferAuditBackend struct {
+	payloads []map[string]any
+	calls    int
+}
+
+func (b *retryingTransferAuditBackend) RequestPayload(_ context.Context, _ string, payload, _ interface{}) error {
+	copyPayload := make(map[string]any)
+	for key, value := range payload.(map[string]any) {
+		copyPayload[key] = value
+	}
+	b.payloads = append(b.payloads, copyPayload)
+	b.calls++
+	if b.calls == 1 {
+		return errors.New("lost audit response")
+	}
+	return nil
+}
+
 // testBackend implements BackendClient for testing handlers.
 type testBackend struct {
 	lastAction  string
 	lastPayload interface{}
 	response    map[string]interface{}
 	err         error
+	contextErr  error
 }
 
-func (tb *testBackend) RequestPayload(_ context.Context, action string, payload, result interface{}) error {
+func (tb *testBackend) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	tb.lastAction = action
 	tb.lastPayload = payload
+	tb.contextErr = ctx.Err()
 	if tb.err != nil {
 		return tb.err
 	}
@@ -40,6 +61,16 @@ func newTestServer(t *testing.T, backend BackendClient) *Server {
 }
 
 func callTool(t *testing.T, s *Server, toolName string, args map[string]interface{}) *mcplib.CallToolResult {
+	return callToolContext(t, context.Background(), s, toolName, args)
+}
+
+func callToolContext(
+	t *testing.T,
+	ctx context.Context,
+	s *Server,
+	toolName string,
+	args map[string]interface{},
+) *mcplib.CallToolResult {
 	t.Helper()
 	toolsMap := s.mcpServer.ListTools()
 	st, ok := toolsMap[toolName]
@@ -56,7 +87,7 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 		t.Fatal(err)
 	}
 
-	result, err := st.Handler(context.Background(), req)
+	result, err := st.Handler(ctx, req)
 	require.NoError(t, err)
 	return result
 }
@@ -75,6 +106,120 @@ func toolInputProperties(t *testing.T, s *Server, toolName string) map[string]in
 	props, ok := parsed["properties"].(map[string]interface{})
 	require.True(t, ok, "schema should have properties")
 	return props
+}
+
+func TestTransferTaskSchemaRejectionIsForwardedForAudit(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "task-1", payload["task_id"])
+	require.NotContains(t, payload, "_audit_only")
+}
+
+func TestTransferTaskSchemaTypeRejectionIsForwardedForAudit(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{
+		"task_id":                      42,
+		"expected_source_workspace_id": "ws-source",
+	})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.EqualValues(t, 42, payload["task_id"])
+	require.Equal(t, "ws-source", payload["expected_source_workspace_id"])
+}
+
+func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := callToolContext(t, ctx, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	require.NoError(t, backend.contextErr)
+}
+
+func TestTransferTaskSchemaRejectionReusesAuditAttemptIDAcrossRetries(t *testing.T) {
+	backend := &retryingTransferAuditBackend{}
+	s := newTestServer(t, backend)
+
+	s.auditRejectedTransferTool(context.Background(), map[string]any{"task_id": "task-1"})
+
+	require.Len(t, backend.payloads, 2)
+	first, ok := backend.payloads[0]["audit_attempt_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, first)
+	require.Equal(t, first, backend.payloads[1]["audit_attempt_id"])
+}
+
+func TestMoveTaskToolSchemasExposeEntryOptions(t *testing.T) {
+	for name, server := range map[string]*Server{
+		"task":   newTaskModeServer(t, &testBackend{}, "task-current"),
+		"config": newTestServer(t, &testBackend{}),
+	} {
+		props := toolInputProperties(t, server, "move_task_kandev")
+		entryOptions, ok := props["entry_options"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s move_task schema must expose entry_options as an object", name)
+		}
+		nested, ok := entryOptions["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s entry_options schema must expose nested properties", name)
+		}
+		for _, field := range []string{"reset_context", "instructions", "skip_step_prompt"} {
+			assert.Contains(t, nested, field, "%s entry_options schema must expose %s", name, field)
+		}
+	}
+}
+
+func TestMoveTaskSameStepDescriptionsAndResponseForwarding(t *testing.T) {
+	for name, backend := range map[string]*testBackend{
+		"task":   {response: map[string]interface{}{"disposition": "applied", "task": map[string]interface{}{"id": "task-1", "workflow_step_id": "step-work", "position": 7}}},
+		"config": {response: map[string]interface{}{"disposition": "applied", "task": map[string]interface{}{"id": "task-1", "workflow_step_id": "step-work", "position": 7}}},
+	} {
+		var server *Server
+		if name == "task" {
+			server = newTaskModeServer(t, backend, "task-current")
+		} else {
+			server = newTestServer(t, backend)
+		}
+
+		tool := server.mcpServer.ListTools()["move_task_kandev"]
+		assert.Contains(t, tool.Tool.Description, "current workflow and step")
+		assert.Contains(t, tool.Tool.Description, "no retry is needed")
+		assert.Contains(t, tool.Tool.Description, "Only an actual step change")
+		position, ok := toolInputProperties(t, server, "move_task_kandev")["position"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Contains(t, position["description"], "server determines arrival order")
+		assert.Contains(t, position["description"], "preserves the stored position")
+
+		result := callTool(t, server, "move_task_kandev", map[string]interface{}{
+			"task_id": "task-1", "workflow_id": "wf-1", "workflow_step_id": "step-work", "position": 99,
+		})
+		require.False(t, result.IsError)
+		require.Len(t, result.Content, 1)
+		content, ok := result.Content[0].(mcplib.TextContent)
+		require.True(t, ok)
+		var response map[string]interface{}
+		require.NoError(t, json.Unmarshal([]byte(content.Text), &response))
+		assert.Equal(t, "applied", response["disposition"])
+		task, ok := response["task"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, float64(7), task["position"])
+		assert.Equal(t, ws.ActionMCPMoveTask, backend.lastAction)
+		payload, ok := backend.lastPayload.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "task-1", payload["task_id"])
+		assert.Equal(t, "wf-1", payload["workflow_id"])
+		assert.Equal(t, "step-work", payload["workflow_step_id"])
+	}
 }
 
 // --- Action constant tests ---
@@ -98,6 +243,8 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 	assert.Equal(t, "mcp.delete_agent_profile", ws.ActionMCPDeleteAgentProfile)
 	assert.Equal(t, "mcp.get_mcp_config", ws.ActionMCPGetMcpConfig)
 	assert.Equal(t, "mcp.update_mcp_config", ws.ActionMCPUpdateMcpConfig)
+	assert.Equal(t, "mcp.list_shared_prompts", ws.ActionMCPListSharedPrompts)
+	assert.Equal(t, "mcp.get_shared_prompt", ws.ActionMCPGetSharedPrompt)
 	assert.Equal(t, "mcp.list_executors", ws.ActionMCPListExecutors)
 	assert.Equal(t, "mcp.list_executor_profiles", ws.ActionMCPListExecutorProfiles)
 	assert.Equal(t, "mcp.create_executor_profile", ws.ActionMCPCreateExecutorProfile)
@@ -130,6 +277,32 @@ func TestWorkflowStepTools_SchemaExposesCancelTriggersTurnComplete(t *testing.T)
 	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
 	assert.Contains(t, createProps, "cancel_triggers_turn_complete")
 	assert.Contains(t, updateProps, "cancel_triggers_turn_complete")
+}
+
+func TestWorkflowStepTools_SchemaExposesProfileAndSessionPolicies(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
+	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
+	assert.Contains(t, createProps, "agent_profile_id")
+	assert.Contains(t, createProps, "profile_session_start_policy")
+	assert.Contains(t, createProps, "profile_session_end_policy")
+	assert.Contains(t, updateProps, "agent_profile_id")
+	assert.Contains(t, updateProps, "profile_session_start_policy")
+	assert.Contains(t, updateProps, "profile_session_end_policy")
+}
+
+func TestWorkflowStepTools_SchemaExposesSessionTarget(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
+	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
+	assert.Contains(t, createProps, "session_target")
+	assert.Contains(t, updateProps, "session_target")
+	assert.Equal(t, []interface{}{"object", "null"}, createProps["session_target"].(map[string]interface{})["type"])
+	assert.Equal(t, []interface{}{"object", "null"}, updateProps["session_target"].(map[string]interface{})["type"])
 }
 
 func TestCreateWorkflowHandler_Success(t *testing.T) {
@@ -296,6 +469,10 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 		"position":                     float64(0),
 		"color":                        "#22c55e",
 		"prompt":                       "Deploy prompt",
+		"agent_profile_id":             "profile-deploy",
+		"profile_session_start_policy": "reuse",
+		"profile_session_end_policy":   "park",
+		"session_target":               map[string]interface{}{"kind": "initial"},
 		"is_start_step":                true,
 		"allow_manual_move":            true,
 		"show_in_command_panel":        true,
@@ -312,6 +489,10 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, "profile-deploy", payload["agent_profile_id"])
+	assert.Equal(t, "reuse", payload["profile_session_start_policy"])
+	assert.Equal(t, "park", payload["profile_session_end_policy"])
+	assert.Equal(t, map[string]interface{}{"kind": "initial"}, payload["session_target"])
 	assert.Equal(t, true, payload["auto_advance_requires_signal"])
 	assert.NotNil(t, payload["events"])
 }
@@ -378,6 +559,9 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 		"step_id":                      "step-1",
 		"name":                         "In Review",
 		"color":                        "#3b82f6",
+		"agent_profile_id":             "profile-review",
+		"profile_session_start_policy": "new",
+		"profile_session_end_policy":   "complete",
 		"allow_manual_move":            true,
 		"show_in_command_panel":        true,
 		"auto_advance_requires_signal": false,
@@ -393,6 +577,9 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, "profile-review", payload["agent_profile_id"])
+	assert.Equal(t, "new", payload["profile_session_start_policy"])
+	assert.Equal(t, "complete", payload["profile_session_end_policy"])
 	assert.Equal(t, false, payload["auto_advance_requires_signal"])
 	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
 	assert.NotNil(t, payload["events"])
@@ -410,6 +597,30 @@ func TestUpdateWorkflowStepHandler_ForwardsCancelTriggersTurnComplete(t *testing
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, false, payload["cancel_triggers_turn_complete"])
+}
+
+func TestWorkflowStepHandlersForwardExplicitNullSessionTarget(t *testing.T) {
+	for _, toolName := range []string{"create_workflow_step_kandev", "update_workflow_step_kandev"} {
+		t.Run(toolName, func(t *testing.T) {
+			backend := &testBackend{response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}}}
+			s := newTestServer(t, backend)
+			args := map[string]interface{}{"session_target": nil}
+			if toolName == "create_workflow_step_kandev" {
+				args["workflow_id"] = "workflow-1"
+				args["name"] = "Review"
+			} else {
+				args["step_id"] = "step-1"
+			}
+
+			result := callTool(t, s, toolName, args)
+			require.False(t, result.IsError)
+			payload, ok := backend.lastPayload.(map[string]interface{})
+			require.True(t, ok)
+			value, present := payload["session_target"]
+			require.True(t, present)
+			require.Nil(t, value)
+		})
+	}
 }
 
 func TestUpdateWorkflowStepHandler_MissingStepID(t *testing.T) {
@@ -465,8 +676,8 @@ func TestCreateAgentProfileHandler_MissingAgentID(t *testing.T) {
 	assert.True(t, result.IsError)
 }
 
-func TestCreateAgentProfileHandler_MissingModel(t *testing.T) {
-	backend := &testBackend{}
+func TestCreateAgentProfileHandler_AllowsAgentDefaultModel(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"id": "profile-1"}}
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "create_agent_profile_kandev", map[string]interface{}{
@@ -474,7 +685,8 @@ func TestCreateAgentProfileHandler_MissingModel(t *testing.T) {
 		"name":     "My Profile",
 	})
 
-	assert.True(t, result.IsError)
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCreateAgentProfile, backend.lastAction)
 }
 
 func TestUpdateAgentHandler_Success(t *testing.T) {

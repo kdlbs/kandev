@@ -54,7 +54,7 @@ export function IntegrationsEnabledProvider({
  * The badge for one integration row, or nothing. Renders null outside a
  * provider, which is what a row gets while its branch is still mounting.
  *
- * Built-in integrations badge from the provider's probe result. Plugin
+ * Built-in integrations badge from the provider's connected-and-enabled set. Plugin
  * integrations (slugs the built-in set does not know) badge from the plugin
  * registry's per-workspace enabled map — written by the owning plugin via
  * `host.setIntegrationEnabled` — so the badge is workspace-scoped and

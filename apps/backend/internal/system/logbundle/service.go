@@ -22,6 +22,7 @@ import (
 
 const (
 	defaultCaptureWindow  = 15 * time.Second
+	maxCaptureTimeout     = 15 * time.Second
 	defaultBuildLifetime  = 5 * time.Minute
 	defaultReadyLifetime  = 15 * time.Minute
 	maxActiveJobs         = 8
@@ -568,10 +569,18 @@ func (s *Service) beginCollection(owner, id string, deadline time.Time) {
 	notifier := s.notifier
 	ctx := s.ctx
 	s.mu.Unlock()
+	captureTimeout := deadline.Sub(s.config.Now().UTC())
+	if captureTimeout < 0 {
+		captureTimeout = 0
+	}
+	if captureTimeout > maxCaptureTimeout {
+		captureTimeout = maxCaptureTimeout
+	}
 	if notifier != nil {
 		message, err := ws.NewNotification("system.logs.capture_requested", map[string]any{
 			"bundle_id": id, "capture_deadline": deadline,
-			"max_chunk_bytes": 1024 * 1024, "max_browser_profiles": maxBrowserProfiles,
+			"capture_timeout_ms": captureTimeout.Milliseconds(),
+			"max_chunk_bytes":    1024 * 1024, "max_browser_profiles": maxBrowserProfiles,
 		})
 		if err == nil {
 			notifier.SendToIdentity(owner, message)

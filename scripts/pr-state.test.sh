@@ -49,6 +49,11 @@ if [[ "${GH_FAIL_REVIEWS:-0}" == "1" && "$*" == *"pulls/123/reviews"* ]]; then
   exit 1
 fi
 
+if [[ "${GH_FAIL_RATE_LIMIT:-0}" == "1" && "$1" == "api" && "$2" == "graphql" ]]; then
+  echo "HTTP 429 Too Many Requests; Retry-After: 30; X-RateLimit-Reset: 123" >&2
+  exit 1
+fi
+
 if [[ "${GH_FAIL_GRAPHQL:-0}" == "1" && "$1" == "api" && "$2" == "graphql" ]]; then
   echo "graphql failed" >&2
   exit 1
@@ -64,7 +69,7 @@ if [[ "${GH_FAIL_REPO:-0}" == "1" && "$1" == "repo" && "$2" == "view" ]]; then
   exit 1
 fi
 
-if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kandev/pulls/comments/* ]]; then
+if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && ("$2" == repos/kdlbs/kandev/pulls/comments/* || "$2" == repos/kdlbs/kandev/issues/comments/*) ]]; then
   echo "comment api failed" >&2
   exit 1
 fi
@@ -75,8 +80,51 @@ if [[ "${GH_FAIL_APPROVAL_RUNS:-0}" == "1" && "$*" == *"repos/kdlbs/kandev/actio
 fi
 
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
-  printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
+  printf '{"owner":{"login":"kdlbs"},"name":"kandev","defaultBranchRef":{"name":"main"}}\n'
   exit 0
+fi
+
+if [[ "$*" == *"repos/kdlbs/kandev/rulesets?per_page=100"* ]]; then
+  if [[ "${GH_FAIL_RULESETS:-0}" == "1" ]]; then
+    exit 1
+  fi
+  if [[ "${GH_REQUIRED_RULESET:-0}" == "1" ]]; then
+    printf '%s\n' '[{"id":7,"target":"branch","enforcement":"active"}]'
+  else
+    printf '%s\n' '[]'
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/rulesets/7" ]]; then
+  if [[ "${GH_RULESET_PATTERN:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["release/*"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Pattern required check"}]}}]}'
+  elif [[ "${GH_RULESET_INTEGRATION:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~ALL"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"App required check","integration_id":42}]}}]}'
+  elif [[ "${GH_RULESET_EXCLUDES_MAIN:-0}" == "1" ]]; then
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~ALL"],"exclude":["main"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"Excluded required check"}]}}]}'
+  else
+    printf '%s\n' '{"id":7,"target":"branch","enforcement":"active","conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"]}},"rules":[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"E2E Tests Passed"},{"context":"Run Backend Tests"}]}}]}'
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/branches/main/protection/required_status_checks" ]]; then
+  case "${GH_LEGACY_FAILURE:-}" in
+    forbidden) printf 'HTTP/2.0 403 Forbidden\r\n\r\n{"message":"Forbidden"}\n'; exit 1 ;;
+    unavailable) printf 'HTTP/2.0 503 Unavailable\r\n\r\n{"message":"Unavailable"}\n'; exit 1 ;;
+    hidden) printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Not Found"}\n'; exit 1 ;;
+    network) exit 1 ;;
+  esac
+  if [[ "${GH_LEGACY_REQUIRED:-0}" == "1" ]]; then
+    if [[ "$*" == *"--include"* ]]; then
+      printf 'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n'
+    fi
+    printf '%s\n' '{"contexts":["Legacy required check"],"checks":[{"context":"Legacy checked required"}]}'
+    exit 0
+  fi
+  printf 'HTTP/2.0 404 Not Found\r\n\r\n{"message":"Branch not protected"}\n'
+  exit 1
 fi
 
 if [[ "$1" == "api" && "$2" == repos/kdlbs/kandev/compare/* ]]; then
@@ -106,6 +154,20 @@ if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
   "html_url": "https://github.com/kdlbs/kandev/pull/123#discussion_r111",
   "created_at": "2026-06-01T10:00:00Z",
   "updated_at": "2026-06-01T10:01:00Z"
+}
+JSON
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/issues/comments/222" ]]; then
+  cat <<'JSON'
+{
+  "id": 222,
+  "user": { "login": "github-actions[bot]" },
+  "body": "<!-- kandev-docs-cloudflare-preview -->\nPreview is ready.",
+  "html_url": "https://github.com/kdlbs/kandev/issues/123#issuecomment-222",
+  "created_at": "2026-06-01T11:00:00Z",
+  "updated_at": "2026-06-01T11:01:00Z"
 }
 JSON
   exit 0
@@ -175,6 +237,34 @@ JSON
   exit 0
 fi
 
+if [[ "${GH_TERMINAL_CHECKS:-0}" == "1" && "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
+  cat <<'JSON'
+{
+  "number": 123,
+  "baseRefName": "main",
+  "headRefName": "feat/pr-state",
+  "headRefOid": "abc123",
+  "headRepositoryOwner": { "login": "kdlbs" },
+  "headRepository": { "name": "kandev" },
+  "maintainerCanModify": true,
+  "isCrossRepository": false,
+  "url": "https://github.com/kdlbs/kandev/pull/123",
+  "comments": [],
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "name": "skipped required check",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000010/job/55150000010"
+    }
+  ]
+}
+JSON
+  exit 0
+fi
+
 if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   if [[ "${GH_NO_PR_URL:-0}" == "1" ]]; then
     pr_url='null'
@@ -234,6 +324,11 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
       "author": { "login": "github-actions" },
       "body": "<!-- opencode-review:fallback-findings --> finding",
       "createdAt": "2026-06-01T13:06:00Z"
+    },
+    {
+      "author": { "login": "github-actions" },
+      "body": "<!-- kandev-docs-cloudflare-preview -->\\n## Cloudflare Pages docs preview\\n\\n[Open the docs preview](https://preview.example/docs)\\n\\nBuilt from docs commit `abc1234`.",
+      "createdAt": "2026-06-01T13:07:00Z"
     }
   ],
   "statusCheckRollup": [
@@ -553,8 +648,13 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
       "data": {
         "repository": {
           "pullRequest": {
-            "baseRefName": "main",
-            "baseRefOid": "'"$base_head"'"
+            "baseRefName": "'"${GH_BASE_REF_NAME:-main}"'",
+            "baseRefOid": "'"$base_head"'",
+            "baseRef": {
+              "target": {
+                "oid": "'"${GH_BASE_TARGET:-$base_head}"'"
+              }
+            }
           }
         }
       }
@@ -564,6 +664,16 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
 
   if [[ "$*" == *"headRefOid"* ]]; then
     head_oid="abc123"
+    mergeable=MERGEABLE
+    merge_status=CLEAN
+    if [[ "${GH_MERGE_SEQUENCE:-stable}" == "race" ]]; then
+      if [[ -f "${GH_MERGE_COUNTER_FILE:?}" ]]; then
+        mergeable=CONFLICTING
+        merge_status=DIRTY
+      else
+        : >"$GH_MERGE_COUNTER_FILE"
+      fi
+    fi
     if [[ "${GH_HEAD_SEQUENCE:-stable}" == "race" ]]; then
       if [[ -f "${GH_HEAD_COUNTER_FILE:?}" ]]; then
         head_oid="def456"
@@ -578,6 +688,10 @@ if [[ "$1" == "api" && "$2" == "graphql" ]]; then
         "repository": {
           "pullRequest": {
             "headRefOid": "'"$head_oid"'",
+            "state": "OPEN",
+            "mergeable": "'"$mergeable"'",
+            "mergeStateStatus": "'"$merge_status"'",
+            "reviewDecision": "REVIEW_REQUIRED",
             "commits": {
               "nodes": [
                 {
@@ -738,7 +852,7 @@ test_snapshot_happy_path() {
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
   assert_jq "head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
-  assert_jq "base divergence fields" '.pr.base_ref_name == "main" and .pr.base_head_oid == "base-head-sha" and .pr.merge_base_oid == "base-branch-sha" and .pr.base_advanced_since_head == true' "$json"
+  assert_jq "base divergence fields" '.pr.base_ref_name == "main" and .pr.base_head_oid == "base-head-sha" and .pr.base_target_oid == "base-head-sha" and .pr.merge_base_oid == "base-branch-sha" and .pr.base_advanced_since_head == true' "$json"
   assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
   assert_jq "checks collapse duplicate workflow attempts" '.checks | length < 10' "$json"
   assert_jq "latest duplicate check uses newest attempt" '[.checks[] | select(.name == "web lint")][0] | .conclusion == "success" and .run_id == "27340000001"' "$json"
@@ -755,9 +869,10 @@ test_snapshot_happy_path() {
   assert_jq "thread comment timestamp" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_created_at == "2026-06-01T13:00:00Z"' "$json"
   assert_jq "reviews count" '.reviews | length == 1' "$json"
   assert_jq "review author" '.reviews[] | select(.author == "cubic-dev-ai[bot]") | .author == "cubic-dev-ai[bot]"' "$json"
-  assert_jq "issue comments count" '.issue_comments | length == 7' "$json"
+  assert_jq "issue comments count" '.issue_comments | length == 8' "$json"
   assert_jq "issue comment author" 'any(.issue_comments[]; .author == "github-actions" and (.body | contains("Verdict")))' "$json"
-  assert_jq "only GitHub Actions noncanonical output is actionable" '([.issue_comments[] | select(.actionable == false)] | length) == 2 and .actionable_issue_comment_count == 5' "$json"
+  assert_jq "only GitHub Actions noncanonical output is actionable" '([.issue_comments[] | select(.actionable == false)] | length) == 3 and .actionable_issue_comment_count == 5' "$json"
+  assert_jq "Cloudflare preview marker is informational" 'any(.issue_comments[]; (.body | contains("<!-- kandev-docs-cloudflare-preview -->")) and .actionable == false)' "$json"
   assert_jq "non-GitHub-Actions canonical marker is nonactionable while workflow diagnostic and fallback remain actionable" 'any(.issue_comments[]; .author == "other-bot[bot]" and .actionable == false) and all(.issue_comments[] | select(.body | test("Blocker: real|diagnostic|fallback"; "i")); .actionable == true)' "$json"
   assert_jq "no errors" '.errors == []' "$json"
   assert_jq "raw review evidence is complete" '.review_evidence.complete == true and .review_evidence.current_head_sha == "abc123"' "$json"
@@ -1129,7 +1244,7 @@ test_partial_failure_records_error_but_keeps_other_data() {
 
   assert_jq "reviews empty on failure" '.reviews == []' "$json"
   assert_jq "checks still present" '.checks | length < 9' "$json"
-  assert_jq "new issue comments still present" '.issue_comments | length == 7' "$json"
+  assert_jq "new issue comments still present" '.issue_comments | length == 8' "$json"
   assert_jq "partial failure recorded" '.errors | length == 1' "$json"
   assert_jq "partial failure source" '.errors[0].source == "reviews"' "$json"
   pass "partial failure records error but keeps other data"
@@ -1186,8 +1301,23 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   assert_jq "graphql failure records review_threads error" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
   assert_jq "graphql failure records closing head error" '.errors[] | select(.source == "closing_head") | .message == "gh api graphql closing head commit failed"' "$json"
   assert_jq "graphql failure records closing base error" '.errors[] | select(.source == "closing_base") | .message == "gh api graphql base ref lookup failed after evidence collection"' "$json"
-  assert_jq "since fallback includes all historical comments" '.issue_comments | length == 8' "$json"
+  assert_jq "since fallback includes all historical comments" '.issue_comments | length == 9' "$json"
   pass "graphql failure records error but keeps other data"
+}
+
+test_rate_limit_details_are_preserved_in_errors() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_FAIL_RATE_LIMIT=1 PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "rate limit remains an error" 'any(.errors[]; .message | test("HTTP 429"))' "$json"
+  assert_jq "retry guidance is preserved" 'any(.errors[]; .message | test("Retry-After: 30"))' "$json"
+  assert_jq "reset guidance is preserved" 'any(.errors[]; .message | test("X-RateLimit-Reset: 123"))' "$json"
+  pass "rate-limit status and retry headers survive pr-state error handling"
 }
 
 test_graphql_pagination_collects_all_threads() {
@@ -1218,7 +1348,7 @@ test_all_flag_includes_historical_comments_and_reviews() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "since omitted in all mode" '.since == null' "$json"
-  assert_jq "all issue comments present" '.issue_comments | length == 8' "$json"
+  assert_jq "all issue comments present" '.issue_comments | length == 9' "$json"
   assert_jq "all reviews present" '.reviews | length == 2' "$json"
   assert_jq "all review threads present" '.review_threads | length == 2' "$json"
   assert_jq "all mode keeps historical thread comment" '.review_threads[] | select(.thread_id == "PRRT_1") | .comment_id == 111' "$json"
@@ -1261,6 +1391,110 @@ test_summary_mode_returns_compact_fixup_state() {
   pass "--summary returns compact fixup state"
 }
 
+test_summary_keeps_failed_policy_sources_unknown() {
+  local tmp json failure
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  for failure in forbidden unavailable hidden network; do
+    GH_LEGACY_FAILURE="$failure" PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+    json="$(<"$tmp/out.json")"
+    assert_jq "legacy $failure keeps policy unknown" '.required_status_checks_known == false' "$json"
+    assert_jq "legacy $failure records missing evidence" 'any(.errors[]; .source == "required_status_checks")' "$json"
+  done
+
+  GH_FAIL_RULESETS=1 GH_LEGACY_REQUIRED=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  assert_jq "legacy success cannot hide failed rulesets" '.required_status_checks_known == false' "$(<"$tmp/out.json")"
+
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  assert_jq "explicitly absent legacy protection is known" '.required_status_checks_known == true and .required_status_checks == []' "$(<"$tmp/out.json")"
+  pass "policy discovery distinguishes absent protection from unavailable evidence"
+}
+
+test_summary_reports_required_status_contexts_from_rulesets() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "required status policy is known" '.required_status_checks_known == true' "$json"
+  assert_jq "required status contexts are listed" '.required_status_checks == ["E2E Tests Passed", "Run Backend Tests"]' "$json"
+  assert_jq "missing required contexts remain pending" '.pending_checks | map(.name) | index("E2E Tests Passed") != null' "$json"
+  pass "summary reports required status contexts from the active ruleset"
+}
+
+test_summary_unions_legacy_and_ruleset_required_status_contexts() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_LEGACY_REQUIRED=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "legacy and ruleset policies are both known" '.required_status_checks_known == true' "$json"
+  assert_jq "legacy and ruleset contexts are unioned" '.required_status_checks == ["E2E Tests Passed", "Legacy checked required", "Legacy required check", "Run Backend Tests"]' "$json"
+  pass "summary unions legacy and ruleset required status contexts"
+}
+
+test_summary_ignores_excluded_ruleset_branch() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_EXCLUDES_MAIN=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "excluded ruleset policy is known" '.required_status_checks_known == true' "$json"
+  assert_jq "excluded ruleset contributes no required context" '.required_status_checks == []' "$json"
+  pass "summary honors ruleset branch exclusions"
+}
+
+test_summary_marks_unsupported_ruleset_patterns_unknown() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_PATTERN=1 GH_BASE_REF_NAME=release/1.2 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "unsupported ruleset patterns make policy unknown" '.required_status_checks_known == false' "$json"
+  assert_jq "unsupported ruleset pattern is reported" '.errors[] | select(.source == "required_status_checks") | .message == "required status check policy lookup failed"' "$json"
+  pass "summary does not guess at unsupported ruleset patterns"
+}
+
+test_summary_marks_integration_scoped_rules_unknown() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REQUIRED_RULESET=1 GH_RULESET_INTEGRATION=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "integration-scoped rules make policy unknown" '.required_status_checks_known == false' "$json"
+  assert_jq "integration-scoped policy failure is reported" '.errors[] | select(.source == "required_status_checks") | .message == "required status check policy lookup failed"' "$json"
+  pass "summary does not accept an unverified required-check integration"
+}
+
+test_summary_preserves_terminal_skipped_contexts() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_TERMINAL_CHECKS=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "skipped check remains terminal evidence" '.terminal_checks | length == 1 and .[0].name == "skipped required check" and .[0].conclusion == "skipped"' "$json"
+  pass "summary preserves skipped and neutral terminal checks"
+}
+
 test_summary_reports_current_head_fork_approval_runs() {
   local tmp
   make_tmp_dir tmp
@@ -1287,6 +1521,19 @@ test_summary_reports_base_not_advanced_when_head_matches_merge_base() {
 
   assert_jq "summary reports base not advanced" '.pr.base_advanced_since_head == false' "$json"
   pass "summary reports base not advanced when head matches merge base"
+}
+
+test_summary_distinguishes_recorded_base_from_live_target() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_BASE_HEAD=recorded-base-sha GH_BASE_TARGET=live-target-sha PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary distinguishes captured base from live target" '.pr.base_head_oid == "recorded-base-sha" and .pr.base_target_oid == "live-target-sha"' "$json"
+  pass "summary distinguishes captured base from live target"
 }
 
 test_summary_revalidates_base_at_closing_head() {
@@ -1375,11 +1622,29 @@ test_comment_mode_returns_full_review_comment() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "comment id" '.comment_id == 111' "$json"
+  assert_jq "comment type" '.comment_type == "review"' "$json"
   assert_jq "comment body is full" '.body | contains("Full rationale here.")' "$json"
   assert_jq "comment path" '.path == "apps/web/file.ts"' "$json"
   assert_jq "comment line" '.line == 42' "$json"
   assert_jq "comment author" '.author == "greptile-apps[bot]"' "$json"
   pass "--comment returns full review comment"
+}
+
+test_comment_mode_falls_back_to_top_level_issue_comment() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 222 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "issue comment id" '.comment_id == 222' "$json"
+  assert_jq "issue comment type" '.comment_type == "issue"' "$json"
+  assert_jq "issue comment body is full" '.body | contains("Preview is ready.")' "$json"
+  assert_jq "issue comment has no review path" '.path == null and .line == null' "$json"
+  assert_jq "issue comment author" '.author == "github-actions[bot]"' "$json"
+  pass "--comment falls back to top-level issue comments"
 }
 
 test_comment_mode_reports_fetch_failure() {
@@ -1564,6 +1829,58 @@ test_anchored_prefix_strip_cannot_loop() {
   pass "anchored prefix strips terminate on jq 1.6"
 }
 
+test_compact_keeps_actionable_evidence_and_counts() {
+  local tmp full compact
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/full.json"
+  PATH="$tmp/bin:$PATH" "$SCRIPT" --compact 123 >"$tmp/compact.json"
+  full="$(<"$tmp/full.json")"
+  compact="$(<"$tmp/compact.json")"
+  assert_jq "compact omits successful and skipped rows" 'has("successful_checks") == false and has("terminal_checks") == false' "$compact"
+  jq -en --argjson full "$full" --argjson compact "$compact" '
+    $compact.failed_checks == $full.failed_checks
+    and $compact.pending_checks == $full.pending_checks
+    and $compact.review_evidence == $full.review_evidence
+    and $compact.pr == $full.pr
+    and $compact.merge_state == $full.merge_state
+    and $compact.unresolved_review_thread_count == $full.unresolved_review_thread_count
+    and $compact.unresolved_threads == $full.unresolved_threads
+    and $compact.hidden_unresolved_threads == $full.hidden_unresolved_threads
+    and $compact.required_status_checks == $full.required_status_checks
+    and $compact.required_status_checks_known == $full.required_status_checks_known
+    and $compact.approval_required_runs == $full.approval_required_runs
+    and $compact.check_count == $full.check_count
+    and $compact.checks_head_sha == $full.checks_head_sha
+    and $compact.checks_snapshot_complete == $full.checks_snapshot_complete
+    and $compact.errors == $full.errors
+    and $compact.passed_check_count == $full.passed_check_count
+    and $compact.skipped_check_count == ([$full.terminal_checks[] | select(.conclusion == "skipped")] | length)
+    and $compact.neutral_check_count == ([$full.terminal_checks[] | select(.conclusion == "neutral")] | length)
+  ' >/dev/null || fail "compact preserves evidence and summary counts"
+  GH_FAIL_GRAPHQL=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --compact 123 >"$tmp/error.json"
+  assert_jq "compact preserves unknown review state and errors" '.unresolved_review_thread_count == null and (.errors | length > 0)' "$(<"$tmp/error.json")"
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --compact --comment 111 >/dev/null 2>&1; then
+    fail "compact snapshots cannot combine with single-comment mode"
+  fi
+  pass "compact output preserves actionable evidence, unknown state, and counts"
+}
+
+test_closing_merge_state_is_exported() {
+  local tmp json
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+  GH_MERGE_SEQUENCE=race GH_MERGE_COUNTER_FILE="$tmp/merge-calls" PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+  assert_jq "merge state comes from closing observation" '.merge_state.state == "OPEN" and .merge_state.mergeable == "CONFLICTING" and .merge_state.mergeStateStatus == "DIRTY" and .merge_state.reviewDecision == "REVIEW_REQUIRED"' "$json"
+  assert_jq "merge state identifies its closing head" '.merge_state.headRefOid == .review_evidence.closing_head_sha' "$json"
+  GH_FAIL_GRAPHQL=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/error.json"
+  assert_jq "failed closing read leaves merge state unknown" '.merge_state == null' "$(<"$tmp/error.json")"
+  pass "merge metadata describes the closing head, or remains unknown"
+}
+
+test_compact_keeps_actionable_evidence_and_counts
+test_closing_merge_state_is_exported
 test_snapshot_happy_path
 test_old_head_review_does_not_qualify
 test_exact_head_selected_review_qualifies
@@ -1591,17 +1908,27 @@ test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
 test_repo_failure_skips_review_threads
 test_graphql_failure_records_error_but_keeps_other_data
+test_rate_limit_details_are_preserved_in_errors
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
+test_summary_keeps_failed_policy_sources_unknown
+test_summary_reports_required_status_contexts_from_rulesets
+test_summary_unions_legacy_and_ruleset_required_status_contexts
+test_summary_ignores_excluded_ruleset_branch
+test_summary_marks_unsupported_ruleset_patterns_unknown
+test_summary_marks_integration_scoped_rules_unknown
+test_summary_preserves_terminal_skipped_contexts
 test_summary_reports_current_head_fork_approval_runs
 test_summary_reports_base_not_advanced_when_head_matches_merge_base
+test_summary_distinguishes_recorded_base_from_live_target
 test_summary_revalidates_base_at_closing_head
 test_summary_reports_approval_run_fetch_failure
 test_summary_all_flag_includes_historical_unresolved_threads
 test_job_log_mode_emits_bounded_failure_context
 test_job_log_mode_unpacks_zip_responses
 test_comment_mode_returns_full_review_comment
+test_comment_mode_falls_back_to_top_level_issue_comment
 test_comment_mode_reports_fetch_failure
 test_comment_mode_rejects_incompatible_flags
 test_array_expansions_are_safe_under_set_u

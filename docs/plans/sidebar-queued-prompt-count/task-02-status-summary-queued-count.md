@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-pending-prompt-count-queries"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-queued-prompt-count.md"
+spec: "../../specs/ui/requirements/sidebar-queued-prompt-count.md"
 ---
 
 # Task 02: Add `queued_prompt_count` to the Live Status Summary

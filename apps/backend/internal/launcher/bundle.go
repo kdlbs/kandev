@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 )
 
 type runtimeBundle struct {
@@ -33,12 +35,16 @@ var requiredAgentctlRemoteHelpers = []agentctlRemoteHelper{
 	{Name: "agentctl-darwin-amd64", Label: "agentctl darwin/amd64 helper"},
 }
 
-func resolveRuntimeBundle() (runtimeBundle, error) {
+func resolveRuntimeBundle(build ...BuildInfo) (runtimeBundle, error) {
+	var identity BuildInfo
+	if len(build) > 0 {
+		identity = build[0]
+	}
 	if dir := os.Getenv("KANDEV_BUNDLE_DIR"); dir != "" {
-		return validateRuntimeBundle(dir, "env")
+		return validateRuntimeBundle(dir, "env", identity)
 	}
 	if dir, ok := bundleDirFromExecutable(); ok {
-		return validateRuntimeBundle(dir, "executable")
+		return validateRuntimeBundle(dir, "executable", identity)
 	}
 	return runtimeBundle{}, fmt.Errorf(
 		"no Kandev runtime found; KANDEV_BUNDLE_DIR is not set and no bundle was found next to the launcher")
@@ -91,7 +97,7 @@ func bundleDirForLauncherPath(exe string) (string, bool) {
 	return dir, true
 }
 
-func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
+func validateRuntimeBundle(dir, source string, build ...BuildInfo) (runtimeBundle, error) {
 	launcher := filepath.Join(dir, "bin", executableName("kandev"))
 	if !exists(launcher) {
 		return runtimeBundle{}, fmt.Errorf("launcher binary not found in bundle at %s", launcher)
@@ -100,32 +106,80 @@ func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
 	if !exists(agentctl) {
 		return runtimeBundle{}, fmt.Errorf("agentctl binary not found in bundle at %s", agentctl)
 	}
-	for _, helper := range requiredAgentctlRemoteHelpers {
-		path := filepath.Join(dir, "bin", helper.Name)
-		if !exists(path) {
-			return runtimeBundle{}, fmt.Errorf("%s not found in bundle at %s", helper.Label, path)
-		}
-		if helper.MustBeSigned {
-			signed, ok := machoHasCodeSignature(path)
-			if !ok {
-				// Fail closed: a helper we can't parse as a thin arm64 Mach-O
-				// (read error, truncation, unexpected/fat layout) can't be
-				// verified as signed, and an unverifiable darwin/arm64 helper
-				// would still be SIGKILLed by Apple Silicon at launch.
-				return runtimeBundle{}, fmt.Errorf(
-					"%s at %s is not a parsable thin darwin/arm64 Mach-O; cannot verify its "+
-						"code signature (rebuild it via 'make -C apps/backend build-agentctl-remote')",
-					helper.Label, path)
-			}
-			if !signed {
-				return runtimeBundle{}, fmt.Errorf(
-					"%s at %s is not code-signed; Apple Silicon will refuse to run it "+
-						"(build it via 'make -C apps/backend build-agentctl-remote', which ad-hoc-signs darwin helpers)",
-					helper.Label, path)
-			}
-		}
+	var identity BuildInfo
+	if len(build) > 0 {
+		identity = build[0]
+	}
+	manifest, hasManifest, err := runtimeapi.ReadRemoteHelperManifest(dir, identity.Version, identity.Commit)
+	if err != nil {
+		return runtimeBundle{}, err
+	}
+	if hasManifest && manifest.Variant == runtimeapi.RemoteHelperVariantStandard {
+		err = validateStandardRuntimeBundle(dir)
+	} else {
+		err = validateFullRuntimeBundle(dir, manifest, hasManifest)
+	}
+	if err != nil {
+		return runtimeBundle{}, err
 	}
 	return runtimeBundle{Dir: dir, Launcher: launcher, Source: source}, nil
+}
+
+func validateStandardRuntimeBundle(dir string) error {
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		path := filepath.Join(dir, "bin", helper.Name)
+		if exists(path) {
+			return fmt.Errorf("standard runtime bundle unexpectedly contains %s", helper.Label)
+		}
+	}
+	return nil
+}
+
+func validateFullRuntimeBundle(dir string, manifest *runtimeapi.RemoteHelperManifest, hasManifest bool) error {
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		if err := validateRuntimeBundleHelper(dir, helper, manifest, hasManifest); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateRuntimeBundleHelper(dir string, helper agentctlRemoteHelper, manifest *runtimeapi.RemoteHelperManifest, hasManifest bool) error {
+	path := filepath.Join(dir, "bin", helper.Name)
+	if !exists(path) {
+		return fmt.Errorf("%s not found in bundle at %s", helper.Label, path)
+	}
+	if hasManifest {
+		record, ok := runtimeapi.RemoteHelperRecordFor(manifest, helper.Name)
+		if !ok {
+			return fmt.Errorf("remote helper manifest is missing %s", helper.Label)
+		}
+		if err := runtimeapi.ValidateBundledRemoteHelper(path, record); err != nil {
+			return err
+		}
+	}
+	if helper.MustBeSigned {
+		return validateSignedDarwinArm64Helper(path, helper)
+	}
+	return nil
+}
+
+func validateSignedDarwinArm64Helper(path string, helper agentctlRemoteHelper) error {
+	signed, ok := machoHasCodeSignature(path)
+	if !ok {
+		// Fail closed: an unverifiable darwin/arm64 helper would be SIGKILLed by Apple Silicon.
+		return fmt.Errorf(
+			"%s at %s is not a parsable thin darwin/arm64 Mach-O; cannot verify its "+
+				"code signature (rebuild it via 'make -C apps/backend build-agentctl-remote')",
+			helper.Label, path)
+	}
+	if !signed {
+		return fmt.Errorf(
+			"%s at %s is not code-signed; Apple Silicon will refuse to run it "+
+				"(build it via 'make -C apps/backend build-agentctl-remote', which ad-hoc-signs darwin helpers)",
+			helper.Label, path)
+	}
+	return nil
 }
 
 // machoHasCodeSignature reports whether a thin 64-bit Mach-O carries an

@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/provider-error-recovery.md"
+spec: "../../specs/platform/requirements/provider-error-recovery.md"
 ---
 
 # Task 01: Shared error catalogue

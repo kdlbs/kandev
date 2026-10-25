@@ -4,6 +4,7 @@ import { forwardRef, type ComponentPropsWithoutRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconBriefcase, IconChevronDown, IconLayoutKanban, IconPlus } from "@tabler/icons-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@kandev/ui/dropdown-menu";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { ActiveWorkspaceBadge } from "@/components/settings/record-badges";
 import { cn } from "@/lib/utils";
 
@@ -68,7 +69,8 @@ export const WorkspaceTrigger = forwardRef<
       type="button"
       aria-label={t("sidebar:switchWorkspace")}
       className={cn(
-        "group/ws flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-sm font-medium text-foreground shadow-sm cursor-pointer transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "group/ws flex min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-sm font-medium text-foreground shadow-sm cursor-pointer transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        controlSizingClassName("standard"),
         className,
       )}
       {...props}

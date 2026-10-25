@@ -14,7 +14,7 @@
 // JSON-encoded string; we parse that inner JSON so the renderers see plain JS.
 
 const NAMESPACE_SEP = /\/|__|\./;
-const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/"] as const;
+const KANDEV_NAMESPACES = ["mcp__kandev__", "mcp.kandev.", "kandev/", "kandev: "] as const;
 const KANDEV_SUFFIX = "_kandev";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -29,7 +29,7 @@ export function extractKandevArgs(value: unknown): Record<string, unknown> | und
   const input = asRecord(value);
   if (!input) return undefined;
   const rawInput = asRecord(input.raw_input);
-  return asRecord(rawInput?.arguments) ?? rawInput ?? input;
+  return asRecord(rawInput?.arguments) ?? asRecord(rawInput?.args) ?? rawInput ?? input;
 }
 
 export function extractKandevStem(toolName: string | undefined): string | null {
@@ -69,6 +69,10 @@ function unwrapContentBlocks(blocks: unknown[]): unknown {
   return tryParseJson(joined);
 }
 
+function hasValue(value: unknown): boolean {
+  return value !== undefined && value !== null;
+}
+
 // extractMcpResult walks the various shapes the ACP/MCP transport can emit and
 // returns the structured payload. Returns null if the value is empty/missing.
 export function extractMcpResult(value: unknown): unknown {
@@ -89,8 +93,12 @@ export function extractMcpResult(value: unknown): unknown {
       structuredContent?: unknown;
       structured_content?: unknown;
     };
-    if (obj.structuredContent !== undefined) return obj.structuredContent;
-    if (obj.structured_content !== undefined) return obj.structured_content;
+    if (hasValue(obj.structuredContent)) {
+      return obj.structuredContent;
+    }
+    if (hasValue(obj.structured_content)) {
+      return obj.structured_content;
+    }
     if (Array.isArray(obj.content)) return unwrapContentBlocks(obj.content);
     if (typeof obj.output === "string") return tryParseJson(obj.output);
     if (

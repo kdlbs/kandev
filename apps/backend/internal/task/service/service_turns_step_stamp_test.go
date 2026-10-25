@@ -255,3 +255,26 @@ func TestCreateCompletedTurnCarriesSameStamp(t *testing.T) {
 		t.Fatalf("synthetic completed turn stamp = %v, want %q", turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart], "step-c")
 	}
 }
+
+func TestCreateCompletedTurnMarksLifecycleOnly(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupStepStampTask(t, repo, "task-lifecycle-only", "step-d")
+	session := createStepStampSession(t, repo, "session-lifecycle-only", "task-lifecycle-only")
+
+	turn, err := svc.createCompletedTurn(ctx, session)
+	if err != nil {
+		t.Fatalf("createCompletedTurn: %v", err)
+	}
+	if turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("synthetic completed turn lifecycle_only = %v, want true", turn.Metadata[models.TurnMetaKeyLifecycleOnly])
+	}
+
+	stored, err := repo.GetTurn(ctx, turn.ID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if stored.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+		t.Fatalf("persisted completed turn lifecycle_only = %v, want true", stored.Metadata[models.TurnMetaKeyLifecycleOnly])
+	}
+}

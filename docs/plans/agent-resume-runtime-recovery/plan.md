@@ -1,9 +1,13 @@
 ---
-spec: docs/specs/agent-resume-runtime-recovery/spec.md
-related_specs:
-  - docs/specs/agents/runtime-updates.md
 created: 2026-07-27
+updated: 2026-09-21
 status: implemented
+requirements:
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001
+system_design:
+  - ../../specs/agents/system-design/agent-resume-runtime-recovery.md
+legacy_specs:
+  - ../../specs/agents/requirements/runtime-updates.md
 ---
 
 # Implementation Plan: Agent Resume and Runtime Recovery
@@ -31,6 +35,9 @@ credential, and update surfaces; there is no API or frontend contract change.
 - A successful resume applies `git_credential_snapshot` after the guarded
   `STARTING` write. Without a second guarded metadata write, SQLite retains
   the previous credential-routing display even though the new lease is used.
+- A failed relaunch can start from a stale persisted `RUNNING` or `STARTING`
+  state. Restoring that state after the launch error advertises liveness that
+  was not recovered and blocks later prompts as already running.
 - `CacheUpdateCommand` can reuse an already-extracted `_npx` directory. npm's
   package-content cache can be valid while that execution tree is truncated,
   so another `npm exec` does not necessarily repair it.
@@ -93,6 +100,16 @@ regression discovered after release and persist its non-secret display metadata.
   the earlier `LaunchAgent` fake, it asserts the state at the exact broker
   boundary.
 
+### Keep failed relaunches out of active states
+
+- Map a prior `RUNNING` or `STARTING` state to `FAILED` when a resume relaunch
+  fails and the session still holds the guarded `STARTING` transition.
+- Preserve non-active prior states and any concurrent state transition.
+- Carry the expected `STARTING` source state through the orchestrator callback
+  and persistence CAS so a concurrent `RUNNING` owner cannot be overwritten.
+- Cover the state mapping, the real stale-`RUNNING` resume failure path, and a
+  concurrent transition to `RUNNING` between rollback reads.
+
 ### Persist the resume credential snapshot
 
 - After broker configuration records the non-secret credential snapshot, write
@@ -149,6 +166,14 @@ regression discovered after release and persist its non-secret display metadata.
   `apps/backend/internal/orchestrator/executor/executor_resume_test.go`.
   **How:** repository-observing fake `GitHubCredentialLeaseIssuer` exercised
   through the real `ResumeSession -> buildResumeRequest` path.
+- **What:** a failed relaunch cannot restore stale active state when no agent
+  process was recovered; non-active states and every concurrent transition
+  remain preserved.
+  **File:**
+  `apps/backend/internal/orchestrator/executor/executor_resume_terminal_rollback_test.go`.
+  **How:** table-driven state mapping, the real `ResumeSession` launch-error
+  path starting from stale `RUNNING`, and a callback race that advances
+  `STARTING` to `RUNNING` before rollback persistence.
 - **What:** a resumed launch persists the current non-secret credential
   routing snapshot after lease setup without weakening the `STARTING` guard.
   **File:**
@@ -191,6 +216,10 @@ Wave 4:
 
 - [x] [Task 05: Persist resume credential snapshot](task-05-resume-credential-snapshot.md)
 
+Wave 5:
+
+- [x] [Task 06: Fail stale active sessions after resume relaunch errors](task-06-terminal-resume-rollback.md)
+
 Execution remains sequential in the primary conversation by default. The
 parallel-safe label does not authorize delegation.
 
@@ -211,5 +240,8 @@ parallel-safe label does not authorize delegation.
 - Credential display metadata is non-secret and must be persisted with an
   expected `STARTING` state; it must not revive or overwrite a concurrent
   terminal session.
+- A relaunch error must not restore `RUNNING` or `STARTING` without a live
+  agent; guarded rollback records `FAILED` while preserving a concurrent
+  terminal winner.
 - The plan does not weaken credential authorization, auto-start fresh
   conversations, clean global npm caches, or add launch-time cache mutation.

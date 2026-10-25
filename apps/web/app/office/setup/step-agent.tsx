@@ -19,6 +19,7 @@ import {
 } from "./agent-profile-setup-controls";
 import { Trans, useTranslation } from "react-i18next";
 import { TIER_NAME_KEYS } from "../lib/label-keys";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type ProfileSelectOption = ReturnType<typeof useSelectableProfileOptions>["profileOptions"][number];
 
@@ -166,7 +167,10 @@ function ProfileSelectorSection({
           onValueChange={(v) => onChange({ agentProfileId: v })}
           disabled={profileOptions.length === 0}
           placeholder={t("office:selectAnAgentProfile")}
-          triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
+          triggerClassName={controlSizingClassName(
+            "standard",
+            "mt-1 border border-input rounded-md px-3",
+          )}
         />
       )}
       {!showCreate && (
@@ -320,7 +324,10 @@ function ExecutorSelector({
         onValueChange={onChange}
         placeholder={t("office:selectExecutor")}
         showSearch={false}
-        triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
+        triggerClassName={controlSizingClassName(
+          "standard",
+          "mt-1 border border-input rounded-md px-3",
+        )}
       />
       {selected ? (
         <p className="text-xs text-muted-foreground mt-1">{selected.description}</p>

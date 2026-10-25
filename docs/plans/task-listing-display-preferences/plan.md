@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/task-listing-display-preferences.md
+spec: docs/specs/ui/requirements/task-listing-display-preferences.md
 created: 2026-07-25
 status: done
 ---

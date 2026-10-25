@@ -21,7 +21,7 @@ func (s *Store) beginWatchReset(ctx context.Context, watchTable, taskTable, watc
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET generation = generation + 1, last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleting = 0`, watchTable), watchID)
+	result, err := tx.ExecContext(ctx, tx.Rebind(fmt.Sprintf(`UPDATE %s SET generation = generation + 1, last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleting = FALSE`, watchTable)), watchID)
 	if err != nil {
 		return nil, err
 	}
@@ -33,11 +33,11 @@ func (s *Store) beginWatchReset(ctx context.Context, watchTable, taskTable, watc
 		return nil, ErrWatchNotFound
 	}
 	var generation int64
-	if err := tx.QueryRowContext(ctx, fmt.Sprintf(`SELECT generation FROM %s WHERE id = ?`, watchTable), watchID).Scan(&generation); err != nil {
+	if err := tx.QueryRowxContext(ctx, tx.Rebind(fmt.Sprintf(`SELECT generation FROM %s WHERE id = ?`, watchTable)), watchID).Scan(&generation); err != nil {
 		return nil, err
 	}
 	var taskIDs []string
-	if err := tx.SelectContext(ctx, &taskIDs, fmt.Sprintf(`SELECT task_id FROM %s WHERE watch_id = ? AND generation < ? AND task_id <> '' ORDER BY created_at`, taskTable), watchID, generation); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(fmt.Sprintf(`SELECT task_id FROM %s WHERE watch_id = ? AND generation < ? AND task_id <> '' ORDER BY created_at`, taskTable)), watchID, generation); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -60,10 +60,10 @@ func (s *Store) finishWatchReset(ctx context.Context, watchTable, taskTable, wat
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ? AND generation < ?`, taskTable), watchID, generation); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ? AND generation < ?`, taskTable)), watchID, generation); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND generation = ? AND deleting = 0`, watchTable), watchID, generation)
+	result, err := tx.ExecContext(ctx, tx.Rebind(fmt.Sprintf(`UPDATE %s SET last_polled_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND generation = ? AND deleting = FALSE`, watchTable)), watchID, generation)
 	if err != nil {
 		return err
 	}
@@ -79,12 +79,12 @@ func (s *Store) finishWatchReset(ctx context.Context, watchTable, taskTable, wat
 
 func (s *Store) ListWorkItemWatchTaskIDs(ctx context.Context, watchID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids, `SELECT task_id FROM azure_devops_work_item_watch_tasks WHERE watch_id = ? AND task_id <> '' ORDER BY created_at`, watchID)
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`SELECT task_id FROM azure_devops_work_item_watch_tasks WHERE watch_id = ? AND task_id <> '' ORDER BY created_at`), watchID)
 	return ids, err
 }
 
 func (s *Store) ListPullRequestWatchTaskIDs(ctx context.Context, watchID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids, `SELECT task_id FROM azure_devops_pull_request_watch_tasks WHERE watch_id = ? AND task_id <> '' ORDER BY created_at`, watchID)
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`SELECT task_id FROM azure_devops_pull_request_watch_tasks WHERE watch_id = ? AND task_id <> '' ORDER BY created_at`), watchID)
 	return ids, err
 }

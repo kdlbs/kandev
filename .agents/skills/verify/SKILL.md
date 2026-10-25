@@ -35,6 +35,14 @@ verification report.
   delivery are waiting on mandatory verification; do not imply that Codex or GitHub cannot
   create PRs or ask whether to proceed unverified.
 
+## Resource-safe frontend verification
+
+Before a broad web test or E2E run, read
+[the E2E resource-safety reference](../e2e/references/resource-safety.md).
+The local Vitest configuration clamps unsafe worker overrides, and the E2E
+wrappers cap local shards and workers. Do not bypass those limits or overlap
+full suites unless the task is a deliberate, monitored resource experiment.
+
 ## Verification Procedure
 
 Resolve the PR base and verification scope base, then collect
@@ -82,12 +90,28 @@ node apps/web/scripts/generate-release-notes.mjs
 node apps/web/scripts/generate-changelog.mjs
 scripts/run-quiet typecheck -- make typecheck
 scripts/run-quiet test -- make test
-scripts/run-quiet lint -- make lint
+# Full-backend Go lint belongs to CI. Select the changed Go files locally.
+scripts/run-quiet backend-lint -- bash scripts/lint-go-changed <changed-go-files>
+scripts/run-quiet lint -- make lint-web lint-harness lint-specs lint-architecture
 ```
 
 After quiet formatting, inspect the intended diff because formatter changes
 still require review. When a quiet command fails, use its returned log path for
 targeted inspection instead of rerunning the command with streamed output.
+
+Large Go package output can bury the actual failure in the execution relay,
+especially when tests emit expected simulated-error logs. Keep the command's
+exit status and capture its output with `scripts/run-quiet` or an explicit
+temporary log, then extract targeted markers before reading the surrounding
+context:
+
+```bash
+rg -n -- '--- FAIL|^FAIL[[:space:]]|panic:|DATA RACE|WARNING: DATA RACE' <log>
+```
+
+Treat truncated tool output as incomplete evidence. Use the extracted package
+and test names to inspect the focused log section, and report the log path with
+the verification result.
 
 ### Disk-constrained runners
 
@@ -192,9 +216,13 @@ That package script runs `pretypecheck` and regenerates
 the web package directly, prefer the package-local script over workspace-filter
 forms so TypeScript runs in the intended package context.
 
-If the aggregate `make lint` wrapper stalls or does not provide useful progress, run the backend and frontend lint checks directly instead and record the substitution in your result:
+For backend lint, follow `apps/backend/AGENTS.md` for file selection, PR-base
+resolution, and resource defaults. Run lint and race/build suites sequentially.
+If lint stalls, inspect its saved log and live process before retrying; a full
+local backend scan requires explicit user authorization and OS-level resource
+limits. For direct lint troubleshooting, use:
 
 ```bash
-make lint-backend
+bash scripts/lint-go-changed <changed-go-files>
 cd apps && pnpm --filter @kandev/web lint
 ```

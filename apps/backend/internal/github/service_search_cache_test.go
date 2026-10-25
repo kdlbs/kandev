@@ -32,6 +32,8 @@ func newTestService(client Client) *Service {
 		searchCache:          newTTLCache(),
 		prStatusCache:        newTTLCache(),
 		prFeedbackCache:      newPRFeedbackCache(),
+		workflowRunsCache:    newWorkflowAttentionCache(),
+		workflowJobsCache:    newWorkflowAttentionCache(),
 		accessibleReposCache: newAccessibleReposCache(),
 		repoErrorCache:       newRepoErrorCache(),
 	}

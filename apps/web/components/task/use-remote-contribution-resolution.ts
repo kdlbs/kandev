@@ -22,19 +22,18 @@ export type PendingRemoteContributionResolution = RemoteContributionResolutionTa
 
 export function buildRemoteContributionResolutionTarget(
   relation: RemoteContributionRelation,
-  repositoryName: string | undefined,
+  repositoryScope: string | undefined,
   selectedPR: TaskPR | null | undefined,
   remoteRepositoryLabel: string,
 ): RemoteContributionResolutionTarget | null {
   const providerHead = relation.providerHead;
   if (!providerHead || (!relation.canReplaceRemote && !relation.canUseRemote)) return null;
-  const repositoryScope = repositoryName ?? "";
+  const scope = repositoryScope ?? "";
   return {
     expectedRemoteHead: providerHead,
-    repo: repositoryScope,
+    repo: scope,
     repositoryName:
-      repositoryScope ||
-      (selectedPR ? `${selectedPR.owner}/${selectedPR.repo}` : remoteRepositoryLabel),
+      scope || (selectedPR ? `${selectedPR.owner}/${selectedPR.repo}` : remoteRepositoryLabel),
   };
 }
 

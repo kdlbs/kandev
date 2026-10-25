@@ -5,7 +5,7 @@ status: completed
 wave: 4
 depends_on: ["03-cancellation-routing", "04-settings-ui"]
 plan: "plan.md"
-spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
+spec: "../../specs/tasks/requirements/workflow-cancelled-turn-completion.md"
 ---
 
 # Task 06: Cancelled turn E2E coverage

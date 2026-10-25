@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/published-docs-preview-reliability/spec.md
+spec: docs/specs/ui/requirements/published-docs-preview-reliability.md
 created: 2026-07-31
 status: implemented
 ---

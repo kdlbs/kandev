@@ -51,6 +51,7 @@ export function LspStatusIcon({
   }
   switch (status.state) {
     case "connecting":
+    case "reconnecting":
     case "starting":
     case "stopping":
       return (

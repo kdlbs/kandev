@@ -28,7 +28,6 @@ func newCMTest(t *testing.T) *ContainerManager {
 	}
 	return &ContainerManager{
 		logger:         log,
-		networkName:    "kandev",
 		commandBuilder: NewCommandBuilder(),
 	}
 }
@@ -179,6 +178,33 @@ func TestBuildContainerConfigPublishesManagedGitCredentialHelperBeforeAgentctlSt
 	}
 }
 
+func TestBuildContainerConfigScrubsForkPRCredentialsBeforeAgentctl(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:   newConfigStubAgent(),
+		InstanceID:    "0123456789abcdef",
+		TaskID:        "task-1",
+		Credentials:   map[string]string{"GITHUB_TOKEN": "secret"},
+		Metadata:      map[string]interface{}{metadataCheckoutRef: "refs/pull/3527/head"},
+		PrepareScript: "echo prepare",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	script := got.Entrypoint[2]
+	if !strings.Contains(script, "${"+selectedCheckoutMarker+":-}") {
+		t.Fatalf("bootstrap marker check missing: %s", script)
+	}
+	if !strings.Contains(script, selectedCheckoutCredentialScrubCommands) {
+		t.Fatalf("bootstrap credential scrub missing: %s", script)
+	}
+	if !strings.Contains(script, "rm -f /run/kandev/auth.env") {
+		t.Fatalf("bootstrap must remove auth material: %s", script)
+	}
+}
+
 func containsExactString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -202,6 +228,50 @@ func TestBuildContainerConfig_ImageDefaultsToRuntime(t *testing.T) {
 	}
 	if got.Image != "kandev/multi-agent:latest" {
 		t.Errorf("Image = %q, want kandev/multi-agent:latest", got.Image)
+	}
+}
+
+// TestBuildContainerConfig_SecurityOptNilByDefault verifies AC-1: a profile
+// with AllowUserNamespaces off (the default) produces SecurityOpt == nil,
+// byte-identical to today's launch.
+func TestBuildContainerConfig_SecurityOptNilByDefault(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		TaskID:      "task-1",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	if got.SecurityOpt != nil {
+		t.Errorf("SecurityOpt = %v, want nil when AllowUserNamespaces is off", got.SecurityOpt)
+	}
+}
+
+// TestBuildContainerConfig_SecurityOptForUserNamespaces verifies AC-2: a
+// profile with AllowUserNamespaces on produces seccomp and apparmor opts.
+func TestBuildContainerConfig_SecurityOptForUserNamespaces(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig:         newConfigStubAgent(),
+		InstanceID:          "0123456789abcdef",
+		TaskID:              "task-1",
+		AllowUserNamespaces: true,
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	if len(got.SecurityOpt) != 2 {
+		t.Fatalf("SecurityOpt = %v, want exactly 2 entries", got.SecurityOpt)
+	}
+	assertHasSecurityOpt(t, got.SecurityOpt, "apparmor=unconfined")
+	if !strings.HasPrefix(got.SecurityOpt[0], "seccomp=") {
+		t.Errorf("SecurityOpt[0] = %q, want seccomp=<json> prefix", got.SecurityOpt[0])
 	}
 }
 
@@ -345,6 +415,7 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 		{"gemini", agents.NewGemini()},
 		{"auggie", agents.NewAuggie()},
 		{"grok-acp", agents.NewGrokACP()},
+		{"muse-acp", agents.NewMuseACP()},
 	}
 	const kandevHome = "/tmp/kandev-test-home"
 	const instanceID = "0123456789abcdef"
@@ -397,6 +468,49 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 				t.Fatalf("session-dir mount source %q still references {home} placeholder", found.Source)
 			}
 		})
+	}
+}
+
+func TestBuildContainerConfig_MuseMountContainsSeededAuthAndSessionData(t *testing.T) {
+	cm := newCMTest(t)
+	cm.kandevHomeDir = "/tmp/kandev-test-home"
+	const instanceID = "muse-instance"
+	ag := agents.NewMuseACP()
+
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig: ag,
+		InstanceID:  instanceID,
+		TaskID:      "task-1",
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	root := filepath.Join(cm.kandevHomeDir, "agent-sessions", instanceID)
+	var mount *docker.MountConfig
+	for i := range got.Mounts {
+		if got.Mounts[i].Target == "/root" {
+			mount = &got.Mounts[i]
+			break
+		}
+	}
+	if mount == nil {
+		t.Fatalf("expected Muse executor-home mount at /root, got %+v", got.Mounts)
+	}
+	if mount.Source != root {
+		t.Fatalf("Muse mount source = %q, want isolated executor root %q", mount.Source, root)
+	}
+
+	auth := ag.RemoteAuth()
+	if auth == nil || len(auth.Methods) == 0 {
+		t.Fatal("Muse must declare remote auth files")
+	}
+	seededAuth := filepath.Join(root, auth.Methods[0].TargetRelDir, "auth.json")
+	if !strings.HasPrefix(seededAuth, mount.Source+string(filepath.Separator)) {
+		t.Fatalf("seeded auth path %q is outside Muse mount %q", seededAuth, mount.Source)
+	}
+	if !strings.HasPrefix(filepath.Join(root, ".local", "share", "muse"), mount.Source+string(filepath.Separator)) {
+		t.Fatalf("Muse session path is outside Muse mount %q", mount.Source)
 	}
 }
 
@@ -456,6 +570,16 @@ func assertHasMount(t *testing.T, mounts []docker.MountConfig, source, target st
 		}
 	}
 	t.Fatalf("missing mount source=%q target=%q readOnly=%v in %#v", source, target, readOnly, mounts)
+}
+
+func assertHasSecurityOpt(t *testing.T, opts []string, want string) {
+	t.Helper()
+	for _, opt := range opts {
+		if opt == want {
+			return
+		}
+	}
+	t.Fatalf("missing SecurityOpt %q in %#v", want, opts)
 }
 
 func assertHasPortBinding(t *testing.T, bindings []docker.PortBindingConfig, port int) {

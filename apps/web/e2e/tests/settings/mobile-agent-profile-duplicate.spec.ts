@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 /**
  * Mobile parity for the agent profile duplicate flow: the row-level
@@ -48,7 +49,11 @@ test.describe("Mobile agent profile duplicate", () => {
       await trigger.tap();
       const duplicate = testPage.getByTestId(`duplicate-profile-${profile.id}`);
       await expect(duplicate).toBeVisible({ timeout: 15_000 });
-      await duplicate.tap();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      const menu = testPage.locator('[data-slot="dropdown-menu-content"]:visible');
+      await expect(menu).toBeVisible();
+      await waitForFiniteAnimations(menu);
+      await menu.getByTestId(`duplicate-profile-${profile.id}`).tap();
 
       // The copy appears as its own row without a reload.
       await expect

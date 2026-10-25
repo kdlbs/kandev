@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/mobile-task-navigation.md"
+spec: "../../specs/ui/requirements/mobile-task-navigation.md"
 ---
 
 # Task 01: Mobile Kanban hierarchy

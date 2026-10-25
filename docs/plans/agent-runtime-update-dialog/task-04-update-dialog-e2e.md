@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["01-preview-catalogue", "02-update-preview-api", "03-update-dialog-ui"]
 plan: "plan.md"
-spec: "../../specs/agents/runtime-updates.md"
+spec: "../../specs/agents/requirements/runtime-updates.md"
 ---
 
 # Task 04: Verify desktop and mobile update dialog flows

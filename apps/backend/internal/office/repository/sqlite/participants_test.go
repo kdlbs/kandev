@@ -13,6 +13,7 @@ func TestListAllTaskParticipants_PrefersPerTaskParticipant(t *testing.T) {
 		CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT DEFAULT '',
+			workflow_id TEXT DEFAULT '',
 			workflow_step_id TEXT DEFAULT ''
 		)
 	`); err != nil {
@@ -26,7 +27,8 @@ func TestListAllTaskParticipants_PrefersPerTaskParticipant(t *testing.T) {
 			role TEXT NOT NULL,
 			agent_profile_id TEXT DEFAULT '',
 			decision_required INTEGER DEFAULT 0,
-			position INTEGER DEFAULT 0
+			position INTEGER DEFAULT 0,
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
 		)
 	`); err != nil {
 		t.Fatalf("create workflow_step_participants table: %v", err)

@@ -1,12 +1,29 @@
 package costs
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// errorJSONKey is the JSON field name every handler in this file reports an
+// error under. Named to avoid adding a fresh "error" string literal on top
+// of this file's many pre-existing gin.H{"error": ...} call sites (goconst).
+const errorJSONKey = "error"
+
+// writeBudgetPolicyError maps validateBudgetPolicyWrite's rejection
+// (AC-OFFICE-BUDGET-002.6/.7) to 400; any other error (e.g. a repository
+// failure) stays 500.
+func writeBudgetPolicyError(c *gin.Context, err error) {
+	if errors.Is(err, ErrInvalidBudgetPolicy) {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{errorJSONKey: err.Error()})
+}
 
 // Handler provides HTTP handlers for cost and budget routes.
 type Handler struct {
@@ -39,6 +56,8 @@ func registerBudgetRoutes(api *gin.RouterGroup, h *Handler) {
 	api.POST("/workspaces/:wsId/budgets", h.createBudget)
 	api.PATCH("/budgets/:id", h.updateBudget)
 	api.DELETE("/budgets/:id", h.deleteBudget)
+	api.GET("/workspaces/:wsId/budgets/default", h.getDefaultCeiling)
+	api.PUT("/workspaces/:wsId/budgets/default", h.setDefaultCeiling)
 }
 
 // -- Cost handlers --
@@ -101,8 +120,17 @@ func (h *Handler) costsByProvider(c *gin.Context) {
 // by-project / by-model / by-provider) in a single response so the costs
 // page renders in one round-trip (Stream D of office optimization).
 func (h *Handler) costsBreakdown(c *gin.Context) {
-	total, byAgent, byProject, byModel, byProvider, err := h.svc.GetCostsBreakdown(
-		c.Request.Context(), c.Param("wsId"),
+	ranges, supplied := c.Request.URL.Query()["range"]
+	rangeValue := ""
+	if supplied {
+		if len(ranges) != 1 || !validCostRange(ranges[0]) {
+			c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: ErrInvalidCostRange.Error()})
+			return
+		}
+		rangeValue = ranges[0]
+	}
+	total, byAgent, byProject, byModel, byProvider, err := h.svc.GetCostsBreakdownForRange(
+		c.Request.Context(), c.Param("wsId"), rangeValue,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -159,7 +187,7 @@ func (h *Handler) createBudget(c *gin.Context) {
 		ActionOnExceed:    action,
 	}
 	if err := h.svc.CreateBudgetPolicy(c.Request.Context(), policy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeBudgetPolicyError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"budget": policy})
@@ -190,7 +218,7 @@ func (h *Handler) updateBudget(c *gin.Context) {
 	}
 	applyBudgetPatch(policy, &req)
 	if err := h.svc.UpdateBudgetPolicy(c.Request.Context(), policy); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeBudgetPolicyError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"budget": policy})
@@ -223,4 +251,32 @@ func (h *Handler) deleteBudget(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// getDefaultCeiling reports the built-in default ceiling's current
+// effective limit, visible without inspecting the database
+// (AC-OFFICE-BUDGET-003.5).
+func (h *Handler) getDefaultCeiling(c *gin.Context) {
+	limitSubcents, err := h.svc.GetWorkspaceBudgetDefault(c.Request.Context(), c.Param("wsId"))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, DefaultCeilingResponse{LimitSubcents: limitSubcents})
+}
+
+// setDefaultCeiling writes the built-in default ceiling's limit through the
+// same surface that manages budget policies (AC-OFFICE-BUDGET-003.5), never
+// touching office_budget_policies (AC-OFFICE-BUDGET-003.7).
+func (h *Handler) setDefaultCeiling(c *gin.Context) {
+	var req SetDefaultCeilingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorJSONKey: err.Error()})
+		return
+	}
+	if err := h.svc.SetWorkspaceBudgetDefault(c.Request.Context(), c.Param("wsId"), req.LimitSubcents); err != nil {
+		writeBudgetPolicyError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, DefaultCeilingResponse(req))
 }

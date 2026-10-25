@@ -1,6 +1,6 @@
 ---
-spec: docs/specs/auth/spec.md
-related_spec: docs/specs/integrations/github-authentication.md
+spec: docs/specs/auth/requirements/auth.md
+related_spec: docs/specs/integrations/requirements/github-authentication.md
 created: 2026-07-31
 status: done
 ---

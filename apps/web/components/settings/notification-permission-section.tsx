@@ -9,7 +9,7 @@ import {
   type NativeNotificationPermission,
 } from "@/lib/desktop/native-notification-client";
 import type { PermissionRefresh } from "./notifications-settings-actions";
-import { SettingsTarget } from "./settings-target";
+import { SettingsGroup } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type NotificationPermissionState =
@@ -44,14 +44,11 @@ export function DesktopNotificationsSection({
 }: DesktopNotificationsSectionProps) {
   const { t } = useTranslation();
   return (
-    <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.desktopNotifications} className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-sm font-medium">{t("settings:desktopNotifications")}</div>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:desktopNotificationsDescription")}
-          </p>
-        </div>
+    <SettingsGroup
+      title={t("settings:desktopNotifications")}
+      description={t("settings:desktopNotificationsDescription")}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.desktopNotifications}
+      action={
         <div className="flex items-center gap-2">
           <Button
             title={t("settings:enableDesktopNotifications")}
@@ -104,8 +101,8 @@ export function DesktopNotificationsSection({
             </HoverCardContent>
           </HoverCard>
         </div>
-      </div>
-
+      }
+    >
       {notificationPermission === "denied" && (
         <p className="text-xs text-amber-600">
           {nativeNotifications.isAvailable()
@@ -119,7 +116,7 @@ export function DesktopNotificationsSection({
       {notificationPermission === "error" && (
         <p className="text-xs text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
       )}
-    </SettingsTarget>
+    </SettingsGroup>
   );
 }
 

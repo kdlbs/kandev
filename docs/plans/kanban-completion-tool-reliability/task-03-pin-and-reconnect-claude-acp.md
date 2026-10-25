@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-task-only-eager-tool"]
 plan: "plan.md"
-spec: "../../specs/workflow/explicit-completion-signal/spec.md"
+spec: "../../specs/tasks/requirements/workflow-explicit-completion-signal.md"
 ---
 
 # Task 03: Verify the Claude ACP bridge and reconnect path

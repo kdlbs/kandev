@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-explicit-path-contract", "02-identity-bound-git-operations", "03-frontend-validation-contract"]
 plan: "plan.md"
-spec: "../../specs/workspaces/local-repositories.md"
+spec: "../../specs/workspaces/requirements/local-repositories.md"
 ---
 
 # Task 04: Cross-Platform Repository Regression Coverage

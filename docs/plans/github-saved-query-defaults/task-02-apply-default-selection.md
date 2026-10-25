@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-persist-default-saved-queries"]
 plan: "plan.md"
-spec: "../../specs/ui/github-saved-query-defaults.md"
+spec: "../../specs/ui/requirements/github-saved-query-defaults.md"
 ---
 
 # Task 02: Apply Default Saved-Query Selection

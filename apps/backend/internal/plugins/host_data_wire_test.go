@@ -38,6 +38,7 @@ import (
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -355,8 +356,8 @@ func TestPluginHostData_Wire_Writes(t *testing.T) {
 
 // TestPluginHostData_Wire_InvokeUtilityAgent proves the agent_invoke gate and
 // the one-shot completion round-trip over the real transport: an undeclared
-// manifest is PermissionDenied, and a declared one resolves the configured
-// profile and returns the runner's text.
+// manifest is PermissionDenied, and a declared one resolves the platform
+// default or an explicit profile and returns the runner's text.
 func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 	t.Run("DeniedWithoutCapability", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{})
@@ -370,16 +371,36 @@ func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 		require.Equal(t, "capability 'agent_invoke' not declared", st.Message())
 	})
 
-	t.Run("Succeeds", func(t *testing.T) {
+	t.Run("UsesDefault", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
+		d.defaultProfile.profileID = "profile-default"
+		d.profiles.profilesByID = map[string]*AgentProfile{
+			"profile-default": {Enabled: true, InferenceCapable: true},
+		}
 		d.utilRun.text = "summary text"
 		host := dialPluginHostOverWire(t, d.host)
 
 		got, err := host.InvokeUtilityAgent(context.Background(), "summarize")
 		require.NoError(t, err)
 		require.Equal(t, "summary text", got)
-		require.Equal(t, "profile-42", d.utilRun.gotProfileID)
+		require.Equal(t, "profile-default", d.utilRun.gotProfileID)
+		require.Equal(t, 1, d.defaultProfile.calls)
+	})
+
+	t.Run("UsesExplicitOverride", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
+		d.defaultProfile.err = status.Error(codes.Unavailable, "default unavailable")
+		d.profiles.profilesByID = map[string]*AgentProfile{
+			"profile-override": {Enabled: true, InferenceCapable: true},
+		}
+		d.utilRun.text = "override text"
+		host := dialPluginHostOverWire(t, d.host)
+
+		got, err := host.InvokeUtilityAgent(context.Background(), "summarize", pluginsdk.UtilityAgentOptions{ProfileID: "profile-override"})
+		require.NoError(t, err)
+		require.Equal(t, "override text", got)
+		require.Equal(t, "profile-override", d.utilRun.gotProfileID)
+		require.Equal(t, 0, d.defaultProfile.calls)
 	})
 }
 
@@ -413,4 +434,53 @@ func TestPluginHostData_Wire_SessionsPagination(t *testing.T) {
 	require.NotNil(t, secondPageInfo)
 	require.False(t, secondPageInfo.HasMore)
 	require.Empty(t, secondPageInfo.NextCursor)
+}
+
+// TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes proves the full
+// model -> DTO -> proto -> gRPC wire -> pluginsdk chain for WorkflowStep's
+// on_enter_action_types field: a step with several on_enter actions reports
+// their types in authored order, a step with none reports nil (not an empty
+// slice) at every hop, and action Config never travels — pluginsdk.WorkflowStep
+// has no Config field at all, so there is no wire shape for it to leak
+// through.
+func TestPluginHostData_Wire_WorkflowSteps_OnEnterActionTypes(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"workflows"}})
+	d.steps.steps = map[string][]*wfmodels.WorkflowStep{
+		"wf-1": {
+			{
+				ID:         "step-work",
+				WorkflowID: "wf-1",
+				Name:       "Work",
+				Position:   0,
+				StageType:  wfmodels.StageType("work"),
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent, Config: map[string]interface{}{"agent_profile_id": "profile-1"}},
+						{Type: wfmodels.OnEnterRunCodeReview},
+						// Unknown types must remain available to plugin callers so they can
+						// apply their own forward-compatible handling.
+						{Type: wfmodels.OnEnterActionType("future_action")},
+					},
+				},
+			},
+			{
+				ID:         "step-todo",
+				WorkflowID: "wf-1",
+				Name:       "Todo",
+				Position:   1,
+				StageType:  wfmodels.StageType("custom"),
+			},
+		},
+	}
+	host := dialPluginHostOverWire(t, d.host)
+
+	steps, err := host.Workflows().ListSteps(context.Background(), "wf-1")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+
+	require.Equal(t, "step-work", steps[0].ID)
+	require.Equal(t, []string{"auto_start_agent", "run_code_review", "future_action"}, steps[0].OnEnterActionTypes)
+
+	require.Equal(t, "step-todo", steps[1].ID)
+	require.Nil(t, steps[1].OnEnterActionTypes)
 }

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/auth/session-ip-refresh.md
+spec: docs/specs/auth/requirements/session-ip-refresh.md
 created: 2026-08-19
 status: complete
 ---

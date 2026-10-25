@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["03-system-api-wiring", "04-task-actions-card"]
 plan: "plan.md"
-spec: "../../specs/platform/task-sleep-inhibition.md"
+spec: "../../specs/platform/requirements/task-sleep-inhibition.md"
 ---
 
 # Task 05: Sleep setting E2E coverage

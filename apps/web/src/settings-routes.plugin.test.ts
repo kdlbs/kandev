@@ -8,6 +8,19 @@ vi.mock("@/components/settings/workspaces/workspace-settings-shell", () => ({
   WorkspaceSettingsShell: ({ children }: { children: ReactNode }) => children,
 }));
 
+vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
+  usePlugins: () => ({
+    items: [{ id: "plugin-a" }],
+    loaded: true,
+    loading: false,
+    error: null,
+  }),
+}));
+
+vi.mock("@/components/settings/plugins/plugin-shortcuts-card", () => ({
+  PluginShortcutsCard: () => createElement("div", null, "Host-owned plugin shortcuts"),
+}));
+
 const PLUGIN_ID = "plugin-a";
 const PLUGIN_SETTINGS_PATH = "/settings/plugins/plugin-a/config";
 const PLUGIN_INTEGRATION_ID = "source-control";
@@ -42,6 +55,20 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
     expect(isValidElement(route)).toBe(true);
     render(route as ReactElement);
     expect(screen.getByText("PluginSettingsPage:rendered")).not.toBeNull();
+    cleanup();
+  });
+
+  it("keeps host-owned shortcuts on an exact plugin detail route replacement", () => {
+    function PluginSettingsPage() {
+      return createElement("div", null, "Plugin-owned detail content");
+    }
+    const detailPath = `/settings/plugins/${PLUGIN_ID}`;
+    pluginRegistry.forPlugin(PLUGIN_ID).registerSettingsRoute(detailPath, PluginSettingsPage);
+
+    render(renderSettingsRoute(detailPath) as ReactElement);
+
+    expect(screen.getByText("Plugin-owned detail content")).not.toBeNull();
+    expect(screen.getByText("Host-owned plugin shortcuts")).not.toBeNull();
     cleanup();
   });
 

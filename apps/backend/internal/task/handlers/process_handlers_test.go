@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,9 +30,40 @@ import (
 )
 
 type mockRepository struct {
+	// Membership is not exercised by this fake; the embedded default
+	// reports no membership, which is the narrower answer.
+	repository.UnsupportedWorkspaceMembers
 	scriptsByRepo map[string][]*models.RepositoryScript
 	sessions      map[string]*models.TaskSession
 	executors     map[string]*models.Executor
+}
+
+func (*mockRepository) EnsureManagedConversation(context.Context, managed.EnsureRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
+}
+
+func (*mockRepository) ChangeManagedConversationState(context.Context, managed.StateRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
+}
+
+func (m *mockRepository) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, fmt.Errorf("field updates are not supported by this test repository")
+}
+
+func (m *mockRepository) CommitWorkspaceRecoveryErrorIfCurrent(
+	ctx context.Context,
+	observation models.WorkspaceRecoveryErrorObservation,
+	errorValue models.LastAgentError,
+) (bool, string, error) {
+	return false, "", nil
+}
+
+func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRepository) ClaimInitialPromptFallback(context.Context, string, string) (bool, error) {
+	return true, nil
 }
 
 func (m *mockRepository) DeleteTurnIfUnreferenced(context.Context, string, string) (bool, error) {
@@ -48,6 +81,9 @@ func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
 	return nil, nil
 }
 func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
@@ -77,6 +113,20 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }
+func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error) {
+	return nil, nil, nil
+}
+func (m *mockRepository) SetTaskDeferredLaunchIfUnchanged(
+	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+) (bool, bool, error) {
+	return false, false, nil
+}
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
@@ -98,11 +148,20 @@ func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models
 func (m *mockRepository) ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListUnarchivedTasksWithActiveSessions(ctx context.Context) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error) {
+	return nil, nil
+}
 func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
 	return nil, nil
 }
 func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	return nil, nil
 }
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
@@ -175,6 +234,13 @@ func (m *mockRepository) SettleTaskExternalID(_ context.Context, _, _ string, _ 
 func (m *mockRepository) ReleaseTaskExternalID(_ context.Context, _, _ string) (*models.Task, error) {
 	return nil, nil
 }
+func (m *mockRepository) SwitchTaskRunner(context.Context, models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error) {
+	return nil, nil
+}
+func (m *mockRepository) ReplaceTaskRepositories(context.Context, string, func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error) {
+	return nil, fmt.Errorf("complete repository replacement is unsupported by this handler fixture")
+}
+
 func (m *mockRepository) CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	return nil
 }
@@ -195,6 +261,7 @@ func (m *mockRepository) UpdateTaskRepositoryComparisonTarget(
 	string,
 	*models.ComparisonTarget,
 	*models.ComparisonTarget,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }
@@ -202,6 +269,7 @@ func (m *mockRepository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	context.Context,
 	string,
 	string,
+	bool,
 ) (*models.TaskRepository, bool, error) {
 	return nil, false, nil
 }
@@ -223,6 +291,9 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*models.Wo
 func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
 }
+func (m *mockRepository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow field updates are not configured in this fixture")
+}
 func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
 }
@@ -237,6 +308,12 @@ func (m *mockRepository) CreateMessage(ctx context.Context, message *models.Mess
 }
 func (m *mockRepository) GetMessage(ctx context.Context, id string) (*models.Message, error) {
 	return nil, nil
+}
+
+// RehydrateMessagePayload is a no-op for the mock repository: none of its
+// callers construct messages with an externalized PayloadDigest.
+func (m *mockRepository) RehydrateMessagePayload(ctx context.Context, message *models.Message) error {
+	return nil
 }
 
 // GetMessageWithPromptIndex returns the message for id with its derived prompt index, mirroring the repository contract.
@@ -264,6 +341,9 @@ func (m *mockRepository) FindActiveClarificationMessagesBySessionID(ctx context.
 func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
 	return make(map[string]models.TaskPendingAction), nil
 }
+func (m *mockRepository) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
+	return nil, nil
+}
 func (m *mockRepository) CompleteActiveClarificationBundle(
 	context.Context,
 	string,
@@ -290,6 +370,18 @@ func (m *mockRepository) RestoreActiveClarificationBundle(
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
+}
+func (m *mockRepository) ClaimPermissionResolution(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error) {
+	return &models.PermissionResolutionClaimResult{Outcome: models.PermissionClaimNotFound}, nil
+}
+func (m *mockRepository) FinalizePermissionResolution(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error) {
+	return &models.PermissionResolutionFinalizeResult{Outcome: models.PermissionFinalizeNotFound}, nil
+}
+func (m *mockRepository) GetPermissionResolutionAudit(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetPermissionMessageByIdentity(context.Context, string, string, string, string) (*models.Message, error) {
+	return nil, nil
 }
 func (m *mockRepository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
@@ -417,7 +509,16 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error) {
+	return nil, nil
+}
 func (m *mockRepository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) CancelActiveTaskSessionsByIDs(ctx context.Context, taskID string, sessionIDs []string, reason string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) CancelActiveTaskSessionsByCandidates(ctx context.Context, taskID string, candidates []models.ActiveSessionCancellationCandidate, reason string) ([]*models.TaskSession, error) {
 	return nil, nil
 }
 func (m *mockRepository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
@@ -441,7 +542,7 @@ func (m *mockRepository) CountActiveTaskSessionsByRepository(ctx context.Context
 func (m *mockRepository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
 	return 0, nil
 }
-func (m *mockRepository) DeleteTaskSession(ctx context.Context, id string) error {
+func (m *mockRepository) DeleteTaskSession(ctx context.Context, session *models.TaskSession) error {
 	return nil
 }
 func (m *mockRepository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
@@ -524,6 +625,9 @@ func (m *mockRepository) ListExecutorsRunning(ctx context.Context) ([]*models.Ex
 func (m *mockRepository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
 	return nil, nil
 }
+func (m *mockRepository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 func (m *mockRepository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	return nil
 }
@@ -543,6 +647,24 @@ func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessio
 	return nil
 }
 func (m *mockRepository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
+	return nil
+}
+func (m *mockRepository) ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error) {
+	return nil, models.ErrExecutorReachabilityNotFound
+}
+func (m *mockRepository) ListExecutorReachability(ctx context.Context) ([]*models.ExecutorReachability, error) {
+	return nil, nil
+}
+func (m *mockRepository) UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error {
+	return nil
+}
+func (m *mockRepository) ResetExecutorReachability(ctx context.Context, executorID, host string, seenUpdatedAt time.Time) error {
+	return nil
+}
+func (m *mockRepository) DeleteExecutorReachability(ctx context.Context, executorID string) error {
 	return nil
 }
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {
@@ -573,6 +695,9 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 }
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
+}
+func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil
@@ -608,6 +733,15 @@ func (m *mockRepository) GetLatestGitSnapshot(ctx context.Context, sessionID str
 }
 func (m *mockRepository) GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error) {
 	return make(map[string]*models.GitSnapshot), nil
+}
+func (m *mockRepository) GetLatestGitSnapshotByTaskEnvironmentID(ctx context.Context, taskEnvironmentID string) (*models.GitSnapshot, error) {
+	return nil, nil
+}
+func (m *mockRepository) GetLatestGitSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) (map[string]*models.GitSnapshot, error) {
+	return make(map[string]*models.GitSnapshot), nil
+}
+func (m *mockRepository) GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx context.Context, taskEnvironmentIDs []string) ([]*models.GitSnapshot, error) {
+	return nil, nil
 }
 func (m *mockRepository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	return nil, nil
@@ -729,6 +863,9 @@ func (m *mockRepository) GetExecutorProfile(ctx context.Context, id string) (*mo
 	return nil, nil
 }
 func (m *mockRepository) UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error {
+	return nil
+}
+func (m *mockRepository) UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error {
 	return nil
 }
 func (m *mockRepository) DeleteExecutorProfile(ctx context.Context, id string) error { return nil }

@@ -1,0 +1,218 @@
+import { create } from "zustand";
+import { immer } from "zustand/middleware/immer";
+import { describe, expect, it } from "vitest";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import { createSessionSlice } from "./session-slice";
+import type { SessionSlice } from "./types";
+
+const SESSION = "session-1";
+
+function makeStore() {
+  return create<SessionSlice>()(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    immer((set) => ({ ...(createSessionSlice as any)(set) })),
+  );
+}
+
+function makeMessage(
+  id: string,
+  content: string,
+  session: string = SESSION,
+  overrides: Partial<Message> = {},
+): Message {
+  return {
+    id,
+    task_id: toTaskId("task-1"),
+    session_id: toSessionId(session),
+    author_type: "agent",
+    content,
+    type: "message",
+    created_at: "2026-08-27T00:00:00Z",
+    updated_at: "2026-08-27T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("running notice resolution", () => {
+  it("accepts newly projected resolution without changing a notice timestamp", () => {
+    const store = makeStore();
+    const notice = makeMessage("notice", "Still waiting", SESSION, {
+      turn_id: "turn-1",
+      type: "status",
+      metadata: { action_visibility: "running" },
+    });
+    store.getState().setMessages(SESSION, [notice]);
+    store.getState().mergeMessages(SESSION, [
+      {
+        ...notice,
+        metadata: { ...notice.metadata, running_notice_resolved: true },
+      },
+    ]);
+    expect(store.getState().messages.bySession[SESSION][0].metadata?.running_notice_resolved).toBe(
+      true,
+    );
+  });
+
+  it.each(["updateMessage", "updateMessages"] as const)(
+    "%s resolves a notice when the tool is outside the loaded window",
+    (action) => {
+      const store = makeStore();
+      const notice = makeMessage("notice", "Still waiting", SESSION, {
+        turn_id: "turn-1",
+        type: "status",
+        metadata: { action_visibility: "running" },
+      });
+      store.getState().setMessages(SESSION, [notice]);
+      const tool = makeMessage("unloaded-tool", "Compacted", SESSION, {
+        turn_id: "turn-1",
+        type: "tool_call",
+        created_at: "2026-08-26T23:00:00Z",
+        updated_at: "2026-08-27T00:00:01Z",
+      });
+      if (action === "updateMessage") store.getState().updateMessage(tool);
+      else store.getState().updateMessages([tool]);
+
+      const messages = store.getState().messages.bySession[SESSION];
+      expect(messages).toHaveLength(1);
+      expect(messages[0].metadata?.running_notice_resolved).toBe(true);
+      store.getState().updateMessage(notice);
+      store.getState().mergeMessages(SESSION, [notice]);
+      store.getState().setMessages(SESSION, [notice]);
+      expect(
+        store.getState().messages.bySession[SESSION][0].metadata?.running_notice_resolved,
+      ).toBe(true);
+    },
+  );
+});
+
+describe("updateMessages", () => {
+  it("notifies subscribers once for one replacement frame", () => {
+    const store = makeStore();
+    const initial = [makeMessage("message-a", "a"), makeMessage("message-b", "b")];
+    store.getState().setMessages(SESSION, initial);
+
+    const notifications: Message[][] = [];
+    const unsubscribe = store.subscribe((state) => {
+      notifications.push(state.messages.bySession[SESSION] ?? []);
+    });
+
+    const updateMessages = store.getState().updateMessages;
+    expect(updateMessages).toBeTypeOf("function");
+    updateMessages([makeMessage("message-a", "a2"), makeMessage("message-b", "b2")]);
+
+    expect(notifications).toHaveLength(1);
+    expect(store.getState().messages.bySession[SESSION].map((message) => message.content)).toEqual([
+      "a2",
+      "b2",
+    ]);
+    unsubscribe();
+  });
+
+  it("preserves partial fields and unaffected session identities", () => {
+    const store = makeStore();
+    const first = makeMessage("message-a", "a", SESSION, {
+      metadata: { retained: true },
+      prompt_index: 3,
+    });
+    const second = makeMessage("message-b", "b");
+    const otherSessionMessage = makeMessage("message-c", "c", "session-2");
+    store.getState().setMessages(SESSION, [first, second]);
+    store.getState().setMessages("session-2", [otherSessionMessage]);
+
+    const sessionMessages = store.getState().messages.bySession[SESSION];
+    const otherSessionMessages = store.getState().messages.bySession["session-2"];
+    store.getState().updateMessages([
+      makeMessage("message-a", "a2", SESSION, {
+        metadata: undefined,
+        prompt_index: undefined,
+      }),
+    ]);
+
+    const nextSessionMessages = store.getState().messages.bySession[SESSION];
+    expect(nextSessionMessages).not.toBe(sessionMessages);
+    expect(nextSessionMessages[0].content).toBe("a2");
+    expect(nextSessionMessages[0].metadata).toEqual({ retained: true });
+    expect(nextSessionMessages[0].prompt_index).toBe(3);
+    expect(nextSessionMessages[1]).toBe(sessionMessages[1]);
+    expect(store.getState().messages.bySession["session-2"]).toBe(otherSessionMessages);
+    expect(store.getState().messages.bySession["session-2"][0]).toBe(otherSessionMessage);
+  });
+
+  it("upserts a retry notice when its reused row is outside the loaded window", () => {
+    const store = makeStore();
+    store.getState().updateMessages([
+      makeMessage("retry", "Model at capacity", SESSION, {
+        type: "status",
+        metadata: { retrying: true, attempt: 2 },
+      }),
+    ]);
+
+    expect(store.getState().messages.bySession[SESSION]).toEqual([
+      expect.objectContaining({
+        id: "retry",
+        type: "status",
+        metadata: { retrying: true, attempt: 2 },
+      }),
+    ]);
+  });
+});
+
+it("keeps an acknowledged Git push dismissal when a delayed update replays its original timestamp", () => {
+  const store = makeStore();
+  const dismissedAt = "2026-09-25T10:00:00Z";
+  const dismissed = makeMessage("push-error", "Git push failed", SESSION, {
+    type: "error",
+    updated_at: dismissedAt,
+    metadata: {
+      git_operation_error: true,
+      operation: "push",
+      git_operation_error_dismissed_at: dismissedAt,
+    },
+  });
+  store.getState().setMessages(SESSION, [dismissed]);
+
+  store.getState().updateMessages([
+    makeMessage("push-error", "Git push failed", SESSION, {
+      type: "error",
+      updated_at: dismissed.updated_at,
+      metadata: { git_operation_error: true, operation: "push" },
+    }),
+  ]);
+
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual({
+    git_operation_error: true,
+    operation: "push",
+    git_operation_error_dismissed_at: dismissedAt,
+  });
+});
+
+it("keeps a committed removal marker through stale message events and HTTP snapshots", () => {
+  const store = makeStore();
+  const original = makeMessage("tool", "Command", SESSION, {
+    type: "tool_execute",
+    metadata: { normalized: { shell_exec: { output: { stdout: "removed payload" } } } },
+  });
+  store.getState().setMessages(SESSION, [original]);
+  const removed = {
+    ...original,
+    metadata: {
+      payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" },
+      normalized: { shell_exec: { output: { exit_code: 0 } } },
+    },
+  };
+  store.getState().updateMessage(removed);
+  store.getState().updateMessage(original);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+  store.getState().mergeMessages(SESSION, [original]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+  store.getState().setMessages(SESSION, [original]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+});
+it("accepts a removal marker even when maintenance preserves message timestamps", () => {
+  const store = makeStore();
+  const original = makeMessage("tool", "Command");
+  store.getState().setMessages(SESSION, [original]);
+  const metadata = { payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" } };
+  store.getState().mergeMessages(SESSION, [{ ...original, metadata }]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(metadata);
+});

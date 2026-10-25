@@ -5,7 +5,7 @@ status: completed
 wave: 3
 depends_on: ["01-attachment-storage-api", "02-agent-delivery-and-queue"]
 plan: "plan.md"
-spec: "../../specs/tasks/prompt-attachments.md"
+spec: "../../specs/tasks/requirements/prompt-attachments.md"
 ---
 
 # Task 03: Frontend staged uploads

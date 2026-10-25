@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "@/lib/routing/client-dynamic";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconLoader2, IconRestore } from "@tabler/icons-react";
 import {
@@ -17,14 +16,7 @@ import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
-
-const PlanReadOnlyMarkdown = dynamic(
-  () =>
-    import("@/components/editors/tiptap/tiptap-plan-readonly").then(
-      (mod) => mod.PlanReadOnlyMarkdown,
-    ),
-  { ssr: false },
-);
+import { PlanReadOnlyMarkdown } from "@/components/editors/tiptap/tiptap-plan-readonly";
 
 type Props = {
   revision: TaskPlanRevision | null;

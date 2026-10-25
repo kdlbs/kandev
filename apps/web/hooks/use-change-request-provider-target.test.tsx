@@ -57,6 +57,9 @@ describe("useChangeRequestProviderTarget", () => {
       taskSessions: { items: { "session-a": { task_id: "task-a" } as never } },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           "workflow-b": {
             tasks: [

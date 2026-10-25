@@ -134,6 +134,55 @@ func TestStreamCoalescerCloseFlushesAndRejectsFutureChunks(t *testing.T) {
 	}
 }
 
+func TestStreamCoalescerDoesNotMergeChunksFromDifferentPromptGenerations(t *testing.T) {
+	var got []coalescedStreamChunk
+	coalescer := newStreamCoalescer(time.Hour, func(chunk coalescedStreamChunk) {
+		got = append(got, chunk)
+	})
+
+	// The first chunk is immediate (isAppend false) and only seeds the
+	// correlation key; the second chunk (isAppend true) is what actually
+	// becomes the pending segment a same-generation third chunk would merge
+	// into. A generation change on that third chunk must not merge into it.
+	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "x", promptGeneration: 1})
+	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "a", isAppend: true, promptGeneration: 1})
+	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "b", isAppend: true, promptGeneration: 2})
+	coalescer.flush()
+
+	if len(got) != 3 || got[0].content != "x" || got[1].content != "a" || got[2].content != "b" {
+		t.Fatalf("cross-generation output = %#v, want separate x, a (gen 1), b (gen 2) segments", got)
+	}
+	if got[1].promptGeneration != 1 || got[2].promptGeneration != 2 {
+		t.Fatalf("published generations = [%d, %d], want [1, 2]", got[1].promptGeneration, got[2].promptGeneration)
+	}
+}
+
+func TestStreamCoalescerPreservesCanonicalProjectionAcrossMergedChunks(t *testing.T) {
+	var got []coalescedStreamChunk
+	coalescer := newStreamCoalescer(time.Hour, func(chunk coalescedStreamChunk) {
+		got = append(got, chunk)
+	})
+
+	coalescer.add(coalescedStreamChunk{
+		eventType:           "thinking_streaming",
+		messageID:           "canonical-thinking",
+		content:             "first",
+		canonicalProjection: true,
+	})
+	coalescer.add(coalescedStreamChunk{
+		eventType:           "thinking_streaming",
+		messageID:           "canonical-thinking",
+		content:             " second",
+		isAppend:            true,
+		canonicalProjection: true,
+	})
+	coalescer.flush()
+
+	if len(got) != 2 || got[1].content != " second" || !got[1].canonicalProjection {
+		t.Fatalf("canonical output = %#v, want immediate first plus canonical append", got)
+	}
+}
+
 func TestStreamCoalescerStatsCountReceivedMergedAndFlushedSegments(t *testing.T) {
 	coalescer := newStreamCoalescer(time.Hour, func(coalescedStreamChunk) {})
 	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "a"})

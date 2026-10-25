@@ -5,7 +5,7 @@ status: complete
 wave: 2
 depends_on: ["01-destination-model-and-github-resolution"]
 plan: "plan.md"
-spec: "../../specs/improve-kandev/spec.md"
+spec: "../../specs/workspaces/requirements/improve-kandev.md"
 ---
 
 # Task 02: Creation Preparation and Bootstrap

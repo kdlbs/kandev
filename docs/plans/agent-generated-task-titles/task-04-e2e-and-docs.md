@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["01-backend-title-lifecycle", "02-mcp-title-tool", "03-frontend-title-flow"]
 plan: "plan.md"
-spec: "../../specs/tasks/agent-generated-titles.md"
+spec: "../../specs/tasks/requirements/agent-generated-titles.md"
 ---
 
 # Task 04: End-to-end coverage and public docs

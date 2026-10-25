@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kandev Inbox — mockup r4, aligned to the shipped shell</title>
+<style>
+/* Product typefaces, loaded from the repo Kandev itself ships.
+   apps/web/public/fonts/** — so every frame below is set in the app's own type. */
+@font-face{font-family:"Figtree";font-style:normal;font-weight:300 900;font-display:block;
+  src:url("../../../../apps/web/public/fonts/figtree/figtree-300-normal.woff2") format("woff2")}
+@font-face{font-family:"Geist";font-style:normal;font-weight:100 900;font-display:block;
+  src:url("../../../../apps/web/public/fonts/geist/geist-100-normal.woff2") format("woff2")}
+@font-face{font-family:"Geist Mono";font-style:normal;font-weight:100 900;font-display:block;
+  src:url("../../../../apps/web/public/fonts/geist-mono/geist-mono-100-normal.woff2") format("woff2")}
+
+/* Dark tokens copied verbatim from apps/web/app/globals.css `.dark` (lines 144-196). */
+:root{
+  --background:#181818; --foreground:#d4d4d4;
+  --card:#1f1f1f; --card-foreground:#d4d4d4;
+  --popover:#222222;
+  --primary:oklch(0.59 0.2 277); --primary-foreground:oklch(0.96 0.02 272);
+  --secondary:#2a2a2a; --secondary-foreground:#d4d4d4;
+  --muted:#2a2a2a; --muted-foreground:#888888;
+  --accent:oklch(0.62 0.18 276); --accent-foreground:#d4d4d4;
+  --destructive:oklch(0.704 0.191 22.216);
+  --warning:oklch(0.78 0.12 78);
+  --border:#2a2a2a; --input:#2a2a2a; --ring:#555555;
+  --sidebar:#171717; --sidebar-foreground:#d4d4d4;
+  --sidebar-accent:#2a2a2a; --sidebar-border:#262626;
+  --radius:0.375rem;
+  /* State hues, verbatim from apps/web/lib/ui/state-icons.ts */
+  --state-waiting:#eab308;   /* text-yellow-500  — WAITING_FOR_INPUT / IconMessageQuestion */
+  --state-permission:#f59e0b;/* text-amber-500   — pending permission / IconShieldQuestion */
+  --state-error:#ef4444;     /* text-red-500     — FAILED */
+  --state-running:#10b981;   /* text-emerald-500 — RUNNING */
+  /* deck-only greys: the commentary is desaturated on purpose */
+  --page:#101010; --ink:#c9c9c9; --ink-dim:#7c7c7c; --ink-faint:#5a5a5a; --rule:#232323;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{background:var(--page);color:var(--ink);
+  font-family:"Figtree","Geist",ui-sans-serif,system-ui,sans-serif;font-size:14px;line-height:1.55}
+code,.mono{font-family:"Geist Mono",ui-monospace,Menlo,monospace;font-size:.86em;
+  background:#1a1a1a;border:1px solid var(--rule);border-radius:4px;padding:.5px 4px;color:#a8a8a8}
+
+/* ============ deck (annotation layer — not product) ============ */
+.deck{max-width:1240px;margin:0 auto;padding:56px 36px 110px}
+.masthead{border-bottom:1px solid var(--rule);padding-bottom:30px;margin-bottom:14px}
+.masthead h1{font-size:31px;font-weight:600;letter-spacing:-.025em;line-height:1.15;color:#e6e6e6;max-width:22ch}
+.masthead p{color:var(--ink-dim);max-width:74ch;margin-top:14px;font-size:14.5px}
+.masthead p strong{color:var(--ink);font-weight:600}
+.meta{display:flex;flex-wrap:wrap;gap:0 28px;margin-top:22px;font-size:12px;color:var(--ink-faint);
+  font-family:"Geist Mono",ui-monospace,monospace}
+.meta span b{color:var(--ink-dim);font-weight:400}
+
+.frame{margin-top:64px}
+.fhead{display:grid;grid-template-columns:52px 1fr;align-items:baseline;
+  border-top:1px solid var(--rule);padding-top:14px}
+.fnum{font-family:"Geist Mono",ui-monospace,monospace;font-size:12px;color:var(--ink-faint);
+  font-variant-numeric:tabular-nums;background:none;border:0;padding:0}
+.fhead h2{font-size:20px;font-weight:600;letter-spacing:-.018em;color:#e6e6e6}
+.fnote{color:var(--ink-dim);font-size:13.5px;max-width:78ch;margin-top:9px;padding-left:52px}
+.fnote + .fnote{margin-top:7px}
+.fnote strong{color:var(--ink);font-weight:600}
+.fbody{margin-top:20px}
+
+/* the one loud frame */
+.frame.pivot .fhead h2{font-size:27px;letter-spacing:-.028em;color:#fff}
+.frame.pivot{padding:34px 32px 36px;background:#141414;border:1px solid var(--rule);border-radius:14px;margin-top:72px}
+.frame.pivot .fhead{border-top:0;padding-top:0}
+
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+.callout{border-left:2px solid var(--rule);margin-left:52px;padding:2px 0 2px 16px;color:var(--ink-dim);font-size:13px;max-width:78ch;margin-top:18px}
+.callout b{color:var(--ink);font-weight:600}
+
+table.spec{width:100%;margin-left:52px;max-width:calc(100% - 52px);border-collapse:collapse;margin-top:18px;font-size:13px}
+table.spec th{text-align:left;font-weight:600;color:var(--ink);border-bottom:1px solid var(--rule);padding:8px 12px 8px 0;font-size:12.5px}
+table.spec td{border-bottom:1px solid var(--rule);padding:9px 12px 9px 0;color:var(--ink-dim);vertical-align:top}
+table.spec td b{color:var(--ink);font-weight:600}
+table.spec td.num{font-family:"Geist Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+ol.rules{margin:16px 0 0 52px;padding:0;list-style:none;counter-reset:r}
+ol.rules li{counter-increment:r;position:relative;padding:0 0 14px 40px;color:var(--ink-dim);font-size:13.5px;max-width:82ch}
+ol.rules li::before{content:counter(r);position:absolute;left:0;top:1px;font-family:"Geist Mono",ui-monospace,monospace;
+  font-size:11.5px;color:var(--ink-faint);border:1px solid var(--rule);border-radius:4px;width:22px;height:20px;
+  display:grid;place-items:center}
+ol.rules li b{color:var(--ink);font-weight:600}
+
+/* ============ app shell (product) ============ */
+.shell{border:1px solid #242424;border-radius:11px;overflow:hidden;background:var(--background);
+  box-shadow:0 1px 1px rgba(0,0,0,.5),0 14px 44px rgba(0,0,0,.45)}
+.chrome{display:flex;height:52px;background:var(--sidebar);border-bottom:1px solid var(--border)}
+.chrome-l{width:320px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;
+  border-right:1px solid var(--sidebar-border)}
+.brand{font-size:13.5px;font-weight:600;color:var(--foreground)}
+.slash{color:var(--muted-foreground);opacity:.7}
+.wspick{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:6px;
+  height:30px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:#1c1c1c;
+  font-size:13px;font-weight:500;color:var(--foreground)}
+.chrome-r{flex:1;display:flex;align-items:center;justify-content:space-between;padding:0 16px;
+  background:var(--background)}
+.ptitle{font-size:14.5px;font-weight:500;color:var(--foreground)}
+svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i{width:16px;height:16px;flex:none}
+.i14{width:14px;height:14px;flex:none}
+.i18{width:18px;height:18px;flex:none}
+.dim{color:var(--muted-foreground)}
+
+.app{display:flex;min-height:468px}
+.sb{width:320px;flex:none;background:var(--sidebar);border-right:1px solid var(--sidebar-border);
+  display:flex;flex-direction:column;padding:8px}
+.sbnav{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0}
+/* AppSidebarNavItem: h-9 px-2.5 gap-2.5 rounded-md text-[13px] font-medium */
+.nav{position:relative;display:flex;align-items:center;height:36px;padding:0 10px;gap:10px;
+  border-radius:6px;font-size:13px;font-weight:500;color:rgba(212,212,212,.8)}
+/* SIDEBAR_ITEM_ACTIVE — a 3px left accent bar, never a filled background.
+   app-sidebar-constants.ts: "a saturated fill reads as garish against the brand theme." */
+.nav.on{color:var(--foreground)}
+.nav.on::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:999px;background:var(--primary)}
+.nav .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav .trail{display:flex;align-items:center;gap:8px;color:var(--muted-foreground)}
+/* sidebarBadgeClass: rounded-full px-1.5 py-0.5 text-xs bg-primary text-primary-foreground.
+   Gated on `badge > 0` — a zero never renders. */
+.nbadge{border-radius:999px;padding:1px 6px;font-size:12px;line-height:16px;font-weight:500;
+  background:var(--primary);color:var(--primary-foreground);font-variant-numeric:tabular-nums}
+/* AppSidebarSection header: h-7 px-2, label text-[11px] font-semibold uppercase tracking-wider */
+.sect{display:flex;align-items:center;height:28px;padding:0 8px;gap:6px;margin-top:6px}
+.slabel{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:rgba(212,212,212,.7)}
+.ssum{font-size:11px;color:rgba(136,136,136,.7);font-variant-numeric:tabular-nums}
+.sect .sp{flex:1}
+.sact{font-size:11.5px;color:var(--muted-foreground);display:flex;align-items:center;gap:3px}
+.chev{color:rgba(136,136,136,.6);display:flex}
+.chev.open svg{transform:rotate(90deg)}
+.repo{display:flex;align-items:center;height:32px;padding:0 10px;gap:8px;border-radius:6px;
+  font-size:13px;color:rgba(212,212,212,.8)}
+.repo .rc{margin-left:auto;font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.sbfoot{display:flex;align-items:center;gap:14px;padding:10px 10px 4px;color:var(--muted-foreground);
+  border-top:1px solid var(--sidebar-border);margin-top:8px}
+.sbfoot .dotmark{position:relative}
+.sbfoot .dotmark::after{content:"";position:absolute;right:-2px;top:-2px;width:5px;height:5px;border-radius:50%;background:var(--primary)}
+
+/* main pane — Office inbox page is `space-y-4 p-6`, no page <h1> */
+.mn{flex:1;min-width:0;background:var(--background);display:flex;flex-direction:column}
+.page{padding:24px;display:flex;flex-direction:column;gap:16px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}
+/* TabsList variant="line": bg-transparent, gap-1; trigger active gets a 2px after-bar */
+.tabs{display:inline-flex;align-items:center;gap:4px;height:32px}
+.tab{position:relative;display:inline-flex;align-items:center;gap:6px;height:100%;padding:2px 6px;
+  border-radius:6px;font-size:12px;font-weight:500;color:var(--muted-foreground);border:1px solid transparent}
+.tab.on{color:var(--foreground)}
+.tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-5px;height:2px;background:var(--foreground)}
+/* Badge variant="secondary" h-5 px-1.5 text-xs tabular-nums — the StepCount idiom */
+.cnt{height:20px;display:inline-flex;align-items:center;padding:0 6px;border-radius:6px;
+  background:var(--secondary);color:var(--secondary-foreground);font-size:12px;font-variant-numeric:tabular-nums}
+.srch{position:relative;display:flex;align-items:center}
+.srch svg{position:absolute;left:9px;width:14px;height:14px;color:var(--muted-foreground)}
+.srch input{width:220px;height:30px;padding:0 10px 0 28px;border-radius:6px;background:#1c1c1c;
+  border:1px solid var(--input);color:var(--foreground);font:inherit;font-size:12px}
+
+/* list: border border-border rounded-lg divide-y divide-border overflow-hidden */
+.list{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.r{display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--border)}
+.r:first-child{border-top:0}
+.ric{width:32px;height:32px;border-radius:50%;background:var(--muted);display:grid;place-items:center;flex:none;
+  color:var(--muted-foreground)}
+.ric.wait{color:var(--state-waiting)} .ric.perm{color:var(--state-permission)} .ric.err{color:var(--state-error)}
+.rm{flex:1;min-width:0}
+.rt{font-size:14px;font-weight:500;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rd,.rtime{font-size:12px;color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn{height:32px;padding:0 12px;border-radius:6px;border:0;background:var(--primary);
+  color:var(--primary-foreground);font:inherit;font-size:12px;font-weight:500;white-space:nowrap}
+.btn.ghost{background:transparent;border:1px solid var(--input);color:var(--foreground)}
+.tag{height:20px;display:inline-flex;align-items:center;padding:0 8px;border-radius:6px;font-size:10px;
+  font-weight:500;background:var(--secondary);color:var(--secondary-foreground);white-space:nowrap}
+.tag.perm{background:rgba(245,158,11,.16);color:#fbbf24}
+.empty{padding:32px 16px;text-align:center}
+.empty .e1{font-size:14px;color:var(--muted-foreground)}
+.empty .e2{font-size:12px;color:var(--muted-foreground);margin-top:4px}
+.grouphead{display:flex;align-items:center;gap:8px;padding:8px 16px;background:#1c1c1c;
+  border-top:1px solid var(--border);font-size:12px;color:var(--muted-foreground)}
+.grouphead:first-child{border-top:0}
+.grouphead b{color:var(--foreground);font-weight:500}
+
+/* answer-in-place */
+.ans{border-top:1px solid var(--border);padding:16px 16px 16px 60px;background:#1c1c1c}
+.qctx{font-size:12.5px;color:var(--muted-foreground);border-left:2px solid var(--border);padding-left:12px;
+  margin-bottom:14px;white-space:pre-line;line-height:1.6}
+.qlabel{font-size:13px;font-weight:500;color:var(--foreground);margin-bottom:8px}
+.opts{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.opt{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border:1px solid var(--border);
+  border-radius:6px;font-size:12.5px;color:var(--muted-foreground);background:var(--background)}
+.opt.sel{border-color:var(--primary);color:var(--foreground);background:rgba(99,91,255,.07)}
+.radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted-foreground);flex:none;margin-top:2px}
+.opt.sel .radio{border-color:var(--primary);box-shadow:inset 0 0 0 3px var(--primary)}
+.acts{display:flex;align-items:center;gap:8px}
+.hint{font-size:11.5px;color:var(--muted-foreground);margin-left:auto}
+</style>
+</head>
+<body><div class="deck">
+<header class="masthead">
+  <h1>Inbox — drawn on Kandev's own shell</h1>
+  <p>Revision 4. The previous revisions got the colour tokens exactly right and the chrome
+  around them wrong: the sidebar, the tabs, the rows and the badges were invented. This pass
+  redraws every frame from the shipped components, and applies your two answers — the badge
+  and the list both read the <strong>clarification-bundle</strong> path, and permission rows
+  appear in the history tab, labelled.</p>
+  <p>Only colour Kandev already paints appears below. Everything in grey is commentary.</p>
+  <div class="meta">
+    <span><b>repo</b> 76ab36270</span>
+    <span><b>data</b> 2026-09-12 01:06 UTC, mode=ro</span>
+    <span><b>reference</b> your screenshot, 01:11 UTC</span>
+    <span><b>scope</b> workspace Kandev</span>
+  </div>
+</header>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">01</span><h2>The destination, on the real sidebar</h2></div>
+  <p class="fnote">The nav row exists already — <code>app-sidebar-primary-nav.tsx:41-49</code> renders
+  <code>IconInbox</code> with <code>badge={inboxCount}</code>, wrapped in <code>{inOffice &amp;&amp; …}</code>.
+  Kanban never sees it. Three details the earlier revisions drew wrong, each fixed here:</p>
+  <p class="fnote"><strong>The active row is a 3px left bar, not a filled block.</strong>
+  <code>app-sidebar-constants.ts</code> says why, in the file: <em>"a saturated fill reads as garish
+  against the brand theme."</em> <strong>The badge is gated on <code>badge &gt; 0</code></strong> — so with
+  Kandev at zero answerable questions, no badge renders at all, and the "0" pills I drew beside other
+  workspaces cannot exist in that component. <strong>And the sections carry their count only while shut</strong>
+  (<code>collapsedSummary</code>) — that is the <code>Automations 4</code> in your screenshot.</p>
+  <div class="fbody">
+    <div class="shell">
+      <div class="chrome">
+        <div class="chrome-l">
+          <span class="brand">Kandev</span><span class="slash">/</span>
+          <button class="wspick"><span>Kandev</span><svg class="i14 dim" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></button>
+          <svg class="i18 dim" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M9 4v16"/></svg>
+        </div>
+        <div class="chrome-r"><span class="ptitle">Inbox</span>
+          <svg class="i18 dim" viewBox="0 0 24 24"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></svg>
+        </div>
+      </div>
+      <div class="app">
+        <aside class="sb">
+          <div class="sbnav">
+            <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M10 21v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6"/></svg><span class="lbl">Home</span></div>
+            <div class="nav on"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></svg><span class="lbl">Inbox</span></div>
+            <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M9 12h6"/><path d="M12 9v6"/></svg><span class="lbl">New Task</span>
+              <span class="trail"><svg class="i14" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M8 9l3 3l-3 3"/></svg>
+              <svg class="i14" viewBox="0 0 24 24"><path d="M3 20l1.3 -3.9a9 8 0 1 1 3.4 2.9l-4.7 1"/></svg></span></div>
+            <div class="sect"><span class="slabel">Automations</span><span class="ssum">4</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+            <div class="sect"><span class="slabel">Canvases</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+            <div class="sect"><span class="slabel">Integrations</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+            <div class="sect"><span class="slabel">Tasks</span><span class="sp"></span><span class="sact">All tasks <svg class="i14" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></span><span class="chev open"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+            <div class="repo"><span>kdlbs/kandev</span><span class="rc">189</span></div>
+          </div>
+          <div class="sbfoot">
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06 .06a2 2 0 0 1 -2.83 2.83l-.06 -.06a1.65 1.65 0 0 0 -1.82 -.33a1.65 1.65 0 0 0 -1 1.51v.17a2 2 0 0 1 -4 0v-.09a1.65 1.65 0 0 0 -1.08 -1.51a1.65 1.65 0 0 0 -1.82 .33l-.06 .06a2 2 0 1 1 -2.83 -2.83l.06 -.06a1.65 1.65 0 0 0 .33 -1.82a1.65 1.65 0 0 0 -1.51 -1h-.17a2 2 0 0 1 0 -4h.09a1.65 1.65 0 0 0 1.51 -1.08a1.65 1.65 0 0 0 -.33 -1.82l-.06 -.06a2 2 0 1 1 2.83 -2.83l.06 .06a1.65 1.65 0 0 0 1.82 .33h.08a1.65 1.65 0 0 0 1 -1.51v-.17a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51a1.65 1.65 0 0 0 1.82 -.33l.06 -.06a2 2 0 1 1 2.83 2.83l-.06 .06a1.65 1.65 0 0 0 -.33 1.82v.08a1.65 1.65 0 0 0 1.51 1h.17a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0 -1.51 1z"/></svg>
+            <svg class="i" viewBox="0 0 24 24"><path d="M3 20l0 -6"/><path d="M9 20l0 -10"/><path d="M15 20l0 -4"/><path d="M21 20l0 -14"/></svg>
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M12 12l4 -3"/></svg>
+            <svg class="i" viewBox="0 0 24 24"><path d="M6 4v5a4 4 0 0 0 8 0v-5"/><path d="M10 13v3a4 4 0 0 0 8 0v-2"/><path d="M18 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/></svg>
+            <span class="dotmark"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l1.5 4.5l4.5 1.5l-4.5 1.5l-1.5 4.5l-1.5 -4.5l-4.5 -1.5l4.5 -1.5z"/></svg></span>
+            <svg class="i" viewBox="0 0 24 24"><path d="M12 12m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4l1.4 -1.4M17 7l1.4 -1.4"/></svg>
+          </div>
+        </aside>
+        <main class="mn"><div class="page">
+          <div class="toolbar">
+            <div class="tabs">
+              <div class="tab on">Needs you</div>
+              <div class="tab">Asked, unanswered <span class="cnt">115</span></div>
+              <div class="tab">Failed <span class="cnt">17</span></div>
+            </div>
+            <div class="srch"><svg viewBox="0 0 24 24"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></svg><input placeholder="Search" disabled></div>
+          </div>
+          <div class="list"><div class="empty">
+            <p class="e1">Nothing is waiting on you in Kandev.</p>
+            <p class="e2">115 questions were asked here and never answered. The agents that asked have moved on, so they sit read-only in <b>Asked, unanswered</b>.</p>
+          </div></div>
+        </div></main>
+      </div>
+    </div>
+  </div>
+  <p class="callout">This is the honest first frame: measured at 01:06 UTC, the Kandev workspace has
+  <b>0</b> answerable questions, so the Inbox opens empty and the sidebar badge does not render.
+  The row design is in frame 02, drawn on the one real answerable question in the instance.</p>
+</section>
+<section class="frame">
+  <div class="fhead"><span class="fnum">02</span><h2>The row, and answering without leaving</h2></div>
+  <p class="fnote">Rebuilt on the shipped row: <code>inbox-item-row.tsx</code> — flat rows divided inside one
+  bordered container, a 32px <code>bg-muted</code> icon chip, title, description, and <code>timeAgo</code> as
+  plain muted text. Actions are <code>Button size="sm"</code> on the right. Gone: the per-row card border, the
+  indigo ring, the red age chip, and the <span class="mono">→</span> on the link.</p>
+  <p class="fnote"><strong>The icon carries the type, in the hue the board already uses.</strong>
+  <code>lib/ui/state-icons.ts</code> assigns yellow + <code>IconMessageQuestion</code> to
+  <code>WAITING_FOR_INPUT</code> and amber + <code>IconShieldQuestion</code> to a pending permission —
+  the same marks on the kanban card. My earlier draft spent amber on a tab count, which already means
+  "over WIP limit" in <code>StepCount</code>, and red on an age chip, where red already means failed.</p>
+  <div class="fbody">
+    <div class="shell"><div class="chrome">
+      <div class="chrome-l"><span class="brand">Kandev</span><span class="slash">/</span>
+        <button class="wspick"><span>Kegmil V2</span><svg class="i14 dim" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></button></div>
+      <div class="chrome-r"><span class="ptitle">Inbox</span></div></div>
+    <div class="app" style="min-height:0"><aside class="sb" style="padding-top:8px"><div class="sbnav">
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M10 21v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6"/></svg><span class="lbl">Home</span></div>
+      <div class="nav on"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></svg><span class="lbl">Inbox</span><span class="nbadge">1</span></div>
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M9 12h6"/><path d="M12 9v6"/></svg><span class="lbl">New Task</span></div>
+      <div class="sect"><span class="slabel">Automations</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+      <div class="sect"><span class="slabel">Tasks</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+    </div></aside>
+    <main class="mn"><div class="page">
+      <div class="toolbar"><div class="tabs">
+        <div class="tab on">Needs you <span class="cnt">1</span></div>
+        <div class="tab">Asked, unanswered</div>
+      </div></div>
+      <div class="list">
+        <div class="r">
+          <div class="ric wait"><svg class="i" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h4"/><path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z"/></svg></div>
+          <div class="rm">
+            <p class="rt">Pick the reply archetype before the #39 hand-off draft can be written</p>
+            <p class="rd">[FE] #39 — Cross-surface MA+WA pilot hand-off</p>
+            <p class="rtime">2 questions, asked 8 days ago</p>
+          </div>
+          <svg class="i dim" viewBox="0 0 24 24" style="transform:rotate(90deg)"><path d="M9 6l6 6l-6 6"/></svg>
+        </div>
+        <div class="ans">
+          <div class="qctx">The draft needs one decision before I can write it: which archetype the reply follows.
+I have the thread, the pilot scope and the two prior hand-offs. What I do not have is your call on tone.</div>
+          <p class="qlabel">Which reply archetype should the hand-off follow?</p>
+          <div class="opts">
+            <div class="opt sel"><span class="radio"></span><span><b style="color:var(--foreground);font-weight:500">Status hand-off:</b> what shipped, what is open, who owns each thread</span></div>
+            <div class="opt"><span class="radio"></span><span><b style="color:var(--foreground);font-weight:500">Decision request:</b> lead with the two open calls, evidence underneath</span></div>
+            <div class="opt"><span class="radio"></span><span><b style="color:var(--foreground);font-weight:500">Narrative:</b> walk the pilot chronologically, decisions in place</span></div>
+          </div>
+          <div class="acts">
+            <button class="btn">Answer and resume</button>
+            <button class="btn ghost">Open task</button>
+            <button class="btn ghost">Snooze 1 day</button>
+            <span class="hint">Resumes session e154c20c in place</span>
+          </div>
+        </div>
+      </div>
+    </div></main></div></div>
+  </div>
+  <p class="callout"><b>Answer and resume</b> is the row that earns the feature. It mounts
+  <code>ClarificationPanelSection</code> unchanged — that component takes
+  <code>{pending, messages, onResolved}</code> and reads no task-chat context, so the Inbox can render the
+  shipped answer UI rather than a copy of it. Display-only is the version that fails: you would still be
+  jumping around, just from a tidier list.</p>
+  <p class="callout">This row lives in <b>Kegmil V2</b>, not Kandev — it is the only answerable question in
+  the whole instance, asked 2026-09-03 04:54 UTC. It is drawn here so the row design is visible on real
+  content; on the Kandev board this tab is empty today.</p>
+</section>
+<section class="frame">
+  <div class="fhead"><span class="fnum">03</span><h2>Asked, unanswered — now with permissions, labelled</h2></div>
+  <p class="fnote">Your answer applied: permission requests appear here, read-only, with a label that says
+  what they are. On the Kandev board that is <strong>109 clarification rows across 25 live tasks</strong>
+  plus <strong>6 permission rows</strong> carrying no terminal status — 115 in total. Every one sits on a
+  superseded turn, so nothing here is answerable; the tab has no write path at all.</p>
+  <p class="fnote"><strong>85 of the 109 are parked in a step where nothing runs</strong> — 70 in
+  <code>PR Review</code>, 15 in <code>PR Fixup</code>, whose own prompt says "NOTHING RUNS HERE." An
+  invisible question on a parked card with no agent to re-raise it. Grouping by task rather than by row
+  is what keeps one stuck task from filling the screen.</p>
+  <div class="fbody">
+    <div class="shell"><div class="chrome">
+      <div class="chrome-l"><span class="brand">Kandev</span><span class="slash">/</span>
+        <button class="wspick"><span>Kandev</span><svg class="i14 dim" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></button></div>
+      <div class="chrome-r"><span class="ptitle">Inbox</span></div></div>
+    <div class="app" style="min-height:0"><aside class="sb" style="padding-top:8px"><div class="sbnav">
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M10 21v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6"/></svg><span class="lbl">Home</span></div>
+      <div class="nav on"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></svg><span class="lbl">Inbox</span></div>
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M9 12h6"/><path d="M12 9v6"/></svg><span class="lbl">New Task</span></div>
+      <div class="sect"><span class="slabel">Tasks</span><span class="sp"></span><span class="chev"><svg class="i14" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></svg></span></div>
+    </div></aside>
+    <main class="mn"><div class="page">
+      <div class="toolbar"><div class="tabs">
+        <div class="tab">Needs you</div>
+        <div class="tab on">Asked, unanswered <span class="cnt">115</span></div>
+        <div class="tab">Failed <span class="cnt">17</span></div>
+      </div>
+      <div class="srch"><svg viewBox="0 0 24 24"><path d="M10 10m-7 0a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></svg><input placeholder="Search" disabled></div></div>
+      <div class="list">
+        <div class="grouphead"><b>Wakeup-gate transient failure retries</b> &nbsp;9 questions, parked in PR Review, oldest 16 days ago</div>
+        <div class="r">
+          <div class="ric wait"><svg class="i" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h4"/><path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z"/></svg></div>
+          <div class="rm"><p class="rt">Should the retry budget be per-run or per-workspace?</p>
+            <p class="rtime">asked 16 days ago, superseded by a later turn</p></div>
+          <button class="btn ghost">Open task</button>
+        </div>
+        <div class="r">
+          <div class="ric perm"><svg class="i" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/><path d="M12 9v3"/><path d="M12 15h.01"/></svg></div>
+          <div class="rm"><p class="rt">Run <span class="mono">git push --no-verify</span> to bypass the secret-scanner hook</p>
+            <p class="rtime">asked 16 days ago, and the push has since landed</p></div>
+          <span class="tag perm">Permission</span>
+          <button class="btn ghost">Open task</button>
+        </div>
+        <div class="grouphead"><b>Chunk run-id batches in workspace sweep</b> &nbsp;4 questions, parked in PR Fixup, oldest 10 days ago</div>
+        <div class="r">
+          <div class="ric wait"><svg class="i" viewBox="0 0 24 24"><path d="M8 9h8"/><path d="M8 13h4"/><path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z"/></svg></div>
+          <div class="rm"><p class="rt">Chunk size 100 or 500? The sweep holds the lock for the whole batch.</p>
+            <p class="rtime">asked 10 days ago, superseded by a later turn</p></div>
+          <button class="btn ghost">Open task</button>
+        </div>
+      </div>
+    </div></main></div></div>
+  </div>
+  <p class="callout">Two things this tab must never do. It must not feed the badge — none of it is
+  answerable, and a badge you cannot drive to zero is a badge you stop reading. And it must not offer
+  <b>Re-ask</b>, which you cut: five of the nine push-blocked questions measured on 09-11 had already been
+  settled by events, so re-asking restarts an agent on a question that answered itself. The honest
+  consequence is that these 115 have no exit in v1. They had none before either — the Inbox makes them
+  visible, it does not clear them.</p>
+</section>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">04</span><h2>Failed — present, and deliberately off the badge</h2></div>
+  <p class="fnote"><strong>Correcting the reason I gave you.</strong> Revision 2 kept Failed off the badge
+  because "16 failed tasks, newest 6 days old — nothing urgent." That reason has expired: measured now,
+  <strong>17</strong> live Kandev tasks have a failed primary session, the newest <strong>9.6 hours</strong>
+  ago, and <strong>3</strong> inside 24 hours. The exclusion still stands, on a reason that does not expire:
+  a failed task is triage, not a decision you owe. The badge counts questions only.</p>
+  <div class="fbody">
+    <div class="shell"><div class="chrome">
+      <div class="chrome-l"><span class="brand">Kandev</span><span class="slash">/</span>
+        <button class="wspick"><span>Kandev</span><svg class="i14 dim" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></button></div>
+      <div class="chrome-r"><span class="ptitle">Inbox</span></div></div>
+    <div class="app" style="min-height:0"><aside class="sb" style="padding-top:8px"><div class="sbnav">
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M10 21v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6"/></svg><span class="lbl">Home</span></div>
+      <div class="nav on"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></svg><span class="lbl">Inbox</span></div>
+      <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M9 12h6"/><path d="M12 9v6"/></svg><span class="lbl">New Task</span></div>
+    </div></aside>
+    <main class="mn"><div class="page">
+      <div class="toolbar"><div class="tabs">
+        <div class="tab">Needs you</div><div class="tab">Asked, unanswered <span class="cnt">115</span></div>
+        <div class="tab on">Failed <span class="cnt">17</span></div></div></div>
+      <div class="list">
+        <div class="r"><div class="ric err"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></svg></div>
+          <div class="rm"><p class="rt">Lifecycle sweep: GetTask failure path</p>
+            <p class="rd">Orchestrator</p>
+            <p class="rtime">failed 10 hours ago</p></div>
+          <button class="btn ghost">Open task</button></div>
+        <div class="r"><div class="ric err"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></svg></div>
+          <div class="rm"><p class="rt">Guard MCP_TOOL_TIMEOUT override</p>
+            <p class="rd">Agent runtime &amp; ACP</p>
+            <p class="rtime">failed 19 hours ago</p></div>
+          <button class="btn ghost">Open task</button></div>
+        <div class="r"><div class="ric err"><svg class="i" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></svg></div>
+          <div class="rm"><p class="rt">Restore legacy dynamic routes sweep</p>
+            <p class="rd">Dynamic Agent</p>
+            <p class="rtime">failed 23 hours ago</p></div>
+          <button class="btn ghost">Open task</button></div>
+      </div>
+    </div></main></div></div>
+  </div>
+</section>
+<section class="frame pivot">
+  <div class="fhead"><span class="fnum">05</span><h2>The empty state is the product</h2></div>
+  <p class="fnote">Measured 25 hours apart and again this morning: the Kandev workspace has <strong>0</strong>
+  answerable questions. This is not an edge case to sketch and move past — on your board it is the screen
+  you open most days. It gets the most design attention of anything in this deck.</p>
+  <p class="fnote">One rule governs all three variants: <strong>an empty inbox must name what it is not
+  counting.</strong> "You're all caught up" while 115 questions sit invisible is how this feature loses your
+  trust in week one, and it is the same failure as the 351-row version — just quieter.</p>
+  <div class="fbody">
+    <div style="display:grid;grid-template-columns:1fr;gap:14px">
+      <div class="shell"><div class="chrome"><div class="chrome-l"><span class="brand">Kandev</span><span class="slash">/</span><button class="wspick"><span>Kandev</span><svg class="i14 dim" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></svg></button></div><div class="chrome-r"><span class="ptitle">Inbox</span></div></div>
+        <div class="app" style="min-height:0"><aside class="sb" style="padding-top:8px"><div class="sbnav">
+          <div class="nav"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l-2 0l9 -9l9 9l-2 0"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7"/><path d="M10 21v-6a2 2 0 0 1 2 -2h0a2 2 0 0 1 2 2v6"/></svg><span class="lbl">Home</span></div>
+          <div class="nav on"><svg class="i" viewBox="0 0 24 24"><path d="M4 4m0 2a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></svg><span class="lbl">Inbox</span></div>
+        </div></aside>
+        <main class="mn"><div class="page">
+          <div class="toolbar"><div class="tabs"><div class="tab on">Needs you</div><div class="tab">Asked, unanswered <span class="cnt">115</span></div><div class="tab">Failed <span class="cnt">17</span></div></div></div>
+          <div class="list"><div class="empty">
+            <p class="e1">Nothing is waiting on you in Kandev.</p>
+            <p class="e2">115 questions were asked here and never answered, and 17 tasks failed. Neither needs a decision from you, so both sit in the other two tabs.</p>
+          </div></div>
+        </div></main></div></div>
+
+      <div class="cols">
+        <div>
+          <p class="fnote" style="padding-left:0;margin:0 0 8px;min-height:60px"><strong>Quiet here, busy next door.</strong>
+          The count comes from <code>inboxCountByWorkspaceId</code>, already a per-workspace map — a number,
+          never a row, so nothing crosses a permission boundary.</p>
+          <div class="shell"><div class="app" style="min-height:0"><main class="mn"><div class="page" style="padding:20px">
+            <div class="list"><div class="empty">
+              <p class="e1">Nothing is waiting on you in Kandev.</p>
+              <p class="e2">1 question is waiting in <b>Kegmil V2</b>.</p>
+              <p style="margin-top:12px"><button class="btn ghost">Switch to Kegmil V2</button></p>
+            </div></div>
+          </div></main></div></div>
+        </div>
+        <div>
+          <p class="fnote" style="padding-left:0;margin:0 0 8px;min-height:60px"><strong>Empty because you filtered it.</strong>
+          A different sentence, because it is a different situation and the fix is one click.</p>
+          <div class="shell"><div class="app" style="min-height:0"><main class="mn"><div class="page" style="padding:20px">
+            <div class="list"><div class="empty">
+              <p class="e1">No questions match "rebase".</p>
+              <p class="e2">115 questions are in this tab.</p>
+              <p style="margin-top:12px"><button class="btn ghost">Clear search</button></p>
+            </div></div>
+          </div></main></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="callout">Copy notes, since the words are the design here. No apology and no exclamation mark —
+  an empty queue is a normal state, not a celebration. The number is the subject of the second line, not a
+  footnote. And the verb on every button says exactly what happens: <b>Switch to Kegmil V2</b>, not
+  <b>View</b>.</p>
+</section>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">06</span><h2>An entry gate, not a filter over a noisy state</h2></div>
+  <p class="fnote">The issue proposed showing every task that is not Running. Same database, same instant,
+  Kandev workspace, 2026-09-12 01:06 UTC:</p>
+  <div class="fbody">
+    <table class="spec">
+      <tr><th>What the view would show</th><th style="width:120px">Rows</th><th>Of which you can act on</th></tr>
+      <tr><td><b>"Not Running"</b> — sessions in <code>WAITING_FOR_INPUT</code> on live tasks</td><td class="num">275</td><td class="num">0</td></tr>
+      <tr><td><b>Every pending question row</b>, any turn</td><td class="num">109</td><td class="num">0</td></tr>
+      <tr><td><b>Answerable now</b> — the shipped clarification-bundle path</td><td class="num">0</td><td class="num">0</td></tr>
+      <tr><td>Same, measured across the whole instance</td><td class="num">1</td><td class="num">1</td></tr>
+    </table>
+    <p class="callout" style="margin-top:22px"><code>WAITING_FOR_INPUT</code> on this board mostly means
+    "the agent finished its turn and is idle", not "a human is blocking it". A 275-row inbox at a 100%
+    false-positive rate trains you to stop opening it — the same failure as an empty one that lies.
+    Paperclip's rule is the fix, and it is an entry rule rather than a filter: <b>a row cannot enter unless
+    it carries something concrete you can do</b>. Rows 1 and 2 above are exactly the rows that rule
+    excludes.</p>
+  </div>
+</section>
+<section class="frame">
+  <div class="fhead"><span class="fnum">07</span><h2>Which tab control, and why it is not the default one</h2></div>
+  <p class="fnote">A design call I can make from the shipped component rather than from taste.
+  <code>packages/ui/src/tabs.tsx</code> has two variants. The Office inbox uses <code>default</code>. On the
+  dark theme that variant's selected state resolves to the track colour it sits on:
+  <code>bg-muted</code> is <code>#2a2a2a</code>, and the active trigger paints
+  <code>dark:bg-input/30</code> over it — <code>--input</code> is also <code>#2a2a2a</code>, so 30% of
+  <code>#2a2a2a</code> on <code>#2a2a2a</code> is <code>#2a2a2a</code>. The active border is
+  <code>--input</code>, the same colour again. Selection is carried by the label's brightness alone.</p>
+  <div class="fbody">
+    <div class="cols">
+      <div><p class="fnote" style="padding-left:0;margin:0 0 10px"><strong>default</strong> — the shipped Office inbox</p>
+        <div class="shell"><div style="padding:24px;background:var(--background)">
+          <div style="display:inline-flex;align-items:center;height:32px;background:#2a2a2a;border-radius:8px;padding:3px;gap:0">
+            <span style="height:100%;display:inline-flex;align-items:center;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:500;color:#d4d4d4;background:rgba(42,42,42,.3);border:1px solid #2a2a2a">Needs you</span>
+            <span style="height:100%;display:inline-flex;align-items:center;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:500;color:#888888;border:1px solid transparent">Asked, unanswered</span>
+            <span style="height:100%;display:inline-flex;align-items:center;padding:2px 10px;border-radius:6px;font-size:12px;font-weight:500;color:#888888;border:1px solid transparent">Failed</span>
+          </div>
+          <p style="margin-top:14px;font-size:12px;color:#5a5a5a">A secondary count badge here would be
+          <span style="background:#2a2a2a;color:#d4d4d4;padding:0 6px;border-radius:6px;font-size:11px">17</span>
+          on a <span class="mono" style="background:none;border:0">#2a2a2a</span> track — invisible.</p>
+        </div></div>
+      </div>
+      <div><p class="fnote" style="padding-left:0;margin:0 0 10px"><strong>line</strong> — recommended</p>
+        <div class="shell"><div style="padding:24px;background:var(--background)">
+          <div class="tabs">
+            <div class="tab on">Needs you</div>
+            <div class="tab">Asked, unanswered <span class="cnt">115</span></div>
+            <div class="tab">Failed <span class="cnt">17</span></div>
+          </div>
+          <p style="margin-top:20px;font-size:12px;color:#5a5a5a">Transparent track, a 2px
+          <code style="background:none;border:0">after:bg-foreground</code> underline. Selection reads at a
+          glance, and the counts sit on <code style="background:none;border:0">--background</code> where a
+          secondary badge has contrast.</p>
+        </div></div>
+      </div>
+    </div>
+    <p class="callout">Both variants ship today, so this costs nothing to choose —
+    <code>&lt;TabsList variant="line"&gt;</code>. It also settles a smaller question: counts belong in the tab,
+    not in the page header, because the header is where a title would go and this page has no title. The
+    app's top bar owns that, as your screenshot shows with <b>Home</b>.</p>
+  </div>
+</section>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">08</span><h2>Beside Threads, on one shared signal</h2></div>
+  <p class="fnote">Your answer was "beside, shared selector", and the code makes that literal.
+  <code>threads-view-filter-registry.ts</code> already ships a <code>threadStatus</code> dimension whose
+  default value is <code>needs_action</code> and a <code>pendingAction</code> dimension defaulting to
+  <code>clarification</code>. What is missing is that the one built-in view ships <code>filters: []</code>
+  (<code>thread-view-builtins.ts</code>), so nobody ever sees the preset — and there is no badge and no
+  destination.</p>
+  <p class="fnote"><strong>The Inbox is a second consumer of <code>resolveThreadStatus</code>, not a second
+  classifier.</strong> That is the whole reason the two surfaces cannot drift: one function decides what
+  needs action, two surfaces render it.</p>
+  <div class="fbody">
+    <div class="shell"><div style="padding:26px;background:var(--background)">
+      <div style="display:grid;grid-template-columns:1fr 24px 1fr;align-items:center;gap:0">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:16px">
+          <p style="font-size:13px;font-weight:500;color:var(--foreground);margin-bottom:4px">Inbox</p>
+          <p style="font-size:12px;color:var(--muted-foreground)">Decisions you owe, one row each, answerable in place. Badge = this count.</p>
+        </div>
+        <div style="text-align:center;font-size:11px;color:#5a5a5a" class="mono">same<br>source</div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:16px">
+          <p style="font-size:13px;font-weight:500;color:var(--foreground);margin-bottom:4px">Threads</p>
+          <p style="font-size:12px;color:var(--muted-foreground)">Every conversation, filterable. A new built-in view carries <code style="background:none;border:0">threadStatus is needs_action</code>.</p>
+        </div>
+      </div>
+      <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:16px;text-align:center">
+        <p style="font-size:12px;color:var(--muted-foreground)">both read</p>
+        <p class="mono" style="margin-top:6px;font-size:12.5px;background:none;border:0;color:var(--foreground)">resolveThreadStatus() → clarification-bundle path</p>
+      </div>
+    </div></div>
+    <p class="callout"><b>Your read-path answer, applied.</b> The badge and the <b>Needs you</b> list both
+    come from the clarification-bundle path (<code>clarification_bundle_query.go:119</code>), which excludes
+    <code>lifecycle_only</code> turns. The other shipped resolver,
+    <code>pending_interactions.go:69</code>, does not exclude them, and the two disagree today on exactly
+    the row frame 02 draws — 1 bundle against 0. Binding the badge to one and the list to the other would
+    give you a badge reading 1 over an empty page. One path, both consumers.</p>
+  </div>
+</section>
+<section class="frame">
+  <div class="fhead"><span class="fnum">09</span><h2>What you reuse, what you build</h2></div>
+  <p class="fnote"><strong>Correcting myself again, and in the expensive direction.</strong> I told you this
+  was "a kanban route and a different count source, not a new component." The Office inbox shares the nav
+  <em>slot</em>, not the feature: its <code>InboxItem</code> has eight types — <code>approval</code>,
+  <code>budget_alert</code>, <code>agent_run_failed</code>, <code>task_review</code>,
+  <code>provider_degraded</code> and others — and <strong>none of them is a clarification</strong>. Its rows
+  come from <code>/api/v1/office/workspaces/{id}/inbox</code>. A kanban Inbox needs its own row model, read
+  path and count producer.</p>
+  <div class="fbody">
+    <table class="spec">
+      <tr><th style="width:42%">Piece</th><th style="width:22%">Status</th><th>Where</th></tr>
+      <tr><td><b>Sidebar nav row + badge</b></td><td>reuse unchanged</td><td><code>AppSidebarNavItem</code> — drop the <code>inOffice</code> gate</td></tr>
+      <tr><td><b>Answer UI</b></td><td>reuse unchanged</td><td><code>ClarificationPanelSection</code> — props only, no task-chat context</td></tr>
+      <tr><td><b>Page shell, list container, empty block</b></td><td>copy the pattern</td><td><code>inbox-page-client.tsx</code> — <code>p-6 space-y-4</code>, bordered divided list</td></tr>
+      <tr><td><b>Tabs</b></td><td>reuse, <code>variant="line"</code></td><td><code>packages/ui/src/tabs.tsx</code></td></tr>
+      <tr><td><b>Row icons and hues</b></td><td>reuse the board's vocabulary</td><td><code>lib/ui/state-icons.ts</code></td></tr>
+      <tr><td><b>needs-action classification</b></td><td>reuse</td><td><code>resolveThreadStatus</code> / <code>lib/utils/needs-action.ts</code></td></tr>
+      <tr><td><b>Row model + read path</b></td><td><b>build</b></td><td>new — the Office <code>InboxItem</code> has no clarification type</td></tr>
+      <tr><td><b>Count producer</b></td><td><b>build, carefully</b></td><td><code>inboxCountByWorkspaceId</code> has one writer today; a second on the same key collides</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">10</span><h2>The rules this mockup encodes</h2></div>
+  <p class="fnote">Lift these into the card as acceptance criteria; each one is a decision the drawings
+  already make.</p>
+  <div class="fbody">
+    <ol class="rules">
+      <li><b>Entry gate, not a state filter.</b> A row enters only if it carries an action you can take now.
+      "Not Running" is 275 rows at a 100% false-positive rate; the gate is 0.</li>
+      <li><b>The badge counts decisions you owe, and nothing else.</b> Never the queue size, never the
+      history tab, never failures. It must be drivable to zero, and <code>badge &gt; 0</code> already means a
+      zero renders nothing.</li>
+      <li><b>One read path.</b> Badge and list both read the clarification-bundle path. Two shipped
+      resolvers disagree today; pick one for both consumers.</li>
+      <li><b>Answering happens in the row.</b> A display-only inbox still makes you jump around, from a
+      tidier list. <b>Answer and resume</b> posts the answer and restarts the session in place.</li>
+      <li><b>An empty inbox names what it is not counting.</b> Never "all caught up" alone.</li>
+      <li><b>History is read-only.</b> No Re-ask: five of nine push-blocked questions had already settled
+      themselves. Permissions appear here, labelled, and never in the badge.</li>
+      <li><b>Dismiss and snooze are a per-user sidecar</b> and never mutate the queue — Paperclip's rule,
+      adopted verbatim.</li>
+      <li><b>An agent may only name itself as the owner of a row it creates.</b> 430 of 430 questions in the
+      last ten days were agent-authored and Kandev has no equivalent gate. Paperclip enforces this one
+      against its own agents — I had it returned to me as a <code>403</code> while trying to hand you a row.</li>
+      <li><b>Workspace-scoped.</b> Other workspaces contribute a count in the empty state and the switcher,
+      never a row.</li>
+      <li><b>Reuse the board's colour vocabulary.</b> Yellow is a question, amber is a permission, red is a
+      failure, emerald is running, violet is background work. The Inbox introduces no new hue.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="frame">
+  <div class="fhead"><span class="fnum">—</span><h2>What is still unverified</h2></div>
+  <p class="fnote">Three things, so nobody reads this deck as more settled than it is. <strong>The frames are
+  drawn from source, not from the running build</strong> — I had no browser to walk <code>:8817</code> with,
+  so the fidelity claims rest on the component files at <code>76ab36270</code> and on your screenshot, not on
+  a live comparison. <strong>Button and input metrics are approximated</strong> to within a pixel or two;
+  the sidebar, tabs, badge, row and list metrics are taken from the class strings verbatim.
+  <strong>And the numbers are 01:06 UTC</strong>, reused rather than re-measured — thirteen minutes on a
+  population that turns over in days would look like verification and would not be.</p>
+</section>
+
+<script>
+(function(){
+  var m = location.search.match(/only=(\d+)/);
+  if(!m) return;
+  var i = parseInt(m[1],10);
+  var frames = document.querySelectorAll('.frame');
+  document.querySelector('.masthead').style.display = (i===0?'block':'none');
+  frames.forEach(function(f,idx){ f.style.display = (i>0 && idx===i-1)?'block':'none'; });
+  var deck = document.querySelector('.deck');
+  deck.style.padding = '34px 36px 40px';
+  if(i>0){ var fr=frames[i-1]; fr.style.marginTop='0'; }
+})();
+</script>
+</div></body></html>

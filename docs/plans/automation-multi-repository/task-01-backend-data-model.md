@@ -5,14 +5,14 @@ status: pending
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/automations-settings.md"
+spec: "../../specs/office/requirements/automations-settings.md"
 ---
 
 # Task 01: Backend data model — `automation_repositories`
 
 ## Inputs
 
-- `docs/specs/office/automations-settings.md` — Data model, API surface,
+- `docs/specs/office/requirements/automations-settings.md` — Data model, API surface,
   Failure modes sections (multi-repository additions).
 - `docs/plans/automation-multi-repository/plan.md` — Backend section.
 - `apps/backend/internal/automation/models.go` — `Automation`,

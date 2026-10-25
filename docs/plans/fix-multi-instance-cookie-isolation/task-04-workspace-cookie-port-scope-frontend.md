@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/fix-multi-instance-cookie-isolation/spec.md"
+spec: "../../specs/auth/requirements/fix-multi-instance-cookie-isolation.md"
 ---
 
 # Task 04: Port-scope workspace cookies (frontend)

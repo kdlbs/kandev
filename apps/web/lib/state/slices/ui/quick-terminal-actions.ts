@@ -62,6 +62,14 @@ function findTerminalFallback(
   );
 }
 
+function cancelPendingConversationOpen(quickChat: QuickChatState): void {
+  const pending = quickChat.pendingOpen;
+  if (!pending) return;
+  quickChat.selectionRevisionByWorkspace[pending.workspaceId] =
+    (quickChat.selectionRevisionByWorkspace[pending.workspaceId] ?? 0) + 1;
+  quickChat.pendingOpen = null;
+}
+
 export function activateWorkspaceFallback(quickChat: QuickChatState, workspaceId?: string): void {
   if (!workspaceId) {
     quickChat.activeSessionId = null;
@@ -85,6 +93,11 @@ export function activateWorkspaceFallback(quickChat: QuickChatState, workspaceId
   quickChat.isOpen = false;
 }
 
+function invalidateWorkspaceSnapshot(quickChat: QuickChatState, workspaceId: string): void {
+  quickChat.syncRevisionByWorkspace[workspaceId] =
+    (quickChat.syncRevisionByWorkspace[workspaceId] ?? 0) + 1;
+}
+
 function createQuickTerminalDraft(quickChat: QuickChatState, workspaceId: string): string {
   const workspaceTerminals = quickChat.terminalTabs.filter(
     (tab) => tab.workspaceId === workspaceId,
@@ -98,6 +111,7 @@ function createQuickTerminalDraft(quickChat: QuickChatState, workspaceId: string
     status: "connecting",
   };
   quickChat.terminalTabs.push(tab);
+  invalidateWorkspaceSnapshot(quickChat, workspaceId);
   activateTerminalDraft(quickChat, tab);
   return tab.tabId;
 }
@@ -107,6 +121,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
     reuseOrCreateQuickTerminal: (workspaceId: string) => {
       let tabId = "";
       set((draft) => {
+        cancelPendingConversationOpen(draft.quickChat);
         const lastId = draft.quickChat.lastTerminalTabIdByWorkspace[workspaceId];
         const existing = findWorkspaceTerminal(draft.quickChat.terminalTabs, workspaceId, lastId);
         const fallback =
@@ -119,6 +134,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
     createQuickTerminal: (workspaceId: string) => {
       let tabId = "";
       set((draft) => {
+        cancelPendingConversationOpen(draft.quickChat);
         tabId = createQuickTerminalDraft(draft.quickChat, workspaceId);
       });
       return tabId;
@@ -127,6 +143,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
       set((draft) => {
         const tab = draft.quickChat.terminalTabs.find((item) => item.tabId === tabId);
         if (!tab) return;
+        invalidateWorkspaceSnapshot(draft.quickChat, tab.workspaceId);
         if ("sequence" in update && update.sequence !== undefined) tab.sequence = update.sequence;
         if ("sessionId" in update) tab.sessionId = update.sessionId ?? null;
         if (update.status) tab.status = update.status;
@@ -143,6 +160,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
       set((draft) => {
         const tab = draft.quickChat.terminalTabs.find((item) => item.tabId === tabId);
         if (!tab || tab.workspaceId !== workspaceId) return;
+        cancelPendingConversationOpen(draft.quickChat);
         activateTerminalDraft(draft.quickChat, tab);
       }),
     removeQuickTerminal: (tabId: string) =>
@@ -151,6 +169,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
         if (index === -1) return;
         const closing = draft.quickChat.terminalTabs[index];
         draft.quickChat.terminalTabs.splice(index, 1);
+        invalidateWorkspaceSnapshot(draft.quickChat, closing.workspaceId);
         const replacement = findTerminalFallback(
           draft.quickChat.terminalTabs,
           closing.workspaceId,

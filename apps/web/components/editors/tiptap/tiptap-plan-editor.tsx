@@ -27,12 +27,15 @@ import {
 import { createPlanSlashExtension, type PlanSlashCommand } from "./plan-slash-commands";
 import { PlanSearchExtension } from "./search-highlight-extension";
 import { PlanSlashMenu } from "./plan-slash-menu";
-import { PlanBubbleMenu } from "./plan-bubble-menu";
+import { PLAN_FORMATTING_TOOLBAR_HEIGHT_PX, PlanBubbleMenu } from "./plan-bubble-menu";
 import { PlanDragHandle } from "./plan-drag-handle";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
 import { DOMParser as PmDOMParser } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
+import { cn } from "@/lib/utils";
 
 export type { CommentForEditor };
 
@@ -43,19 +46,47 @@ export type TextSelection = {
   position: { x: number; y: number };
 };
 
+export function resolvePlanEditorPadding({
+  visible,
+  keyboardOpen,
+  keyboardBottomOffset,
+  mobileBottomOffset,
+}: {
+  visible: boolean;
+  keyboardOpen: boolean;
+  keyboardBottomOffset: number;
+  mobileBottomOffset?: string;
+}): string {
+  if (!visible) return "";
+  if (!keyboardOpen) return `${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px`;
+
+  const navigationOffset = mobileBottomOffset ? ` - ${mobileBottomOffset}` : "";
+  return `max(${PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px, calc(${keyboardBottomOffset + PLAN_FORMATTING_TOOLBAR_HEIGHT_PX}px${navigationOffset} - env(safe-area-inset-bottom, 0px)))`;
+}
+
 type TipTapPlanEditorProps = {
   taskId: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  readOnly?: boolean;
   onSelectionChange?: (selection: TextSelection | null) => void;
   comments?: CommentForEditor[];
   onCommentClick?: (id: string, position: { x: number; y: number }) => void;
   onCommentDeleted?: (ids: string[]) => void;
   onEditorReady?: (editor: Editor) => void;
+  /** Internal mobile layout offset; not part of the plugin editor contract. */
+  mobileBottomOffset?: string;
 };
 
 const lowlight = createLowlight(common);
+
+function serializePlanMarkdown(editor: Editor): string {
+  const { markdown } = editor.storage as unknown as {
+    markdown?: { getMarkdown?: () => string };
+  };
+  return markdown?.getMarkdown?.() ?? editor.getText();
+}
 
 /** Regex matching common markdown syntax signals. */
 const MD_SIGNALS = /^#{1,6}\s|^\s*[-*+]\s|^\s*\d+\.\s|```|\*\*|__|\[.+\]\(/m;
@@ -102,6 +133,7 @@ function buildEditorExtensions(
   slashExtension: ReturnType<typeof createPlanSlashExtension>,
   onOrphanedComments: (ids: string[]) => void,
   taskId: string | null,
+  tableResizeEnabled: boolean,
 ) {
   return [
     StarterKit.configure({ codeBlock: false }),
@@ -113,7 +145,13 @@ function buildEditorExtensions(
     Underline,
     TaskList,
     TaskItem.configure({ nested: true }),
-    Table.configure({ resizable: false }),
+    Table.configure({
+      resizable: tableResizeEnabled,
+      renderWrapper: true,
+      handleWidth: 10,
+      cellMinWidth: MIN_MARKDOWN_COLUMN_WIDTH,
+      lastColumnResizable: false,
+    }),
     TableRow,
     TableCell,
     TableHeader,
@@ -295,6 +333,8 @@ type PlanEditorState = {
 /** Hook encapsulating TipTap editor setup, extensions, and lifecycle effects. */
 function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const { t } = useTranslation();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const tableResizeEnabled = isFinePointer && !isMobile;
   const {
     value,
     onChange,
@@ -312,6 +352,8 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const onCommentClickRef = useRef(onCommentClick);
   const onCommentDeletedRef = useRef(onCommentDeleted);
   const onEditorReadyRef = useRef(onEditorReady);
+  const serializedMarkdownRef = useRef<string | null>(null);
+  const reportedProjectionOrphansRef = useRef(new Set<string>());
   const [isReady, setIsReady] = useState(false);
 
   const slash = useSlashMenu();
@@ -321,49 +363,72 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
-  useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange;
-  }, [onSelectionChange]);
-  useEffect(() => {
     onCommentClickRef.current = onCommentClick;
-  }, [onCommentClick]);
-  useEffect(() => {
     onCommentDeletedRef.current = onCommentDeleted;
-  }, [onCommentDeleted]);
-  useEffect(() => {
     onEditorReadyRef.current = onEditorReady;
-  }, [onEditorReady]);
+  }, [onChange, onCommentClick, onCommentDeleted, onEditorReady, onSelectionChange]);
 
   const stableOrphanHandler = useCallback((ids: string[]) => {
-    onCommentDeletedRef.current?.(ids);
+    const fresh = ids.filter((id) => !reportedProjectionOrphansRef.current.has(id));
+    if (fresh.length === 0) return;
+    for (const id of fresh) reportedProjectionOrphansRef.current.add(id);
+    onCommentDeletedRef.current?.(fresh);
+  }, []);
+  const clearProjectedOrphans = useCallback((ids: string[]) => {
+    for (const id of ids) reportedProjectionOrphansRef.current.delete(id);
   }, []);
 
   /* eslint-disable react-hooks/refs -- stableOrphanHandler reads ref for deferred access, not during render */
   const extensions = useMemo(
-    () => buildEditorExtensions(placeholder, slash.extension, stableOrphanHandler, props.taskId),
-    [placeholder, props.taskId, slash.extension, stableOrphanHandler],
+    () =>
+      buildEditorExtensions(
+        placeholder,
+        slash.extension,
+        stableOrphanHandler,
+        props.taskId,
+        tableResizeEnabled,
+      ),
+    [placeholder, props.taskId, slash.extension, stableOrphanHandler, tableResizeEnabled],
   );
   /* eslint-enable react-hooks/refs */
 
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions,
-    content: value,
-    editorProps: {
-      attributes: { class: "tiptap-plan-editor", spellcheck: "false" },
-      handlePaste: pasteHandler,
+  const editor = useEditor(
+    {
+      immediatelyRender: false,
+      editable: !props.readOnly,
+      extensions,
+      content: value,
+      editorProps: {
+        attributes: { class: "tiptap-plan-editor", spellcheck: "false" },
+        handlePaste: pasteHandler,
+      },
+      onUpdate: ({ editor: ed }) => {
+        const markdown = serializePlanMarkdown(ed);
+        if (serializedMarkdownRef.current === null) {
+          serializedMarkdownRef.current = markdown;
+          return;
+        }
+        if (markdown === serializedMarkdownRef.current) return;
+        serializedMarkdownRef.current = markdown;
+        onChangeRef.current(markdown);
+      },
+      onBeforeCreate: () => {
+        serializedMarkdownRef.current = null;
+        setIsReady(false);
+      },
+      onCreate: ({ editor: ed }) => {
+        serializedMarkdownRef.current = serializePlanMarkdown(ed);
+        setIsReady(true);
+        onEditorReadyRef.current?.(ed);
+      },
     },
-    onUpdate: ({ editor: ed }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const md = (ed.storage as any).markdown?.getMarkdown?.() as string | undefined;
-      onChangeRef.current(md ?? ed.getText());
-    },
-    onCreate: ({ editor: ed }) => {
-      setIsReady(true);
-      onEditorReadyRef.current?.(ed);
-    },
-  });
+    [tableResizeEnabled],
+  );
+
+  useLayoutEffect(() => {
+    editor?.setEditable(!props.readOnly, false);
+  }, [editor, props.readOnly]);
 
   useEffect(() => {
     editorRef.current = editor;
@@ -372,11 +437,14 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   useEffect(() => {
     if (!editor || !isReady) return;
     try {
-      rehydrateCommentMarks(editor, comments);
+      // A backend comment can temporarily be absent from an unsaved local
+      // plan projection. Rehydration must never interpret that as deletion;
+      // only an actual editor mark removal invokes stableOrphanHandler.
+      rehydrateCommentMarks(editor, comments, undefined, clearProjectedOrphans);
     } catch {
       /* editor may be transitional */
     }
-  }, [comments, editor, isReady]);
+  }, [clearProjectedOrphans, comments, editor, isReady, stableOrphanHandler]);
 
   return { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash };
 }
@@ -400,23 +468,59 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
     [onSelectionChangeRef],
   );
 
+  const handleMobileVisibilityChange = useCallback(
+    (visible: boolean, keyboardBottomOffset: number, keyboardOpen: boolean) => {
+      // Direct style mutation avoids re-rendering the ProseMirror subtree when the dock toggles.
+      const paddingBottom = resolvePlanEditorPadding({
+        visible,
+        keyboardOpen,
+        keyboardBottomOffset,
+        mobileBottomOffset: props.mobileBottomOffset,
+      });
+      const scrollContainer = wrapperRef.current?.querySelector<HTMLElement>(
+        '[data-testid="plan-editor-scroll-container"]',
+      );
+      if (!scrollContainer) return;
+      const editorContent = scrollContainer.querySelector<HTMLElement>(".ProseMirror");
+      const clearanceTarget = editorContent ?? scrollContainer;
+      if (!paddingBottom) {
+        clearanceTarget.style.removeProperty("--plan-toolbar-clearance");
+        return;
+      }
+      clearanceTarget.style.setProperty("--plan-toolbar-clearance", paddingBottom);
+    },
+    [props.mobileBottomOffset],
+  );
+
   return (
     <div
       ref={wrapperRef}
       className={`tiptap-plan-wrapper markdown-body h-full relative ${resolvedTheme === "dark" ? "dark" : ""}`}
     >
-      <EditorContent editor={editor} className="h-full" />
-      {editor && isReady && (
+      <EditorContent
+        editor={editor}
+        data-testid="plan-editor-scroll-container"
+        className={cn("h-full min-h-0 overflow-y-auto overscroll-contain")}
+      />
+      {editor && isReady && !props.readOnly && (
         <>
-          <PlanBubbleMenu editor={editor} onComment={handleBubbleComment} />
+          <PlanBubbleMenu
+            editor={editor}
+            onComment={handleBubbleComment}
+            mobileBottomOffset={props.mobileBottomOffset}
+            mobileContainerRef={wrapperRef}
+            onMobileVisibilityChange={handleMobileVisibilityChange}
+          />
           <PlanDragHandle editor={editor} />
         </>
       )}
-      <PlanSlashMenu
-        menuState={slash.menuState}
-        selectedIndex={slash.selectedIndex}
-        setSelectedIndex={slash.setSelectedIndex}
-      />
+      {!props.readOnly && (
+        <PlanSlashMenu
+          menuState={slash.menuState}
+          selectedIndex={slash.selectedIndex}
+          setSelectedIndex={slash.setSelectedIndex}
+        />
+      )}
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm bg-background/80">
           {t("editors:loadingEditor")}

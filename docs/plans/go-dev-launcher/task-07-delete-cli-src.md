@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["06-makefile-cutover"]
 plan: "plan.md"
-spec: "../../specs/go-dev-launcher/spec.md"
+spec: "../../specs/platform/requirements/go-dev-launcher.md"
 ---
 
 # Task 07: Delete `apps/cli/src` and drop CLI devDependencies

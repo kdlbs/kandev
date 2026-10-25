@@ -20,6 +20,7 @@ type WorkspaceContentSearchOptions = {
   enabled: boolean;
   query: string;
   sessionId: string | null;
+  inventoryRevision?: string;
 };
 
 function contentSearchResultKey(result: WorkspaceContentSearchResult): string {
@@ -50,6 +51,7 @@ async function searchWorkspaceContentWithRetries(
         query,
         CONTENT_SEARCH_LIMIT_PER_REPO,
       );
+      lastError = undefined;
       for (const result of response.results ?? []) {
         results.set(contentSearchResultKey(result), result);
       }
@@ -67,6 +69,7 @@ export function useWorkspaceContentSearch({
   enabled,
   query,
   sessionId,
+  inventoryRevision = "",
 }: WorkspaceContentSearchOptions) {
   const [results, setResults] = useState<WorkspaceContentSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -134,7 +137,7 @@ export function useWorkspaceContentSearch({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [enabled, query, sessionId]);
+  }, [enabled, inventoryRevision, query, sessionId]);
 
   return { results, isSearching, error };
 }

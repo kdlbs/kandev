@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"path/filepath"
@@ -152,7 +153,7 @@ func newSubagentMigrationTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 	// against an empty database with no messages seeded yet, and claimed the
 	// two activation keys (AC-24) — correct for a genuinely fresh install,
 	// but not what this file's tests want: they seed subagent-shaped
-	// messages AFTER construction and then call repo.runMigrations() again,
+	// messages AFTER construction and then call repo.runMigrations(context.Background()) again,
 	// expecting THAT call to be the real (only) backfill run — mirroring a
 	// DB upgrade where historical messages predate this boot. Reset to
 	// "not yet activated" so every test in this file gets that semantics by
@@ -172,7 +173,12 @@ func newSubagentMigrationTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 // invalid JSON outright, which real corrupt rows predate.
 func dropMessageMetadataIndex(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	for _, index := range []string{"idx_messages_metadata_tool_call_id", "idx_messages_metadata_pending_id"} {
+	for _, index := range []string{
+		"idx_messages_metadata_tool_call_id",
+		"idx_messages_metadata_pending_id",
+		"idx_messages_metadata_pending_id_lookup",
+		"idx_messages_metadata_pending_id_lookup_ordered",
+	} {
 		if _, err := db.Exec(`DROP INDEX IF EXISTS ` + index); err != nil {
 			t.Fatalf("drop %s: %v", index, err)
 		}
@@ -207,10 +213,10 @@ func TestSubagentContextSchemaFreshAndReplay(t *testing.T) {
 		t.Fatal("duplicate (task_session_id, tool_call_id) should violate UNIQUE constraint")
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations twice: %v", err)
 	}
 	if count := countSubagentContextRows(t, repo, "session-schema", "tc-schema"); count != 1 {
@@ -249,7 +255,7 @@ func TestSubagentContextBackfillAsyncLaunchedStoresNullNotZero(t *testing.T) {
 		createdAt, updatedAt,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -322,7 +328,7 @@ func TestSubagentContextBackfillReportedZeroToolUseCountSurvives(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -349,7 +355,7 @@ func TestSubagentContextBackfillNegativeMetricBecomesNull(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -379,7 +385,7 @@ func TestSubagentContextBackfillEmptyStringBecomesNull(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -398,8 +404,8 @@ func TestSubagentContextBackfillMalformedMetadataDoesNotAbort(t *testing.T) {
 	ts := time.Date(2026, 8, 5, 14, 0, 0, 0, time.UTC)
 
 	// A literal empty-string metadata row can only exist as historical
-	// corruption predating idx_messages_metadata_tool_call_id (the index
-	// itself rejects an empty-string insert via its json_extract expression).
+	// corruption predating the message metadata expression indexes (the indexes
+	// themselves reject an empty-string insert via their JSON expressions).
 	dropMessageMetadataIndex(t, db)
 	seedRawSubagentMessage(t, repo, "msg-blank", "session-malformed", "task-malformed", "turn-malformed", "", ts, ts)
 	seedRawSubagentMessage(t, repo, "msg-null", "session-malformed", "task-malformed", "turn-malformed", "null", ts, ts)
@@ -409,7 +415,7 @@ func TestSubagentContextBackfillMalformedMetadataDoesNotAbort(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations must not abort on malformed metadata rows: %v", err)
 	}
 
@@ -435,7 +441,7 @@ func TestSubagentContextBackfillNonTerminalSettledAtNull(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -480,7 +486,7 @@ func TestSubagentContextBackfillLiveRowWins(t *testing.T) {
 		t.Fatalf("seed pre-existing live row: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -523,7 +529,7 @@ func TestSubagentContextBackfillSkipsRowsWithoutIdentity(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -548,7 +554,7 @@ func TestSubagentContextBackfillNestedParentToolCallID(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -575,7 +581,7 @@ func TestSubagentContextActivationKeysWrittenOnce(t *testing.T) {
 	seedSubagentMessage(t, repo, "msg-activation-newest", "session-activation", "task-activation", "turn-activation",
 		"tc-activation-newest", "", "completed", map[string]interface{}{"status": "completed"}, newest, newest)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -599,7 +605,7 @@ func TestSubagentContextActivationKeysWrittenOnce(t *testing.T) {
 		t.Fatalf("subagent_context_backfill_through = %v, want newest message created_at %v", parsed, newest)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 	captureSinceReplayed, _ := readMetaKey(t, db, "subagent_context_capture_since")
@@ -619,7 +625,7 @@ func TestSubagentContextActivationKeysWrittenOnce(t *testing.T) {
 func TestSubagentContextActivationBackfillThroughEmptyWithNoMessages(t *testing.T) {
 	repo, db := newSubagentMigrationTestRepo(t)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations: %v", err)
 	}
 
@@ -654,7 +660,7 @@ func TestSubagentContextBackfillDoesNotRescanOnceActivated(t *testing.T) {
 		ts, ts,
 	)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("first runMigrations (the real, one-time backfill): %v", err)
 	}
 	if count := countSubagentContextRows(t, repo, "session-once", "tc-once"); count != 1 {
@@ -666,7 +672,7 @@ func TestSubagentContextBackfillDoesNotRescanOnceActivated(t *testing.T) {
 		t.Fatalf("delete backfilled row: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second runMigrations (a later boot): %v", err)
 	}
 	if count := countSubagentContextRows(t, repo, "session-once", "tc-once"); count != 0 {
@@ -723,7 +729,7 @@ func TestSubagentContextBackfillStatementFailureLogsWarnWithMigrationName(t *tes
 		t.Fatalf("drop updated_at column: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations must swallow the failure, not return it: %v", err)
 	}
 
@@ -766,7 +772,7 @@ func TestSubagentContextBackfillDoesNotRescanWhenBackfillThroughEmpty(t *testing
 	repo, db := newSubagentMigrationTestRepo(t)
 	seedForMsgTest(t, repo, "task-empty-guard", "session-empty-guard", "turn-empty-guard")
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("first runMigrations (activates with no messages): %v", err)
 	}
 	backfillThrough, ok := readMetaKey(t, db, "subagent_context_backfill_through")
@@ -781,7 +787,7 @@ func TestSubagentContextBackfillDoesNotRescanWhenBackfillThroughEmpty(t *testing
 	seedSubagentMessage(t, repo, "msg-empty-guard", "session-empty-guard", "task-empty-guard", "turn-empty-guard",
 		"tc-empty-guard", "", "completed", map[string]interface{}{"status": "completed"}, ts, ts)
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second runMigrations (a later boot, message now exists): %v", err)
 	}
 	if count := countSubagentContextRows(t, repo, "session-empty-guard", "tc-empty-guard"); count != 0 {

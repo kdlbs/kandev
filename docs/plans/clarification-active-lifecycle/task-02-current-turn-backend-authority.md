@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-clarification-regression-red"]
 plan: "plan.md"
-spec: "../../specs/clarification-active-lifecycle/spec.md"
+spec: "../../specs/tasks/requirements/clarification-active-lifecycle.md"
 ---
 
 # Task 02: Current-turn backend authority

@@ -58,6 +58,10 @@ describe("quickChatSessionFromTaskEvent", () => {
     ["a non-ephemeral task", { is_ephemeral: false }],
     ["a workflow-bound ephemeral task", { workflow_id: "wf-1" }],
     ["an automation run", { origin: "automation_run" }],
+    [
+      "a managed agent conversation",
+      { metadata: { "kandev.plugin_id": "plugin-coordinator", "kandev.ephemeral": true } },
+    ],
     ["a task with no primary session yet", { primary_session_id: null }],
     ["an event without a workspace", { workspace_id: undefined }],
   ])("ignores %s", (_label, overrides) => {

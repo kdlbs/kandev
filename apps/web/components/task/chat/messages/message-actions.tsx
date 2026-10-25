@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
   IconCheck,
@@ -9,20 +9,32 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconEyeCode,
+  IconHourglass,
   IconInfoCircle,
   IconStar,
+  IconGitFork,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatMessageTime } from "@/lib/i18n/message-time";
+import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/turn-duration";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/app-state-types";
 import type { Message, Turn } from "@/lib/types/http";
 import {
   buildMessageDebugEntries,
   hasMessageDebugMetadata,
 } from "@/components/task/chat/messages/message-debug-metadata";
 import { formatMessageSessionConfig } from "@/components/task/chat/messages/message-session-config";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@kandev/ui/dialog";
 import {
   Drawer,
   DrawerContent,
@@ -33,10 +45,14 @@ import {
 } from "@kandev/ui/drawer";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
+import { Button } from "@kandev/ui/button";
+import { forkConversation } from "@/lib/services/session-launch-service";
+import { generateUUID } from "@/lib/uuid";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
 const ACTION_BUTTON_TRANSITION = "transition-colors duration-200";
+const FORK_CONVERSATION_LABEL = "task:forkConversation";
 // The JS value `null`, rendered verbatim in the debug-metadata dialog. Not copy.
 const NULL_LITERAL = "null";
 
@@ -243,33 +259,40 @@ function MessageDebugDialog({
 
 function MessageTimestamp({ createdAt }: { createdAt: string }) {
   const { t } = useTranslation();
+  const messageTimeDisplay = useAppStore((state) => state.userSettings.messageTimeDisplay);
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
-  const absoluteTime = new Date(createdAt).toLocaleString();
+  const formatted = formatMessageTime(createdAt, messageTimeDisplay);
+  if (!formatted) return null;
+
   const timeEl = (
     <time
       dateTime={createdAt}
-      title={absoluteTime}
-      className="text-[10px] text-muted-foreground/60 font-mono"
+      title={formatted.counterpart}
+      aria-label={t("task:messageTimestampAriaLabel", {
+        label: formatted.label,
+        counterpart: formatted.counterpart,
+      })}
+      className="min-w-0 text-[10px] text-muted-foreground/60 font-mono"
     >
-      {formatRelativeTime(createdAt)}
+      {formatted.label}
     </time>
   );
-
   if (!usesTouchDrawer) return timeEl;
 
-  // Native `title` tooltips never fire on touch (no hover event), so coarse
-  // pointers get a tap-to-open Drawer surfacing the same absolute time.
   return (
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger asChild>
         <button
           type="button"
           data-testid="message-timestamp-trigger"
-          className="cursor-pointer border-0 bg-transparent p-0 text-left"
+          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={t("task:showFullTimestamp", { absoluteTime })}
+          aria-label={t("task:messageTimestampAriaLabel", {
+            label: formatted.label,
+            counterpart: formatted.counterpart,
+          })}
         >
           {timeEl}
         </button>
@@ -277,7 +300,7 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
       <DrawerContent data-testid="message-timestamp-drawer">
         <DrawerHeader>
           <DrawerTitle>{t("task:messageTime")}</DrawerTitle>
-          <DrawerDescription>{absoluteTime}</DrawerDescription>
+          <DrawerDescription>{formatted.counterpart}</DrawerDescription>
         </DrawerHeader>
       </DrawerContent>
     </Drawer>
@@ -285,27 +308,153 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
 }
 
 /** Selects the message turn and its model-specific usage multiplier. */
+function findMessageTurn(state: AppState, message: Message): Turn | null {
+  const sessionId = message.session_id;
+  const turnId = message.turn_id;
+  if (!sessionId || !turnId) return null;
+  return state.turns.bySession[sessionId]?.find((item) => item.id === turnId) ?? null;
+}
+
+function resolveMessageModelId(
+  message: Message,
+  turn: Turn | null,
+  modelId?: string,
+): string | undefined {
+  return (message.metadata?.model ?? turn?.metadata?.model ?? modelId) as string | undefined;
+}
+
+function getMessageUsageMultiplier(
+  state: AppState,
+  sessionId: string,
+  modelId: string | undefined,
+) {
+  return (
+    state.sessionModels.bySessionId[sessionId]?.models.find((model) => model.modelId === modelId)
+      ?.usageMultiplier ?? null
+  );
+}
+
+function selectMessageTurnAndUsage(state: AppState, message: Message) {
+  const sessionId = message.session_id ?? "";
+  const turn = findMessageTurn(state, message);
+  const currentModelId = state.sessionModels.bySessionId[sessionId]?.currentModelId;
+  const modelId = resolveMessageModelId(message, turn, currentModelId);
+  return {
+    turn,
+    usageMultiplier: getMessageUsageMultiplier(state, sessionId, modelId),
+    nativeCodexForkEnabled: state.features?.codexAppServer ?? false,
+  };
+}
+
 function useMessageTurnAndUsage(message: Message): {
   turn: Turn | null;
   usageMultiplier: string | null;
+  nativeCodexForkEnabled: boolean;
 } {
-  return useAppStore(
-    useShallow((state) => {
-      const turnId = message.turn_id;
-      const turn =
-        turnId && message.session_id
-          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
-          : null;
-      if (!message.session_id) return { turn, usageMultiplier: null };
-      const sessionModels = state.sessionModels.bySessionId[message.session_id];
-      const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as
-        | string
-        | undefined;
-      const modelId = metadataModel ?? sessionModels?.currentModelId;
-      const usageMultiplier =
-        sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
-      return { turn, usageMultiplier };
-    }),
+  return useAppStore(useShallow((state) => selectMessageTurnAndUsage(state, message)));
+}
+
+function ForkConversationAction({ message, turn }: { message: Message; turn: Turn }) {
+  const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const requestId = useRef<string | null>(null);
+
+  const handleFork = async () => {
+    if (!message.session_id || !message.task_id || !turn.completed_at || pending) return;
+    requestId.current ??= generateUUID();
+    setPending(true);
+    setFailed(false);
+    try {
+      const response = await forkConversation({
+        task_id: message.task_id,
+        session_id: message.session_id,
+        turn_id: turn.id,
+        request_id: requestId.current,
+      });
+      setActiveSession(response.task_id, response.session_id);
+      requestId.current = null;
+      setOpen(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const trigger = (
+    <button
+      type="button"
+      data-testid="fork-conversation-trigger"
+      className={cn(
+        "h-11 w-11 p-3 sm:h-5 sm:w-5 sm:p-1",
+        ACTION_BUTTON_HOVER,
+        ACTION_BUTTON_TRANSITION,
+      )}
+      title={t(FORK_CONVERSATION_LABEL)}
+      aria-label={t(FORK_CONVERSATION_LABEL)}
+    >
+      <IconGitFork className="h-full w-full" />
+    </button>
+  );
+  const confirmationActions = (
+    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      <Button
+        variant="outline"
+        onClick={() => setOpen(false)}
+        disabled={pending}
+        className="min-h-11"
+      >
+        {t("common:cancel")}
+      </Button>
+      <Button
+        onClick={() => void handleFork()}
+        disabled={pending}
+        className="min-h-11"
+        data-testid="fork-conversation-confirm"
+      >
+        {t("task:forkConversationConfirm")}
+      </Button>
+    </div>
+  );
+
+  return usesTouchDrawer ? (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{t(FORK_CONVERSATION_LABEL)}</DrawerTitle>
+          <DrawerDescription>{t("task:forkConversationSharedFiles")}</DrawerDescription>
+        </DrawerHeader>
+        <div className="px-4 pb-4">
+          {failed && (
+            <p role="alert" className="mb-3 text-sm text-destructive">
+              {t("task:forkConversationFailed")}
+            </p>
+          )}
+          {confirmationActions}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  ) : (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t(FORK_CONVERSATION_LABEL)}</DialogTitle>
+          <DialogDescription>{t("task:forkConversationSharedFiles")}</DialogDescription>
+        </DialogHeader>
+        {failed && (
+          <p role="alert" className="text-sm text-destructive">
+            {t("task:forkConversationFailed")}
+          </p>
+        )}
+        <DialogFooter>{confirmationActions}</DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -392,15 +541,26 @@ export function MessageActions(props: MessageActionsProps) {
     isFavorite,
     onToggleFavorite,
   } = resolveMessageActionsProps(props);
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
-  const { turn, usageMultiplier } = useMessageTurnAndUsage(message);
+  const { turn, usageMultiplier, nativeCodexForkEnabled } = useMessageTurnAndUsage(message);
+  const usesTouchDrawer = useTouchDrawer();
+  const durationSeconds = messageTurnDurationSeconds(message, turn);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
+  const actionRowVisibility = usesTouchDrawer
+    ? "opacity-100"
+    : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
   const handleCopy = async () => {
     await copy(message.content);
   };
 
   return (
-    <div className="flex items-center gap-2 mt-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+    <div
+      className={cn(
+        "flex items-center gap-2 mt-2 focus-within:opacity-100 transition-opacity",
+        actionRowVisibility,
+      )}
+    >
       {showCopy && <CopyButton copied={copied} onCopy={handleCopy} />}
       {showRawToggle && onToggleRaw && (
         <RawToggleButton
@@ -418,6 +578,12 @@ export function MessageActions(props: MessageActionsProps) {
         />
       )}
       <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />
+      {nativeCodexForkEnabled &&
+        message.author_type === "agent" &&
+        turn?.completed_at &&
+        turn.metadata?.agent_type === "codex-app-server" && (
+          <ForkConversationAction message={message} turn={turn} />
+        )}
       {onToggleFavorite && <FavoriteButton isFavorite={isFavorite} onToggle={onToggleFavorite} />}
       <MessageMetaInfo
         showModel={showModel}
@@ -425,6 +591,19 @@ export function MessageActions(props: MessageActionsProps) {
         showTimestamp={showTimestamp}
         createdAt={message.created_at}
       />
+      {durationSeconds !== null && (
+        <span
+          data-testid="message-turn-duration"
+          className="inline-flex items-center gap-1 whitespace-nowrap shrink-0 text-[10px] text-muted-foreground/60 font-mono"
+        >
+          <IconHourglass className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {formatPromptDuration(durationSeconds, {
+            s: t("task:durationUnitSeconds"),
+            m: t("task:durationUnitMinutes"),
+            h: t("task:durationUnitHours"),
+          })}
+        </span>
+      )}
     </div>
   );
 }

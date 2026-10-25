@@ -7,7 +7,7 @@ depends_on:
   - "12-custom-bundle-contracts"
   - "13-on-demand-acp-collection"
 plan: "plan.md"
-spec: "../../specs/platform/diagnostic-logging.md"
+spec: "../../specs/platform/requirements/diagnostic-logging.md"
 ---
 
 # Task 14: Bundle customizer UI

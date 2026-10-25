@@ -29,6 +29,7 @@ export type MarkdownCommentView = {
 type UseMarkdownPreviewCommentsArgs = {
   path: string;
   repositoryId?: string | null;
+  repositoryName?: string;
   content: string;
   sessionId?: string;
   taskId?: string | null;
@@ -158,6 +159,7 @@ function useMarkdownCommentShortcut({
 function useMarkdownCommentSubmitters({
   path,
   repositoryId,
+  repositoryName,
   sessionId,
   taskId,
   textSelection,
@@ -165,6 +167,7 @@ function useMarkdownCommentSubmitters({
 }: {
   path: string;
   repositoryId?: string | null;
+  repositoryName?: string;
   sessionId?: string;
   taskId?: string | null;
   textSelection: MarkdownPreviewSelection | null;
@@ -182,6 +185,7 @@ function useMarkdownCommentSubmitters({
       const comment = buildMarkdownPreviewComment({
         filePath: path,
         repositoryId: repositoryId ?? undefined,
+        repositoryName,
         sessionId,
         selectedText: textSelection.selectedText,
         text,
@@ -192,7 +196,7 @@ function useMarkdownCommentSubmitters({
       clearTextSelection();
       return comment;
     },
-    [addComment, clearTextSelection, path, repositoryId, sessionId, textSelection],
+    [addComment, clearTextSelection, path, repositoryId, repositoryName, sessionId, textSelection],
   );
 
   // Same `editors:` copy as the CodeMirror and Monaco comment flows in
@@ -322,6 +326,7 @@ function useVisibleMarkdownCommentActions({
 export function useMarkdownPreviewComments({
   path,
   repositoryId,
+  repositoryName,
   content,
   sessionId,
   taskId,
@@ -330,7 +335,12 @@ export function useMarkdownPreviewComments({
 }: UseMarkdownPreviewCommentsArgs) {
   const [textSelection, setTextSelection] = useState<MarkdownPreviewSelection | null>(null);
   const [commentView, setCommentView] = useState<MarkdownCommentView>(null);
-  const comments = useDiffFileComments(sessionId ?? "", path, repositoryId ?? undefined);
+  const comments = useDiffFileComments(
+    sessionId ?? "",
+    path,
+    repositoryId ?? undefined,
+    repositoryName ?? "",
+  );
 
   const closeCommentView = useCallback(() => setCommentView(null), []);
   const { currentSelection, setCurrentSelection } = useMarkdownSelectionCapture({
@@ -373,6 +383,7 @@ export function useMarkdownPreviewComments({
   const { submitComment, submitAndRunComment } = useMarkdownCommentSubmitters({
     path,
     repositoryId,
+    repositoryName,
     sessionId,
     taskId,
     textSelection,

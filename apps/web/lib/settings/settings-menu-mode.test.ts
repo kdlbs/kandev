@@ -11,6 +11,7 @@ import {
 } from "./settings-menu-mode";
 
 const FLAT = "flat";
+const ACCORDION = "accordion";
 const AGENTS_ROW_KEY = "row:/settings/agents";
 const AGENT_KEY = "agent:claude-code";
 
@@ -19,9 +20,10 @@ describe("settings menu mode storage", () => {
     window.localStorage.clear();
   });
 
-  it("defaults to the flat menu when this device has never chosen", () => {
-    expect(readSettingsMenuMode()).toBe(FLAT);
-    expect(DEFAULT_SETTINGS_MENU_MODE).toBe(FLAT);
+  // @covers AC-UI-SETTINGS-MENU-DEFAULT-001.1
+  it("defaults to the accordion menu when this device has never chosen", () => {
+    expect(readSettingsMenuMode()).toBe(ACCORDION);
+    expect(DEFAULT_SETTINGS_MENU_MODE).toBe(ACCORDION);
   });
 
   it("round-trips a chosen mode", () => {
@@ -30,16 +32,17 @@ describe("settings menu mode storage", () => {
     expect(readSettingsMenuMode()).toBe("persistent");
   });
 
+  // @covers AC-UI-SETTINGS-MENU-DEFAULT-001.3
   it("falls back rather than trusting a mode that no longer exists", () => {
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS_MENU_MODE, JSON.stringify("outline"));
 
-    expect(readSettingsMenuMode()).toBe(FLAT);
+    expect(readSettingsMenuMode()).toBe(ACCORDION);
   });
 
   it("survives an unparseable stored value", () => {
     window.localStorage.setItem(STORAGE_KEYS.SETTINGS_MENU_MODE, "{not json");
 
-    expect(readSettingsMenuMode()).toBe(FLAT);
+    expect(readSettingsMenuMode()).toBe(ACCORDION);
   });
 
   it("round-trips expanded branch keys", () => {

@@ -15,6 +15,9 @@ const WORKSPACE_CHOICE_CONFIRM_TESTID = "improve-kandev-create-workspace-confirm
 const GH_AUTH_MESSAGE = "Run gh auth login.";
 
 const mocks = vi.hoisted(() => ({
+  created: null as
+    | null
+    | ((task: { id: string }, mode: "create", meta: { autoFocus: boolean }) => void),
   bootstrap: vi.fn(),
   listRepositories: vi.fn(),
   listWorkflowSteps: vi.fn(),
@@ -54,15 +57,22 @@ vi.mock("@/lib/api/domains/health-api", () => ({
   fetchSystemHealth: mocks.health,
 }));
 vi.mock("./improve-kandev-dialog-create", () => ({
-  CreateModeView: (props: { workspaceId: string | null; bootstrap: { kind: string } }) => (
-    <div
-      data-testid="create-mode-view"
-      data-workspace={props.workspaceId ?? ""}
-      data-bootstrap={props.bootstrap.kind}
-    >
-      create view
-    </div>
-  ),
+  CreateModeView: (props: {
+    workspaceId: string | null;
+    bootstrap: { kind: string };
+    onTaskCreated: NonNullable<typeof mocks.created>;
+  }) => {
+    mocks.created = props.onTaskCreated;
+    return (
+      <div
+        data-testid="create-mode-view"
+        data-workspace={props.workspaceId ?? ""}
+        data-bootstrap={props.bootstrap.kind}
+      >
+        create view
+      </div>
+    );
+  },
 }));
 
 const bootstrapResponse: ImproveKandevBootstrapResponse = {
@@ -333,4 +343,21 @@ describe("improve-kandev dialog <Trans> copy", () => {
 
     expect(container.textContent).toBe("Contributing as @octocat. You have write access.");
   });
+});
+
+it("preserves background creation metadata for Improve navigation callers", async () => {
+  setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+  window.localStorage.setItem(IMPROVE_KANDEV_SKIP_INTRO_KEY, "true");
+  const onSuccess = vi.fn();
+  render(
+    <ImproveKandevDialog
+      open
+      onOpenChange={vi.fn()}
+      workspaceId="ws-active"
+      onSuccess={onSuccess}
+    />,
+  );
+  await screen.findByTestId("create-mode-view");
+  act(() => mocks.created?.({ id: "new-task" }, "create", { autoFocus: false }));
+  expect(onSuccess).toHaveBeenCalledWith({ id: "new-task" }, { autoFocus: false });
 });

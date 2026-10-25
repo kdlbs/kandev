@@ -109,6 +109,7 @@ func TestCleanupAllReviewTasks_ThreadsReason(t *testing.T) {
 	if err := store.CreateReviewWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateReviewWatch: %v", err)
 	}
+	seedTask(t, store, "task-merged", "ws-1")
 	if _, err := store.ReserveReviewMRTask(ctx, watch.ID, project, iid, "url"); err != nil {
 		t.Fatalf("ReserveReviewMRTask: %v", err)
 	}
@@ -147,6 +148,7 @@ func TestCleanupAllIssueTasks_ThreadsReason(t *testing.T) {
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
 		t.Fatalf("CreateIssueWatch: %v", err)
 	}
+	seedTask(t, store, "task-closed", "ws-1")
 	if _, err := store.ReserveIssueWatchTask(ctx, watch.ID, project, iid, "url"); err != nil {
 		t.Fatalf("ReserveIssueWatchTask: %v", err)
 	}

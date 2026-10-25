@@ -6,7 +6,7 @@ import type { KanbanState } from "@/lib/state/slices";
 
 type Task = KanbanState["tasks"][number];
 
-export function useTask(taskId: string | null) {
+export function useTask(taskId: string | null, detailActive = true) {
   // The active workflow's tasks live in `kanban.tasks`, but cross-workflow
   // tasks (PR-review boards, multi-workflow swimlanes) live in
   // `kanbanMulti.snapshots[*].tasks`. Mirror the lookup used by
@@ -16,18 +16,26 @@ export function useTask(taskId: string | null) {
     if (!taskId) return null;
     const fromActive = state.kanban.tasks.find((item: Task) => item.id === taskId);
     if (fromActive) return fromActive;
-    return findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+    const fromSnapshot = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+    if (fromSnapshot) return fromSnapshot;
+    // Archived tasks leave active workflow collections but remain available in
+    // the sidebar cache while their history is open in Quick Chat.
+    return (
+      Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId)
+        .flat()
+        .find((item: Task) => item.id === taskId) ?? null
+    );
   });
 
   useEffect(() => {
-    if (!taskId) return;
+    if (!detailActive || !taskId) return;
     const client = getWebSocketClient();
     if (!client) return;
     const unsubscribe = client.subscribe(taskId);
     return () => {
       unsubscribe();
     };
-  }, [taskId]);
+  }, [detailActive, taskId]);
 
   return task;
 }

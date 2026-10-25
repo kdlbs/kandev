@@ -3,8 +3,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { SETTINGS_TAKEOVER_TESTID, setSettingsMenuMode } from "../../helpers/settings-menu";
 
 function sidebarGitHubRow(testPage: Page) {
-  const sidebar = testPage.getByTestId("app-sidebar");
-  return sidebar.locator('a[href="/github"]:not([data-testid="integration-header-shortcut"])');
+  return testPage
+    .getByTestId("app-sidebar")
+    .locator("#sidebar-section-integrations")
+    .getByRole("link", { name: "GitHub", exact: true });
 }
 
 async function expandIntegrationsSection(testPage: Page) {
@@ -20,7 +22,7 @@ async function expandIntegrationsSection(testPage: Page) {
   await expect(integrationsToggle).toHaveAttribute("aria-expanded", "true");
 }
 
-// Covers docs/specs/integrations/enable-disable-toggle.md's nav-visibility
+// Covers docs/specs/integrations/requirements/enable-disable-toggle.md's nav-visibility
 // scenarios: with "Hide disabled integrations from left panel navigation"
 // off (the default), a disabled-but-configured integration still shows in
 // the sidebar; turning the setting on hides it; turning it back off (or
@@ -29,6 +31,7 @@ test.describe("hide disabled integrations from left panel navigation", () => {
   test("off by default keeps a disabled integration visible; on hides it; re-enabling reveals it", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     // Make GitHub configured/healthy so it is eligible to appear in the nav
     // regardless of its enabled state.
@@ -69,11 +72,13 @@ test.describe("hide disabled integrations from left panel navigation", () => {
     // The Settings left panel's per-workspace Integrations tree is also part
     // of left-panel navigation: with "hide disabled" off (default) the
     // disabled-but-configured GitHub entry must stay listed there too.
-    // The tree is opt-in — `flat`, the default menu mode, renders no branches
-    // at all — so choose a tree mode before asserting on its rows.
+    // Choose a tree mode explicitly before asserting on its rows so this test
+    // does not depend on the device's remembered menu preference.
     await setSettingsMenuMode(testPage, "accordion");
-    const { workspaces } = await apiClient.listWorkspaces();
-    const workspaceId = workspaces[0].id;
+    // The setting above is scoped to the worker's seeded workspace. Do not
+    // use the first workspace returned by the API: another test can create a
+    // workspace earlier in the worker, and its GitHub state is independent.
+    const workspaceId = seedData.workspaceId;
     const integrationsPath = `/settings/workspaces/${workspaceId}/integrations`;
     await testPage.goto(integrationsPath);
     const settingsTree = testPage.getByTestId(SETTINGS_TAKEOVER_TESTID);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { pluginModalManager } from "./modal-manager";
 import type { PluginModalOptions } from "./types";
 
@@ -9,6 +9,10 @@ function noopContent() {
 const baseOptions: PluginModalOptions = { content: noopContent };
 
 describe("pluginModalManager", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("open() returns a handle and adds the modal to the snapshot", () => {
     const before = pluginModalManager.getSnapshot().length;
     const handle = pluginModalManager.openModal("jira", baseOptions);
@@ -83,5 +87,47 @@ describe("pluginModalManager", () => {
     const before = pluginModalManager.getSnapshot().length;
     expect(() => handle.close()).not.toThrow();
     expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
+
+  it("captures a separate opener for each modal before publishing the snapshot", () => {
+    const container = document.createElement("div");
+    const openerA = document.createElement("button");
+    const openerB = document.createElement("button");
+    container.append(openerA, openerB);
+    document.body.append(container);
+
+    let publishedOpener: HTMLElement | undefined;
+    const unsubscribe = pluginModalManager.subscribe(() => {
+      const modals = pluginModalManager.getSnapshot();
+      publishedOpener = modals[modals.length - 1]?.openerElement;
+    });
+
+    openerA.focus();
+    const handleA = pluginModalManager.openModal("jira", baseOptions);
+    expect(publishedOpener).toBe(openerA);
+
+    openerB.focus();
+    const handleB = pluginModalManager.openTaskLinkDialog("jira", baseOptions);
+    expect(publishedOpener).toBe(openerB);
+    expect(
+      pluginModalManager
+        .getSnapshot()
+        .slice(-2)
+        .map((modal) => modal.openerElement),
+    ).toEqual([openerA, openerB]);
+
+    unsubscribe();
+    handleA.close();
+    handleB.close();
+    container.remove();
+  });
+
+  it("does not require a document when opened outside the browser", () => {
+    vi.stubGlobal("document", undefined);
+
+    const handle = pluginModalManager.openModal("jira", baseOptions);
+
+    expect(pluginModalManager.getSnapshot().at(-1)?.openerElement).toBeUndefined();
+    handle.close();
   });
 });

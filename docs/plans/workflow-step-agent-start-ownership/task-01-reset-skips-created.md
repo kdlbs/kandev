@@ -6,7 +6,7 @@ wave: 1
 parallelism: sequential
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/workflow-step-agent-start-ownership/spec.md"
+spec: "../../specs/tasks/requirements/workflow-step-agent-start-ownership.md"
 ---
 
 # Task 01: Context reset skips never-prompted sessions

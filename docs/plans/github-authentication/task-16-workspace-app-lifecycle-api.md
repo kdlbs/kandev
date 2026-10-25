@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["14-runtime-registration-resolution", "15-registration-webhook-routing"]
 plan: "plan.md"
-spec: "../../specs/integrations/github-authentication.md"
+spec: "../../specs/integrations/requirements/github-authentication.md"
 ---
 
 # Task 16: Workspace App Lifecycle API

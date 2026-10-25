@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/platform/git-subprocess-admission.md
+spec: docs/specs/platform/requirements/git-subprocess-admission.md
 created: 2026-08-02
 status: implemented
 ---
@@ -233,3 +233,8 @@ and diagnostics files; waves do not authorize subagents.
 - Documentation links and indexes resolve.
 - The Windows before/after evidence required by the spec is attached before
   closing issue #2150.
+
+## Shared execution follow-up (2026-09-13)
+
+The [noninteractive Git execution package](../noninteractive-git-execution/plan.md) owns final runner enforcement, helper cleanup, and authentication-failure recovery coverage.
+That package is complete. Existing results above remain historical evidence for this package's original implementation; its follow-up validation is recorded in the linked package.

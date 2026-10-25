@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-frontend-submenu"]
 plan: "plan.md"
-spec: "../../specs/ui/add-panel-pr-submenu.md"
+spec: "../../specs/ui/requirements/add-panel-pr-submenu.md"
 ---
 
 # Task 02: E2E coverage for the PR submenu
@@ -29,7 +29,7 @@ spec: "../../specs/ui/add-panel-pr-submenu.md"
 - **Dependencies:** task-01-frontend-submenu.
 - **Parallelism:** sequential.
 - **Inputs:**
-  - Spec `Scenarios`: docs/specs/ui/add-panel-pr-submenu.md
+  - Spec `Scenarios`: docs/specs/ui/requirements/add-panel-pr-submenu.md
   - Plan E2E section: docs/plans/add-panel-pr-submenu/plan.md
   - Desktop seeding: `associateTwoPRs` + `openTaskAndWait` in
     `apps/web/e2e/tests/pr/pr-multi-popover.spec.ts`

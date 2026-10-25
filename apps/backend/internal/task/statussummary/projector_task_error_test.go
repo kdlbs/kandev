@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func taskErrorProjector(t *testing.T, store *projectorTestStore, loader TaskLaunchErrorLoader) *Projector {
@@ -47,14 +48,17 @@ func TestProjectorProjectsTaskOwnedLaunchErrorWithoutSession(t *testing.T) {
 		t.Fatalf("project task error: %v", err)
 	}
 	got := store.summary("task-1")
-	if got == nil || got.ActiveError == nil {
-		t.Fatalf("summary = %+v, want task-owned active error", got)
+	if got == nil || got.TaskError == nil {
+		t.Fatalf("summary = %+v, want task-owned error projection", got)
 	}
-	if got.ActiveError.SessionID != "" || got.ActiveError.TaskRepositoryID != "task-repository-1" {
-		t.Fatalf("active error identity = %+v", got.ActiveError)
+	if got.TaskError.Scope != "task" || got.TaskError.SessionID != "" || got.TaskError.TaskRepositoryID != "task-repository-1" {
+		t.Fatalf("task error identity = %+v", got.TaskError)
 	}
-	if len(got.ActiveError.RecoveryActions) != 1 || got.ActiveError.RecoveryActions[0] != "mark_review_done" {
-		t.Fatalf("active error actions = %#v", got.ActiveError.RecoveryActions)
+	if len(got.TaskError.RecoveryActions) != 1 || got.TaskError.RecoveryActions[0] != "mark_review_done" {
+		t.Fatalf("task error actions = %#v", got.TaskError.RecoveryActions)
+	}
+	if got.ActiveError == nil || got.ActiveError.Scope != "task" {
+		t.Fatalf("active error compatibility projection = %+v", got.ActiveError)
 	}
 }
 
@@ -121,5 +125,62 @@ func TestProjectorRefreshesTaskLaunchErrorRemoval(t *testing.T) {
 	}
 	if got := store.summary("task-1"); got == nil || got.ActiveError != nil {
 		t.Fatalf("summary after task error removal = %+v, want no active error", got)
+	}
+}
+
+func TestProjectorClearsTaskScopedErrorWithOriginatingSessionAfterTaskMetadataRemoval(t *testing.T) {
+	store := newProjectorTestStore()
+	originatingSession := "session-origin"
+	storedError := &ActiveErrorSummary{
+		Scope:      models.ErrorScopeTask,
+		SessionID:  originatingSession,
+		Stamp:      "task-error-1",
+		OccurredAt: time.Date(2026, 8, 19, 19, 0, 0, 0, time.UTC),
+		Preview:    "task error",
+	}
+	store.rows["task-1"] = &StoredTaskStatusSummary{
+		TaskID:      "task-1",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:    1,
+			ActiveError: storedError,
+			TaskError:   storedError,
+		},
+	}
+	active := true
+	projector := taskErrorProjector(t, store, func(context.Context, string) (TaskLaunchErrorObservation, error) {
+		if !active {
+			return TaskLaunchErrorObservation{Observed: true}, nil
+		}
+		return TaskLaunchErrorObservation{
+			Observed: true,
+			Error:    storedError,
+		}, nil
+	})
+
+	event := func() *bus.Event {
+		return bus.NewEvent(events.TaskUpdated, "test", map[string]interface{}{
+			"task_id":      "task-1",
+			"workspace_id": "workspace-1",
+		})
+	}
+	if err := projector.HandleEvent(context.Background(), event()); err != nil {
+		t.Fatalf("restore task error: %v", err)
+	}
+	got := store.summary("task-1")
+	if got == nil || got.TaskError == nil || got.ActiveError == nil {
+		t.Fatalf("summary after restore = %+v, want task error in both projections", got)
+	}
+	if got.TaskError.Scope != models.ErrorScopeTask || got.TaskError.SessionID != originatingSession {
+		t.Fatalf("restored task error = %+v, want explicit task scope", got.TaskError)
+	}
+
+	active = false
+	if err := projector.HandleEvent(context.Background(), event()); err != nil {
+		t.Fatalf("clear task error: %v", err)
+	}
+	got = store.summary("task-1")
+	if got == nil || got.TaskError != nil || got.ActiveError != nil {
+		t.Fatalf("summary after task metadata removal = %+v, want both errors cleared", got)
 	}
 }

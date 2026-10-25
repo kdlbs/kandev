@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { IconExternalLink } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { normalizeRemediationUrl } from "@/lib/remediation-url";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 /**
  * Shared localized external link for the allowlisted provider remediation
@@ -23,7 +24,8 @@ export function RemediationLink({ url, className }: { url?: string; className?: 
       rel="noopener noreferrer"
       data-testid="remediation-link"
       className={cn(
-        "inline-flex min-h-11 items-center gap-1.5 text-xs text-primary underline underline-offset-4 cursor-pointer sm:min-h-8",
+        controlSizingClassName("standard", "inline-flex items-center gap-1.5"),
+        "text-xs text-primary underline underline-offset-4 cursor-pointer",
         className,
       )}
     >

@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/integrations/provider-aware-review-automation.md
+spec: docs/specs/integrations/requirements/provider-aware-review-automation.md
 created: 2026-08-03
 status: implemented
 ---

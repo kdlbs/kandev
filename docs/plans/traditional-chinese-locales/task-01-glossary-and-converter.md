@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/traditional-chinese-locales.md"
+spec: "../../specs/platform/requirements/traditional-chinese-locales.md"
 ---
 
 # Task 01: Glossary machine form and zh-cn→zh-hant converter

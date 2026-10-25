@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@/components/kanban-card";
-import { filterTasks } from "./swimlane-container";
+import { filterTasks, projectWorkflowTasks } from "@/lib/kanban/task-projections";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 
 function makeTask(overrides: Partial<Task> & { id: string }): Task {
@@ -59,6 +59,111 @@ describe("filterTasks — plugin task filter predicate", () => {
     const result = filterTasks(snapshots, "wf", repoFilter, {
       searchQuery: "fix",
       matchesPluginTaskFilters: matches,
+    });
+
+    expect(result.map((t) => t.id)).toEqual(["1"]);
+  });
+});
+
+describe("filterTasks — searchQuery matches linked PR/MR numbers", () => {
+  const NO_REPO_FILTER = mapSelectedRepositoryIds([], []);
+
+  it("keeps a task matching only by its linked PR/MR number", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({ id: "1", title: "Fix EvaluateOnly", description: "unrelated" }),
+          makeTask({ id: "2", title: "on_agent_error never fires", description: "" }),
+        ],
+        steps: [],
+      },
+    };
+
+    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "3315",
+      vcsSearchTextByTaskId: { "2": "#3315" },
+    });
+
+    expect(result.map((t) => t.id)).toEqual(["2"]);
+  });
+
+  it("matches a linked PR number by either a bare number or a #-prefixed query", () => {
+    const snapshots = {
+      wf: {
+        tasks: [makeTask({ id: "1", title: "Task" })],
+        steps: [],
+      },
+    };
+    const opts = { vcsSearchTextByTaskId: { "1": "#3315" } };
+
+    expect(
+      filterTasks(snapshots, "wf", NO_REPO_FILTER, { searchQuery: "3315", ...opts }).map(
+        (t) => t.id,
+      ),
+    ).toEqual(["1"]);
+    expect(
+      filterTasks(snapshots, "wf", NO_REPO_FILTER, { searchQuery: "#3315", ...opts }).map(
+        (t) => t.id,
+      ),
+    ).toEqual(["1"]);
+  });
+
+  it("matches the status-summary PR number before associations load", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({
+            id: "1",
+            title: "Task",
+            statusSummary: { pull_request: { number: 3295 } } as never,
+          }),
+        ],
+        steps: [],
+      },
+    };
+
+    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "#3295",
+    });
+
+    expect(result.map((t) => t.id)).toEqual(["1"]);
+  });
+
+  it("excludes a task whose linked PR number does not match the query", () => {
+    const snapshots = {
+      wf: {
+        tasks: [makeTask({ id: "1", title: "Task" })],
+        steps: [],
+      },
+    };
+
+    const result = filterTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "9999",
+      vcsSearchTextByTaskId: { "1": "#3315" },
+    });
+
+    expect(result.map((t) => t.id)).toEqual([]);
+  });
+
+  it("composes the PR/MR search arm with repository and plugin filters", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({ id: "1", title: "Task A", repositoryId: "repo-a" }),
+          makeTask({ id: "2", title: "Task B", repositoryId: "repo-b" }),
+        ],
+        steps: [],
+      },
+    };
+    const repoFilter = mapSelectedRepositoryIds(
+      [{ id: "repo-a", name: "A" } as never, { id: "repo-b", name: "B" } as never],
+      ["repo-a"],
+    );
+
+    const result = filterTasks(snapshots, "wf", repoFilter, {
+      searchQuery: "3315",
+      vcsSearchTextByTaskId: { "1": "#3315", "2": "#3315" },
+      matchesPluginTaskFilters: (taskId) => taskId === "1",
     });
 
     expect(result.map((t) => t.id)).toEqual(["1"]);
@@ -161,5 +266,31 @@ describe("filterTasks — hiddenStepIds (per-workflow step visibility filter)", 
 
     expect(resultA.map((t) => t.id)).toEqual([]);
     expect(resultB.map((t) => t.id)).toEqual(["2"]);
+  });
+});
+
+describe("projectWorkflowTasks — visible cards vs column occupancy", () => {
+  const NO_REPO_FILTER = mapSelectedRepositoryIds([], []);
+
+  it("keeps search and manual hiding out of occupancy while applying plugin filters", () => {
+    const snapshots = {
+      wf: {
+        tasks: [
+          makeTask({ id: "visible", title: "Needle", workflowStepId: "step-a" }),
+          makeTask({ id: "hidden", title: "Other", workflowStepId: "step-b" }),
+          makeTask({ id: "plugin-rejected", title: "Needle", workflowStepId: "step-c" }),
+        ],
+        steps: [{ id: "step-a" }, { id: "step-b" }, { id: "step-c" }],
+      },
+    };
+
+    const projection = projectWorkflowTasks(snapshots, "wf", NO_REPO_FILTER, {
+      searchQuery: "needle",
+      hiddenStepIds: new Set(["step-b"]),
+      matchesPluginTaskFilters: (taskId) => taskId !== "plugin-rejected",
+    });
+
+    expect(projection.visibleTasks.map((task) => task.id)).toEqual(["visible"]);
+    expect(projection.occupancyTasks.map((task) => task.id)).toEqual(["visible", "hidden"]);
   });
 });

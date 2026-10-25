@@ -5,7 +5,7 @@ status: completed
 wave: 2
 depends_on: ["01-publish-clarification-task-state"]
 plan: "plan.md"
-spec: "../../specs/tasks/runtime-state-publication-order.md"
+spec: "../../specs/tasks/requirements/runtime-state-publication-order.md"
 ---
 
 # Task 02: Prove live sidebar regrouping

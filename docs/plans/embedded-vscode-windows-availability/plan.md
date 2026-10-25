@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/ui/embedded-vscode-windows-availability.md
+spec: docs/specs/ui/requirements/embedded-vscode-windows-availability.md
 created: 2026-07-29
 status: complete
 ---

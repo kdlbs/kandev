@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 import { useSessionGitStatusByRepo } from "./use-session-git-status";
+import { splitFilesByChangeLayer } from "./git-change-facets";
 
 type RepositoryStatus = ReturnType<typeof useSessionGitStatusByRepo>[number];
 
@@ -14,16 +15,29 @@ export type RepositoryStatusSummary = {
   pushAhead: number;
   pullBehind: number;
   hasUpstream: boolean;
+  detailsReady: boolean;
   hasStaged: boolean;
   hasUnstaged: boolean;
 };
 
 function upstreamCounts(status: RepositoryStatus["status"], ahead: number) {
   const hasUpstream = Boolean(status?.remote_branch);
+  const detailsReady = status?.detail_state !== "pending" && status?.detail_state !== "unavailable";
+  if (!detailsReady) {
+    return {
+      hasUpstream,
+      detailsReady,
+      remoteAhead: 0,
+      remoteBehind: 0,
+      pushAhead: 0,
+      pullBehind: 0,
+    };
+  }
   const remoteAhead = status?.remote_ahead ?? 0;
   const remoteBehind = status?.remote_behind ?? 0;
   return {
     hasUpstream,
+    detailsReady,
     remoteAhead,
     remoteBehind,
     pushAhead: hasUpstream ? remoteAhead : ahead,
@@ -36,8 +50,9 @@ function summarizeRepositoryStatus(
   stagedByRepo: Map<string, boolean>,
   unstagedByRepo: Map<string, boolean>,
 ): RepositoryStatusSummary {
-  const ahead = status?.ahead ?? 0;
-  const behind = status?.behind ?? 0;
+  const detailsReady = status?.detail_state !== "pending" && status?.detail_state !== "unavailable";
+  const ahead = detailsReady ? (status?.ahead ?? 0) : 0;
+  const behind = detailsReady ? (status?.behind ?? 0) : 0;
   const remote = upstreamCounts(status, ahead);
   return {
     repository_name,
@@ -45,6 +60,7 @@ function summarizeRepositoryStatus(
     ahead,
     behind,
     ...remote,
+    detailsReady: remote.detailsReady,
     hasStaged: stagedByRepo.get(repository_name) ?? false,
     hasUnstaged: unstagedByRepo.get(repository_name) ?? false,
   };
@@ -69,10 +85,14 @@ export function deriveMultiRepoSummary(
 
   const stagedByRepo = new Map<string, boolean>();
   const unstagedByRepo = new Map<string, boolean>();
-  for (const file of allFiles) {
+  const { stagedFiles, unstagedFiles } = splitFilesByChangeLayer(allFiles);
+  for (const file of stagedFiles) {
     const repositoryName = file.repository_name ?? "";
-    if (file.staged) stagedByRepo.set(repositoryName, true);
-    else unstagedByRepo.set(repositoryName, true);
+    stagedByRepo.set(repositoryName, true);
+  }
+  for (const file of unstagedFiles) {
+    const repositoryName = file.repository_name ?? "";
+    unstagedByRepo.set(repositoryName, true);
   }
   const hasNamed = statusByRepo.some((status) => status.repository_name !== "");
   const filtered =

@@ -4,7 +4,7 @@ title: "Lifecycle Git classification"
 status: done
 wave: 2
 plan: "plan.md"
-spec: "../../specs/platform/git-subprocess-admission.md"
+spec: "../../specs/platform/requirements/git-subprocess-admission.md"
 depends_on:
   - "01-class-aware-admission"
 ---

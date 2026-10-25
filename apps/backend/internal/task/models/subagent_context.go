@@ -4,7 +4,7 @@ import "time"
 
 // SubagentContext is a durable, queryable row for one subagent (Task tool)
 // invocation observed by the orchestrator. See
-// docs/specs/subagent-context-persistence/spec.md.
+// docs/specs/agents/requirements/subagent-context-persistence.md.
 //
 // Every nullable column is a pointer. This is not style: ToolUseCount in
 // particular must distinguish a reported 0 from "not reported", and a

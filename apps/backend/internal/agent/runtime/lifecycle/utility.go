@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
@@ -30,6 +31,9 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentID)
 	}
+	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentID)
+	}
 
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
@@ -42,7 +46,8 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
 
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
@@ -54,10 +59,12 @@ func (m *Manager) ExecuteInferencePrompt(ctx context.Context, sessionID, agentID
 		AgentID: agentID,
 		Model:   model,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   execution.WorkspacePath,
-			StripEnv:  agents.StripEnvFor(ia),
+			Protocol:        cfg.Protocol,
+			Command:         cfg.Command.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         execution.WorkspacePath,
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 
@@ -94,15 +101,25 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if !ok {
 		return nil, fmt.Errorf("agent %q does not support inference", agentName)
 	}
+	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
+		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentName)
+	}
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
 		return nil, fmt.Errorf("agent %q inference not supported", agentName)
 	}
+	agentConfig, _ := ia.(agents.Agent)
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("no execution available for session %s: %w", sessionID, err)
 	}
-	client := execution.GetAgentCtlClient()
+	gatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(
+		ctx, profile, agentConfig, execution.RuntimeName)
+	if err != nil {
+		return nil, err
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
@@ -120,19 +137,22 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 			return nil, err
 		}
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+	env, err := m.ResolveUtilityProfileEnvironment(ctx, agentName, profile.EnvVars)
+	if err != nil {
+		return nil, err
+	}
+	if providerKey != "" && providerKeyEnvVar != "" {
+		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
 	}
 	autoApprove := profile.AutoApprove
 	return client.InferencePrompt(ctx, &utility.PromptRequest{
 		Prompt: prompt, AgentID: agentName, Model: profile.Model, Mode: profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
-			Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
-			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
+			Protocol: cfg.Protocol,
+			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix),
+			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	})
 }
@@ -151,7 +171,7 @@ func (m *Manager) ListInferenceAgentsWithContext(ctx context.Context) []Inferenc
 	for _, ia := range inferenceAgents {
 		// Get base agent for metadata
 		ag, ok := ia.(agents.Agent)
-		if !ok {
+		if !ok || !ag.Enabled() {
 			continue
 		}
 

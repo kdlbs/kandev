@@ -179,7 +179,7 @@ function AttachmentBody({ doc }: { doc: TaskDocument }) {
         download={doc.filename ?? doc.key}
         className="cursor-pointer"
       >
-        <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+        <Button variant="ghost" size="icon" className="cursor-pointer">
           <IconDownload className="h-3.5 w-3.5" />
         </Button>
       </a>

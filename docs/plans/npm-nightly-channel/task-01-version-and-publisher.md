@@ -5,7 +5,7 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/npm-nightly-channel/spec.md"
+spec: "../../specs/release/requirements/npm-nightly-channel.md"
 ---
 
 # Task 01: Version and npm publisher

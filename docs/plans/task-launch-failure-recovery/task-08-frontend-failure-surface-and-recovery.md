@@ -5,7 +5,7 @@ status: done
 wave: 5
 depends_on: ["07-status-summary-projection"]
 plan: "plan.md"
-spec: "../../specs/task-launch-failure-recovery/spec.md"
+spec: "../../specs/tasks/requirements/task-launch-failure-recovery.md"
 ---
 
 # Task 08: Frontend launch-error data

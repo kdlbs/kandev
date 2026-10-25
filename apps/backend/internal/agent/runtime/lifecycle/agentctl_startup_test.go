@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func testAgentctlStartupConfig() commonconfig.AgentctlStartupConfig {
@@ -16,6 +17,33 @@ func testAgentctlStartupConfig() commonconfig.AgentctlStartupConfig {
 		IdleReaperInterval:        3 * time.Minute,
 		NotificationQueueCapacity: 4096,
 		OTLPEndpoint:              "http://collector:4318",
+	}
+}
+
+func TestAgentctlStartupConfigDisablesSurvivalOutsideHostExecutors(t *testing.T) {
+	for _, executorType := range []models.ExecutorType{
+		models.ExecutorTypeLocalDocker,
+		models.ExecutorTypeRemoteDocker,
+		models.ExecutorTypeSprites,
+		models.ExecutorTypeSSH,
+		models.ExecutorTypeKubernetes,
+		models.ExecutorTypeMockRemote,
+	} {
+		startup := testAgentctlStartupConfig()
+		startup.AgentSurvivalEnabled = true
+		got := agentctlStartupConfigForExecutor(startup, string(executorType))
+		if got.AgentSurvivalEnabled {
+			t.Fatalf("executor %q retained host survival reaper", executorType)
+		}
+	}
+
+	for _, executorType := range []string{string(models.ExecutorTypeLocal), string(models.ExecutorTypeWorktree), legacyExecutorTypeLocalPC} {
+		startup := testAgentctlStartupConfig()
+		startup.AgentSurvivalEnabled = true
+		got := agentctlStartupConfigForExecutor(startup, executorType)
+		if !got.AgentSurvivalEnabled {
+			t.Fatalf("host executor %q lost survival reaper", executorType)
+		}
 	}
 }
 

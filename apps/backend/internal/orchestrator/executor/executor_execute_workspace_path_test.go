@@ -1,6 +1,10 @@
 package executor
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // Pinpointed tests for computeWorkspacePath. The persisted workspace_path
 // becomes agentctl's WorkDir on cold start (GetOrEnsureExecution); it must
@@ -48,11 +52,32 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 		}
 	})
 
+	// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.3
 	t.Run("no worktree falls back to repository path", func(t *testing.T) {
 		req := &LaunchAgentRequest{RepositoryPath: "/repos/myrepo"}
 		resp := &LaunchAgentResponse{} // no WorktreePath
 		if got := computeWorkspacePath(req, resp); got != "/repos/myrepo" {
 			t.Fatalf("fallback: want /repos/myrepo, got %q", got)
+		}
+	})
+
+	// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+	t.Run("recovered execution keeps lifecycle workspace", func(t *testing.T) {
+		req := &LaunchAgentRequest{RepositoryPath: "/source/kandev"}
+		resp := &LaunchAgentResponse{WorkspacePath: "/tasks/task-1/kandev"}
+		if got := computeWorkspacePath(req, resp); got != "/tasks/task-1/kandev" {
+			t.Fatalf("recovered workspace: want lifecycle workspace, got %q", got)
+		}
+	})
+
+	t.Run("SSH keeps the remote task directory over the host repository path", func(t *testing.T) {
+		req := &LaunchAgentRequest{
+			ExecutorType:   string(models.ExecutorTypeSSH),
+			RepositoryPath: "/host/repos/source-only",
+		}
+		resp := &LaunchAgentResponse{WorkspacePath: "/home/agent/.kandev/tasks/task-1"}
+		if got := computeWorkspacePath(req, resp); got != "/home/agent/.kandev/tasks/task-1" {
+			t.Fatalf("SSH workspace: want remote task directory, got %q", got)
 		}
 	})
 }

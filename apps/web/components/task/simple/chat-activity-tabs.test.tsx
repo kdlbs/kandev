@@ -145,6 +145,9 @@ describe("ChatActivityTabs per-agent tabs", () => {
     const dots = screen.getAllByTestId("agent-tab-live-dot");
     // Exactly one dot — the running agent.
     expect(dots).toHaveLength(1);
+    expect(dots[0].hasAttribute("data-compositor-pulse")).toBe(true);
+    expect(dots[0].className).toContain("animate-pulse");
+    expect(dots[0].getAttribute("aria-label")).toBe("agent running");
   });
 
   it("groups multiple sessions for one agent into a single tab", () => {

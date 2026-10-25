@@ -16,10 +16,9 @@ import (
 // the actual host-local probe stays in this platform-split package.
 //
 //   - local/standalone: judged by local_pid on this host.
-//   - SSH/remote: Unknown here. The agent process lives on another host and its
-//     liveness is owned by the SSH executor's remote `kill -0` path; the SSH
-//     `pid` column is a REMOTE pid and must never be probed with a local
-//     os.FindProcess.
+//   - SSH/Kubernetes/remote: Unknown here. The agent process lives elsewhere;
+//     SSH owns its remote `kill -0` probe and Kubernetes owns Pod status. Their
+//     process identifiers must never be probed with a local os.FindProcess.
 //   - docker / anything else: Unknown for now (out of scope for this batch).
 func RowProcessLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
 	if row == nil {
@@ -42,8 +41,9 @@ func RowProcessLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
 
 // isLocalRuntime reports whether a row's runtime runs its agent process on THIS
 // host, so a local os.FindProcess check is meaningful. Standalone is the only
-// local runtime; SSH/docker/remote-docker/sprites run the process elsewhere.
-// An empty/unknown runtime is treated as non-local (Unknown), never probed.
+// local runtime; SSH/Kubernetes/docker/remote-docker/sprites run the process
+// elsewhere. An empty/unknown runtime is treated as non-local (Unknown), never
+// probed.
 func isLocalRuntime(runtime agentruntime.Runtime) bool {
 	return runtime == agentruntime.RuntimeStandalone
 }

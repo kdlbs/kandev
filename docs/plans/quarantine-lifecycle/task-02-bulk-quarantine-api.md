@@ -5,7 +5,7 @@ status: done
 wave: 2
 depends_on: ["01-backend-purge-engine"]
 plan: "plan.md"
-spec: "../../specs/system-page/storage-maintenance.md"
+spec: "../../specs/system-page/requirements/storage-maintenance.md"
 ---
 
 # Task 02: Bulk quarantine API

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"github.com/stretchr/testify/require"
 	"regexp"
 	"testing"
 
@@ -102,6 +103,13 @@ func TestMockAgent_Runtime_CanRecover(t *testing.T) {
 	}
 }
 
+func TestMockAgent_Runtime_NativeSessionResume(t *testing.T) {
+	a := NewMockAgent()
+	if !a.Runtime().SessionConfig.NativeSessionResume {
+		t.Error("expected mock ACP agent to use native session/load resume")
+	}
+}
+
 func TestMockAgent_Runtime_ProtocolACP(t *testing.T) {
 	a := NewMockAgent()
 	rt := a.Runtime()
@@ -191,4 +199,12 @@ func TestMockAgent_PassthroughConfig_PromptPattern(t *testing.T) {
 	if re.MatchString(initialPromptLine) {
 		t.Fatalf("expected PromptPattern not to match prompt echo %q", initialPromptLine)
 	}
+}
+
+func TestMockRemotePassthroughUsesTargetBinary(t *testing.T) {
+	agent := NewMockAgent()
+	agent.SetBinaryPath("/backend/bin/mock-agent")
+	command := agent.BuildPassthroughCommand(PassthroughOptions{Runtime: agentruntime.RuntimeSSH, Prompt: "remote prompt"})
+	require.Equal(t, "mock-agent", command.Args()[0])
+	require.Contains(t, command.Args(), "remote prompt")
 }

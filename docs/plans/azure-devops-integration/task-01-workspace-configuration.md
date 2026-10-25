@@ -5,7 +5,7 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/azure-devops-integration/spec.md"
+spec: "../../specs/integrations/requirements/azure-devops-integration.md"
 ---
 
 # Task 01: Workspace Configuration

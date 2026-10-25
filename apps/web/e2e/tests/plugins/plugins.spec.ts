@@ -49,17 +49,36 @@ import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
-import { dwell } from "../../helpers/causal-waits";
-import { MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "@/lib/navigation/plugin-footer-budget";
+import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
+import {
+  openInstallDialog,
+  PACKAGE_PATH,
+  PLUGIN_ID,
+  uninstallPluginFixture,
+  uploadPackage,
+} from "./plugin-test-helpers";
 
-const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
 const PLUGIN_ROUTE = "/plugins/e2e-hello";
 
-const PACKAGE_PATH = path.resolve(
-  __dirname,
-  "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
-);
+// @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.8
+test("plugin settings toolbar stays compact on desktop", async ({ testPage }) => {
+  await testPage.goto("/settings/plugins");
+  const install = testPage.getByTestId("install-plugin-trigger");
+  const sync = testPage.getByTestId("plugins-sync-button");
+  const check = testPage.getByTestId("plugins-check-updates-button");
+  await expect(install).toBeVisible();
+  const boxes = await Promise.all([install.boundingBox(), sync.boundingBox(), check.boundingBox()]);
+  for (const box of boxes) {
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeCloseTo(28, 0);
+    expect(box!.y).toBeCloseTo(boxes[0]!.y, 0);
+  }
+  await install.focus();
+  await testPage.keyboard.press("Enter");
+  await expect(testPage.getByTestId("install-plugin-dialog")).toBeVisible();
+});
 
 /** Every deliveries.jsonl `event_type` recorded so far, read straight off
  * disk from the plugin's real KANDEV_PLUGIN_DATA_DIR (no in-process mock —
@@ -75,18 +94,6 @@ function deliveredEventTypes(pluginsDir: string): string[] {
     .map((line) => (JSON.parse(line) as { event_type: string }).event_type);
 }
 
-async function openInstallDialog(page: Page) {
-  await page.goto("/settings/plugins");
-  await page.getByTestId("install-plugin-trigger").click();
-  await expect(page.getByTestId("install-plugin-dialog")).toBeVisible();
-}
-
-async function uploadPackage(page: Page, filePath: string) {
-  await page.getByTestId("install-plugin-tab-upload").click();
-  await page.getByTestId("install-plugin-file-input").setInputFiles(filePath);
-  await page.getByTestId("install-plugin-upload-submit").click();
-}
-
 async function waitForPluginBundleReady(page: Page): Promise<void> {
   const navItem = page.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`);
   await expect(navItem).toBeVisible({ timeout: 15_000 });
@@ -98,7 +105,7 @@ async function waitForPluginBundleReady(page: Page): Promise<void> {
 }
 
 async function uninstallViaApi(apiClient: ApiClient) {
-  await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
+  await uninstallPluginFixture(apiClient);
 }
 
 async function installedPluginPath(apiClient: ApiClient): Promise<string> {
@@ -125,7 +132,7 @@ function pluginExecutablePath(installPath: string): string {
  * Stages a filesystem sideload: extracts the same fixture package the
  * upload tests use directly into `<pluginsDir>/<id>/<version>/`, with no
  * `{id}.yml` record — the on-disk shape `Service.Sync`'s directory-sideload
- * step looks for (docs/specs/plugins/spec.md "Filesystem sideloading &
+ * step looks for (docs/specs/plugins/requirements/plugins.md "Filesystem sideloading &
  * sync"). `checksums.txt` lands in the directory alongside the rest of the
  * package; the sideload path ignores it (only the tarball-install path
  * verifies checksums).
@@ -325,7 +332,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // --- 7. Uninstall via UI (with confirmation): row disappears, package
     // directory tree is removed from disk. ---
     await pluginRow.getByRole("button", { name: "Uninstall" }).click();
-    await testPage.getByRole("button", { name: "Confirm uninstall" }).click();
+    await expect(testPage.getByTestId("plugin-uninstall-confirm-popover")).toContainText("E2E");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
     await expect(pluginRow).toHaveCount(0, { timeout: 10_000 });
 
     const pluginDir = path.join(pluginsDir, PLUGIN_ID);
@@ -381,6 +390,91 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // Leave the instance-wide default off so sibling tests start clean.
     await globalToggle.click();
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("curated release becomes an installable update", async ({ testPage, apiClient }) => {
+    test.setTimeout(120_000);
+    const releaseFixture = await PluginMarketplaceReleaseFixture.start();
+    let sourceId = "";
+    try {
+      await openInstallDialog(testPage);
+      await uploadPackage(testPage, PACKAGE_PATH);
+      const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+      await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+      const addSource = await apiClient.rawRequest("POST", "/api/plugins/marketplace/sources", {
+        name: "Curated release fixture",
+        url: releaseFixture.indexUrl,
+      });
+      expect(addSource.ok).toBe(true);
+      sourceId = ((await addSource.json()) as { id: string }).id;
+
+      expect(await releaseFixture.detectRelease()).toBe(false);
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const latestVersion = pluginRow.getByTestId(`plugin-latest-version-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
+
+      releaseFixture.publishRelease("1.5.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await expect(releaseFixture.rebuildIndex()).rejects.toThrow();
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      await expect(latestVersion).toContainText("1.0.0", { timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`)).toHaveCount(0);
+
+      releaseFixture.publishRelease("2.0.0");
+      expect(await releaseFixture.detectRelease()).toBe(true);
+      await releaseFixture.rebuildIndex();
+
+      await testPage.getByTestId("plugins-check-updates-button").click();
+      const updateButton = pluginRow.getByTestId(`plugin-update-${PLUGIN_ID}`);
+      await expect(latestVersion).toContainText("2.0.0", { timeout: 15_000 });
+      await expect(updateButton).toBeVisible();
+      await expect(updateButton).toHaveAttribute("data-variant", "default");
+
+      await updateButton.click();
+      await expect(pluginRow.getByText("v2.0.0", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+      await expect(updateButton).toHaveCount(0);
+    } finally {
+      if (sourceId) {
+        await apiClient.rawRequest("DELETE", `/api/plugins/marketplace/sources/${sourceId}`);
+      }
+      await releaseFixture.close();
+    }
+  });
+
+  test("row and detail uninstall confirmations stay local to their initiating controls", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    await pluginRow.getByRole("button", { name: "Uninstall" }).click();
+    const rowConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
+    await expect(rowConfirmation).toContainText("Kandev E2E Fixture Plugin");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await rowConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await expect(rowConfirmation).toHaveCount(0);
+
+    await pluginRow.click({ position: { x: 600, y: 12 } });
+    await expect(testPage).toHaveURL(new RegExp(`/settings/plugins/${PLUGIN_ID}$`));
+    const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Uninstall" }).click();
+
+    const detailConfirmation = testPage.getByTestId("plugin-uninstall-confirm-popover");
+    await expect(detailConfirmation).toContainText("Kandev E2E Fixture Plugin");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
+    await expect(testPage).toHaveURL(/\/settings\/plugins$/);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);
   });
 
   test("shows boot failure diagnostics and retries an errored plugin", async ({
@@ -484,10 +578,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
-    // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
+    // mod+alt+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
     // resolves to Ctrl/Cmd per-platform, matching Playwright's
     // "ControlOrMeta" pseudo-modifier. ---
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
     // toContainText, not toHaveText: the modal body also carries the tooltip
@@ -499,6 +593,86 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // by default) modal. ---
     await testPage.getByRole("button", { name: "Close" }).click();
     await expect(modal).not.toBeVisible();
+  });
+
+  test("long plugin modal content stays contained and its final control remains operable", async ({
+    testPage,
+    prCapture,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      testPage.getByTestId(`plugin-row-${PLUGIN_ID}`).getByText("Active", { exact: true }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await waitForPluginBundleReady(testPage);
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
+
+    const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
+    const body = dialog.locator('[data-testid^="plugin-modal-body-"]');
+    const title = dialog.locator('[data-slot="dialog-title"]');
+    const close = dialog.locator('[data-slot="dialog-close"]');
+    const finalAction = dialog.getByTestId("hello-long-modal-final-action");
+    await expect(dialog).toBeVisible();
+    await expect(body).toHaveCount(1);
+    await expect(finalAction).toBeVisible();
+    await dialog.evaluate(async (element) => {
+      const animations = element.getAnimations({ subtree: true }).filter((animation) => {
+        if (animation.playState !== "running") return false;
+        const iterations = animation.effect?.getComputedTiming().iterations;
+        return typeof iterations === "number" && Number.isFinite(iterations);
+      });
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
+
+    const metrics = await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      return { clientHeight: node.clientHeight, scrollHeight: node.scrollHeight };
+    });
+    expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+    const viewport = await testPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    for (const [label, locator] of [
+      ["dialog", dialog],
+      ["title", title],
+      ["close", close],
+    ] as const) {
+      const box = await locator.boundingBox();
+      if (!box) throw new Error(`${label} has no layout box`);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    }
+
+    await body.evaluate((element) => {
+      const node = element as HTMLElement;
+      node.scrollTop = node.scrollHeight;
+    });
+    await expect
+      .poll(() => body.evaluate((element) => (element as HTMLElement).scrollTop))
+      .toBeGreaterThan(0);
+    await expect(finalAction).toBeInViewport();
+    const finalBox = await finalAction.boundingBox();
+    if (!finalBox) throw new Error("final plugin action has no layout box");
+    expect(finalBox.y).toBeGreaterThanOrEqual(0);
+    expect(finalBox.y + finalBox.height).toBeLessThanOrEqual(viewport.height);
+    await finalAction.click();
+    await expect(finalAction).toHaveText("Plugin modal action complete");
+    if (prCapture.capturing) {
+      await prCapture.screenshot("long-plugin-modal", {
+        caption:
+          "Long plugin modal content remains scrollable while the title, close control, and final action stay usable.",
+      });
+    }
+
+    await close.click();
+    await expect(dialog).not.toBeVisible();
   });
 
   // `PluginModalHost` owns a TooltipProvider so plugin modal content remains
@@ -523,7 +697,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
 
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
 
@@ -535,7 +709,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
     await trigger.hover();
     await expect(
-      testPage.getByRole("tooltip").filter({ hasText: "Tooltip inside a plugin modal" }),
+      testPage
+        .locator('[data-slot="tooltip-content"]')
+        .filter({ hasText: "Tooltip inside a plugin modal" }),
     ).toBeVisible();
   });
 
@@ -735,6 +911,18 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
         { timeout: 15_000, intervals: [250, 500, 1000] },
       )
       .toBe("s3cret-roundtrip");
+
+    // --- Uninstall from the detail danger zone: the confirmation stays at
+    // the initiating control and only successful cleanup returns to the list. ---
+    await testPage.goto(`/settings/plugins/${PLUGIN_ID}`);
+    const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+    await expect(detail).toBeVisible();
+    await detail.getByRole("button", { name: "Uninstall" }).click();
+    await expect(testPage.getByTestId("plugin-uninstall-confirm-popover")).toContainText("E2E");
+    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await testPage.getByTestId("plugin-uninstall-confirm").click();
+    await expect(testPage).toHaveURL(/\/settings\/plugins$/);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);
   });
 
   test("uploading a corrupted package surfaces install-plugin-error", async ({ testPage }) => {
@@ -785,8 +973,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     });
   });
 
-  test("registers a sidebar-footer-section item as a footer icon, not a rail row", async ({
+  test("projects a sidebar-footer destination into layout navigation without a footer duplicate", async ({
     testPage,
+    apiClient,
+    seedData,
   }) => {
     test.setTimeout(60_000);
 
@@ -797,58 +987,54 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    const footerButton = testPage.getByTestId(
-      `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`,
-    );
-    await expect(footerButton).toBeVisible({ timeout: 15_000 });
-    await expect(footerButton).toHaveAttribute("aria-label", "E2E Insights Tools");
-    await footerButton.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    const navItem = testPage.getByTestId("plugin-nav-item-e2e-insights-tools");
+    await expect(navItem).toBeVisible({ timeout: 15_000 });
+    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+    try {
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      if ((await expand.getAttribute("aria-expanded")) === "true") {
+        const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+        await expand.click();
+        expect((await collapsed).ok()).toBeTruthy();
+      }
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await expand.click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
+      await navItem.click();
+      await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
 
-    // Moves, does not add: the same item never also renders in the rail.
-    await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
+      await testPage.getByTestId("sidebar-footer-more-button").click();
+      await expect(
+        testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`),
+      ).toHaveCount(0);
+    } finally {
+      const current = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+        seedData.workspaceId
+      ];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: current?.revision ?? 0,
+          layout: baseline ?? null,
+        },
+      });
+    }
   });
 
-  test("routes the over-budget sidebar-footer item through the overflow menu, hidden until opened", async ({
-    testPage,
-  }) => {
+  test("projects every sidebar-footer destination into layout navigation", async ({ testPage }) => {
     test.setTimeout(60_000);
 
-    // The fixture registers 4 sidebar-footer items, in registration order:
-    // e2e-insights-tools (id/label "E2E Insights Tools"), then
-    // -2/-3/-4 ("E2E Overflow Item 2/3/4"). Deliberately one more than the
-    // desktop footer's exported MAX_INLINE_PLUGIN_FOOTER_ITEMS budget, so
-    // this single install drives the real overflow trigger/menu with the
-    // actual Radix DropdownMenu (spec.md#Capacity-and-overflow,
-    // spec.md#The-guarantee). Unit coverage in app-sidebar-footer.test.tsx
-    // mocks DropdownMenu as a pass-through, so it cannot prove the real
-    // component opens on click or hides its content while closed; this is
-    // the test that does.
-    //
-    // Per spec.md#Capacity-and-overflow, conformance tests derive their
-    // expectations from the exported constant rather than hard-coding the
-    // digits — which item lands inline vs. in the overflow menu is computed
-    // below from MAX_INLINE_PLUGIN_FOOTER_ITEMS, not hard-coded as 3/4.
+    // Every footer destination is reachable through the shared utilities menu.
     const fixtureItemIds = [
       "e2e-insights-tools",
       "e2e-insights-tools-2",
       "e2e-insights-tools-3",
       "e2e-insights-tools-4",
     ];
-    const fixtureItemLabels: Record<string, string> = {
-      "e2e-insights-tools": "E2E Insights Tools",
-      "e2e-insights-tools-2": "E2E Overflow Item 2",
-      "e2e-insights-tools-3": "E2E Overflow Item 3",
-      "e2e-insights-tools-4": "E2E Overflow Item 4",
-    };
-    const inlineIds = fixtureItemIds.slice(0, MAX_INLINE_PLUGIN_FOOTER_ITEMS);
-    const overflowIds = fixtureItemIds.slice(MAX_INLINE_PLUGIN_FOOTER_ITEMS);
-    // The fixture must register more items than the budget for this test to
-    // exercise the overflow menu at all — fail loudly here rather than
-    // silently degrading to an all-inline run if the budget is ever raised
-    // to meet or exceed the fixture's fixed item count.
-    expect(overflowIds.length).toBeGreaterThan(0);
-
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
@@ -856,29 +1042,17 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    for (const id of inlineIds) {
-      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toBeVisible({
-        timeout: 15_000,
-      });
-    }
-
-    const overBudgetId = overflowIds[0];
-    const overBudgetTestId = `sidebar-plugin:${PLUGIN_ID}:${overBudgetId}-button`;
-    const overflowTrigger = testPage.getByTestId("sidebar-plugin-overflow-button");
+    const overflowTrigger = testPage.getByTestId("sidebar-footer-more-button");
     await expect(overflowTrigger).toBeVisible();
 
-    // Closed-menu guarantee: the over-budget item's button carries the same
-    // testid an inline button would use (spec.md#Rendered-identity), so it
-    // must be entirely absent from the DOM while the menu is closed, not
-    // merely hidden — a real DropdownMenu unmounts its content when closed.
-    await expect(testPage.getByTestId(overBudgetTestId)).toHaveCount(0);
+    for (const id of fixtureItemIds) {
+      await expect(testPage.getByTestId(`plugin-nav-item-${id}`)).toBeVisible();
+    }
 
     await overflowTrigger.click();
 
-    const menuItem = testPage.getByTestId(overBudgetTestId);
-    await expect(menuItem).toBeVisible();
-    await expect(menuItem).toHaveText(fixtureItemLabels[overBudgetId]);
-    await menuItem.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    for (const id of fixtureItemIds) {
+      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toHaveCount(0);
+    }
   });
 });

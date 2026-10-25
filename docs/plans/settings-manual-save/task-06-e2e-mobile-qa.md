@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-workflow-drafts", "03-general-operational-drafts", "04-manual-editor-migration", "05-integration-settings"]
 plan: "plan.md"
-spec: "../../specs/ui/settings-manual-save.md"
+spec: "../../specs/ui/requirements/settings-manual-save.md"
 ---
 
 # Task 06: E2E, Mobile QA, and Final Audit
@@ -36,7 +36,7 @@ GOCACHE=/tmp/kandev-go-cache GOLANGCI_LINT_CACHE=/tmp/kandev-golangci-cache make
 - `apps/web/e2e/tests/settings/settings-manual-save.spec.ts`
 - `apps/web/e2e/tests/settings/mobile-general-settings.spec.ts`
 - Existing affected settings/integration page objects and specs whose Save selectors changed
-- `docs/specs/ui/settings-manual-save.md`
+- `docs/specs/ui/requirements/settings-manual-save.md`
 - `docs/plans/settings-manual-save/plan.md`
 
 ## Dependencies

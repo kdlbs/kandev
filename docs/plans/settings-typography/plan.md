@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/settings-typography/spec.md
+spec: docs/specs/ui/requirements/settings-typography.md
 created: 2026-08-16
 status: building
 ---
@@ -174,3 +174,10 @@ remaining audit callsites are still in progress and are explicitly tracked in
 the audit README rather than treated as complete. The full web test suite was
 not completed because the existing plugin-host happy-dom stylesheet tests
 emitted external-stylesheet warnings and did not finish in the available run.
+
+## Related composition work
+
+The [settings composition package](../settings-composition/plan.md) owns the later grouping, spacing, and Task behavior reorganization.
+It reuses this package's shipped typography components and preserves their roles.
+Its work orders record new caller migrations and rendered evidence separately.
+This link does not change the existing task statuses or verification results.

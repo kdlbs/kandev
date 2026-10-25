@@ -6,20 +6,20 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
+import { useDialogBodyLockRecovery } from "./lib/dialog-body-lock";
 
-function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  React.useEffect(() => {
-    return () => {
-      // Safety cleanup: Radix AlertDialog sets pointer-events: none on body
-      // when modal. If unmounted mid-close (e.g. layout rebuild), Radix never
-      // finishes cleanup. Check the actual body state at unmount time.
-      if (document.body.style.pointerEvents === "none") {
-        document.body.style.removeProperty("pointer-events");
-      }
-    };
-  }, []);
-
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+function AlertDialog({
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  const handleOpenChange = useDialogBodyLockRecovery(props.open, onOpenChange);
+  return (
+    <AlertDialogPrimitive.Root
+      data-slot="alert-dialog"
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  );
 }
 
 function AlertDialogTrigger({
@@ -40,7 +40,7 @@ function AlertDialogOverlay({
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
       className={cn(
-        "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 bg-black/80 duration-100 supports-backdrop-filter:backdrop-blur-xs fixed inset-0 z-50",
+        "data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-closed:pointer-events-none data-open:fade-in-0 bg-black/80 duration-100 supports-backdrop-filter:backdrop-blur-xs fixed inset-0 z-50",
         className,
       )}
       {...props}
@@ -129,7 +129,7 @@ function AlertDialogTitle({
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
       className={cn(
-        "text-sm font-medium sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
+        "min-w-0 text-sm font-medium text-balance wrap-anywhere sm:group-data-[size=default]/alert-dialog-content:group-has-data-[slot=alert-dialog-media]/alert-dialog-content:col-start-2",
         className,
       )}
       {...props}
@@ -145,7 +145,7 @@ function AlertDialogDescription({
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
       className={cn(
-        "text-muted-foreground *:[a]:hover:text-foreground text-xs/relaxed text-balance md:text-pretty *:[a]:underline *:[a]:underline-offset-3",
+        "text-muted-foreground min-w-0 *:[a]:hover:text-foreground text-xs/relaxed text-pretty wrap-anywhere *:[a]:underline *:[a]:underline-offset-3",
         className,
       )}
       {...props}

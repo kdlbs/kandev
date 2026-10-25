@@ -1,47 +1,49 @@
 "use client";
 
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo } from "react";
 import Link from "@/components/routing/app-link";
-import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconChevronDown,
+  IconChevronRight,
+  IconGitBranch,
+  IconCheck,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
+import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { LineStat } from "@/components/diff-stat";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { useRemoteContributionRelation } from "@/hooks/domains/session/use-remote-contribution-relation";
+import type { FileInfo } from "@/lib/state/slices";
 import {
-  remoteContributionActionPolicy,
-  remoteContributionActionReasonKey,
-} from "@/hooks/domains/session/remote-contribution-relation";
-import {
-  CommitDialog,
-  PRDialog,
-  GitActionsDropdown,
-  computeUncommittedStats,
-  useMobileGitActions,
-} from "./session-mobile-top-bar-git-controls";
-import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+  TaskTopBarPluginActions,
+  useHasTaskTopBarPluginActions,
+} from "@/components/task/task-top-bar-plugin-actions";
+import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { linkToTaskOverview } from "@/lib/links";
+import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useTranslation } from "react-i18next";
-import { openExternalLink } from "@/lib/desktop/external-links";
 import {
-  buildRemoteContributionResolutionTarget,
-  useRemoteContributionResolution,
-  useRemoteContributionResolutionConfirmation,
-  type RemoteContributionResolutionTarget,
-} from "../use-remote-contribution-resolution";
-import { MobileContributionResolutionDrawer } from "./mobile-contribution-resolution-drawer";
+  RemoteRepositoryProviderIcon,
+  useRemoteRepositoryProviderLabel,
+} from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import type { TaskTopbarRepository } from "../task-page-content-helpers";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
   workspaceId?: string | null;
   taskTitle?: string;
+  /** `owner/repo` (or the repository name) of the task's primary repository. */
+  repositoryLabel?: string | null;
+  topbarRepository?: TaskTopbarRepository | null;
   sessionId?: string | null;
   baseBranch?: string;
   worktreeBranch?: string | null;
-  onMenuClick: () => void;
+  onTaskPickerClick: () => void;
+  taskPickerOpen: boolean;
   showApproveButton?: boolean;
   onApprove?: () => void;
   isRemoteExecutor?: boolean;
@@ -52,37 +54,134 @@ type SessionMobileTopBarProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
 };
 
 function MobileTaskTitle({
   taskTitle,
+  repositoryLabel,
   displayBranch,
   totalAdditions,
   totalDeletions,
+  onTaskPickerClick,
+  taskPickerOpen,
 }: {
   taskTitle?: string;
+  repositoryLabel?: string | null;
   displayBranch?: string;
   totalAdditions: number;
   totalDeletions: number;
+  onTaskPickerClick: () => void;
+  taskPickerOpen: boolean;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col min-w-0 flex-1">
-      <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
-      {displayBranch && (
-        <div className="flex items-center gap-1.5">
-          <IconGitBranch className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-          <span className="text-xs text-muted-foreground truncate">{displayBranch}</span>
-          {(totalAdditions > 0 || totalDeletions > 0) && (
-            <LineStat added={totalAdditions} removed={totalDeletions} />
-          )}
-        </div>
-      )}
-    </div>
+    <button
+      type="button"
+      className="flex h-11 min-w-11 flex-1 flex-col justify-center rounded-md text-left cursor-pointer hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+      onClick={(event) => {
+        event.currentTarget.focus();
+        onTaskPickerClick();
+      }}
+      aria-haspopup="dialog"
+      aria-expanded={taskPickerOpen}
+      aria-label={t("task:openTaskSwitcherFor", { title: taskTitle ?? t("task:taskDetails") })}
+      data-testid="mobile-task-picker-trigger"
+      data-legacy-testid="mobile-session-menu"
+    >
+      <span className="flex w-full min-w-0 items-center gap-1">
+        <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
+        <IconChevronDown className="size-4 shrink-0" />
+      </span>
+      {/* The phone bar has no breadcrumb, so the repository rides the same
+          secondary line as the branch. It shrinks first: on a phone the branch
+          and diff stats are the denser signal, and the full name stays in
+          `title`. */}
+      <div className="flex items-center gap-1.5 min-w-0">
+        {repositoryLabel && (
+          <span
+            data-testid="mobile-task-repository"
+            title={repositoryLabel}
+            className="min-w-0 truncate text-xs text-muted-foreground/70"
+          >
+            {repositoryLabel}
+          </span>
+        )}
+        {displayBranch && (
+          <>
+            <IconGitBranch className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="shrink-0 max-w-[45%] truncate text-xs text-muted-foreground">
+              {displayBranch}
+            </span>
+            {(totalAdditions > 0 || totalDeletions > 0) && (
+              <LineStat added={totalAdditions} removed={totalDeletions} />
+            )}
+          </>
+        )}
+      </div>
+    </button>
   );
 }
 
-function RemoteExecutorIndicator({
+function MobileRepositoryLabel({ repository }: { repository: TaskTopbarRepository }) {
+  const { t } = useTranslation();
+  const providerLabel = useRemoteRepositoryProviderLabel(repository.provider);
+  const accessibleName = t("task:remoteRepositoryIdentity", {
+    provider: providerLabel,
+    repository: repository.fullName,
+  });
+  const icon = (
+    <span
+      data-testid="mobile-task-repository-provider-icon"
+      aria-hidden="true"
+      className="flex shrink-0 items-center"
+    >
+      <RemoteRepositoryProviderIcon provider={repository.provider} />
+    </span>
+  );
+  const name = (
+    <span data-testid="mobile-task-repository-name" aria-hidden="true" className="min-w-0 truncate">
+      {repository.displayName}
+    </span>
+  );
+  const className =
+    "flex h-11 min-h-11 min-w-11 max-w-[38%] shrink items-center gap-1 rounded-md px-1.5 text-xs text-muted-foreground";
+  const content = (
+    <span className="flex min-w-0 items-center gap-1">
+      {icon}
+      {name}
+    </span>
+  );
+
+  if (repository.browserUrl) {
+    return (
+      <a
+        href={repository.browserUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={accessibleName}
+        title={repository.fullName}
+        data-testid="mobile-task-repository-link"
+        className={`${className} cursor-pointer hover:bg-muted hover:text-foreground`}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <span
+      title={repository.fullName}
+      data-testid="mobile-task-repository-label"
+      className={`${className} cursor-default`}
+    >
+      {content}
+      <span className="sr-only">{accessibleName}</span>
+    </span>
+  );
+}
+
+export function MobileRemoteExecutorIndicator({
   taskId,
   sessionId,
   remoteExecutorType,
@@ -101,6 +200,9 @@ function RemoteExecutorIndicator({
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
 }) {
+  if (remoteExecutorType === "k8s" || remoteExecutorType === "plugin_remote") {
+    return <ExecutorSettingsButton taskId={taskId} sessionId={sessionId} />;
+  }
   return (
     <RemoteCloudTooltip
       taskId={taskId ?? ""}
@@ -133,6 +235,16 @@ function ApproveButton({ onApprove }: { onApprove: () => void }) {
   );
 }
 
+function computeUncommittedStats(files: Record<string, FileInfo> | undefined) {
+  let additions = 0;
+  let deletions = 0;
+  for (const file of Object.values(files ?? {})) {
+    additions += file.additions || 0;
+    deletions += file.deletions || 0;
+  }
+  return { additions, deletions };
+}
+
 function useMobileGitMetrics(
   sessionId: string | null | undefined,
   worktreeBranch: string | null | undefined,
@@ -143,139 +255,10 @@ function useMobileGitMetrics(
   const stats = computeUncommittedStats(gitStatus?.files);
 
   return {
-    commits,
     displayBranch: worktreeBranch || baseBranch,
-    uncommittedAdditions: stats.additions,
-    uncommittedDeletions: stats.deletions,
-    uncommittedCount: stats.count,
     totalAdditions: stats.additions + commits.reduce((sum, commit) => sum + commit.insertions, 0),
     totalDeletions: stats.deletions + commits.reduce((sum, commit) => sum + commit.deletions, 0),
   };
-}
-
-function useMobileRemoteActionPolicy(sessionId: string | null | undefined) {
-  const contribution = useRemoteContributionRelation(sessionId);
-  return {
-    ...contribution,
-    ...remoteContributionActionPolicy(contribution.relation),
-  };
-}
-
-type MobileGitDialogsProps = {
-  commitDialogOpen: boolean;
-  setCommitDialogOpen: (open: boolean) => void;
-  prDialogOpen: boolean;
-  setPrDialogOpen: (open: boolean) => void;
-  displayBranch?: string;
-  baseBranch?: string;
-  taskTitle?: string;
-  firstCommitMessage?: string;
-  isGitLoading: boolean;
-  branchPushed: boolean;
-  uncommittedCount: number;
-  uncommittedAdditions: number;
-  uncommittedDeletions: number;
-  onCommit: (message: string, stageAll: boolean) => void;
-  onCreatePR: (title: string, body: string, draft: boolean) => void;
-};
-
-function MobileGitDialogs(props: MobileGitDialogsProps) {
-  return (
-    <>
-      <CommitDialog
-        open={props.commitDialogOpen}
-        onOpenChange={props.setCommitDialogOpen}
-        uncommittedCount={props.uncommittedCount}
-        uncommittedAdditions={props.uncommittedAdditions}
-        uncommittedDeletions={props.uncommittedDeletions}
-        isGitLoading={props.isGitLoading}
-        onCommit={props.onCommit}
-      />
-      <PRDialog
-        open={props.prDialogOpen}
-        onOpenChange={props.setPrDialogOpen}
-        displayBranch={props.displayBranch}
-        baseBranch={props.baseBranch}
-        isGitLoading={props.isGitLoading}
-        taskTitle={props.taskTitle}
-        firstCommitMessage={props.firstCommitMessage}
-        onCreatePR={props.onCreatePR}
-        branchPushed={props.branchPushed}
-      />
-    </>
-  );
-}
-
-function useMobileContributionResolutionActions(sessionId: string | null | undefined) {
-  const { t } = useTranslation();
-  const remoteActionPolicy = useMobileRemoteActionPolicy(sessionId);
-  const resolution = useRemoteContributionResolution(
-    sessionId,
-    remoteActionPolicy.refreshProviderEvidence,
-  );
-  const remoteRepositoryLabel = t("task:remoteRepository");
-  const resolutionTarget = useMemo(
-    () =>
-      buildRemoteContributionResolutionTarget(
-        remoteActionPolicy.relation,
-        remoteActionPolicy.repositoryName,
-        remoteActionPolicy.selectedPR,
-        remoteRepositoryLabel,
-      ),
-    [
-      remoteActionPolicy.relation,
-      remoteActionPolicy.repositoryName,
-      remoteActionPolicy.selectedPR,
-      remoteRepositoryLabel,
-    ],
-  );
-  const requestReplace = useCallback(() => {
-    if (resolutionTarget) resolution.requestReplace(resolutionTarget);
-  }, [resolution, resolutionTarget]);
-  const requestUse = useCallback(() => {
-    if (resolutionTarget) resolution.requestUse(resolutionTarget);
-  }, [resolution, resolutionTarget]);
-  const viewPRVersion = useCallback(() => {
-    const url = remoteActionPolicy.selectedPR?.pr_url;
-    if (url) void openExternalLink(url).catch(() => undefined);
-  }, [remoteActionPolicy.selectedPR?.pr_url]);
-  const confirmResolution = useRemoteContributionResolutionConfirmation(resolution);
-
-  return {
-    remoteActionPolicy,
-    resolution,
-    resolutionTarget,
-    requestReplace,
-    requestUse,
-    viewPRVersion,
-    confirmResolution,
-  };
-}
-
-function MobileResolutionDrawer({
-  resolution,
-  resolutionTarget,
-  confirmResolution,
-}: {
-  resolution: ReturnType<typeof useRemoteContributionResolution>;
-  resolutionTarget: RemoteContributionResolutionTarget | null;
-  confirmResolution: () => Promise<void>;
-}) {
-  if (!resolution.pending || !resolutionTarget) return null;
-  return (
-    <MobileContributionResolutionDrawer
-      open
-      action={resolution.pending.action}
-      repositoryName={resolutionTarget.repositoryName ?? ""}
-      expectedRemoteHead={resolution.pending.expectedRemoteHead}
-      isLoading={resolution.isLoading}
-      errorKey={resolution.errorKey}
-      onOpenChange={(open) => {
-        if (!open) resolution.cancel();
-      }}
-      onConfirm={confirmResolution}
-    />
-  );
 }
 
 type MobileTopBarActionsProps = {
@@ -291,86 +274,11 @@ type MobileTopBarActionsProps = {
   showApproveButton: boolean;
   onApprove?: () => void;
   sessionId?: string | null;
-  isGitLoading: boolean;
-  uncommittedCount: number;
-  baseBranch?: string;
   taskTitle?: string;
   isArchived?: boolean;
-  onCommitClick: () => void;
-  onPRClick: () => void;
-  onPull: () => void;
-  onPush: (force?: boolean) => void;
-  onRebase: () => void;
-  onMerge: () => void;
-  onMenuClick: () => void;
+  onTaskUnarchived?: (taskId: string) => void;
+  onTaskPickerClick: () => void;
 };
-
-type MobileTopBarGitActionsProps = Pick<
-  MobileTopBarActionsProps,
-  | "sessionId"
-  | "isGitLoading"
-  | "uncommittedCount"
-  | "baseBranch"
-  | "onCommitClick"
-  | "onPRClick"
-  | "onPull"
-  | "onPush"
-  | "onRebase"
-  | "onMerge"
->;
-
-function MobileTopBarGitActions(props: MobileTopBarGitActionsProps) {
-  const { t } = useTranslation();
-  const {
-    remoteActionPolicy,
-    resolution,
-    resolutionTarget,
-    requestReplace,
-    requestUse,
-    viewPRVersion,
-    confirmResolution,
-  } = useMobileContributionResolutionActions(props.sessionId);
-  const pushDisabledReasonKey = remoteContributionActionReasonKey(
-    remoteActionPolicy.relation,
-    "push",
-  );
-  const pullDisabledReasonKey = remoteContributionActionReasonKey(
-    remoteActionPolicy.relation,
-    "pull",
-  );
-  return (
-    <>
-      <GitActionsDropdown
-        sessionId={props.sessionId}
-        isGitLoading={props.isGitLoading}
-        uncommittedCount={props.uncommittedCount}
-        baseBranch={props.baseBranch}
-        onCommitClick={props.onCommitClick}
-        onPRClick={props.onPRClick}
-        onPull={props.onPull}
-        onPush={props.onPush}
-        onRebase={props.onRebase}
-        onMerge={props.onMerge}
-        pushDisabled={remoteActionPolicy.pushDisabled}
-        pullDisabled={remoteActionPolicy.pullDisabled}
-        pushDisabledReason={pushDisabledReasonKey ? t(pushDisabledReasonKey) : undefined}
-        pullDisabledReason={pullDisabledReasonKey ? t(pullDisabledReasonKey) : undefined}
-        showContributionResolution={remoteActionPolicy.action === "diverged_replace"}
-        replaceDisabled={remoteActionPolicy.replaceDisabled}
-        useDisabled={remoteActionPolicy.useDisabled}
-        onReplaceContribution={requestReplace}
-        onUseContribution={requestUse}
-        onViewPRVersion={viewPRVersion}
-        prNumber={remoteActionPolicy.selectedPR?.pr_number}
-      />
-      <MobileResolutionDrawer
-        resolution={resolution}
-        resolutionTarget={resolutionTarget}
-        confirmResolution={confirmResolution}
-      />
-    </>
-  );
-}
 
 function MobileTopBarActions({
   taskId,
@@ -385,34 +293,30 @@ function MobileTopBarActions({
   showApproveButton,
   onApprove,
   sessionId,
-  isGitLoading,
-  uncommittedCount,
-  baseBranch,
   taskTitle,
   isArchived,
-  onCommitClick,
-  onPRClick,
-  onPull,
-  onPush,
-  onRebase,
-  onMerge,
-  onMenuClick,
+  onTaskUnarchived,
+  onTaskPickerClick,
 }: MobileTopBarActionsProps) {
-  const { t } = useTranslation();
+  const hasPluginActions = useHasTaskTopBarPluginActions();
+  const pluginActions =
+    !isArchived && hasPluginActions ? (
+      <TaskTopBarPluginActions
+        sessionId={sessionId ?? null}
+        taskId={taskId ?? null}
+        taskTitle={taskTitle}
+        workspaceId={workspaceId ?? null}
+        presentation="mobile"
+      />
+    ) : undefined;
+
   return (
-    <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
+    <div className="flex shrink-0 items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
+      {isArchived && <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} mobile />}
       {!isArchived && <PortForwardButton sessionId={sessionId} />}
-      {!isArchived && (
-        <TaskTopBarPluginActions
-          sessionId={sessionId ?? null}
-          taskId={taskId ?? null}
-          taskTitle={taskTitle}
-          workspaceId={workspaceId ?? null}
-        />
-      )}
       {isRemoteExecutor && (
-        <RemoteExecutorIndicator
+        <MobileRemoteExecutorIndicator
           taskId={taskId}
           sessionId={sessionId}
           remoteExecutorType={remoteExecutorType}
@@ -424,28 +328,7 @@ function MobileTopBarActions({
         />
       )}
       {showApproveButton && onApprove && <ApproveButton onApprove={onApprove} />}
-      <MobileTopBarGitActions
-        sessionId={sessionId}
-        isGitLoading={isGitLoading}
-        uncommittedCount={uncommittedCount}
-        baseBranch={baseBranch}
-        onCommitClick={onCommitClick}
-        onPRClick={onPRClick}
-        onPull={onPull}
-        onPush={onPush}
-        onRebase={onRebase}
-        onMerge={onMerge}
-      />
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="cursor-pointer"
-        onClick={onMenuClick}
-        data-testid="mobile-session-menu"
-        aria-label={t("task:openTaskSwitcher")}
-      >
-        <IconMenu2 className="h-4 w-4" />
-      </Button>
+      <AppNavSheet onOpenTaskViews={onTaskPickerClick} pluginActions={pluginActions} />
     </div>
   );
 }
@@ -454,35 +337,13 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
   props: SessionMobileTopBarProps,
 ) {
   const { t } = useTranslation();
-  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
-  const [prDialogOpen, setPrDialogOpen] = useState(false);
-  const [prBranchPushed, setPrBranchPushed] = useState(false);
-  const {
-    commits,
-    displayBranch,
-    uncommittedAdditions,
-    uncommittedDeletions,
-    uncommittedCount,
-    totalAdditions,
-    totalDeletions,
-  } = useMobileGitMetrics(props.sessionId, props.worktreeBranch, props.baseBranch);
-  const {
-    isGitLoading,
-    handlePull,
-    handlePush,
-    handleRebase,
-    handleMerge,
-    handleCommit,
-    handleCreatePR,
-  } = useMobileGitActions(
+  const { displayBranch, totalAdditions, totalDeletions } = useMobileGitMetrics(
     props.sessionId,
+    props.worktreeBranch,
     props.baseBranch,
-    setCommitDialogOpen,
-    setPrDialogOpen,
-    setPrBranchPushed,
   );
   return (
-    <header className="flex items-center justify-between px-2 py-2 bg-background">
+    <header className="flex items-center justify-between h-14 px-2 py-1 bg-background">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <Button variant="ghost" size="icon-sm" asChild>
           <Link
@@ -492,11 +353,23 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
             <IconArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
+        {props.topbarRepository && (
+          <>
+            <MobileRepositoryLabel repository={props.topbarRepository} />
+            <IconChevronRight
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-muted-foreground"
+            />
+          </>
+        )}
         <MobileTaskTitle
           taskTitle={props.taskTitle}
+          repositoryLabel={props.topbarRepository ? null : props.repositoryLabel}
           displayBranch={displayBranch}
           totalAdditions={totalAdditions}
           totalDeletions={totalDeletions}
+          onTaskPickerClick={props.onTaskPickerClick}
+          taskPickerOpen={props.taskPickerOpen}
         />
       </div>
       <MobileTopBarActions
@@ -512,38 +385,10 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         showApproveButton={props.showApproveButton ?? false}
         onApprove={props.onApprove}
         sessionId={props.sessionId}
-        isGitLoading={isGitLoading}
-        uncommittedCount={uncommittedCount}
-        baseBranch={props.baseBranch}
         taskTitle={props.taskTitle}
         isArchived={props.isArchived}
-        onCommitClick={() => setCommitDialogOpen(true)}
-        onPRClick={() => {
-          setPrBranchPushed(false);
-          setPrDialogOpen(true);
-        }}
-        onPull={handlePull}
-        onPush={handlePush}
-        onRebase={handleRebase}
-        onMerge={handleMerge}
-        onMenuClick={props.onMenuClick}
-      />
-      <MobileGitDialogs
-        commitDialogOpen={commitDialogOpen}
-        setCommitDialogOpen={setCommitDialogOpen}
-        prDialogOpen={prDialogOpen}
-        setPrDialogOpen={setPrDialogOpen}
-        displayBranch={displayBranch}
-        baseBranch={props.baseBranch}
-        taskTitle={props.taskTitle}
-        firstCommitMessage={commits[0]?.commit_message}
-        isGitLoading={isGitLoading}
-        branchPushed={prBranchPushed}
-        uncommittedCount={uncommittedCount}
-        uncommittedAdditions={uncommittedAdditions}
-        uncommittedDeletions={uncommittedDeletions}
-        onCommit={handleCommit}
-        onCreatePR={handleCreatePR}
+        onTaskUnarchived={props.onTaskUnarchived}
+        onTaskPickerClick={props.onTaskPickerClick}
       />
     </header>
   );

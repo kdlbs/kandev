@@ -72,7 +72,7 @@ func (s *Service) RemoveComparisonTargetForChange(
 	if !ok || current.Provider != provider || current.Kind != kind || current.Number != number {
 		return nil
 	}
-	if _, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, taskRepo.ID, nil, &current); err != nil {
+	if _, changed, err := s.taskRepos.UpdateTaskRepositoryComparisonTarget(ctx, taskRepo.ID, nil, &current, false); err != nil {
 		return fmt.Errorf("remove comparison target for detach: %w", err)
 	} else if !changed {
 		return nil
@@ -133,6 +133,10 @@ func (s *Service) collectTaskComparisonTargets(ctx context.Context, taskID strin
 	if err != nil {
 		return nil, fmt.Errorf("list task repositories for comparison-target map: %w", err)
 	}
+	executorType, err := s.workspaceSourceExecutorType(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve executor type for comparison-target map: %w", err)
+	}
 	repos := make([]*models.Repository, len(taskRepos))
 	targets := make([]models.ComparisonTarget, len(taskRepos))
 	hasTarget := make([]bool, len(taskRepos))
@@ -172,9 +176,13 @@ func (s *Service) collectTaskComparisonTargets(ctx context.Context, taskID strin
 		if !hasTarget[i] || repos[i] == nil {
 			continue
 		}
-		result[baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)] = target
+		key, err := taskRepositoryWorkspaceTrackerKey(executorType, i, repos[i], taskRepos[i], plans[i].PathSlug)
+		if err != nil {
+			return nil, fmt.Errorf("resolve comparison-target workspace for repository %q: %w", repos[i].Name, err)
+		}
+		result[key] = target
 	}
-	if len(taskRepos) == 1 && hasTarget[0] {
+	if len(taskRepos) == 1 && hasTarget[0] && executorType != string(models.ExecutorTypePluginRemote) {
 		result[""] = targets[0]
 	}
 	return result, nil

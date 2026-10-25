@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["04-integrate-archived-rows"]
 plan: "plan.md"
-spec: "../../specs/ui/sidebar-archived-filter.md"
+spec: "../../specs/ui/requirements/sidebar-archived-filter.md"
 ---
 
 # Task 05: Prove archived sidebar flows

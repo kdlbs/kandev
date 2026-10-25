@@ -2,7 +2,7 @@
 
 /* eslint-disable max-lines -- create and edit submit flows share one lifecycle boundary. */
 
-import { useCallback, FormEvent } from "react";
+import { useCallback, useRef, FormEvent } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
@@ -14,6 +14,12 @@ import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
 import { t } from "@/lib/i18n";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
 import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
+import { ApiError } from "@/lib/api/client";
+import { getTaskDependencyCycle } from "@/lib/api/domains/task-dependencies-api";
+import { isTaskDependencyUpdateFailure } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
+import { switchTaskRunner } from "@/lib/api/domains/task-runner-api";
+import { WebSocketRequestError } from "@/lib/ws/client";
 
 const GENERIC_ERROR_KEY = "common:anErrorOccurred";
 
@@ -27,6 +33,7 @@ import {
   validateCreateInputs,
   hasPendingAttachmentUploads,
   toMessageAttachments,
+  RUNNER_INELIGIBLE_REASON_KEYS,
 } from "@/components/task-create-dialog-helpers";
 import { hasRegisteredRepositoryProviderCandidate } from "@/lib/plugins/repository-provider-url-resolution";
 
@@ -41,27 +48,254 @@ function notifyQueuedTask(
   });
 }
 
+function shouldNavigateAfterTaskCreate(
+  withAgent: boolean,
+  isPassthroughProfile: boolean,
+  planMode: boolean | undefined,
+  sessionId: string | null,
+) {
+  return (withAgent && isPassthroughProfile) || !!(planMode && sessionId);
+}
+
+function finishTaskCreateNavigation(args: {
+  planMode: boolean | undefined;
+  newSessionId: string | null;
+  autoFocusNewTasks: boolean;
+  withAgent: boolean;
+  isPassthroughProfile: boolean;
+  activatePlan: (sessionId: string) => void;
+  openPassthroughTask: () => void;
+}) {
+  if (args.planMode && args.newSessionId) {
+    args.activatePlan(args.newSessionId);
+  } else if (args.autoFocusNewTasks && args.withAgent && args.isPassthroughProfile) {
+    args.openPassthroughTask();
+  }
+}
+
 type NoAgentTaskRequirements = {
   description: string;
-  workflowStepId: string;
   workspaceId: string;
   workflowId: string;
 };
 
 function hasNoAgentTaskRequirements(input: {
   description: string;
-  workflowStepId: string | null;
   workspaceId: string | null;
   workflowId: string | null;
 }): input is NoAgentTaskRequirements {
-  return Boolean(
-    input.description && input.workflowStepId && input.workspaceId && input.workflowId,
-  );
+  return Boolean(input.description && input.workspaceId && input.workflowId);
 }
 
 function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
   if (!noRepository) return undefined;
   return workspacePath.trim() || undefined;
+}
+
+function isStaleBranchPolicyError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.status === 400 && error.errorCode === "branch_policy_stale"
+  );
+}
+
+const REPOSITORY_SELECTION_ERROR_KEYS: Record<string, string> = {
+  repository_selection_invalid: "task:repositorySelectionInvalid",
+  repository_selection_not_found: "task:repositorySelectionNotFound",
+  repository_selection_unavailable: "task:repositorySelectionUnavailable",
+};
+
+/**
+ * Wraps a rejected `task.runner` switch: the save issues no other call once
+ * this throws, so `performTaskUpdate` never reaches `updateTask`.
+ */
+class RunnerSwitchRejectedError extends Error {
+  constructor(readonly cause: unknown) {
+    super("runner switch rejected");
+  }
+}
+
+/**
+ * Wraps a failure in the sequence AFTER a runner switch already committed:
+ * the switch is not rolled back, so this exists to tell that state apart
+ * from an ordinary save failure.
+ */
+class TaskUpdateAfterRunnerSwitchError extends Error {
+  constructor(readonly cause: unknown) {
+    super("task update failed after runner switch committed");
+  }
+}
+
+/**
+ * Wraps a session-launch failure that follows an already-committed task
+ * save: the save is not rolled back, so this exists to tell that state
+ * apart from an ordinary save failure and keep the dialog reporting the
+ * truth (saved, but the agent didn't start) instead of a silent success.
+ */
+class LaunchAfterTaskUpdateError extends Error {
+  constructor(readonly cause: unknown) {
+    super("session launch failed after task update committed");
+  }
+}
+
+// Maps a rejected task.runner switch to outcome-specific text: a typed
+// mutability conflict reuses the same reason copy as the read-side
+// projection; an untyped outcome (invalid, not-found,
+// evaluation-unavailable) gets text for that class instead of the raw wire
+// code.
+function runnerSwitchErrorMessage(error: unknown): string {
+  if (error instanceof WebSocketRequestError) {
+    const errorCode =
+      typeof error.details?.error_code === "string" ? error.details.error_code : undefined;
+    if (errorCode === "target_cannot_materialize_repository") {
+      return t("task:runnerConflictTargetCannotMaterializeRepository");
+    }
+    const reasonKey = errorCode ? RUNNER_INELIGIBLE_REASON_KEYS[errorCode] : undefined;
+    if (reasonKey) return t(reasonKey);
+    if (error.code === "NOT_FOUND") return t("task:runnerSwitchNotFound");
+    if (error.code === "VALIDATION_ERROR") return t("task:runnerSwitchInvalid");
+    if (error.code === "UNAVAILABLE") return t("task:runnerReasonEvaluationUnavailable");
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
+export function taskSubmitErrorMessage(error: unknown): string {
+  if (isTaskDependencyUpdateFailure(error)) {
+    const cycle = getTaskDependencyCycle(error.cause);
+    if (cycle?.length) return t("task:dependencyCycleError", { cycle: cycle.join(" -> ") });
+    return t("task:dependencyUpdateFailed");
+  }
+  if (error instanceof RunnerSwitchRejectedError) return runnerSwitchErrorMessage(error.cause);
+  if (error instanceof TaskUpdateAfterRunnerSwitchError)
+    return t("task:runnerSwitchPartiallySaved");
+  if (error instanceof LaunchAfterTaskUpdateError) return t("task:launchFailedAfterTaskSaved");
+  if (error instanceof ApiError) {
+    const key = REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""];
+    if (key) return t(key);
+  }
+  return error instanceof Error ? error.message : t(GENERIC_ERROR_KEY);
+}
+
+type EditDependencySaveArgs = {
+  editDependencies?: SubmitHandlersDeps["editDependencies"];
+  updatedTask: Awaited<ReturnType<typeof updateTask>>;
+  isStartedEdit: boolean;
+  descriptionInputRef: SubmitHandlersDeps["descriptionInputRef"];
+  setTaskName: SubmitHandlersDeps["setTaskName"];
+  setHasDescription: SubmitHandlersDeps["setHasDescription"];
+};
+
+async function saveEditedTaskDependencies({
+  editDependencies,
+  updatedTask,
+  isStartedEdit,
+  descriptionInputRef,
+  setTaskName,
+  setHasDescription,
+}: EditDependencySaveArgs): Promise<void> {
+  if (!editDependencies?.isDirty) return;
+  try {
+    await editDependencies.save();
+  } catch (error) {
+    setTaskName(updatedTask.title);
+    if (!isStartedEdit) {
+      const confirmedDescription = updatedTask.description?.trim() ?? "";
+      descriptionInputRef.current?.setValue(confirmedDescription);
+      setHasDescription(confirmedDescription.length > 0);
+    }
+    throw error;
+  }
+}
+
+function areEditDependenciesReady(
+  isEditMode: boolean,
+  editDependencies: SubmitHandlersDeps["editDependencies"],
+): boolean {
+  return !isEditMode || editDependencies?.ready !== false;
+}
+
+// Only a final selection that differs from the last confirmed stored runner
+// counts as a user change. The baseline advances after a successful switch,
+// so a retry can persist a deliberate change back to the previous profile.
+function computeRunnerChanged(
+  confirmedExecutorProfileId: string | null,
+  executorProfileId: string,
+): boolean {
+  return (
+    confirmedExecutorProfileId !== null &&
+    executorProfileId !== "" &&
+    executorProfileId !== confirmedExecutorProfileId
+  );
+}
+
+// Issued first. A rejection here must leave every other field unsaved, so
+// the caller never reaches the rest of the save sequence.
+async function issueRunnerSwitchIfChanged(
+  runnerChanged: boolean,
+  taskId: string,
+  executorProfileId: string,
+  markRunnerConfirmed: (executorProfileId: string) => void,
+): Promise<void> {
+  if (!runnerChanged) return;
+  try {
+    await switchTaskRunner(taskId, executorProfileId);
+    markRunnerConfirmed(executorProfileId);
+  } catch (error) {
+    throw new RunnerSwitchRejectedError(error);
+  }
+}
+
+type SaveEditedTaskFieldsArgs = {
+  editingTask: { id: string };
+  updatePayload: Parameters<typeof updateTask>[1];
+  trimmedDescription: string;
+  runnerChanged: boolean;
+  mcpServerIds: string[];
+  mcpServerIdsDirty: boolean;
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
+} & Omit<EditDependencySaveArgs, "updatedTask">;
+
+// A runner switch that already committed is never rolled back; tag a
+// failure here so the caller can report the true partial state instead of
+// implying the whole save was rejected.
+async function saveEditedTaskFields({
+  editingTask,
+  updatePayload,
+  trimmedDescription,
+  runnerChanged,
+  mcpServerIds,
+  mcpServerIdsDirty,
+  saveTaskMCPSelections,
+  ...dependencySaveArgs
+}: SaveEditedTaskFieldsArgs) {
+  try {
+    const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveMCPSelectionIfNeeded({
+      isStartedEdit: dependencySaveArgs.isStartedEdit,
+      dirty: mcpServerIdsDirty,
+      definitionIds: mcpServerIds,
+      save: saveTaskMCPSelections,
+    });
+    await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
+    return { updatedTask, trimmedDescription };
+  } catch (error) {
+    if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
+    throw error;
+  }
+}
+
+async function saveMCPSelectionIfNeeded({
+  isStartedEdit,
+  dirty,
+  definitionIds,
+  save,
+}: {
+  isStartedEdit: boolean;
+  dirty: boolean;
+  definitionIds: string[];
+  save?: (definitionIds: string[]) => Promise<unknown>;
+}) {
+  if (isStartedEdit || !dirty || !save) return;
+  await save(definitionIds);
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -75,8 +309,8 @@ export function useTaskSubmitHandlers({
   workspaceId,
   workflowId,
   effectiveWorkflowId,
-  effectiveDefaultStepId,
   repositories,
+  repositoriesDirty,
   discoveredRepositories,
   workspaceRepositories,
   useRemote,
@@ -85,11 +319,13 @@ export function useTaskSubmitHandlers({
   agentProfileId,
   executorId,
   executorProfileId,
+  seededExecutorProfileId,
   editingTask,
   onSuccess,
   onCreateSession,
   onOpenChange,
   createTask,
+  refreshBranchPolicies,
   preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
@@ -103,22 +339,44 @@ export function useTaskSubmitHandlers({
   setRemoteRepos,
   setAgentProfileId,
   setExecutorId,
+  setMcpServerIds,
+  setMcpServerIdsDirty,
   setSelectedWorkflowId,
   setFetchedSteps,
+  setInitialWorkspaceLayout,
   clearDraft,
   freshBranchEnabled,
   isLocalExecutor,
   repositoryLocalPath,
   noRepository,
   workspacePath,
+  priority,
+  workflowAgentOverrides,
+  workflowAgentOverridesBlockedReason,
+  initialWorkspaceLayout,
   blockedBy,
+  mcpServerIds = [],
+  saveTaskMCPSelections,
+  mcpServerIdsDirty,
+  editDependencies,
   transformDescriptionBeforeSubmit,
 }: SubmitHandlersDeps) {
   const router = useRouter();
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
+  const seededRunnerRef = useRef(seededExecutorProfileId);
+  const confirmedRunnerRef = useRef<string | null>(seededExecutorProfileId);
+  if (seededRunnerRef.current !== seededExecutorProfileId) {
+    seededRunnerRef.current = seededExecutorProfileId;
+    confirmedRunnerRef.current = seededExecutorProfileId;
+  }
+  const markRunnerConfirmed = useCallback((profileId: string) => {
+    confirmedRunnerRef.current = profileId;
+  }, []);
 
   const isFreshBranchActive =
     freshBranchEnabled && isLocalExecutor && !useRemote && repositoryLocalPath !== "";
@@ -130,6 +388,15 @@ export function useTaskSubmitHandlers({
       toast,
       createTask,
     });
+
+  const refreshStaleBranchPolicies = useCallback(
+    async (error: unknown) => {
+      if (!isStaleBranchPolicyError(error)) return false;
+      if (refreshBranchPolicies) await refreshBranchPolicies().catch(() => undefined);
+      return true;
+    },
+    [refreshBranchPolicies],
+  );
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
     isFreshBranchActive ? { confirmDiscard: true, consentedDirtyFiles } : undefined;
@@ -212,6 +479,9 @@ export function useTaskSubmitHandlers({
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
+    setMcpServerIds([]);
+    setMcpServerIdsDirty(false);
+    setInitialWorkspaceLayout("repository");
     // State setters are stable; only workflowId can change
   }, [
     workflowId,
@@ -224,6 +494,9 @@ export function useTaskSubmitHandlers({
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
+    setMcpServerIds,
+    setMcpServerIdsDirty,
+    setInitialWorkspaceLayout,
   ]);
 
   const getRepositoriesPayload = useCallback(
@@ -267,6 +540,7 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         agentProfileId,
         executorId,
+        mcpServerIds,
         attachments: toMessageAttachments(attachments),
       });
       onOpenChange(false);
@@ -282,15 +556,23 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
+        mcpServerIds,
       });
-      await launchSession(request);
+      const response = await launchSession(request);
+      if (response.session_id) {
+        recordAgentProfileRecentUseBestEffort(
+          "task_session",
+          response.agent_profile_id ?? agentProfileId,
+          (record) => applyAgentProfileRecentUse("task_session", record),
+        );
+      }
 
       onOpenChange(false);
       router.push(linkToTask(taskId));
     } catch (error) {
       toast({
         title: t("task:failedToCreateSession"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -307,32 +589,74 @@ export function useTaskSubmitHandlers({
     toast,
     descriptionInputRef,
     setIsCreatingSession,
+    applyAgentProfileRecentUse,
+    mcpServerIds,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
     if (!editingTask) return null;
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
+
+    const runnerChanged = computeRunnerChanged(confirmedRunnerRef.current, executorProfileId);
+    await issueRunnerSwitchIfChanged(
+      runnerChanged,
+      editingTask.id,
+      executorProfileId,
+      markRunnerConfirmed,
+    );
+
     const description = isStartedEdit
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
     const trimmedDescription = description.trim();
-    const repositoriesPayload = isStartedEdit ? [] : getRepositoriesPayload();
+    const repositoriesPayload = !isStartedEdit && repositoriesDirty ? getRepositoriesPayload() : [];
     const titleChanged = trimmedTitle !== editingTask.title;
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
       ...(titleChanged && { title: trimmedTitle }),
       ...(!isStartedEdit && { description: trimmedDescription }),
-      ...(repositoriesPayload.length > 0 && { repositories: repositoriesPayload }),
+      ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
 
-    const updatedTask = await updateTask(editingTask.id, updatePayload);
-    return { updatedTask, trimmedDescription };
-  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
+    return saveEditedTaskFields({
+      editingTask,
+      updatePayload,
+      trimmedDescription,
+      runnerChanged,
+      mcpServerIds,
+      mcpServerIdsDirty,
+      saveTaskMCPSelections,
+      editDependencies,
+      isStartedEdit,
+      descriptionInputRef,
+      setTaskName,
+      setHasDescription,
+    });
+  }, [
+    editingTask,
+    taskName,
+    descriptionInputRef,
+    getRepositoriesPayload,
+    isStartedEdit,
+    repositoriesDirty,
+    mcpServerIds,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
+    editDependencies,
+    isEditMode,
+    setTaskName,
+    setHasDescription,
+    executorProfileId,
+    markRunnerConfirmed,
+  ]);
 
   const handleEditSubmit = useCallback(async () => {
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
@@ -348,20 +672,33 @@ export function useTaskSubmitHandlers({
           });
           const response = await launchSession(request);
           taskSessionId = response?.session_id ?? null;
+          if (taskSessionId) {
+            recordAgentProfileRecentUseBestEffort(
+              "task_session",
+              response.agent_profile_id ?? agentProfileId,
+              (record) => applyAgentProfileRecentUse("task_session", record),
+            );
+          }
         } catch (error) {
-          console.error("[TaskCreateDialog] failed to start agent:", error);
+          // The task save already committed by this point (performTaskUpdate
+          // resolved above); the launch is the last call in AC-004.4c's
+          // ordered sequence, so its failure must be reported as a partial
+          // save rather than swallowed into an apparent full success.
+          throw new LaunchAfterTaskUpdateError(error);
         }
       }
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
   }, [
@@ -372,28 +709,50 @@ export function useTaskSubmitHandlers({
     executorProfileId,
     onSuccess,
     onOpenChange,
+    refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
+    applyAgentProfileRecentUse,
+    editDependencies,
+    isEditMode,
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
+    if (!areEditDependenciesReady(isEditMode, editDependencies)) return;
     if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
+    let closeDialog = true;
     try {
       const result = await performTaskUpdate();
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
-      onOpenChange(false);
+      if (closeDialog) onOpenChange(false);
       setIsCreatingTask(false);
     }
-  }, [checkRemoteResolution, performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
+  }, [
+    checkRemoteResolution,
+    performTaskUpdate,
+    onSuccess,
+    onOpenChange,
+    refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
+    toast,
+    setIsCreatingTask,
+    editDependencies,
+    isEditMode,
+  ]);
 
   const performCreate = useCallback(
     async (opts: {
@@ -404,6 +763,7 @@ export function useTaskSubmitHandlers({
       planMode?: boolean;
       attachments?: ReturnType<typeof toMessageAttachments>;
     }) => {
+      if (!isSessionMode && !isEditMode && workflowAgentOverridesBlockedReason) return;
       if (!workspaceId || !effectiveWorkflowId) return;
       let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
@@ -427,7 +787,11 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          priority,
+          workflowAgentOverrides,
+          initialWorkspaceLayout,
           blockedBy,
+          mcpServerIds,
         });
         submittedPayload = payload;
         return payload;
@@ -437,27 +801,44 @@ export function useTaskSubmitHandlers({
       notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       const willNavigate =
-        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
-      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
+        autoFocusNewTasks &&
+        shouldNavigateAfterTaskCreate(
+          opts.withAgent,
+          isPassthroughProfile,
+          opts.planMode,
+          newSessionId,
+        );
+      onSuccess?.(taskResponse, "create", {
+        taskSessionId: newSessionId,
+        willNavigate,
+        autoFocus: autoFocusNewTasks,
+      });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
       preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
-      if (opts.planMode && newSessionId) {
-        activatePlanMode({
-          sessionId: newSessionId,
-          taskId: taskResponse.id,
-          setActiveDocument,
-          setPlanMode,
-          router,
-        });
-      } else if (opts.withAgent && isPassthroughProfile) {
-        router.push(linkToTask(taskResponse.id));
-      }
+      finishTaskCreateNavigation({
+        planMode: opts.planMode,
+        newSessionId,
+        autoFocusNewTasks,
+        withAgent: opts.withAgent,
+        isPassthroughProfile,
+        activatePlan: (sessionId) =>
+          activatePlanMode({
+            sessionId,
+            taskId: taskResponse.id,
+            autoFocus: autoFocusNewTasks,
+            setActiveDocument,
+            setPlanMode,
+            router,
+          }),
+        openPassthroughTask: () => router.push(linkToTask(taskResponse.id)),
+      });
     },
     [
       workspaceId,
       effectiveWorkflowId,
+      autoFocusNewTasks,
       autoTitle,
       blockedBy,
       agentProfileId,
@@ -468,6 +849,8 @@ export function useTaskSubmitHandlers({
       autopilot,
       noRepository,
       workspacePath,
+      priority,
+      initialWorkspaceLayout,
       onSuccess,
       onOpenChange,
       preserveTaskCreateLastUsedOnClose,
@@ -477,6 +860,11 @@ export function useTaskSubmitHandlers({
       router,
       getRepositoriesPayload,
       createTaskWithFreshBranchRetry,
+      isSessionMode,
+      isEditMode,
+      workflowAgentOverrides,
+      workflowAgentOverridesBlockedReason,
+      mcpServerIds,
     ],
   );
 
@@ -509,6 +897,13 @@ export function useTaskSubmitHandlers({
     });
     const response = await launchSession(request);
     const newSessionId = response?.session_id ?? null;
+    if (newSessionId) {
+      recordAgentProfileRecentUseBestEffort(
+        "task_session",
+        response.agent_profile_id ?? agentProfileId,
+        (record) => applyAgentProfileRecentUse("task_session", record),
+      );
+    }
     onSuccess?.(updatedTask, "edit", { taskSessionId: newSessionId });
     onOpenChange(false);
     if (newSessionId) {
@@ -530,17 +925,20 @@ export function useTaskSubmitHandlers({
     setActiveDocument,
     setPlanMode,
     router,
+    applyAgentProfileRecentUse,
   ]);
 
   const handleCreateWithPlanMode = useCallback(async () => {
     if (isEditMode) {
+      if (editDependencies && !editDependencies.ready) return;
       setIsCreatingTask(true);
       try {
         await performEditWithPlanMode();
       } catch (error) {
+        await refreshStaleBranchPolicies(error);
         toast({
           title: t("task:failedToStartTaskPlanMode"),
-          description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+          description: taskSubmitErrorMessage(error),
           variant: "error",
         });
       } finally {
@@ -548,6 +946,7 @@ export function useTaskSubmitHandlers({
       }
       return;
     }
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
@@ -569,9 +968,10 @@ export function useTaskSubmitHandlers({
         attachments,
       });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToStartTaskPlanMode"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -585,9 +985,12 @@ export function useTaskSubmitHandlers({
     hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     performCreate,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    editDependencies,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const submitCreateTask = useCallback(
@@ -623,6 +1026,7 @@ export function useTaskSubmitHandlers({
   );
 
   const handleCreateSubmit = useCallback(async () => {
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
@@ -637,9 +1041,10 @@ export function useTaskSubmitHandlers({
     try {
       await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -651,12 +1056,15 @@ export function useTaskSubmitHandlers({
     hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     submitCreateTask,
+    refreshStaleBranchPolicies,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
+    workflowAgentOverridesBlockedReason,
   ]);
 
   const handleCreateWithoutAgent = useCallback(async () => {
+    if (workflowAgentOverridesBlockedReason) return;
     const trimmedTitle = taskName.trim();
     const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
     const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
@@ -665,7 +1073,6 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     const requirements = {
       description: trimmedDescription,
-      workflowStepId: effectiveDefaultStepId,
       workspaceId,
       workflowId: effectiveWorkflowId,
     };
@@ -692,24 +1099,28 @@ export function useTaskSubmitHandlers({
           attachments,
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
+          priority,
+          workflowAgentOverrides,
+          initialWorkspaceLayout,
           blockedBy,
+          mcpServerIds,
         });
-        p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
         return p;
       };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
       if (!taskResponse) return;
       notifyQueuedTask(taskResponse, toast);
-      onSuccess?.(taskResponse, "create");
+      onSuccess?.(taskResponse, "create", { autoFocus: autoFocusNewTasks });
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);
       preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToCreateTask"),
-        description: error instanceof Error ? error.message : t(GENERIC_ERROR_KEY),
+        description: taskSubmitErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -721,17 +1132,19 @@ export function useTaskSubmitHandlers({
     workspaceId,
     effectiveWorkflowId,
     agentProfileId,
-    effectiveDefaultStepId,
     executorId,
     executorProfileId,
     noRepository,
     autopilot,
     workspacePath,
+    priority,
     validateForCreate,
     hasRemoteSubmitBlocker,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,
+    refreshStaleBranchPolicies,
+    autoFocusNewTasks,
     onSuccess,
     onOpenChange,
     preserveTaskCreateLastUsedOnClose,
@@ -740,6 +1153,10 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     blockedBy,
+    workflowAgentOverrides,
+    workflowAgentOverridesBlockedReason,
+    mcpServerIds,
+    initialWorkspaceLayout,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

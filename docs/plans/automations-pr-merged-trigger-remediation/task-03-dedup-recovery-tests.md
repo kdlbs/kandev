@@ -5,7 +5,7 @@ status: done
 wave: 3
 depends_on: ["02-bind-archive-target"]
 plan: "plan.md"
-spec: "../../specs/automations-pr-merged-trigger/spec.md"
+spec: "../../specs/office/requirements/automations-pr-merged-trigger.md"
 ---
 
 # Task 03: Lock Dedup Recovery Semantics

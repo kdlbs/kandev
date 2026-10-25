@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { settledBoundingBox } from "../../helpers/settled-box";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow cycle guardrails on mobile", () => {
@@ -74,22 +75,10 @@ test.describe("Workflow cycle guardrails on mobile", () => {
       dialog.getByText('"Todo" has no step prompt, so re-entering it sends the task description.'),
     ).toBeVisible();
 
-    const actionSizes = await dialog.getByRole("button").evaluateAll((buttons) =>
-      buttons.map((button) => ({
-        name: button.textContent?.trim(),
-        height: button.getBoundingClientRect().height,
-      })),
-    );
-    expect(
-      actionSizes.filter((action) => ["Cancel", "Create anyway"].includes(action.name ?? "")),
-    ).toEqual([
-      expect.objectContaining({ name: "Cancel", height: expect.any(Number) }),
-      expect.objectContaining({ name: "Create anyway", height: expect.any(Number) }),
-    ]);
-    for (const action of actionSizes.filter((item) =>
-      ["Cancel", "Create anyway"].includes(item.name ?? ""),
-    )) {
-      expect(action.height).toBeGreaterThanOrEqual(44);
+    for (const name of ["Cancel", "Create anyway"]) {
+      const action = dialog.getByRole("button", { name, exact: true });
+      const actionBox = await settledBoundingBox(action);
+      expect(actionBox.height).toBeGreaterThanOrEqual(44);
     }
 
     const overflow = await testPage.evaluate(() => {

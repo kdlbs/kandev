@@ -31,21 +31,43 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
-	service                    *service.Service
-	orchestrator               OrchestratorStarter
-	foregroundActivity         dto.ForegroundActivityProvider
-	cancellationPending        dto.CancellationPendingProvider
-	repo                       handlerRepo
-	planService                *service.PlanService
-	handoffSvc                 *service.HandoffService
-	workspaceRestorer          WorkspaceQuarantineRestorer
-	unarchiveRecoveryTimeout   time.Duration
-	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
-	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger                     *logger.Logger
+	workspaceAdoptionCallerGuard  func(*gin.Context) bool
+	service                       *service.Service
+	orchestrator                  OrchestratorStarter
+	configChatRetirer             ConfigChatSessionRetirer
+	configChatAdmission           configChatAdmission
+	movePreviewer                 WorkflowMovePreviewer
+	foregroundActivity            dto.ForegroundActivityProvider
+	cancellationPending           dto.CancellationPendingProvider
+	parkedProjection              dto.ParkedProvider
+	taskParkedProjection          dto.TaskParkedProvider
+	repo                          handlerRepo
+	planService                   *service.PlanService
+	handoffSvc                    *service.HandoffService
+	workspaceRestorer             WorkspaceQuarantineRestorer
+	unarchiveRecoveryTimeout      time.Duration
+	taskCreateLastUsedRecorder    taskCreateLastUsedRecorder
+	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
+	sidebarSettingsReader         sidebarTaskSettingsReader
+	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	backgroundWorkEnabled         bool
+	logger                        *logger.Logger
+}
+
+func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {
+	h.backgroundWorkEnabled = enabled
+}
+
+func (h *TaskHandlers) isBackgroundWorkEnabled() bool {
+	return h.backgroundWorkEnabled
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
+
+// agentProfileRecentUseTimeout bounds detached preference persistence. The
+// launch response does not wait for this best-effort write, and a stuck store
+// must not leave an unbounded background goroutine behind.
+const agentProfileRecentUseTimeout = 5 * time.Second
 
 func (h *TaskHandlers) detachedRecoveryTimeout() time.Duration {
 	if h.unarchiveRecoveryTimeout > 0 {
@@ -62,10 +84,21 @@ type taskCreateLastUsedRecorder interface {
 	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
 }
 
+type agentProfileRecentUseRecorder interface {
+	RecordAgentProfileRecentUse(
+		ctx context.Context,
+		contextValue usermodels.AgentProfileRecentUseContext,
+		profileID string,
+	) (*usermodels.AgentProfileRecentUse, error)
+}
+
+type sidebarTaskSettingsReader interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
+}
+
 // SetHandoffService wires the office task-handoffs service used by the
-// Kanban subtask path to attach workspace-group membership and the
-// sequential blocker chain (handoffs phase 5). Optional — nil disables
-// post-create attachment, matching the pre-handoffs behaviour.
+// Kanban subtask path. The task service uses the same instance to attach
+// workspace-group membership before any create route returns.
 //
 // Wiring a HandoffService also re-installs the per-user task guard on it. That
 // is not a convenience: this setter is what makes the archive / delete / unarchive
@@ -77,8 +110,13 @@ type taskCreateLastUsedRecorder interface {
 // everywhere else.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
-	if svc != nil && h.service != nil {
-		svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+	if h.service != nil {
+		if svc == nil {
+			h.service.SetWorkspacePolicyAttacher(nil)
+		} else {
+			svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+			h.service.SetWorkspacePolicyAttacher(svc)
+		}
 	}
 }
 
@@ -88,6 +126,25 @@ func (h *TaskHandlers) SetWorkspaceQuarantineRestorer(restorer WorkspaceQuaranti
 
 func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
 	h.taskCreateLastUsedRecorder = recorder
+}
+
+func (h *TaskHandlers) SetAgentProfileRecentUseRecorder(recorder agentProfileRecentUseRecorder) {
+	h.agentProfileRecentUseRecorder = recorder
+}
+
+func (h *TaskHandlers) SetSidebarTaskSettingsReader(reader sidebarTaskSettingsReader) {
+	h.sidebarSettingsReader = reader
+}
+
+func (h *TaskHandlers) recordSuccessfulTaskCreateProfileAsync(ctx context.Context, profileID string) {
+	if h.agentProfileRecentUseRecorder == nil || profileID == "" {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentProfileRecentUseTimeout)
+	go func() {
+		defer cancel()
+		h.recordSuccessfulTaskCreateProfile(recordCtx, profileID)
+	}()
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL
@@ -104,6 +161,13 @@ type OrchestratorStarter interface {
 	EnsureSession(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 }
 
+// WorkflowMovePreviewer is deliberately separate from OrchestratorStarter so
+// existing launch/ensure fakes and plugin adapters do not need to implement a
+// read-only advisory surface.
+type WorkflowMovePreviewer interface {
+	PreviewWorkflowMove(context.Context, orchestrator.WorkflowMovePreviewRequest) (*orchestrator.WorkflowMovePreview, error)
+}
+
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
 		service:      svc,
@@ -111,6 +175,12 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 		repo:         repo,
 		planService:  planService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
+	}
+	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
+		h.movePreviewer = previewer
+	}
+	if retirer, ok := orchestrator.(ConfigChatSessionRetirer); ok {
+		h.configChatRetirer = retirer
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
@@ -124,6 +194,12 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
 	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		h.parkedProjection = parked
+	}
+	if taskParked, ok := orchestrator.(dto.TaskParkedProvider); ok {
+		h.taskParkedProjection = taskParked
+	}
 	return h
 }
 
@@ -135,15 +211,25 @@ func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *serv
 }
 
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
+	h.registerWorkspaceAdoptionHTTP(router)
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
-	// Task create-idempotency (docs/specs/tasks/external-id-idempotency):
+	api.GET("/workspaces/:id/tasks/conversations", h.httpSearchTaskConversations)
+	api.POST("/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
+	// Task create-idempotency (docs/specs/tasks/requirements/external-id-idempotency.md):
 	// side-effect-free lookup, and an operator-only release. Both take
 	// external_id as a query parameter.
 	api.GET("/workspaces/:id/tasks/by-external-id", h.httpGetTaskByExternalID)
 	api.DELETE("/workspaces/:id/tasks/by-external-id", h.httpReleaseTaskExternalID)
 	api.GET("/tasks/:id", h.httpGetTask)
+	api.GET("/tasks/:id/management-claim", h.httpGetTaskManagementClaim)
+	api.POST("/tasks/:id/management-claim", h.httpChangeTaskManagementClaim)
+	api.GET("/tasks/:id/completion-gate", h.httpGetTaskCompletionGate)
+	api.GET("/tasks/:id/completion-gate/history", h.httpListTaskCompletionGateHistory)
+	api.PUT("/tasks/:id/completion-gate/criteria", h.httpSetTaskCompletionCriteria)
+	api.PUT("/tasks/:id/completion-gate/criteria/:criterion_id/evidence", h.httpVerifyTaskCompletionCriterion)
+	api.GET("/tasks/:id/archive-source-manifest", h.httpGetArchiveSourceManifest)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
@@ -154,30 +240,57 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/environment/live", h.httpGetTaskEnvironmentLive)
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
+	api.GET("/task-sessions/:id/turn-changes", h.httpListTurnChangeHistory)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID", h.httpGetTurnChangeHistory)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID/repositories/:repositoryChangeID/files", h.httpListTurnChangeFiles)
+	api.GET("/task-sessions/:id/turn-changes/:changeSetID/files/:fileChangeID/content", h.httpReadTurnChangeContent)
 	api.POST("/tasks", h.httpCreateTask)
+	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
+	api.POST("/tasks/:id/exact-retirement/preview", h.httpPreviewExactRetirement)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
 	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
+	api.POST("/tasks/:id/workspace-sources/preview", h.httpPreviewWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
+	api.POST("/tasks/:id/move-preview", h.httpMoveTaskPreview)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
 	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
 
+	// Task-cost-ledger read surface (docs/specs/task-cost-ledger/spec.md
+	// AC-18): per-task and per-session usage/cost totals.
+	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns", h.httpGetTaskSessionUsageTurns)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns/:turnId", h.httpGetTaskSessionUsageTurn)
+
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
 	// validator in the task service.
 	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
+	api.PUT("/tasks/:id/dependencies", h.httpReplaceTaskDependencies)
 	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
 
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
+	// only request surface for a reorder, mirroring the hyphenated
+	// collection-reorder precedent PUT /api/v1/workspaces/:id/workflows/reorder.
+	api.PUT("/workflow-steps/:id/tasks/reorder", h.httpReorderStepTasks)
+
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
+
+	// Background workload endpoints
+	api.GET("/task-sessions/:id/background-work", h.httpListBackgroundWorkloads)
+	api.GET("/task-sessions/:id/background-work/:workId", h.httpGetBackgroundWorkload)
+	api.POST("/task-sessions/:id/background-work/:workId/action", h.httpExecuteBackgroundAction)
+	api.GET("/task-sessions/:id/background-work/:workId/usage", h.httpGetBackgroundWorkloadUsage)
 
 	// Quick chat endpoints - create ephemeral task with prepared session, and
 	// resync the tab strip so clients that missed WS events converge.
@@ -186,6 +299,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)
+	api.POST("/workspaces/:id/config-chat/restart", h.httpRestartConfigChat)
 }
 
 func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -198,7 +312,11 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	// Session file review handlers
@@ -214,6 +332,15 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionGet, h.wsGetTaskPlanRevision)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevert, h.wsRevertTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanImplement, h.wsMarkTaskPlanImplementationStarted)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentsList, h.wsListTaskPlanComments)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackList, h.wsListTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackCreate, h.wsCreateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackUpdate, h.wsUpdateTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackDelete, h.wsDeleteTaskPreviewFeedback)
+	dispatcher.RegisterFunc(ws.ActionTaskPreviewFeedbackClear, h.wsClearTaskPreviewFeedback)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.
@@ -221,31 +348,31 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	result := make([]service.TaskRepositoryInput, len(repos))
 	for i, r := range repos {
 		result[i] = service.TaskRepositoryInput{
-			RepositoryID:   r.RepositoryID,
-			BaseBranch:     r.BaseBranch,
-			CheckoutBranch: r.CheckoutBranch,
-			PRNumber:       r.PRNumber,
-			LocalPath:      r.LocalPath,
-			Name:           r.Name,
-			DefaultBranch:  r.DefaultBranch,
-			GitHubURL:      r.GitHubURL,
-			RemoteURL:      r.RemoteURL,
-			Provider:       r.Provider,
-			ProviderRepoID: r.ProviderRepoID,
-			ProviderOwner:  r.ProviderOwner,
-			ProviderName:   r.ProviderName,
+			CheckoutOptions:    r.CheckoutOptions,
+			RepositoryID:       r.RepositoryID,
+			BaseBranch:         r.BaseBranch,
+			CheckoutBranch:     r.CheckoutBranch,
+			BranchPolicyID:     r.BranchPolicyID,
+			PRNumber:           r.PRNumber,
+			LocalPath:          r.LocalPath,
+			Name:               r.Name,
+			DefaultBranch:      r.DefaultBranch,
+			GitHubURL:          r.GitHubURL,
+			RemoteURL:          r.RemoteURL,
+			Provider:           r.Provider,
+			ProviderHost:       r.ProviderHost,
+			ProviderScope:      r.ProviderScope,
+			ProviderRepoID:     r.ProviderRepoID,
+			ProviderOwner:      r.ProviderOwner,
+			ProviderName:       r.ProviderName,
+			PreserveBaseBranch: r.PreserveBaseBranch,
 		}
 	}
 	return result
 }
 
-// convertUpdateRepositories maps an update request's repositories field to the
-// service's replace semantics: an absent field (provided=false) must stay nil
-// so UpdateTask leaves task repositories untouched; a provided list — including
-// an explicitly empty one — replaces them. convertToServiceRepos alone returns
-// a non-nil empty slice for nil input, which wiped repositories on title-only
-// renames.
-func convertUpdateRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
+// convertTaskRepositories preserves whether the repositories field was provided.
+func convertTaskRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
 	if !provided {
 		return nil
 	}

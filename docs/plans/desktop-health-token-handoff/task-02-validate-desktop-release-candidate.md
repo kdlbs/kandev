@@ -5,7 +5,7 @@ status: pending
 wave: 2
 depends_on: ["01-restore-desktop-token-ownership"]
 plan: "plan.md"
-spec: "../../specs/port-collision-safety/spec.md"
+spec: "../../specs/executors/requirements/port-collision-safety.md"
 ---
 
 # Task 02: Validate desktop release candidate

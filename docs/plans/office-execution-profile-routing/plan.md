@@ -1,5 +1,5 @@
 ---
-spec: docs/specs/office/routing.md
+spec: docs/specs/office/requirements/routing.md
 decision: docs/decisions/2026-07-15-office-agent-execution-profile-routing.md
 created: 2026-07-15
 status: completed

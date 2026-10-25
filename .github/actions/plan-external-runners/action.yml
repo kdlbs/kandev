@@ -1,0 +1,59 @@
+name: Plan external runner allocation
+description: Compute deterministic external-runner assignments for a workflow
+
+inputs:
+  workflow:
+    description: Runner-plan workflow family key
+    required: true
+  run-id:
+    description: Stable workflow run identifier used for allocation
+    required: true
+  families:
+    description: JSON job-family definitions owned by the calling workflow
+    required: true
+  burst:
+    description: Exact true value enables external allocation
+    required: false
+    default: ""
+  percent:
+    description: External allocation percentage from 0 to 100
+    required: false
+    default: ""
+  light-label:
+    description: Configured light-tier runner label
+    required: false
+    default: ""
+  standard-label:
+    description: Configured standard-tier runner label
+    required: false
+    default: ""
+
+outputs:
+  plan:
+    description: JSON object containing runner and matrix outputs
+    value: ${{ steps.plan.outputs.plan }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan runner allocation
+      id: plan
+      shell: bash
+      env:
+        RUNNER_PLAN_WORKFLOW: ${{ inputs.workflow }}
+        RUNNER_PLAN_RUN_ID: ${{ inputs.run-id }}
+        RUNNER_PLAN_FAMILIES: ${{ inputs.families }}
+        KANDEV_CI_EXTERNAL_ENABLED: ${{ inputs.burst }}
+        KANDEV_CI_EXTERNAL_PERCENT: ${{ inputs.percent }}
+        KANDEV_CI_RUNNER_LIGHT: ${{ inputs.light-label }}
+        KANDEV_CI_RUNNER_STANDARD: ${{ inputs.standard-label }}
+      run: |
+        python3 "$GITHUB_WORKSPACE/.github/scripts/runner-plan.py" \
+          --workflow "$RUNNER_PLAN_WORKFLOW" \
+          --run-id "$RUNNER_PLAN_RUN_ID" \
+          --families "$RUNNER_PLAN_FAMILIES" \
+          --burst "$KANDEV_CI_EXTERNAL_ENABLED" \
+          --percent "$KANDEV_CI_EXTERNAL_PERCENT" \
+          --light-label "$KANDEV_CI_RUNNER_LIGHT" \
+          --standard-label "$KANDEV_CI_RUNNER_STANDARD" \
+          --output "$GITHUB_OUTPUT"
