@@ -2,9 +2,11 @@ package config
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/kandev/kandev/internal/common/sessionmcp"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 // SessionMCPToken holds the per-instance MCP bearer token in memory only. The
@@ -79,3 +81,27 @@ func TokenFingerprint(token string) string { return sessionmcp.Fingerprint(token
 
 // BrokerUpstreamFingerprint fingerprints the upstream broker URL.
 func BrokerUpstreamFingerprint(upstream string) string { return sessionmcp.BrokerFingerprint(upstream) }
+
+// BrokerRelayPath is the instance listener path of the Git credential relay.
+const BrokerRelayPath = "/git-credentials/resolve"
+
+// BrokerRelayURL is the broker URL agent processes of an instance that relays
+// to an upstream broker are given: its own loopback listener.
+func BrokerRelayURL(port int) string {
+	return fmt.Sprintf("http://127.0.0.1:%d%s", port, BrokerRelayPath)
+}
+
+// EffectiveBrokerURLEnv returns env with the broker URL replaced by the relay
+// URL when the instance relays to an upstream broker and env carries a broker
+// URL. The input is not modified.
+func (c *InstanceConfig) EffectiveBrokerURLEnv(env map[string]string) map[string]string {
+	if c == nil || c.BrokerUpstreamURL == "" || c.Port <= 0 || env[githubauth.CredentialBrokerURLEnv] == "" {
+		return env
+	}
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		out[k] = v
+	}
+	out[githubauth.CredentialBrokerURLEnv] = BrokerRelayURL(c.Port)
+	return out
+}

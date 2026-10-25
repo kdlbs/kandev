@@ -92,10 +92,12 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
 	// - /health: liveness probe
+	// - /git-credentials/: the Git credential relay; the lease in the body is
+	//   the capability and the upstream broker validates it.
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess, which
 	//   does not hold the control credential. They are authenticated by the
 	//   per-instance MCP token guard instead.
-	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp", GitCredentialRelayPrefix))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or
@@ -117,6 +119,9 @@ func (s *Server) setupRoutes() {
 	// Health check
 	s.router.GET("/health", s.handleHealth)
 	s.router.GET("/identity", s.handleInstanceIdentity)
+	// The relay decides its own 404/405 so an unregistered subpath and a wrong
+	// method are answered by the documented rules, not by router defaults.
+	s.router.Any(GitCredentialRelayPrefix+"*path", s.handleGitCredentialRelay)
 
 	// Agent control
 	api := s.router.Group("/api/v1")

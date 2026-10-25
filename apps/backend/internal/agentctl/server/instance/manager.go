@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -39,6 +40,43 @@ var (
 	ErrInstanceExists     = errors.New("instance already exists")
 	ErrInstanceCleaningUp = errors.New("instance is still cleaning up")
 )
+
+// ErrInvalidBrokerUpstream marks a create request whose upstream credential
+// broker URL cannot be relayed to.
+var ErrInvalidBrokerUpstream = errors.New("invalid credential broker upstream url")
+
+// ValidateBrokerUpstream accepts an empty URL or an absolute http or https URL
+// without userinfo, query or fragment whose path ends in /resolve.
+func ValidateBrokerUpstream(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if raw != strings.TrimSpace(raw) {
+		return fmt.Errorf("%w: surrounding whitespace", ErrInvalidBrokerUpstream)
+	}
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil:
+		return fmt.Errorf("%w: not a URL", ErrInvalidBrokerUpstream)
+	case u.Scheme != "http" && u.Scheme != "https", u.Host == "":
+		return fmt.Errorf("%w: absolute http or https URL required", ErrInvalidBrokerUpstream)
+	case u.User != nil:
+		return fmt.Errorf("%w: userinfo is not allowed", ErrInvalidBrokerUpstream)
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(raw, "#"):
+		return fmt.Errorf("%w: query and fragment are not allowed", ErrInvalidBrokerUpstream)
+	case !strings.HasSuffix(u.Path, "/resolve"):
+		return fmt.Errorf("%w: path must end in /resolve", ErrInvalidBrokerUpstream)
+	}
+	return nil
+}
+
+// effectiveAgentEnv returns the environment agent processes are given. An
+// instance that relays a broker advertises its own listener as the broker URL,
+// so the upstream address is never process-visible.
+func effectiveAgentEnv(req *CreateRequest, port int) map[string]string {
+	relaying := &config.InstanceConfig{Port: port, BrokerUpstreamURL: req.BrokerUpstreamURL}
+	return relaying.EffectiveBrokerURLEnv(req.Env)
+}
 
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
@@ -155,6 +193,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if req == nil {
 		return nil, errors.New("create instance request is required")
 	}
+	if err := ValidateBrokerUpstream(req.BrokerUpstreamURL); err != nil {
+		return nil, err
+	}
 	protocol := req.Protocol
 	if protocol == "" {
 		protocol = string(m.config.Defaults.Protocol)
@@ -248,11 +289,6 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
 	}
 
-	agentEnv, err := config.CollectInstanceAgentEnvWithError(req.Env)
-	if err != nil {
-		return nil, fmt.Errorf("prepare agent environment: %w", err)
-	}
-
 	id := req.ID
 	if id == "" {
 		id = uuid.New().String()
@@ -267,6 +303,12 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	lease, listener, err := m.allocatePortAndListener(id)
 	if err != nil {
 		return nil, err
+	}
+	agentEnv, err := config.CollectInstanceAgentEnvWithError(effectiveAgentEnv(req, lease.Port))
+	if err != nil {
+		_ = listener.Close()
+		m.portAlloc.Release(lease)
+		return nil, fmt.Errorf("prepare agent environment: %w", err)
 	}
 	bundle := &provisionalInstance{id: id, lease: lease, listener: listener}
 	m.provisional[id] = bundle

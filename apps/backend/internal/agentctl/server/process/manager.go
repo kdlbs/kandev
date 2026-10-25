@@ -2240,13 +2240,13 @@ func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config,
 // process request. Explicit request values remain authoritative.
 func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), m.cfg.EffectiveBrokerURLEnv(req.Env))
 	return req, err
 }
 
 func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
-	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), m.cfg.EffectiveBrokerURLEnv(req.Env))
 	if err != nil {
 		return req, err
 	}
@@ -2317,7 +2317,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 	// Compose the environment before changing any other configuration so a
 	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, m.cfg.EffectiveBrokerURLEnv(env), replaceEnv, m.managedGitTools)
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}

@@ -222,6 +222,10 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": code})
 			return
 		}
+		if errors.Is(err, instance.ErrInvalidBrokerUpstream) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		m.logger.Error("failed to create instance", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to create instance: " + err.Error(),
