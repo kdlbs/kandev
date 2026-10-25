@@ -45,8 +45,10 @@ Session summary queries and the service fallback projection both carry
 `archived_at` to the API. Primary promotion, resume candidate admission, and
 session prompt admission reject archived rows. The session resumption hook
 skips automatic status/recovery work and manual resume for archived history.
-The history filter changes only which summaries are shown; it does not
-reactivate an archived conversation.
+The stopped-session banner hides same-session recovery controls for archived
+history while retaining the task-scoped New Agent action. The history filter
+changes only which summaries are shown; it does not reactivate an archived
+conversation.
 
 ## History controls
 

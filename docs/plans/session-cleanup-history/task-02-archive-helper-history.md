@@ -37,7 +37,8 @@ across desktop, kanban preview, and mobile.
 - Hard-delete disposable terminal session state when no retained evidence
   requires history.
 - Exclude archived sessions from primary selection, automatic and manual
-  recovery, and new prompt admission.
+  recovery, and new prompt admission. The stopped-session banner hides
+  same-session recovery actions for archived history.
 - Localized history visibility and transcript reopening on all three surfaces.
 
 ## Out of scope
@@ -81,5 +82,7 @@ accepted candidate. A follow-up implementation guard rejects archived rows in
 resume candidate admission and promptable-session loading; the resumption hook
 also skips automatic inspection and manual resume for archived rows. Focused
 backend and hook regression checks cover those paths. This local successor's
-browser history evidence remains the earlier captures listed above; the local
-source guard changes do not claim new browser runtime evidence.
+component test also verifies that the stopped-session banner keeps only the
+task-scoped New Agent action for archived history. Browser evidence for the
+banner correction remains pending revalidation; earlier history captures are
+listed above and are not claimed as a browser run for this source successor.

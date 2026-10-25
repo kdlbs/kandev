@@ -82,10 +82,11 @@ payload gets a distinct key, and non-scheduled sources never enter this path.
 
 ## Session ownership recovery
 
-`task.Repository.RecoverTaskSessionQueue` validates and locks the task and both
-sessions, then calls `messagequeue.RecoverSessionQueueInTransaction` within the
-same transaction. The source must be terminal and non-primary, and the
-destination must be the task's primary session. Stored entry snapshots
+The task repository's `RecoverTaskSessionQueue` method validates and locks the
+task and both sessions, then calls
+`messagequeue.RecoverSessionQueueInTransaction` within the same transaction.
+The source must be terminal and non-primary, and the destination must be the
+task's primary session. Stored entry snapshots
 preserve the original body, attachment descriptors, provenance, and ordering.
 A task-scoped recovery receipt identifies the committed snapshot and lets a
 retry return the prior result while transferred entries remain in the
