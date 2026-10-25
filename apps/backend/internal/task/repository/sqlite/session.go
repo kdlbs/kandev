@@ -2330,10 +2330,12 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	}
 	query := `
 		UPDATE task_sessions SET
-			agent_profile_id = ?, execution_profile_id = ?, route_generation = ?, route_state = ?, route_reason = ?, downstream_acp_session_id = ?,
+			agent_profile_id = CASE WHEN exact_profile_generation > 0 THEN agent_profile_id ELSE ? END,
+			execution_profile_id = ?, route_generation = ?, route_state = ?, route_reason = ?, downstream_acp_session_id = ?,
 			executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
-			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
+			agent_profile_snapshot = CASE WHEN exact_profile_generation > 0 THEN agent_profile_snapshot ELSE ? END,
+			executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			review_status = ?, is_passthrough = ?, task_environment_id = ?,
 			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END
