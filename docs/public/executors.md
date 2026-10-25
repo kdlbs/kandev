@@ -570,6 +570,8 @@ The remote-auth card is built from the currently enabled agents. Depending on an
 
 OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
 
+Pi credential copies merge `~/.pi/agent/auth.json` the same way, by provider. Pi can also take an API key for Anthropic, OpenAI, Gemini or OpenRouter from a stored secret; a credential in the remote `auth.json` takes precedence over it. The **Copy Pi settings and models** bundle copies `settings.json` and `models.json` from `~/.pi/agent`; `models.json` can hold inline API keys, which the copy carries. Kandev reads the default agent directory and ignores `PI_CODING_AGENT_DIR`.
+
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 </details>
