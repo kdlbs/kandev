@@ -283,6 +283,8 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
+	// ExactProfileLaunchReceipt is the first historical session audit. It may
+	// describe a different outcome than the current launch or retry.
 	ExactProfileLaunchReceipt         *models.ExactProfileLaunchReceipt         `json:"exact_profile_launch_receipt,omitempty"`
 	Success                           bool                                      `json:"success"`
 	InProgress                        bool                                      `json:"in_progress,omitempty"`

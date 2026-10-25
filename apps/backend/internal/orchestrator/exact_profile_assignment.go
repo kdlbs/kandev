@@ -187,10 +187,41 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 	return observed, nil
 }
 
-func (s *Service) recordExactProfileLaunchReceipt(
-	ctx context.Context, taskID, sessionID string, exact *ExactProfileLaunchDecision, model string, launchErr error,
-) error {
+// exactProfileAttemptResult describes this invocation from its observed
+// assignment and execution. The stored receipt can describe an earlier attempt.
+type exactProfileAttemptResult struct {
+	AgentProfileID   string
+	Generation       int64
+	ProfileRevision  int64
+	Model            string
+	ExecutionID      string
+	Outcome          string
+	InferenceStarted bool
+}
+
+func exactProfileAttemptResultFor(
+	exact *ExactProfileLaunchDecision, execution *executor.TaskExecution,
+) *exactProfileAttemptResult {
 	if exact == nil {
+		return nil
+	}
+	result := &exactProfileAttemptResult{
+		AgentProfileID: exact.AgentProfileID, Generation: exact.Generation,
+		ProfileRevision: exact.Revision, Model: exact.Model,
+		Outcome: models.ExactProfileLaunchOutcomeFailedClosed,
+	}
+	if execution != nil {
+		result.ExecutionID = execution.AgentExecutionID
+		result.Outcome = models.ExactProfileLaunchOutcomeApplied
+		result.InferenceStarted = true
+	}
+	return result
+}
+
+func (s *Service) recordExactProfileLaunchReceipt(
+	ctx context.Context, taskID, sessionID string, attempt *exactProfileAttemptResult,
+) error {
+	if attempt == nil {
 		return nil
 	}
 	receipts, ok := s.repo.(interface {
@@ -200,12 +231,11 @@ func (s *Service) recordExactProfileLaunchReceipt(
 		return fmt.Errorf("exact profile receipt repository unavailable")
 	}
 	receipt := &models.ExactProfileLaunchReceipt{
-		TaskID: taskID, SessionID: sessionID, AgentProfileID: exact.AgentProfileID,
-		Generation: exact.Generation, ProfileRevision: exact.Revision, Model: model,
-		Outcome: models.ExactProfileLaunchOutcomeApplied, InferenceStarted: launchErr == nil,
+		TaskID: taskID, SessionID: sessionID, AgentProfileID: attempt.AgentProfileID,
+		Generation: attempt.Generation, ProfileRevision: attempt.ProfileRevision, Model: attempt.Model,
+		Outcome: attempt.Outcome, InferenceStarted: attempt.InferenceStarted,
 	}
-	if launchErr != nil {
-		receipt.Outcome = models.ExactProfileLaunchOutcomeFailedClosed
+	if attempt.Outcome == models.ExactProfileLaunchOutcomeFailedClosed {
 		receipt.FailureReason = exactProfileLaunchFailureReason
 	}
 	if _, err := receipts.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil {
@@ -220,7 +250,8 @@ func (s *Service) recordExactProfileResolutionDenial(
 	if observed == nil {
 		return resolutionErr
 	}
-	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, observed, "", resolutionErr))
+	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID,
+		exactProfileAttemptResultFor(observed, nil)))
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {

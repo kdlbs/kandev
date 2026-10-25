@@ -810,7 +810,7 @@ func (s *Service) startCreatedSession(
 			return
 		}
 		if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
-			exactAssignment, exactProfileModel(exactAssignment), resultErr); err != nil {
+			exactProfileAttemptResultFor(exactAssignment, result)); err != nil {
 			s.logger.Warn("failed to record exact-profile launch denial", zap.Error(err))
 		}
 	}()
@@ -1196,7 +1196,7 @@ func (s *Service) startCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	receiptAttempted = true
 	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
-		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		exactProfileAttemptResultFor(exactAssignment, execution)); err != nil {
 		return execution, err
 	}
 
@@ -3628,7 +3628,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 			return
 		}
 		if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
-			exactAssignment, exactProfileModel(exactAssignment), resultErr); err != nil {
+			exactProfileAttemptResultFor(exactAssignment, result)); err != nil {
 			s.logger.Warn("failed to record exact-profile resume denial", zap.Error(err))
 		}
 	}()
@@ -3796,7 +3796,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	receiptAttempted = true
 	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
-		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		exactProfileAttemptResultFor(exactAssignment, execution)); err != nil {
 		return execution, err
 	}
 	if continuation != nil {

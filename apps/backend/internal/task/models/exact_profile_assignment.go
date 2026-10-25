@@ -32,11 +32,9 @@ type ExactProfileAssignment struct {
 	UpdatedAt            time.Time
 }
 
-// ExactProfileLaunchReceipt is the durable record that one launch applied (or
-// failed closed against) the exact-profile assignment at a generation. The
-// receipt is written once per launch attempt; it is never rewritten by a later
-// generation so the linkage between a session and the assignment that created
-// it stays auditable.
+// ExactProfileLaunchReceipt is the immutable audit of the first governed launch
+// attempt for a task and session. A later retry can have a different outcome or
+// assignment; this historical receipt does not describe the current attempt.
 type ExactProfileLaunchReceipt struct {
 	TaskID           string
 	SessionID        string

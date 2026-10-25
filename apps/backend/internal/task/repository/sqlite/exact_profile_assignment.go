@@ -364,9 +364,9 @@ func (r *Repository) exactProfileAssignmentNow() time.Time {
 	return time.Now().UTC()
 }
 
-// RecordExactProfileLaunchReceipt writes one exact-launch receipt per session.
-// A repeated call with the same (task, session) keys is a replay no-op; it
-// returns false and never overwrites the original outcome, model, or flags.
+// RecordExactProfileLaunchReceipt preserves the first governed launch attempt
+// per (task, session). Later retries are replay no-ops and never change its
+// historical outcome, model, or flags.
 func (r *Repository) RecordExactProfileLaunchReceipt(ctx context.Context, receipt *models.ExactProfileLaunchReceipt) (bool, error) {
 	if receipt == nil || receipt.TaskID == "" || receipt.SessionID == "" ||
 		receipt.AgentProfileID == "" || receipt.ProfileRevision < 1 {
@@ -404,9 +404,9 @@ func (r *Repository) RecordExactProfileLaunchReceipt(ctx context.Context, receip
 	return rows == 1, nil
 }
 
-// GetExactProfileLaunchReceipt loads the launch receipt for one session. A
-// missing receipt (pre-exact sessions, or launches that never had an exact
-// assignment applied) returns nil.
+// GetExactProfileLaunchReceipt loads the first historical launch receipt for a
+// session, which may differ from a later retry's current result. A missing
+// receipt (pre-exact sessions or never-governed launches) returns nil.
 func (r *Repository) GetExactProfileLaunchReceipt(ctx context.Context, taskID, sessionID string) (*models.ExactProfileLaunchReceipt, error) {
 	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT task_id, session_id, agent_profile_id, generation, profile_revision_token,
