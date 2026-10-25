@@ -198,6 +198,7 @@ export type QueueSessionIdentity = {
 };
 
 export type QueueMessageParams = {
+  builtin_intent?: "walkthrough";
   session_id: string;
   session_incarnation_id: string;
   task_id: string;

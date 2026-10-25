@@ -17,7 +17,13 @@ func resolveBuiltinPrompt(name string, values map[string]string, manifest *p.Bui
 	values["office_rich_output_section"] = officeRichOutputSection
 	values["walkthrough_section"] = walkthroughSection
 	values["builtin_package_section"] = ""
+	values["builtin_tools_heading"] = "Selected tools from \"kandev\"."
+	values["builtin_discovery_instruction"] = "Use callable tools from \"kandev\" with their current schemas; otherwise use native tool search or discovery. Search \"kandev\" plus the operation/canonical name; without search, inspect available MCP tools."
+	values["office_discovery_instruction"] = "This Office session has exactly the tools listed below from the \"kandev\" server.\nAlways use the exact tool names shown below (they include the _kandev suffix)."
 	if manifest != nil {
+		values["builtin_tools_heading"] = "Selected tools from the built-in servers listed below."
+		values["builtin_discovery_instruction"] = "Use callable tools from the selected built-in servers with their current schemas. Otherwise use native tool search or discovery with the selected server name and canonical tool name. Without search, inspect available MCP tools."
+		values["office_discovery_instruction"] = "This Office session uses the selected built-in servers listed below. Tool names below are canonical MCP names. Discover and use the client-specific callable names and schemas within those servers."
 		values["builtin_package_section"] = builtinPackageGuidance(manifest)
 		if manifest.Validate() != nil || !slices.Contains(manifest.Packages, p.PackageRichOutput) {
 			values["rich_output_instruction"] = "Use normal text or Markdown for structured output. Rich Output is unavailable in this execution."
@@ -45,6 +51,15 @@ func builtinPackageGuidance(manifest *p.BuiltinManifest) string {
 		text += " Configuration tools can change authorized shared resources, including workflows, agents, profiles, MCP settings, prompts, executors, and automations. Tool availability does not authorize a change. A regular task keeps its task identity and cannot change built-in package policy or grant packages."
 	}
 	return text
+}
+
+// AppendBuiltinBindingGuidance states the new process binding after retained
+// conversation content. Empty prompts must remain empty for deferred starts.
+func AppendBuiltinBindingGuidance(prompt string, manifest *p.BuiltinManifest) string {
+	if manifest == nil || strings.TrimSpace(prompt) == "" {
+		return prompt
+	}
+	return prompt + "\n\n<kandev-system>" + builtinPackageGuidance(manifest) + "</kandev-system>"
 }
 
 // FormatOfficeContextWithPackages retains Office lifecycle rules while reflecting

@@ -103,8 +103,14 @@ func TestBuiltinSessionEvidenceUsesInjectedProvenance(t *testing.T) {
 		}
 		evidence := mcpAttachmentEvidence("attempt", server, streams.MCPAttachmentEvidenceConfigured, "", "")
 		require.Equal(t, streams.MCPServerSourceKandev, evidence.Source)
+		require.Equal(t, p.PackageConfiguration, evidence.BuiltinPackage)
 	}
 	lookalike := types.McpServer{Name: "kandev-configuration", URL: "https://external.example/mcp", Type: "http"}
 	evidence := mcpAttachmentEvidence("attempt", lookalike, streams.MCPAttachmentEvidenceConfigured, "", "")
 	require.Equal(t, streams.MCPServerSourceProfile, evidence.Source)
+	require.Empty(t, evidence.BuiltinPackage)
+	ctx := s.startMCPAttachmentAttempt(context.Background(), servers)
+	attachment, ok := streams.MCPAttachmentContextFromContext(ctx)
+	require.True(t, ok)
+	require.Equal(t, s.cfg.McpProfile.BuiltinPackages, attachment.Attempt.BuiltinPackages)
 }

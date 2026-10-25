@@ -1774,6 +1774,9 @@ func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return nil, err
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {

@@ -4,6 +4,7 @@ import type { MCPAttachmentServer } from "@/lib/state/slices/session-runtime/typ
 import { useTranslation } from "react-i18next";
 import { getMcpToolCounts, mcpStatusPresentation } from "./mcp-explorer-view-model";
 import { McpStatusDot } from "./mcp-status-presentation";
+import { BuiltinSessionEvidence } from "./builtin-session-evidence";
 
 function formatObservedAt(value?: string) {
   if (!value) return null;
@@ -37,12 +38,15 @@ export function McpServerSummary({ server }: { server: MCPAttachmentServer }) {
           {t(mcpStatusPresentation(server).labelKey)}
         </span>
         <span className="ml-auto text-[13px] text-muted-foreground">
-          {t("task:mcpToolCount", { count: counts.total })}
+          {counts.total === undefined
+            ? t("settings:builtinMcp.toolsUnknown")
+            : t("task:mcpToolCount", { count: counts.total })}
         </span>
       </div>
       <p className="break-words text-muted-foreground">
         {t(mcpStatusPresentation(server).explanationKey)}
       </p>
+      <BuiltinSessionEvidence server={server} />
       {server.summary && (!server.reason_code || server.status === "failed") && (
         <p className="text-[13px] text-muted-foreground">{server.summary}</p>
       )}

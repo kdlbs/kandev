@@ -954,6 +954,9 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 		AgentID:     s.cfg.AgentType,
 		StartedAt:   time.Now().UTC(),
 	}
+	if s.cfg.McpProfile != nil {
+		attempt.BuiltinPackages = s.cfg.McpProfile.BuiltinPackages.Clone()
+	}
 	s.procMgr.PublishMCPAttachmentAttempt(attempt)
 	if s.mcpServer != nil {
 		s.mcpServer.SetAttachmentAttempt(attempt)
@@ -1030,15 +1033,16 @@ func mcpAttachmentEvidence(
 		source = streams.MCPServerSourceKandev
 	}
 	return streams.MCPAttachmentEvidence{
-		AttemptID:  attemptID,
-		ServerName: mcpServer.Name,
-		Kind:       kind,
-		OccurredAt: time.Now().UTC(),
-		Source:     source,
-		Transport:  mcpServer.Type,
-		Target:     target,
-		ReasonCode: reasonCode,
-		Summary:    streams.SanitizeMCPErrorSummary(summary),
+		BuiltinPackage: mcpServer.BuiltinPackage,
+		AttemptID:      attemptID,
+		ServerName:     mcpServer.Name,
+		Kind:           kind,
+		OccurredAt:     time.Now().UTC(),
+		Source:         source,
+		Transport:      mcpServer.Type,
+		Target:         target,
+		ReasonCode:     reasonCode,
+		Summary:        streams.SanitizeMCPErrorSummary(summary),
 	}
 }
 

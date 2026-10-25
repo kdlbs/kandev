@@ -2,6 +2,7 @@ package mcpconfig
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -34,4 +35,22 @@ func TestBuiltinManagementViewSeparatesReadAccessFromChanges(t *testing.T) {
 	require.Nil(t, workspace.Desired)
 	_, err = service.ReadWorkspace(human, "foreign")
 	require.ErrorIs(t, err, ErrMCPWorkspaceAccess)
+}
+
+func TestBuiltinManagementViewSeparatesTaskChoiceFromWorkspaceManagement(t *testing.T) {
+	repo, service := builtinPolicyTestService()
+	repo.snapshot.Policy = DefaultBuiltinWorkspacePolicy("workspace")
+	service.authorize = func(_ context.Context, _ string, requested authz.Scope) error {
+		if requested == authz.ScopeWorkspaceManage {
+			return ErrMCPWorkspaceAccess
+		}
+		return nil
+	}
+	human := authn.WithIdentity(t.Context(), authn.Identity{UserID: "collaborator"})
+	view, err := service.ReadWorkspace(human, "workspace")
+	require.NoError(t, err)
+	require.False(t, view.CanEdit)
+	encoded, err := json.Marshal(view)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"can_choose_for_task":true`)
 }

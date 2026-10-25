@@ -1816,6 +1816,7 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 func configureMCPServices(
 	p routeParams,
 ) (mcpconfig.CatalogRepository, *mcpconfig.CatalogService, *mcpconfig.SelectionService) {
+	configureBuiltinMCPServices(p)
 	catalogRepo, ok := p.agentSettingsRepo.(mcpconfig.CatalogRepository)
 	if !ok {
 		return nil, nil, nil

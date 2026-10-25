@@ -236,10 +236,12 @@ from the task store. Do not overload third-party definition/selection tables or
 arbitrary task metadata. A narrow resolver reads both stores in the owning
 persistence transaction; no executor I/O occurs inside that transaction.
 
-Proposed endpoints:
+Management endpoints:
 
 - `GET /api/v1/workspaces/{id}/mcp-built-in`: catalog descriptors, policy,
-  revision, fixed context defaults, and editability. No global health field.
+  revision, fixed context defaults, and editability. `can_edit` governs workspace
+  policy; `can_choose_for_task` independently reflects human task-write authority
+  for initial task choices. No global health field.
 - `PUT /api/v1/workspaces/{id}/mcp-built-in/policy`: complete optional-package
   policy with `expected_revision`.
 - `GET /api/v1/tasks/{id}/mcp-built-in`: task overrides, workspace limits,
@@ -249,6 +251,16 @@ Proposed endpoints:
   workspace policy and both revisions atomically before accepting an opt-in.
 - `GET /api/v1/task-sessions/{id}/mcp-built-in`: authorized desired manifest,
   bound manifest or legacy/unknown state, and package evidence identities.
+
+The existing HTTP and WebSocket task-create requests accept optional
+`builtin_mcp_preferences`: `version: 1`,
+`expected_workspace_policy_revision`, and `packages` with Inherit/On/Off values.
+Only the authenticated human task writer can supply this consent. Validate its
+workspace and policy revision before insertion. Persist it before the task-created
+launch event; a failed preference write removes the partial task and emits no
+launch event. Missing policy wiring rejects an explicit choice. Replayed creates
+do not revise an existing task's preferences. An omitted field keeps default
+inheritance; it does not grant Configuration.
 
 Missing rows are successful revision-0 defaults; errors are not missing rows.
 Versioned payloads reject unknown fields, duplicate IDs, invalid values, raw tool

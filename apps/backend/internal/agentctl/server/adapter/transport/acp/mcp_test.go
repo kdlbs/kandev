@@ -10,10 +10,26 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	p "github.com/kandev/kandev/internal/mcp/profile"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 )
+
+func TestBuiltinAdapterEvidencePreservesHostProvenance(t *testing.T) {
+	a := &Adapter{updatesCh: make(chan AgentEvent, 1), logger: newTestLoggerForMcp()}
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{AttemptID: "attempt"})
+	for _, injected := range []bool{false, true} {
+		server := types.McpServer{Name: "kandev-configuration", Type: "http", URL: "http://127.0.0.1:1234/mcp/packages/configuration"}
+		if injected {
+			server.BuiltinPackage = p.PackageConfiguration
+		}
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
+		event := <-a.updatesCh
+		require.Equal(t, server.BuiltinPackage, event.MCPAttachment.BuiltinPackage)
+	}
+}
 
 func TestEmitMCPAttachmentEvidenceUsesBackendOwnedAttempt(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})

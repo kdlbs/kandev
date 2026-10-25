@@ -1,5 +1,4 @@
-KANDEV OFFICE MCP TOOLS — This Office session has exactly the tools listed below from the "kandev" server.
-Always use the exact tool names shown below (they include the _kandev suffix).
+KANDEV OFFICE MCP TOOLS — {office_discovery_instruction}
 
 Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}

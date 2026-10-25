@@ -160,7 +160,7 @@ func contextKindForBlock(block string, trustedContents []string) contextKind {
 
 // OfficeContext returns the restricted first-turn prompt used by Office runs.
 // Its tool inventory must stay exactly aligned with MCP ModeOffice.
-func OfficeContext() string { return prompts.Get("office-context") }
+func OfficeContext() string { return FormatOfficeContext("{task_id}", "{session_id}") }
 
 // FormatOfficeContext injects the active task and session IDs into the Office context.
 func FormatOfficeContext(taskID, sessionID string) string {

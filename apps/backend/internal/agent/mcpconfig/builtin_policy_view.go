@@ -8,10 +8,11 @@ import (
 
 type BuiltinManagementView struct {
 	*BuiltinPolicySnapshot
-	Catalog []p.BuiltinPackageDescriptor `json:"catalog"`
-	Desired *p.BuiltinManifest           `json:"desired,omitempty"`
-	Surface p.Surface                    `json:"surface,omitempty"`
-	CanEdit bool                         `json:"can_edit"`
+	Catalog          []p.BuiltinPackageDescriptor `json:"catalog"`
+	Desired          *p.BuiltinManifest           `json:"desired,omitempty"`
+	Surface          p.Surface                    `json:"surface,omitempty"`
+	CanEdit          bool                         `json:"can_edit"`
+	CanChooseForTask bool                         `json:"can_choose_for_task"`
 }
 
 func (s *BuiltinPolicyService) ReadWorkspace(ctx context.Context, workspaceID string) (*BuiltinManagementView, error) {
@@ -25,7 +26,7 @@ func (s *BuiltinPolicyService) ReadWorkspace(ctx context.Context, workspaceID st
 	if snapshot == nil || snapshot.Policy == nil {
 		return nil, ErrBuiltinPolicyInvalid
 	}
-	return &BuiltinManagementView{BuiltinPolicySnapshot: &BuiltinPolicySnapshot{Policy: snapshot.Policy}, Catalog: p.BuiltinPackageCatalog(), CanEdit: s.canEditBuiltin(ctx, workspaceID, authz.ScopeWorkspaceManage)}, nil
+	return &BuiltinManagementView{BuiltinPolicySnapshot: &BuiltinPolicySnapshot{Policy: snapshot.Policy}, Catalog: p.BuiltinPackageCatalog(), CanEdit: s.canEditBuiltin(ctx, workspaceID, authz.ScopeWorkspaceManage), CanChooseForTask: s.canEditBuiltin(ctx, workspaceID, authz.ScopeTaskWrite)}, nil
 }
 
 func (s *BuiltinPolicyService) ReadTask(ctx context.Context, taskID string) (*BuiltinManagementView, error) {

@@ -1,7 +1,7 @@
 ---
 id: "03-management-experience"
 title: "Package selection and responsive management"
-status: pending
+status: completed
 wave: 3
 depends_on:
   - "02-policy-runtime-binding"
@@ -96,7 +96,7 @@ runs, and no protected runtime/preview ports.
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/settings/workspaces/builtin-mcp-detail.test.tsx components/task/chat/mcp-explorer/builtin-package-selector.test.tsx hooks/domains/workspace/use-builtin-mcp-policy.test.ts hooks/domains/task/use-builtin-mcp-preferences.test.ts hooks/domains/session/use-request-changes-walkthrough.test.ts components/task/chat/mcp-explorer/builtin-mcp-view-model.test.ts components/task/chat/mcp-explorer/mcp-server-explorer.test.tsx)
+(cd apps/web && pnpm exec vitest run hooks/domains/workspace/use-builtin-mcp-management.test.ts hooks/domains/session/use-builtin-mcp-session.test.ts hooks/domains/session/use-request-changes-walkthrough.test.ts components/task-create-dialog-helpers.test.ts components/task/chat/mcp-explorer/builtin-mcp-view-model.test.ts components/task/chat/mcp-explorer/mcp-explorer-view-model.test.ts lib/state/slices/session-runtime/builtin-mcp-attachment.test.ts lib/ws/handlers/session-mcp-status.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:check)
@@ -155,4 +155,18 @@ need clear labels. All seven locales are required; generate Traditional Chinese.
 
 ## Results
 
-Pending. No frontend or browser tests run at the design checkpoint.
+Completed. Workspace policy, task customization and
+initial creation choices, package evidence, Walkthrough guards, localization, and
+public docs are implemented. Tests use domain hooks and pure view models plus
+focused browser journeys; React component unit tests were replaced with rendered
+browser checks under the current repository testing convention. Actual commands
+and results are in [implementation-results.md](implementation-results.md).
+
+Final results: 102 focused frontend tests pass, with full typecheck, zero-warning
+changed-file ESLint, seven-language/i18n checks, documentation validation, and
+focused browser journeys. Desktop Configuration chat catalog and task creation
+consent pass real package calls. Phone creation, opt-in/pruning, workspace policy,
+and Portuguese dark/light layout at 320/393/767/768/900 px pass. Existing desktop
+and phone MCP explorer tests pass. Six fresh desktop/phone screenshots cover
+workspace policy, task choices, and initial consent. Disposable capture specs were
+removed after the successful managed run; assets remain ignored.

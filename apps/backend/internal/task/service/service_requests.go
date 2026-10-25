@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -116,9 +117,10 @@ type CreateTaskRequest struct {
 	// Attachments is the creation-time submission. File-backed descriptors are
 	// claimed atomically with the task row; the bounded inline compatibility
 	// path stays on DeferredLaunch.
-	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
-	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
-	MCPServerIDs   []string               `json:"mcp_server_ids,omitempty"`
+	Attachments           []v1.MessageAttachment                `json:"attachments,omitempty"`
+	DeferredLaunch        map[string]interface{}                `json:"deferred_launch,omitempty"`
+	MCPServerIDs          []string                              `json:"mcp_server_ids,omitempty"`
+	BuiltinMCPPreferences *mcpconfig.BuiltinCreationPreferences `json:"builtin_mcp_preferences,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

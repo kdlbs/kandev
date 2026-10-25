@@ -39,7 +39,7 @@ is tracked in the [replacement plan](../../../plans/json-render-rich-output/plan
 
 #### Acceptance criteria
 
-- **AC-AGENTS-AGENT-RICH-OUTPUT-001.1:** Task and Office agents can call `show_rich_output_kandev` to add one native, replayable presentation to the conversation.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.1:** Task and Office agents whose current process includes the Rich Output package can call `show_rich_output_kandev` to add one native, replayable presentation to the conversation.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.2:** A retained historical version 1 presentation has a plain-text title, an optional plain-text description, and one to four ordered blocks.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.3:** Retained historical version 1 supports only file previews, line or bar charts, and metric groups.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.4:** Line and bar charts may receive values inline or select columns from a workspace CSV. CSV-backed results persist as normalized snapshots so they do not depend on the later workspace lifecycle.

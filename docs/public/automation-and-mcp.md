@@ -578,9 +578,9 @@ or task tree.
 
 ### Native rich output
 
-Task and Office agents can call `show_rich_output_kandev` when a workspace file,
+Task and Office agents with the Rich Output package can call `show_rich_output_kandev` when a workspace file,
 trend, comparison, or small metric group is materially clearer as a native
-presentation than as prose. The injected agent context requires this tool for
+presentation than as prose. When that package is selected, the injected agent context requires this tool for
 structured comparisons, recorded checks, charts, graphs, plots, file previews
 and KPI or metric requests when suitable data is available. Prefer plain text or Markdown for ordinary answers. Small textual comparisons can remain Markdown tables. For structured multi-row
 comparisons, verification findings or a prominent observation, agents can use
@@ -1058,7 +1058,7 @@ The database migration is additive. Rolling back the application binary leaves t
 
 ## Office MCP and runtime CLI
 
-Office runs use a smaller MCP surface than regular task-mode sessions. The built-in Office server registers exactly these tools:
+Office runs use a smaller MCP surface than regular task-mode sessions. Core registers the required Office tools below; `show_rich_output_kandev` belongs to the optional Rich Output package, which is on by default. See [Built-in MCP packages](builtin-mcp-packages.md).
 
 - `ask_user_question_kandev`;
 - `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
@@ -1147,7 +1147,7 @@ Taskless launch and session creation remain separate Office scheduler work.
 
 ## Profile and executor MCP
 
-An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. The built-in Kandev task server is injected separately and cannot be replaced by a profile entry named `kandev`.
+An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. Kandev injects its [built-in packages](builtin-mcp-packages.md) separately. Their native server names, including `kandev`, are reserved and cannot be replaced by profile entries.
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
@@ -1162,7 +1162,7 @@ The explorer has server, tool-list, and tool-detail levels. On desktop, the
 server list stays visible beside the active level. On touch devices, select a
 server to open its tool list. Select **Back to servers** to return.
 
-Select `kandev` after Kandev serves `tools/list`. The tool list is sorted and
+Select a native package server after it serves `tools/list`. The tool list is sorted and
 scrolls independently from the explorer header. Each row shows the tool name
 and an estimated token value. Select a tool to open its description and
 arguments. Select **Back to tools** to return to the same list position.

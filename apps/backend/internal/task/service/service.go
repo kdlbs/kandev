@@ -608,6 +608,7 @@ type Service struct {
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
 	mcpSelectionWriter             MCPSelectionWriter
+	builtinCreationWriter          BuiltinCreationWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 

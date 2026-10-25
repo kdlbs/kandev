@@ -2,7 +2,7 @@
 import { MCPAssignmentChooser } from "./mcp-assignment-chooser";
 import type { MCPRegistrationReceipt } from "@/hooks/domains/workspace/use-mcp-registration-completion";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -34,6 +34,11 @@ import { MCPRegistrationCompletion, MCPRegistrationUncertain } from "./mcp-regis
 import type { MCPRegistrationResult } from "@/hooks/domains/workspace/use-mcp-registration-completion";
 import { MCPDefinitionForm } from "./mcp-definition-form";
 import { MCPMarketplace } from "./mcp-marketplace";
+
+import { BuiltinPackageList } from "@/components/mcp/builtin-package-detail";
+import { BuiltinWorkspaceDetail } from "./builtin-workspace-detail";
+import { useBuiltinMCPPolicy } from "@/hooks/domains/workspace/use-builtin-mcp-policy";
+import type { BuiltinMCPPackage } from "@/lib/types/builtin-mcp";
 
 type MCPSettingsProps = { workspaceId: string };
 
@@ -471,6 +476,10 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { toast } = useToast();
   const data = useMCPWorkspaceSettings(workspaceId);
+  const builtin = useBuiltinMCPPolicy(workspaceId);
+  const [builtinId, setBuiltinId] = useState<BuiltinMCPPackage | null>(null);
+  const returnFocus = useRef<BuiltinMCPPackage | null>(null);
+  if (builtinId) returnFocus.current = builtinId;
   const [assignment, setAssignment] = useState<MCPRegistrationReceipt | null>(null);
   const [view, setView] = useState<"configured" | "marketplace">("configured");
   const [editor, setEditor] = useState<MCPServerDefinition | null | undefined>(undefined);
@@ -500,6 +509,15 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
     if (result.status !== "saved") throw new SettingsSaveCancelledError();
   };
 
+  const builtinDetail = builtin.view?.catalog.find((item) => item.id === builtinId);
+  if (builtinDetail)
+    return (
+      <BuiltinWorkspaceDetail
+        editor={builtin}
+        item={builtinDetail}
+        onBack={() => setBuiltinId(null)}
+      />
+    );
   if (editor !== undefined)
     return (
       <MCPDefinitionForm
@@ -525,6 +543,13 @@ function MCPSettingsContent({ workspaceId }: MCPSettingsProps) {
         />
       )}
       <CatalogLoadError error={data.error} />
+      {view === "configured" && (
+        <BuiltinPackageList
+          returnFocus={returnFocus.current}
+          editor={builtin}
+          onSelect={setBuiltinId}
+        />
+      )}
       {view === "configured" ? (
         <ConfiguredMCPServers
           servers={data.servers}

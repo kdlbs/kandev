@@ -1555,6 +1555,7 @@ func (m *Manager) handleMCPAttachmentEvent(
 		attempt.SessionID = execution.SessionID
 		attempt.ExecutionID = execution.ID
 		attempt.AgentID = execution.AgentID
+		attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 		event.MCPAttachmentAttempt = &attempt
 	}
 	// Attachment diagnostics must not count as model activity or alter turn

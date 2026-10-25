@@ -25,6 +25,7 @@ func TestBuiltinAttachmentEvidenceKeepsPackageIdentity(t *testing.T) {
 	for len(events) > 0 {
 		e := <-events
 		require.Equal(t, "kandev-diagnostics", e.ServerName)
+		require.Equal(t, p.PackageDiagnostics, e.BuiltinPackage)
 		require.Equal(t, "attempt", e.AttemptID)
 		if e.Kind == streams.MCPAttachmentEvidenceToolsListObserved {
 			listed = true

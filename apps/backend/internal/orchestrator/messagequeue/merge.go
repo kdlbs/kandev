@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/entityrefs"
+	builtinintent "github.com/kandev/kandev/internal/mcp/intent"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -70,6 +71,15 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 	merged := make(map[string]interface{}, len(target)+1)
 	for key, value := range target {
 		merged[key] = value
+	}
+	for _, metadata := range []map[string]interface{}{target, source} {
+		intent, err := builtinintent.FromMetadata(metadata)
+		if err != nil {
+			return nil, err
+		}
+		if intent != "" {
+			merged[builtinintent.MetadataKey] = string(intent)
+		}
 	}
 	union, err := unionEntityReferences(target, source)
 	if err != nil {

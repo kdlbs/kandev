@@ -52,7 +52,7 @@ func TestBuiltinManagementHTTPValidatesCompleteVersionedWrites(t *testing.T) {
 		c.Request = c.Request.WithContext(authn.WithIdentity(c.Request.Context(), authn.Identity{UserID: "owner"}))
 		c.Next()
 	})
-	RegisterBuiltinMCPRoutes(router, service, nil)
+	RegisterBuiltinMCPRoutes(router, service, nil, nil)
 	request := func(method, path, body string, want int) {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

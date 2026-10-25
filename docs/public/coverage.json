@@ -389,7 +389,8 @@
       "docs": [
         "agents-and-profiles",
         "configuration",
-        "add-agent-cli"
+        "add-agent-cli",
+        "builtin-mcp-packages"
       ],
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
@@ -415,7 +416,9 @@
         "apps/web/components/settings/agent-runtime-policies.tsx",
         "apps/web/components/update-available-toast-bridge.tsx",
         "apps/backend/internal/common/launchwrapper/prepare.go",
-        "apps/backend/internal/agentctl/server/utility/launch_wrapper.go"
+        "apps/backend/internal/agentctl/server/utility/launch_wrapper.go",
+        "apps/backend/internal/mcp/profile/builtin_packages.go",
+        "apps/web/components/mcp/builtin-package-detail.tsx"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -443,7 +446,9 @@
         "apps/backend/internal/common/launchwrapper/prepare_test.go",
         "apps/backend/internal/agentctl/server/utility/generic_wrapper_test.go",
         "apps/web/e2e/tests/cli-mode/generic-launch-wrappers.spec.ts",
-        "apps/web/e2e/tests/cli-mode/mobile-generic-launch-wrappers.spec.ts"
+        "apps/web/e2e/tests/cli-mode/mobile-generic-launch-wrappers.spec.ts",
+        "apps/backend/internal/agent/mcpconfig/builtin_creation_test.go",
+        "apps/web/e2e/tests/settings/builtin-mcp-management.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",

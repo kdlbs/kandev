@@ -39,7 +39,7 @@ test("mobile MCP explorer uses servers, tools, and tool detail pages", async ({
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.sendMessageViaButton("e2e:mcp:kandev:list_workspaces_kandev({})");
+  await session.sendMessageViaButton("e2e:mcp:kandev:list_agents_kandev({})");
   await session.waitForChatIdle({ timeout: 30_000 });
 
   const trigger = testPage.getByTestId("mcp-status-trigger");
