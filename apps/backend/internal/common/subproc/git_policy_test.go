@@ -460,11 +460,14 @@ func TestClassifyGitSubcommand(t *testing.T) {
 			t.Errorf("%s: class %v want %v", sub, got, want)
 		}
 	}
-	worktree := map[string]gitCommandClass{"list": classFilterFree, "prune": classFilterFree, "remove": classFilterReading, "add": classContentWriting}
+	worktree := map[string]gitCommandClass{"list": classFilterFree, "prune": classFilterFree, "remove": classFilterReading, "add": classContentWriting, "move": classContentWriting, "lock": classContentWriting}
 	for second, want := range worktree {
 		if got := classifyGitSubcommand("worktree", []string{second}); got != want {
 			t.Errorf("worktree %s: class %v want %v", second, got, want)
 		}
+	}
+	if classifyGitSubcommand("worktree", nil) != classContentWriting {
+		t.Error("bare worktree must be content-writing")
 	}
 	if classifyGitSubcommand("cat-file", []string{"--filters", "x"}) != classContentWriting {
 		t.Error("cat-file --filters must be content-writing")
@@ -472,7 +475,7 @@ func TestClassifyGitSubcommand(t *testing.T) {
 	if classifyGitSubcommand("branch", []string{"--list"}) != classFilterFree {
 		t.Error("branch --list must be filter-free")
 	}
-	for _, rest := range [][]string{nil, {"--show-current"}, {"-m", "x"}, {"yy"}} {
+	for _, rest := range [][]string{nil, {"--show-current"}, {"-m", "x"}, {"yy"}, {"--list", "--no-list", "zz", "HEAD"}, {"--list", "-d", "x"}} {
 		if classifyGitSubcommand("branch", rest) != classContentWriting {
 			t.Errorf("branch %v must be content-writing", rest)
 		}

@@ -4,6 +4,7 @@ package subproc
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -116,10 +117,11 @@ func TestManagedGitRefUpdatingCommandsRunConfigDefinedHooksOnlyWhenOptedIn(t *te
 		"symbolic-ref": {"symbolic-ref", "HEAD", "refs/heads/zz"},
 		"fetch":        {"fetch", "--tags", "."},
 		"branch":       {"branch", "yy"},
+		"branch-list":  {"branch", "--list", "--no-list", "zz", "HEAD"},
 	}
 	for name, args := range commands {
 		for _, optedIn := range []bool{false, true} {
-			t.Run(name, func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/optedIn=%v", name, optedIn), func(t *testing.T) {
 				repo := newPolicyRepo(t)
 				plainGit(t, repo.dir, "commit", "--allow-empty", "-q", "-m", "base")
 				if name == "fetch" {
@@ -158,6 +160,28 @@ func TestManagedGitWriteTreeRunsConfigDefinedHooksOnlyWhenOptedIn(t *testing.T) 
 		}
 		if got := strings.Contains(repo.markerText(), "config-hook"); got != optedIn {
 			t.Fatalf("opted-in=%v: write-tree config hook ran=%v\n%s", optedIn, got, repo.markerText())
+		}
+	}
+}
+
+func TestParseDriverOutputHookNames(t *testing.T) {
+	long := strings.Repeat("a", maxDriverNameLength+1)
+	for _, record := range []string{"hook.a=b.command\ncmd", "hook." + long + ".event\nx"} {
+		if _, err := parseDriverOutput([]byte(record + "\x00")); err == nil {
+			t.Errorf("record %.30q must be refused", record)
+		}
+	}
+	set, err := parseDriverOutput([]byte("hook.mark.event\nreference-transaction\x00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for hooksEnabled, want := range map[bool]string{false: "hook.mark.enabled=false", true: ""} {
+		pairs, _, err := driverPolicy(set, classFilterReading, nil, hooksEnabled)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(pairs, " "); got != want {
+			t.Errorf("hooksEnabled=%v: pairs %q want %q", hooksEnabled, got, want)
 		}
 	}
 }

@@ -148,3 +148,11 @@ func stringLiteral(expr ast.Expr) (string, bool) {
 func knownSubcommand(sub string) bool {
 	return sub == "cat-file" || filterFreeSubcommands[sub] || filterReadingSubcommands[sub] || contentWritingSubcommands[sub]
 }
+
+func TestContentWritingSubcommandsClassifyAsContentWriting(t *testing.T) {
+	for sub := range contentWritingSubcommands {
+		if got := classifyGitSubcommand(sub, nil); got != classContentWriting {
+			t.Errorf("%s: class %v want content-writing", sub, got)
+		}
+	}
+}

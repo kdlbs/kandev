@@ -103,9 +103,10 @@ func classifyGitSubcommand(sub string, rest []string) gitCommandClass {
 		}
 		return classContentWriting
 	case "branch":
-		// Only the listing form is a pure read; every other form can update
-		// refs and start a reference-transaction hook.
-		if len(rest) > 0 && rest[0] == "--list" {
+		// Only `--list` followed by patterns is a pure read; any further option
+		// (for example `--no-list`) can select a ref-updating form that starts a
+		// reference-transaction hook.
+		if len(rest) > 0 && rest[0] == "--list" && !hasOptionArg(rest[1:]) {
 			return classFilterFree
 		}
 		return classContentWriting
@@ -124,6 +125,15 @@ func classifyGitSubcommand(sub string, rest []string) gitCommandClass {
 		return classFilterReading
 	}
 	return classContentWriting
+}
+
+func hasOptionArg(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return true
+		}
+	}
+	return false
 }
 
 // policyOwnedKeys are the configuration keys the policy sets. A caller entry
