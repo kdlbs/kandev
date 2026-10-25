@@ -160,7 +160,7 @@ func TestPluginHost_ExternalProcessPersistsPriorityThroughTaskService(t *testing
 func buildExternalPriorityProbe(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "plugin-fixture")
-	command := exec.Command("go", "build", "-o", bin, "../../cmd/plugin-fixture")
+	command := exec.Command("go", "build", "-trimpath", "-o", bin, "../../cmd/plugin-fixture")
 	command.Dir = "."
 	output, err := command.CombinedOutput()
 	require.NoErrorf(t, err, "build external plugin fixture: %s", output)
