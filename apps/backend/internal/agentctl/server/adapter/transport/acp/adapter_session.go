@@ -180,6 +180,9 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return "", err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {
@@ -471,15 +474,16 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 	a.sendUpdate(AgentEvent{
 		Type: streams.EventTypeMCPAttachment,
 		MCPAttachment: &streams.MCPAttachmentEvidence{
-			AttemptID:  attachmentContext.Attempt.AttemptID,
-			ServerName: server.Name,
-			Kind:       kind,
-			OccurredAt: time.Now().UTC(),
-			Source:     source,
-			Transport:  server.Type,
-			Target:     target,
-			ReasonCode: reasonCode,
-			Summary:    streams.SanitizeMCPErrorSummary(summary),
+			BuiltinPackage: server.BuiltinPackage,
+			AttemptID:      attachmentContext.Attempt.AttemptID,
+			ServerName:     server.Name,
+			Kind:           kind,
+			OccurredAt:     time.Now().UTC(),
+			Source:         source,
+			Transport:      server.Type,
+			Target:         target,
+			ReasonCode:     reasonCode,
+			Summary:        streams.SanitizeMCPErrorSummary(summary),
 		},
 	})
 }
@@ -616,6 +620,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {
@@ -770,6 +777,9 @@ func (a *Adapter) ResumeSession(ctx context.Context, sessionID string, mcpServer
 	}
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
 	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	if err := requireBuiltinMCPDelivery(mcpServers, filteredServers); err != nil {
+		return err
+	}
 	for _, decision := range decisions {
 		kind := streams.MCPAttachmentEvidenceDelivered
 		if !decision.Included {

@@ -4445,6 +4445,9 @@ func (s *Service) QueueUserPrompt(
 	for key, value := range metadata {
 		queueMetadata[key] = value
 	}
+	if err := retainBuiltinIntent(ctx, taskID, sessionID, queueMetadata); err != nil {
+		return err
+	}
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}

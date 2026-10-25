@@ -513,6 +513,8 @@ information. These components have no controls, external links, callbacks,
 animations, polling, or agent-selected styles. Local interactions in existing
 components retain their authorization and identity semantics.
 
+Guidance requires the [Rich Output binding](builtin-mcp-management.md).
+
 Schema examples in `lib/rich-output/examples.ts` cover inline and CSV Table,
 StatusList and Callout, including a composed report. Descriptions tell agents:
 use Table for multi-row/structured comparisons, StatusList for reported checks,

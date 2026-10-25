@@ -9,8 +9,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type BuiltinSessionReader interface {
+	ReadBuiltinSessionMCP(context.Context, string) (*mcpconfig.BuiltinSessionView, error)
+}
 
 type builtinMCPHTTP struct {
 	service *mcpconfig.BuiltinPolicyService
@@ -25,11 +31,21 @@ type builtinMCPWrite struct {
 
 // RegisterBuiltinMCPRoutes installs the human management API separately from
 // agent tools. Writers enforce human identity and resource scopes in the service.
-func RegisterBuiltinMCPRoutes(router *gin.Engine, service *mcpconfig.BuiltinPolicyService, interlock gin.HandlerFunc) {
+func RegisterBuiltinMCPRoutes(router *gin.Engine, service *mcpconfig.BuiltinPolicyService, interlock gin.HandlerFunc, sessions BuiltinSessionReader) {
 	h := &builtinMCPHTTP{service: service}
 	api := router.Group("/api/v1")
 	api.GET("/workspaces/:id/mcp-built-in", h.read(service.ReadWorkspace))
 	api.GET("/tasks/:id/mcp-built-in", h.read(service.ReadTask))
+	if sessions != nil {
+		api.GET("/task-sessions/:id/mcp-built-in", func(c *gin.Context) {
+			view, err := sessions.ReadBuiltinSessionMCP(c.Request.Context(), c.Param("id"))
+			if err != nil {
+				writeBuiltinMCPError(c, err)
+				return
+			}
+			c.JSON(http.StatusOK, view)
+		})
+	}
 	mutations := api.Group("")
 	if interlock != nil {
 		mutations.Use(interlock)
@@ -101,9 +117,9 @@ func writeBuiltinMCPError(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &conflict):
 		c.JSON(http.StatusConflict, gin.H{"error_code": "builtin_mcp_conflict", "current": conflict.Current})
-	case errors.Is(err, mcpconfig.ErrBuiltinHumanRequired), errors.Is(err, mcpconfig.ErrMCPWorkspaceAccess):
+	case errors.Is(err, mcpconfig.ErrBuiltinHumanRequired), errors.Is(err, mcpconfig.ErrMCPWorkspaceAccess), taskservice.IsForbidden(err):
 		c.JSON(http.StatusForbidden, gin.H{"error_code": "builtin_mcp_forbidden"})
-	case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+	case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound), errors.Is(err, models.ErrTaskSessionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error_code": "builtin_mcp_not_found"})
 	case errors.Is(err, mcpconfig.ErrBuiltinPackageBlocked):
 		c.JSON(http.StatusForbidden, gin.H{"error_code": "builtin_mcp_blocked"})

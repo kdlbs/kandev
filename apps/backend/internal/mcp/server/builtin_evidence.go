@@ -2,10 +2,21 @@ package mcp
 
 import (
 	"context"
+	"slices"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	p "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+func builtinEvidencePackage(manifest *p.BuiltinManifest, name string) p.PackageID {
+	id := p.BuiltinPackageForRuntimeName(name)
+	if manifest != nil && slices.Contains(manifest.Packages, id) {
+		return id
+	}
+	return ""
+}
 
 func mcpEvidenceServerName(names ...string) string {
 	if len(names) > 0 {

@@ -420,6 +420,7 @@ func (s *Server) SetAttachmentReporter(reporter func(streams.MCPAttachmentEviden
 // MCP endpoint observations belong. It is called only by the local agentctl
 // API before handing configuration to an agent adapter.
 func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	attempt.BuiltinPackages = s.Profile().BuiltinPackages
 	s.attachmentMu.Lock()
 	defer s.attachmentMu.Unlock()
 	s.attachmentAttempt = attempt
@@ -606,6 +607,7 @@ func (s *Server) reportMCPConnectionWithTools(
 		tools, _ = streams.NormalizeMCPToolCatalog(tools, toolCount)
 	}
 	reporter(streams.MCPAttachmentEvidence{
+		BuiltinPackage:     builtinEvidencePackage(attempt.BuiltinPackages, mcpEvidenceServerName(serverNames...)),
 		AttemptID:          attempt.AttemptID,
 		ServerName:         mcpEvidenceServerName(serverNames...),
 		Kind:               kind,

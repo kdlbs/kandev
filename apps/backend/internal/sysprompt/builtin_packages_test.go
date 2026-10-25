@@ -25,11 +25,19 @@ func TestBuiltinGuidanceFollowsBoundManifest(t *testing.T) {
 			require.Equal(t, selected, strings.Contains(text, optional), optional)
 		}
 		require.Contains(t, text, "supersedes earlier optional-tool guidance")
+		require.NotContains(t, text, "Selected tools from \"kandev\".")
+		require.NotContains(t, text, "Use callable tools from \"kandev\" with")
 		if selected {
 			require.Contains(t, text, "shared resources")
 			require.Contains(t, text, "cannot change built-in package policy")
 		}
 	}
+}
+
+func TestBuiltinConfigurationDiscoveryAllowsPackageServers(t *testing.T) {
+	text := FormatConfigContext("session")
+	require.NotContains(t, text, "from the \"kandev\" server")
+	require.Contains(t, text, "client-specific callable names")
 }
 
 func TestBuiltinOfficeGuidanceKeepsRequiredTools(t *testing.T) {
@@ -42,5 +50,9 @@ func TestBuiltinOfficeGuidanceKeepsRequiredTools(t *testing.T) {
 	require.Contains(t, text, "$KANDEV_CLI")
 	manifest.Packages = append(manifest.Packages, p.PackageRichOutput)
 	manifest.Origins[p.PackageRichOutput] = "workspace"
-	require.Contains(t, FormatOfficeContextWithPackages("task", "session", true, manifest), "show_rich_output_kandev")
+	selected := FormatOfficeContextWithPackages("task", "session", true, manifest)
+	require.Contains(t, selected, "show_rich_output_kandev")
+	require.NotContains(t, selected, "from the \"kandev\" server")
+	require.Contains(t, selected, "client-specific callable names")
+	require.Contains(t, FormatOfficeContext("task", "session"), "from the \"kandev\" server")
 }

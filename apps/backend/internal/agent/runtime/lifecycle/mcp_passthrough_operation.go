@@ -38,6 +38,7 @@ func (m *Manager) startPassthroughWithMCP(ctx context.Context, execution *AgentE
 func buildPassthroughMCPAttempt(execution *AgentExecution, processID string, operation *preparedMCPOperation) streams.MCPAttachmentAttempt {
 	attemptID := uuid.NewSHA1(uuid.NameSpaceOID, []byte(execution.ID+":"+processID)).String()
 	attempt := streams.MCPAttachmentAttempt{AttemptID: attemptID, TaskID: execution.TaskID, SessionID: execution.SessionID, ExecutionID: execution.ID, AgentID: execution.AgentID, AgentProfileID: execution.AgentProfileID, StartedAt: time.Now().UTC()}
+	attempt.BuiltinPackages = execution.builtinMCPManifestSnapshot()
 	delivered := make(map[string]bool, len(operation.servers))
 	history := streams.MCPAttachmentHistory{}
 	history.StartAttempt(attempt)
@@ -52,6 +53,9 @@ func buildPassthroughMCPAttempt(execution *AgentExecution, processID string, ope
 			source = streams.MCPServerSourceKandev
 		}
 		evidence := streams.MCPAttachmentEvidence{AttemptID: attemptID, ServerName: server.Name, Source: source, Transport: server.Type, Target: target, OccurredAt: attempt.StartedAt, DefinitionID: server.DefinitionID, DefinitionRevision: server.DefinitionRevision}
+		if server.IsInjectedBuiltin() {
+			evidence.BuiltinPackage = server.BuiltinPackage
+		}
 		for _, origin := range server.Origins {
 			evidence.Origins = append(evidence.Origins, streams.MCPSelectionOrigin{Scope: origin.Scope, WorkspaceID: origin.WorkspaceID, OwnerID: origin.OwnerID})
 		}

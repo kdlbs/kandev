@@ -48,6 +48,22 @@ func TestBuiltinPromptProducersUsePreparedSelection(t *testing.T) {
 	}
 }
 
+func TestBuiltinMessagePromptPreparationValidatesOwner(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task", "session", models.TaskSessionStateCreated)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	preparer, ok := any(svc).(interface {
+		PrepareTaskSessionMCPPrompt(context.Context, string, string) (context.Context, error)
+	})
+	require.True(t, ok, "message admission needs the production orchestrator preparation boundary")
+	ctx := context.Background()
+	_, err := preparer.PrepareTaskSessionMCPPrompt(ctx, "foreign-task", "session")
+	require.ErrorIs(t, err, ErrTaskSessionPairMismatch)
+	prepared, err := preparer.PrepareTaskSessionMCPPrompt(ctx, "task", "session")
+	require.NoError(t, err)
+	require.NotNil(t, executor.PreparedMCPProfile(prepared, "task", "session"))
+}
+
 type countedBuiltinPromptReader struct{ reads int }
 
 func (r *countedBuiltinPromptReader) GetBuiltinPolicySnapshot(ctx context.Context, workspaceID, taskID string) (*mcpconfig.BuiltinPolicySnapshot, error) {
@@ -138,6 +154,52 @@ func TestBuiltinAutoStartUsesFreshOrRetainedSelection(t *testing.T) {
 				require.Zero(t, reader.reads)
 			}
 			require.NotNil(t, executor.PreparedMCPProfile(promptState.ctx, "task", "session"))
+			if !fresh {
+				freshCtx, prepareErr := svc.executor.PrepareMCPLaunch(promptState.ctx, "task", session, true)
+				require.NoError(t, prepareErr)
+				require.Contains(t, executor.PreparedMCPProfile(freshCtx, "task", "session").BuiltinPackages.Packages, p.PackageConfiguration,
+					"a later fresh process must not reuse a continuation snapshot")
+				require.Equal(t, 1, reader.reads)
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-BUILTIN-MCP-003.2
+func TestBuiltinAutoStartRejectsInvalidRetainedBinding(t *testing.T) {
+	for _, invalid := range []string{"corrupt", "foreign-task", "foreign-workspace"} {
+		t.Run(invalid, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task", "session", models.TaskSessionStateWaitingForInput)
+			task, err := repo.GetTask(ctx, "task")
+			require.NoError(t, err)
+			task.WorkspaceID = "ws1"
+			require.NoError(t, repo.UpdateTask(ctx, task))
+			session, err := repo.GetTaskSession(ctx, "session")
+			require.NoError(t, err)
+			profile := p.New(p.SurfaceKanbanTask, nil, nil)
+			profile.BuiltinPackages = &p.BuiltinManifest{Version: 1, CatalogVersion: 1, WorkspaceID: "ws1", TaskID: "task", Surface: profile.Surface, Packages: []p.PackageID{p.PackageCore}, Origins: map[p.PackageID]string{p.PackageCore: "required"}}
+			if invalid == "foreign-task" {
+				profile.BuiltinPackages.TaskID = "another-task"
+			}
+			if invalid == "foreign-workspace" {
+				profile.BuiltinPackages.WorkspaceID = "another-workspace"
+			}
+			encoded, err := p.MarshalBuiltinBinding(profile)
+			require.NoError(t, err)
+			if invalid == "corrupt" {
+				encoded = "broken"
+			}
+			require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{TaskID: "task", SessionID: "session", AgentExecutionID: "execution", Runtime: "standalone", Status: models.ExecutorRunningStatusRunning, Metadata: map[string]any{p.BuiltinBindingMetadataKey: encoded}}))
+			svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			reader := &countedBuiltinPromptReader{}
+			svc.executor.SetBuiltinPolicyReader(reader)
+			step := &wfmodels.WorkflowStep{ID: "step", Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterResetAgentContext}}}}
+			state := &autoStartStepPromptState{ctx: ctx, taskID: "task", sessionID: "session", session: session, step: step, agentPrompt: "request", effectiveAgentPrompt: "request"}
+			_, _, err = svc.composeAutoStartStepPrompts(state)
+			require.Error(t, err, "invalid retained authority must not fall back to current policy")
+			require.Zero(t, reader.reads)
 		})
 	}
 }

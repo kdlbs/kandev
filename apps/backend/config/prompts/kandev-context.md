@@ -1,4 +1,4 @@
-KANDEV MCP TOOLS — Selected tools from "kandev".
+KANDEV MCP TOOLS — {builtin_tools_heading}
 `_kandev` names are canonical MCP protocol names; use the client-specific callable names and schemas, which may be server-qualified.
 
 Kandev Task ID: {task_id}
@@ -12,7 +12,7 @@ Use create_task_kandev only when the user explicitly wants a persistent Kandev t
 
 MCP DISCOVERY:
 These instructions list selected Kandev tools, not the complete MCP catalog.
-Use callable tools from "kandev" with their current schemas; otherwise use native tool search or discovery. Search "kandev" plus the operation/canonical name; without search, inspect available MCP tools.
+{builtin_discovery_instruction}
 An omitted entry here does not mean that the tool is unavailable. If discovery fails, report the limitation before substituting.
 
 ESSENTIAL WORKFLOW:

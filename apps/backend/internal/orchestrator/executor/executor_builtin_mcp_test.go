@@ -79,14 +79,25 @@ func TestBuiltinFreshResumeAndModelSwitchResolveCurrentPolicy(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 	reader := &builtinSnapshotReader{snapshot: &mcpconfig.BuiltinPolicySnapshot{Policy: mcpconfig.DefaultBuiltinWorkspacePolicy("workspace"), Preferences: &mcpconfig.BuiltinTaskPreferences{Version: 1, WorkspaceID: "workspace", TaskID: "task", Packages: mcpconfig.BuiltinPackageChoices{p.PackageConfiguration: "on"}}}}
 	exec.SetBuiltinPolicyReader(reader)
-	req := &LaunchAgentRequest{StartAgent: true}
+	req := &LaunchAgentRequest{StartAgent: true, TaskDescription: "resume this work"}
 	require.NoError(t, exec.applyResumeMCPSettings(context.Background(), task.ID, session, req))
 	require.NotNil(t, req.McpProfile.BuiltinPackages)
 	require.Contains(t, req.McpProfile.BuiltinPackages.Packages, p.PackageConfiguration)
+	require.Contains(t, req.TaskDescription, "resume this work")
+	require.Contains(t, req.TaskDescription, "kandev-configuration")
+	require.Contains(t, req.TaskDescription, "supersedes earlier optional-tool guidance")
 	reader.snapshot.Preferences.Packages[p.PackageConfiguration] = "off"
 	switched, err := exec.buildSwitchModelRequest(context.Background(), task, session, session.ID, "model", "request", "", executorConfig{Metadata: map[string]any{}}, nil)
 	require.NoError(t, err)
 	require.NotNil(t, switched.McpProfile.BuiltinPackages)
 	require.NotContains(t, switched.McpProfile.BuiltinPackages.Packages, p.PackageConfiguration)
+	require.Contains(t, switched.TaskDescription, "request")
+	require.Contains(t, switched.TaskDescription, "BUILT-IN PACKAGES:")
+	require.NotContains(t, switched.TaskDescription, "kandev-configuration")
 	require.Equal(t, 2, reader.reads)
+	for _, startAgent := range []bool{false, true} {
+		empty := &LaunchAgentRequest{StartAgent: startAgent}
+		require.NoError(t, exec.applyResumeMCPSettings(context.Background(), task.ID, session, empty))
+		require.Empty(t, empty.TaskDescription, "workspace preparation and deferred prompts must remain empty")
+	}
 }

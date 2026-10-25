@@ -19,6 +19,9 @@ import { useMcpExplorerNavigation } from "./use-mcp-explorer-navigation";
 import type { TaskSessionMCPSelection } from "@/hooks/domains/session/use-task-session-mcp-selection";
 import { isHandledApiError } from "@/lib/api/client";
 import { mcpSelectionInitialView } from "./mcp-selection-presentation";
+import { useBuiltinMCPManagement } from "@/hooks/domains/workspace/use-builtin-mcp-management";
+import { useBuiltinMCPSession } from "@/hooks/domains/session/use-builtin-mcp-session";
+import type { BuiltinMCPPackage } from "@/lib/types/builtin-mcp";
 
 type Navigation = ReturnType<typeof useMcpExplorerNavigation>;
 
@@ -137,11 +140,13 @@ export function McpServerExplorer({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"connections" | "customize">("connections");
   const [query, setQuery] = useState("");
+  const { builtin, builtinSession, setBuiltinSelected } = useBuiltinExplorer(selection, open);
   const handled = isHandledApiError(selection?.error);
   useEffect(() => {
     setOpen(false);
     setQuery("");
     setView("connections");
+    setBuiltinSelected(null);
   }, [selection?.contextKey]);
   useEffect(() => {
     if (handled) setOpen(false);
@@ -151,7 +156,15 @@ export function McpServerExplorer({
     if (next) setView(mcpSelectionInitialView(selection?.state));
     setOpen(next);
   };
-  const views = { selection, view, onViewChange: setView, query, onQueryChange: setQuery };
+  const views = {
+    selection,
+    builtin,
+    builtinSession: builtinSession.view,
+    view,
+    onViewChange: setView,
+    query,
+    onQueryChange: setQuery,
+  };
   const navigation = useMcpExplorerNavigation({ servers, open, touch });
   if (!touch) {
     return (
@@ -184,4 +197,28 @@ export function McpServerExplorer({
       </DrawerContent>
     </Drawer>
   );
+}
+
+function useBuiltinExplorer(selection: TaskSessionMCPSelection | null | undefined, open: boolean) {
+  const builtinEditor = useBuiltinMCPManagement(
+    "tasks",
+    selection?.taskId ?? null,
+    selection?.workspaceId ?? "",
+  );
+  const builtinSession = useBuiltinMCPSession(
+    selection?.taskId ?? null,
+    selection?.sessionId ?? null,
+    selection?.workspaceId ?? "",
+    open,
+  );
+  const [builtinSelected, setBuiltinSelected] = useState<BuiltinMCPPackage | null>(null);
+  const builtin = selection?.taskId
+    ? {
+        editor: builtinEditor,
+        selected: builtinSelected,
+        select: setBuiltinSelected,
+        onSaved: () => void builtinSession.refresh(),
+      }
+    : undefined;
+  return { builtin, builtinSession, setBuiltinSelected };
 }

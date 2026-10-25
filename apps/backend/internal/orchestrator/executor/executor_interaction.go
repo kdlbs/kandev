@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1527,6 +1528,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		return nil, err
 	}
 	req.McpProfile = &profileContext
+	req.TaskDescription = sysprompt.AppendBuiltinBindingGuidance(req.TaskDescription, profileContext.BuiltinPackages)
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
 	if err != nil {

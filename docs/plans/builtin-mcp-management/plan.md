@@ -1,6 +1,6 @@
 ---
 created: 2026-10-22
-status: draft
+status: completed
 requirements:
   - REQ-AGENTS-BUILTIN-MCP-001
   - REQ-AGENTS-BUILTIN-MCP-002
@@ -16,7 +16,9 @@ legacy_specs: []
 ## Checkpoint and verified baseline
 
 Design approved by the user; implementation explicitly authorized with "go for it"
-on 2026-10-24. Work order 01 is complete; 02 is in progress and 03 remains pending.
+on 2026-10-24 and "continue impl" on 2026-10-25. Work order 01 is complete;
+02 and 03 are complete. The latest request authorizes the remaining
+approved implementation, beyond the historical partial publication checkpoint.
 Implementation uses sequential TDD. The publication checkpoint below supersedes
 the earlier instruction to retain this package only as uncommitted files.
 
@@ -40,7 +42,7 @@ revision. No reviewed implementation package has been found. Autopilot remains
 off. No workers, additional tasks/sessions, commits, pushes, or merge are
 part of this design turn. Recheck current base/contracts before implementation.
 
-## Partial publication checkpoint
+## Historical partial publication checkpoint (2026-10-24)
 
 The coordinator requested publication of all task-owned work as a draft on
 2026-10-24, followed by a stop without review handling, CI waiting, or merge.
@@ -227,8 +229,8 @@ use main runtime 9998 or old previews 48593/48595.
 ## Work orders
 
 - [x] [Task 01: Package catalog and isolated registration](task-01-tool-group-contract.md)
-- [ ] [Task 02: Policy, task grants, and runtime delivery](task-02-policy-runtime-binding.md)
-- [ ] [Task 03: Package selection and responsive management](task-03-management-experience.md)
+- [x] [Task 02: Policy, task grants, and runtime delivery](task-02-policy-runtime-binding.md)
+- [x] [Task 03: Package selection and responsive management](task-03-management-experience.md)
 
 Execute 01 > 02 > 03 in the primary session after explicit authorization.
 The historical filenames remain stable for links; their scopes are revised here.
@@ -268,3 +270,12 @@ those definitions intact and make remediation explicit.
 Review the five package boundaries, default-on optional task packages, explicit
 Configuration task opt-in, deferred profile/session editors, and next-start
 application. These are review choices, not factual blockers or approval prompts.
+
+## Current implementation verification (2026-10-25)
+
+Runtime and human management wiring, atomic initial task consent, accepted-session
+evidence, typed Walkthrough admission/dispatch, workspace and task package controls,
+seven-language copy, and public documentation are implemented. Desktop and phone
+browser verification passed. See [implementation-results.md](implementation-results.md)
+for current evidence and limits; earlier checkpoint statements describe historical
+partial work, not the current feature state.

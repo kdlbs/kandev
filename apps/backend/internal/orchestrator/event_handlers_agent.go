@@ -1675,6 +1675,10 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 			s.signalCeilingSweep()
 		}()
 	}
+	ctx, state.dispatchErr = s.prepareQueuedBuiltinIntent(ctx, queuedMsg)
+	if state.dispatchErr != nil {
+		return
+	}
 	s.deliverQueuedPassthroughPrompt(ctx, identity, queuedMsg, &state)
 }
 
@@ -1733,7 +1737,9 @@ func (s *Service) finishQueuedPassthroughExecution(
 		s.clearQueuedDispatchInFlightForCapacityRefusal(identity.SessionID, reservation)
 	} else {
 		s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-		s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+		if !isBuiltinIntentError(state.dispatchErr) {
+			s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
+		}
 	}
 	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
 	if s.onQueuedMessageExecutionComplete != nil {
@@ -1948,6 +1954,13 @@ func (s *Service) executeQueuedMessageWithReservation(
 		return
 	}
 
+	var intentErr error
+	promptCtx, intentErr = s.prepareQueuedBuiltinIntent(promptCtx, queuedMsg)
+	if intentErr != nil {
+		allowFollowupDrain = false
+		s.finishQueuedMessageExecution(promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation, lifecyclePrompt, false, false, intentErr)
+		return
+	}
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
 	if err := s.prepareQueuedCIAutoFixOutcomeProtocol(promptCtx, queuedMsg); err != nil {
 		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
@@ -2106,6 +2119,9 @@ func (s *Service) executeQueuedMessageWithReservation(
 		// The receipt transition atomically removed this managed row from the
 		// shared FIFO. Ordinary acknowledgement could race a successor input.
 		return
+	}
+	if isBuiltinIntentError(err) {
+		allowFollowupDrain = false
 	}
 	s.finishQueuedMessageExecution(
 		promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
@@ -2380,7 +2396,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Error(err))
 
-	manualRecovery := isManualRecoveryPromptError(err)
+	manualRecovery := isManualRecoveryPromptError(err) || isBuiltinIntentError(err)
 	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&

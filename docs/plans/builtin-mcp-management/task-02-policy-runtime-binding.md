@@ -1,7 +1,7 @@
 ---
 id: "02-policy-runtime-binding"
 title: "Policy, task grants, and runtime delivery"
-status: in_progress
+status: completed
 wave: 2
 depends_on:
   - "01-tool-group-contract"
@@ -137,9 +137,9 @@ silently widen it. Shared configuration resources must retain domain authorizati
 
 ## Results
 
-In progress. Package-mode selection is not yet enabled for normal launches.
-The management writers and selection resolver remain unwired until runtime and
-prompt enforcement are complete. No UI controls have shipped.
+Completed. Runtime, prompt, dispatch, management wiring, and initial consent
+checks pass. The historical slice results below show the implementation sequence;
+the final evidence is in [implementation-results.md](implementation-results.md).
 
 Completed TDD slices include policy resolution; human-only workspace/task writers
 with two-revision CAS; SQLite/PostgreSQL policy persistence; Configuration grant
@@ -163,9 +163,50 @@ installed provider's connection. Detailed transient logs are under
 `/tmp/kandev-builtin-*.log`. The publication checkpoint records the final lint run and post-rebase checks.
 
 Initial new-task and prepared-session launches now share one prepared policy
-snapshot with prompt formatting. Normal dependency injection still does not
-activate the policy reader or management writers.
+snapshot with prompt formatting. The latest working tree also connects the reader and management writers through
+normal dependency injection; its integration checks are still in progress.
 
-Remaining: policy-reader and management writer activation; broader recovery/retained
-binding verification; accepted-state/session projection; remaining prompt producer
-paths; queued Walkthrough intent; final backend checks. WO-03 stays pending.
+The 2026-10-25 implementation adds retained-execution prompt preparation, conditional
+Office discovery, fresh resume/model-switch guidance, and accepted package evidence
+across helper API, ACP, native Codex configuration, and passthrough carriers.
+Acceptance remains separate from connection and tool-list observations. Unsupported
+ACP transport rejects package-mode setup before the provider request.
+
+Typed Walkthrough requests now retain their requirement through direct/queued
+admission, replay identity, merge, Send All, workflow handoff, and fallback queues.
+Dispatch rechecks the receiving execution. Runtime guards cover normal prompts,
+steering, startup, and passthrough input. Availability failures restore queued
+requests without an immediate follow-up drain. The focused orchestrator, message
+handler, queue handler, and merge tests pass. Intent admission leaves final profile
+preparation to the existing title-ownership and launch sequence.
+
+Frontend attachment types and validation retain package acceptance without
+inventing connection health or a tool count. Hydration and live events reject
+foreign or older reports. The four focused frontend files pass 71 tests and scoped
+ESLint. These changes affect data projection only; WO-03 still owns all UI work.
+
+Remaining: complete session-view and dependency-injection verification; finish
+backend contract/race/lint checks and resolve any failures. The first frontend
+typecheck hit Node's default 4 GB heap limit; an 8 GB run is in progress. WO-03
+stays pending.
+
+### Current continuation, 2026-10-25
+
+The session-view and normal dependency-injection checks pass. Initial creation now
+validates human task-write authority, version and workspace revision before insert,
+saves consent before the task-created event, and removes a partial task if saving
+fails. Configuration consent cannot be supplied by an agent or through generic
+metadata. Task writers need not also be workspace-policy administrators.
+
+The final affected Go lint reports zero issues. The runtime, evidence, queued-intent,
+and creation test groups pass; focused race checks are in progress. Frontend full
+typecheck succeeds with an 8 GB Node heap. WO-03 is implemented and under browser
+validation. Current evidence supersedes the pending statements above and is recorded
+in [implementation-results.md](implementation-results.md).
+
+Final backend evidence: the affected runtime suite and five focused race packages
+pass. The real-store wiring regression reproduces and fixes initial consent before
+any primary session exists. HTTP creation policy denials/conflicts now use typed
+403/400/409 responses; the corresponding handler tests pass. Final affected Go lint
+reports zero issues. Full-suite environment limits remain explicit in the results
+record; they are not counted as passing broad audits.

@@ -131,6 +131,9 @@ func (m *Manager) WritePassthroughStdin(ctx context.Context, sessionID string, d
 		return fmt.Errorf("no agent execution found for session: %s", sessionID)
 	}
 
+	if err := execution.validateBuiltinIntent(ctx); err != nil {
+		return err
+	}
 	if execution.PassthroughProcessID == "" {
 		return fmt.Errorf("session %s is not in passthrough mode", sessionID)
 	}
