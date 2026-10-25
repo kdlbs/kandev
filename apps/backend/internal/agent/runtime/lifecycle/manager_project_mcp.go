@@ -39,6 +39,9 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if rt == nil || rt.ProjectMCPStrategy == nil {
 		return nil
 	}
+	if err := m.requireSessionMCPCarrier(agentConfig, rt.ProjectMCPStrategy); err != nil {
+		return err
+	}
 	if isCursorMCPAuthStrategy(rt.ProjectMCPStrategy) {
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, executorType, rt.ProjectMCPStrategy, progress); err != nil {
 			return err

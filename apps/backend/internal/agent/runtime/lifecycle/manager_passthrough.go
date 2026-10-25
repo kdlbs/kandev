@@ -460,6 +460,9 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if isSSHPassthrough(execution) {
 		return m.applySSHPassthroughMCP(ctx, execution, pt, agentConfig, profileInfo, operation)
 	}
+	if err := m.requireSessionMCPCarrier(agentConfig, pt.MCPStrategy); err != nil {
+		return preparedPassthroughMCP{}, err
+	}
 	if isCursorMCPAuthStrategy(pt.MCPStrategy) {
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, execution.ExecutorType, pt.MCPStrategy, progress); err != nil {
 			return preparedPassthroughMCP{}, err

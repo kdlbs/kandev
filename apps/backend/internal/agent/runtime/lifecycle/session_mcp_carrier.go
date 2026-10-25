@@ -51,6 +51,19 @@ func classifyMCPCarrier(agent agents.Agent, strategy mcpconfig.PassthroughMCPStr
 	}
 }
 
+// requireSessionMCPCarrier refuses an agent that has no way to carry the
+// session token. It must run before any path that writes the Kandev entry,
+// including the Cursor project-file path that bypasses withSessionMCPAuth.
+func (m *Manager) requireSessionMCPCarrier(agent agents.Agent, strategy mcpconfig.PassthroughMCPStrategy) error {
+	if _, ok := m.sessionKeyStore(); !ok {
+		return nil
+	}
+	if carrier, cause := classifyMCPCarrier(agent, strategy); carrier == carrierDeferred {
+		return &LaunchRefusal{Code: CodeMCPTokenCarrierUnavailable, Cause: cause}
+	}
+	return nil
+}
+
 // sessionMCPAuthorization derives the Authorization header value for the
 // execution's instance. It returns "" when no signing key store is wired
 // (test doubles); the production runtime always has one.
@@ -91,9 +104,8 @@ func (m *Manager) withSessionMCPAuth(
 	if _, ok := m.sessionKeyStore(); !ok {
 		return servers, nil
 	}
-	carrier, cause := classifyMCPCarrier(agent, strategy)
-	if carrier == carrierDeferred {
-		return nil, &LaunchRefusal{Code: CodeMCPTokenCarrierUnavailable, Cause: cause}
+	if err := m.requireSessionMCPCarrier(agent, strategy); err != nil {
+		return nil, err
 	}
 	auth, err := m.sessionMCPAuthorization(ctx, execution)
 	if err != nil {
