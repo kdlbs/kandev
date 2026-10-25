@@ -229,7 +229,7 @@ func TestDeleteTaskSessionRejectsQueuedMessages(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
+func TestDeleteTaskSessionPreservesDurableQueueClaimsInTransaction(t *testing.T) {
 	repo := newRepoForArchiveTests(t, "task-session-recovery-purge")
 	ctx := context.Background()
 	const sessionID = "session-recovery-purge"
@@ -259,8 +259,8 @@ func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
 		t.Fatalf("claim Send Now entry: %v", err)
 	}
 
-	if err := deleteTaskSessionByID(ctx, repo, sessionID); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionByID(ctx, repo, sessionID); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with undispositioned queue claims")
 	}
 	dispatches, err := mqRepo.(interface {
 		ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
@@ -274,8 +274,10 @@ func TestDeleteTaskSessionPurgesDurableQueueClaimsInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list Send Now claims: %v", err)
 	}
-	if len(dispatches) != 0 || len(sendNowClaims) != 0 {
-		t.Fatalf("durable claims after session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
+	if len(dispatches) != 1 || dispatches[0].Message.ID != dispatchEntry.ID ||
+		len(sendNowClaims) != 1 || len(sendNowClaims[0].Claim.Sources) != 1 ||
+		sendNowClaims[0].Claim.Sources[0].ID != sendNowEntry.ID {
+		t.Fatalf("durable claims after rejected session delete: dispatches=%#v send_now=%#v", dispatches, sendNowClaims)
 	}
 }
 

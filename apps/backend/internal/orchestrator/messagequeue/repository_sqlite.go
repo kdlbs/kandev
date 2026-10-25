@@ -2031,19 +2031,21 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if incarnationID != identity.SessionIncarnationID {
 		return ErrSessionIdentityMismatch
 	}
-	queueTablePresent, err := internaldb.TableExists(tx, "queued_messages")
-	if err != nil {
-		return fmt.Errorf("check deleted session queue: %w", err)
-	}
-	if queueTablePresent {
+	for _, table := range []string{"queued_messages", "queue_dispatch_claims", "queue_send_now_claims"} {
+		present, err := internaldb.TableExists(tx, table)
+		if err != nil {
+			return fmt.Errorf("check deleted session %s: %w", table, err)
+		}
+		if !present {
+			continue
+		}
 		var pending int
-		if err := tx.GetContext(ctx, &pending, db.Rebind(`
-			SELECT COUNT(*) FROM queued_messages WHERE session_id = ?
-		`), identity.SessionID); err != nil {
-			return fmt.Errorf("count deleted session queue: %w", err)
+		query := `SELECT COUNT(*) FROM ` + table + ` WHERE session_id = ?`
+		if err := tx.GetContext(ctx, &pending, db.Rebind(query), identity.SessionID); err != nil {
+			return fmt.Errorf("count deleted session %s: %w", table, err)
 		}
 		if pending > 0 {
-			return fmt.Errorf("cannot delete session %s: %d queue entries remain; inspect and dispose or recover them first", identity.SessionID, pending)
+			return fmt.Errorf("cannot delete session %s: %d pending %s records remain; inspect and dispose or recover them first", identity.SessionID, pending, table)
 		}
 	}
 	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
