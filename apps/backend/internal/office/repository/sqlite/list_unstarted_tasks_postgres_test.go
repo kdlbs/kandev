@@ -101,3 +101,58 @@ func equalIDs(got, want []string) bool {
 	}
 	return true
 }
+
+// TestPostgresListUnstartedTasksNonUTCSession checks the lookback cutoff when
+// the PostgreSQL session time zone is not UTC. tasks.created_at is a naive
+// TIMESTAMP holding UTC wall-clock values, so comparing it against NOW()
+// without normalizing it reads it in the session zone and shifts the window
+// by the zone offset. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresListUnstartedTasksNonUTCSession(t *testing.T) {
+	for _, tz := range []string{"Asia/Shanghai", "America/Los_Angeles"} {
+		t.Run(tz, func(t *testing.T) {
+			db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+			ctx := context.Background()
+
+			if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
+				t.Fatalf("init settings store: %v", err)
+			}
+			if _, err := taskrepo.NewWithDB(db, db, nil); err != nil {
+				t.Fatalf("init task repo: %v", err)
+			}
+			if _, err := workflowrepo.NewWithDB(db, db, nil); err != nil {
+				t.Fatalf("init workflow repo: %v", err)
+			}
+			repo, err := sqlite.NewWithDB(db, db, nil)
+			if err != nil {
+				t.Fatalf("init office repo: %v", err)
+			}
+			// OpenIsolatedPostgres pins the pool to one connection, so the
+			// session setting applies to every query below.
+			if _, err := db.ExecContext(ctx, "SET TIME ZONE '"+tz+"'"); err != nil {
+				t.Fatalf("set time zone: %v", err)
+			}
+
+			now := time.Now().UTC()
+			seed := func(id string, createdAt time.Time) {
+				t.Helper()
+				execPostgres(t, ctx, repo, `
+					INSERT INTO tasks (id, workspace_id, project_id, state, title, description, identifier, created_at, updated_at)
+					VALUES (?, 'pg-unstarted-ws', 'pg-unstarted-project', 'TODO', 'Task', '', '', ?, ?)
+				`, id, createdAt, createdAt)
+				seedPostgresRunner(t, ctx, repo, id)
+			}
+			// 20h old is inside a 24h window; 30h old is outside it. Both are
+			// more than the zone offset away from the cutoff.
+			seed("pg-tz-inside", now.Add(-20*time.Hour))
+			seed("pg-tz-outside", now.Add(-30*time.Hour))
+
+			rows, err := repo.ListUnstartedTasks(ctx, 24, 10)
+			if err != nil {
+				t.Fatalf("ListUnstartedTasks: %v", err)
+			}
+			if got := unstartedIDs(rows); !equalIDs(got, []string{"pg-tz-inside"}) {
+				t.Fatalf("ListUnstartedTasks with session time zone %s = %v, want only the 20h-old task", tz, got)
+			}
+		})
+	}
+}
