@@ -152,6 +152,9 @@ Workflow-level settings include the name and default agent profile. Each step ca
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A manual move into a full target succeeds and queues in that target. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. Direct moves and automatic transitions queue in the destination without using the feeder. A full feeder rejects new overflow creation. |
 
+Use the information button beside **Pull from** to read queue and feeder guidance.
+On a phone, it opens a drawer that stays open while you read.
+
 ### Recover from a context reset failure
 
 When **Reset agent context** starts a fresh ACP session, Kandev restores the

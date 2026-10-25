@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { i18n } from "@/lib/i18n";
 import type { WorkflowStep } from "@/lib/types/http";
 import {
@@ -8,6 +8,11 @@ import {
   PROMPT_TEMPLATES,
   STEP_COLORS,
 } from "./workflow-pipeline-editor-helpers";
+
+const pointer = vi.hoisted(() => ({ isMobile: false, isFinePointer: true }));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => pointer,
+}));
 
 /**
  * Attribute-borne copy has no second check: the pseudo-locale oracle walks text
@@ -24,12 +29,37 @@ describe("HelpTip aria-label", () => {
   // on `[data-testid="tip"]`.
   afterEach(async () => {
     cleanup();
+    pointer.isMobile = false;
+    pointer.isFinePointer = true;
     await i18n.changeLanguage("en");
   });
 
   it("resolves its default label through the catalog", () => {
     render(<HelpTip text="body" testId="tip" />);
     expect(screen.getByTestId("tip").getAttribute("aria-label")).toBe("More information");
+  });
+
+  it.each([
+    ["phone with fine pointer", true, true],
+    ["coarse pointer", false, false],
+  ])("keeps block guidance in a drawer for a %s", (_label, isMobile, isFinePointer) => {
+    Object.assign(pointer, { isMobile, isFinePointer });
+    render(
+      <HelpTip
+        text={
+          <div>
+            <p>Feeder guidance</p>
+          </div>
+        }
+        testId="tip"
+        mobileTouchTarget
+      />,
+    );
+    const trigger = screen.getByTestId("tip");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    fireEvent.click(trigger);
+    expect(screen.getByRole("dialog").textContent).toContain("Feeder guidance");
+    expect(screen.getByText("Feeder guidance").parentElement?.closest("p")).toBeNull();
   });
 
   it("follows a locale switch rather than being frozen at boot", async () => {

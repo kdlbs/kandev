@@ -97,25 +97,27 @@ test.describe("Agent settings profile layout on mobile", () => {
       ]);
       const fallbackBadge = row.locator('[data-slot="badge"]').nth(1);
       await expect(fallbackBadge).toBeVisible();
-      const geometry = await fallbackBadge.evaluate((element) => {
-        const owner = element.closest('[data-testid="agent-profile-row"]');
-        if (!owner) throw new Error("Fallback badge has no profile row");
-        return {
-          badge: element.getBoundingClientRect().toJSON(),
-          row: owner.getBoundingClientRect().toJSON(),
-          fitsWidth: element.scrollWidth <= element.clientWidth + 1,
-          fitsHeight: element.scrollHeight <= element.clientHeight + 1,
-        };
-      });
-      expect(geometry.badge.width).toBeGreaterThan(0);
-      expect(geometry.badge.height).toBeGreaterThan(0);
-      expect(geometry.badge.width).toBeLessThanOrEqual(geometry.row.width);
-      expect(geometry.fitsWidth).toBe(true);
-      expect(geometry.fitsHeight).toBe(true);
-      expect(geometry.badge.y).toBeGreaterThanOrEqual(geometry.row.y - 1);
-      expect(geometry.badge.y + geometry.badge.height).toBeLessThanOrEqual(
-        geometry.row.y + geometry.row.height + 1,
-      );
+      await expect(async () => {
+        const geometry = await fallbackBadge.evaluate((element) => {
+          const owner = element.closest('[data-testid="agent-profile-row"]');
+          if (!owner) throw new Error("Fallback badge has no profile row");
+          return {
+            badge: element.getBoundingClientRect().toJSON(),
+            row: owner.getBoundingClientRect().toJSON(),
+            fitsWidth: element.scrollWidth <= element.clientWidth + 1,
+            fitsHeight: element.scrollHeight <= element.clientHeight + 1,
+          };
+        });
+        expect(geometry.badge.width).toBeGreaterThan(0);
+        expect(geometry.badge.height).toBeGreaterThan(0);
+        expect(geometry.badge.width).toBeLessThanOrEqual(geometry.row.width);
+        expect(geometry.fitsWidth).toBe(true);
+        expect(geometry.fitsHeight).toBe(true);
+        expect(geometry.badge.y).toBeGreaterThanOrEqual(geometry.row.y - 1);
+        expect(geometry.badge.y + geometry.badge.height).toBeLessThanOrEqual(
+          geometry.row.y + geometry.row.height + 1,
+        );
+      }).toPass({ timeout: 5_000 });
     } finally {
       if (profileId) {
         await apiClient.deleteAgentProfile(profileId, true);

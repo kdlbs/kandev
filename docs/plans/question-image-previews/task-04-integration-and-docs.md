@@ -11,6 +11,7 @@ requirements:
   - REQ-TASKS-QUESTION-IMAGES-002
   - REQ-TASKS-QUESTION-IMAGES-003
   - REQ-TASKS-QUESTION-IMAGES-004
+  - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 acceptance_criteria:
   - AC-TASKS-QUESTION-IMAGES-001.3
   - AC-TASKS-QUESTION-IMAGES-001.4
@@ -23,8 +24,10 @@ acceptance_criteria:
   - AC-TASKS-QUESTION-IMAGES-004.2
   - AC-TASKS-QUESTION-IMAGES-004.3
   - AC-TASKS-QUESTION-IMAGES-004.4
+  - AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10
 system_design:
   - ../../specs/tasks/system-design/question-image-previews.md
+  - ../../specs/tasks/system-design/wip-limit-pull-system.md
 ---
 
 # Task 04: Prove integration and document usage
@@ -477,4 +480,43 @@ autopilot spec passed three checks (`--project mobile-chrome
 tests/task/mobile-autopilot-mode.spec.ts --retries=0 --repeat-each=3`). Logs:
 `/tmp/question-images-checks/kandev-run.e2e.EnFcwgLl.log` and
 `/tmp/question-images-checks/kandev-run.e2e.wSPFdWp3.log`. Changed-file ESLint,
+specification lint, documentation catalog, and work-order coverage passed.
+
+### Mobile guidance and live-row geometry
+
+Workflow [40208567506](https://github.com/kdlbs/kandev/actions/runs/40208567506)
+finished with 4,244 first-attempt passes, two flaky cases, and 40 skips. All 118
+blob reports parsed. The only failures were the mobile WIP guidance tooltip and
+the saved fallback-summary geometry check. Prior corrections passed.
+
+The tooltip could open on focus and close on the same tap. WIP guidance now opts
+into the existing `HelpTip` drawer, as used by the completion-setting help. Phone
+and coarse-pointer users get the same localized guidance in a temporary bottom
+drawer with a 44-pixel minimum trigger. This includes narrow fine-pointer windows
+and coarse-pointer tablets. Desktop hover and focus retain the tooltip. The
+existing drawer owns scrolling, safe-area spacing, dismissal, and focus return.
+Reading guidance does not change the selected feeder or the workflow draft. Its
+description uses a div so the existing block content remains valid HTML. The WIP
+requirement, design, and public workflow guide record this behavior.
+
+The saved fallback-summary test measured a row during replacement and received a
+zero-width rectangle after its visibility assertion. It now retries the complete
+geometry assertions against the live row. Positive size, wrapping, and containment
+assertions remain. This is test synchronization, with no product-layout change.
+
+The new narrow fine-pointer unit case failed before the helper correction. All
+15 helper and step-action unit cases passed afterward. The original mobile
+cases each passed three constrained runs; that does not invalidate the CI
+evidence. The revised drawer test failed against old assets at the 44-pixel
+assertion, then passed against rebuilt assets. Browser checks cover both feeder
+states, readable persistent guidance, Escape dismissal, focus return, and no
+horizontal overflow. A new PR capture documents the mobile drawer; existing
+question-image captures remain applicable because their UI did not change.
+
+The final rebuilt assets passed all six focused mobile checks with retries off
+under two CPUs and one worker: `--project mobile-chrome
+tests/workflow/mobile-workflow-settings.spec.ts
+tests/settings/mobile-agent-profile-layout.spec.ts --grep 'optional feeder
+guidance|wraps the saved fallback' --retries=0 --repeat-each=3`. Log:
+`/tmp/question-images-checks/kandev-run.e2e.BoMTuxXi.log`. Changed-file ESLint,
 specification lint, documentation catalog, and work-order coverage passed.

@@ -7,8 +7,10 @@ requirements:
   - REQ-TASKS-QUESTION-IMAGES-003
   - REQ-TASKS-QUESTION-IMAGES-004
   - REQ-TASKS-QUESTION-IMAGES-005
+  - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 system_design:
   - ../../specs/tasks/system-design/question-image-previews.md
+  - ../../specs/tasks/system-design/wip-limit-pull-system.md
 legacy_specs: []
 ---
 
