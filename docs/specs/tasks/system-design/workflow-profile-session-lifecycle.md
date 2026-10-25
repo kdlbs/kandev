@@ -366,7 +366,7 @@ committed route; this allocation gate does not reconcile the prior runtime.
 Task deletion removes the route and duplication strips it. A deleted or terminal
 recorded destination cannot satisfy reuse. The same accepted entry must not
 allocate another destination when its recorded allocation is missing, failed,
-terminal, or has uncertain ownership; it fails visibly. Only a distinct accepted
+terminal, or has uncertain ownership; re-admission is refused. Only a distinct accepted
 entry may allocate a fresh destination under its start setting. This allocation
 fence does not restart a runtime or replay a prompt.
 Test prepared/committed restart and rollback on both

@@ -182,7 +182,8 @@ preserved.
 
 A retry of the same accepted step entry does not create another conversation.
 Kandev keeps the recorded destination; if it failed, ended, or has uncertain
-ownership, the retry fails visibly without restarting it or replaying a prompt.
+ownership, the retry stops without creating or restarting a conversation or
+replaying a prompt.
 A later visit is a new entry and applies the start setting again.
 
 ### Continue a completed conversation
