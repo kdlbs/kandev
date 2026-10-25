@@ -443,3 +443,38 @@ tests/layout/spa-resilience.spec.ts tests/system/logs-page.spec.ts --retries=0
 --repeat-each=3`. Log: `/tmp/question-images-checks/kandev-run.e2e.Upf8Xaqm.log`.
 The fresh E2E browser build, changed-file lint, documentation catalog,
 specification lint, and work-order coverage passed. No user-facing copy changed.
+
+
+### Runner selection, picker settlement, and answer history
+
+Workflow [40206656046](https://github.com/kdlbs/kandev/actions/runs/40206656046)
+finished with 4,243 first-attempt passes, three flaky cases, and 40 skips. The
+118-report audit found no other failures. The preload and diagnostic corrections
+passed. Three test assumptions needed correction:
+
+- Runner switching selected the destination with a name-substring regex. CI had
+  three matching local profiles. Both switching cases now select the existing
+  option value by profile ID and retain their stored-runner assertions.
+- Coordinator setup opened the executor picker before the agent picker completed
+  focus restoration. The executor option detached, then the click waited until
+  the test deadline. Setup now waits for the prior option to unmount and focus
+  to return to its trigger before opening the next picker.
+- Mobile autopilot treated a second turn row as proof that its answer message was
+  already projected. It now polls the history for both the answered question and
+  exactly one parent response before checking the child UI.
+
+Each original failing case passed three constrained local runs, which does not
+invalidate the CI evidence. Logs: `/tmp/question-images-checks/kandev-run.e2e.FzqaodAE.log`,
+`/tmp/question-images-checks/kandev-run.e2e.fT1p1ziq.log`, and
+`/tmp/question-images-checks/kandev-run.e2e.gpJvhND1.log`. These changes affect test
+synchronization and selection only. Product behavior and answer semantics remain.
+
+All 21 corrected checks passed under two CPUs and one worker with no retries.
+The full coordinator and runner-switch specs passed 18 desktop checks
+(`--project chromium tests/task/runner-switch.spec.ts
+tests/coordinator/settings.spec.ts --retries=0 --repeat-each=3`). The mobile
+autopilot spec passed three checks (`--project mobile-chrome
+tests/task/mobile-autopilot-mode.spec.ts --retries=0 --repeat-each=3`). Logs:
+`/tmp/question-images-checks/kandev-run.e2e.EnFcwgLl.log` and
+`/tmp/question-images-checks/kandev-run.e2e.wSPFdWp3.log`. Changed-file ESLint,
+specification lint, documentation catalog, and work-order coverage passed.
