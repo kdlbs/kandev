@@ -563,3 +563,38 @@ tests/integrations/mobile-sentry-watch-dialog-ownership.spec.ts --retries=0
 --repeat-each=3`). Log: `/tmp/question-images-checks/kandev-run.e2e.k8yN4UhW.log`.
 Changed-file ESLint, specification lint, documentation catalog, and work-order
 coverage passed. All 12 corrected repeated browser checks passed.
+
+### Confirm preference persistence before reload
+
+The next CI run exposed a task-list preference test race. Its original attempt
+completed three optimistic UI assertions in six milliseconds, then reloaded
+without observing the asynchronous settings write. The test now waits until
+`tasks_list_show_details` is true in the backend before reloading, and retains
+all after-reload row and persistence assertions.
+
+The original case passed three constrained local runs. The corrected full
+preference spec passed six checks with no retries under two CPUs and one worker:
+`--project chromium tests/task/task-listing-view-preferences.spec.ts --retries=0
+--repeat-each=3`. Logs: `/tmp/question-images-checks/kandev-run.e2e.9OiWV2RB.log`
+and `/tmp/question-images-checks/kandev-run.e2e.MR9IhWWi.log`. This is test
+synchronization; the asynchronous product persistence contract is unchanged.
+
+The same run exposed a storage navigation setup race. The original attempt read
+accordion content immediately after opening it, then issued its cleanup-review
+click while the opening animation could still move the control. The case now
+uses the existing finite-animation helper on that resource before capture and
+click. It still requires the cleanup accordion to expand, focus to move to its
+trigger, and no storage mutation request. The original case passed three local
+runs (`/tmp/question-images-checks/kandev-run.e2e.K5Xih33o.log`); the CI attempt's
+click completed in 49 milliseconds, shortly after its text assertions. No fixed
+sleep, retried click, or product change is introduced.
+
+Workflow [40213317681](https://github.com/kdlbs/kandev/actions/runs/40213317681)
+finished with 4,244 first-attempt passes, these two flaky cases, and 40 skips.
+The 118-report audit found no other failures. The corrected storage case passed
+three checks with retries off under two CPUs and one worker (`--project chromium
+tests/system/storage-temporary-folders.spec.ts --grep 'bounded entry ownership'
+--retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.91hi7WpL.log`. All nine corrected
+checks passed, as did changed-file lint, specification lint, documentation catalog,
+and work-order coverage. Existing UI captures remain applicable.
