@@ -772,7 +772,7 @@ func (s *Service) startCreatedSession(
 	references []v1.EntityReference,
 	promptReferenceContext string,
 	options startCreatedSessionOptions,
-) (*executor.TaskExecution, error) {
+) (result *executor.TaskExecution, resultErr error) {
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -804,6 +804,16 @@ func (s *Service) startCreatedSession(
 		agentProfileID = exact.AgentProfileID
 		exactProfile = true
 	}
+	receiptAttempted := false
+	defer func() {
+		if resultErr == nil || receiptAttempted || exactAssignment == nil {
+			return
+		}
+		if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
+			exactAssignment, exactProfileModel(exactAssignment), resultErr); err != nil {
+			s.logger.Warn("failed to record exact-profile launch denial", zap.Error(err))
+		}
+	}()
 
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
@@ -1163,7 +1173,6 @@ func (s *Service) startCreatedSession(
 			}
 			return nil, err
 		}
-		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
 		if initialTurnCreated {
@@ -1171,7 +1180,11 @@ func (s *Service) startCreatedSession(
 		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
-	s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
+	receiptAttempted = true
+	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(ctx), taskID, sessionID,
+		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		return execution, err
+	}
 
 	// Record the initial user message and set plan mode metadata after launch.
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
@@ -3555,7 +3568,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	options executor.ResumeOptions,
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
 	preReserved *sessionKeyedCeilingReservation,
-) (*executor.TaskExecution, error) {
+) (result *executor.TaskExecution, resultErr error) {
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
@@ -3609,6 +3622,16 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	if err != nil {
 		return nil, err
 	}
+	receiptAttempted := false
+	defer func() {
+		if resultErr == nil || receiptAttempted || exactAssignment == nil {
+			return
+		}
+		if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
+			exactAssignment, exactProfileModel(exactAssignment), resultErr); err != nil {
+			s.logger.Warn("failed to record exact-profile resume denial", zap.Error(err))
+		}
+	}()
 	if exactAssignment == nil && session.ExactProfileGeneration != 0 {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
@@ -3676,7 +3699,6 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
 				persistBranchRecovery()
 				failure := decorateResumeFailure(err)
-				s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
 				return nil, failure
 			}
 		}
@@ -3717,7 +3739,6 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 			failure := decorateResumeFailure(s.handleSessionLaunchFailure(
 				resumeCtx, taskID, sessionID, err, session,
 			))
-			s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), failure)
 			return nil, failure
 		}
 	}
@@ -3740,7 +3761,11 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
-	s.recordExactProfileLaunchReceipt(resumeCtx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), nil)
+	receiptAttempted = true
+	if err := s.recordExactProfileLaunchReceipt(context.WithoutCancel(resumeCtx), taskID, sessionID,
+		exactAssignment, exactProfileModel(exactAssignment), nil); err != nil {
+		return execution, err
+	}
 	seam4Res.consume()
 	persistBranchRecovery()
 	if err := s.activateResumedDynamicRoute(resumeCtx, readySession); err != nil {

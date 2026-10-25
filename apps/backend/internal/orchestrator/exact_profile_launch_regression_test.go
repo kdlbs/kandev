@@ -112,6 +112,19 @@ func TestStartCreatedSession_PersistsExactBindingOnWorkflowRedirect(t *testing.T
 	}
 
 	revision := time.Unix(1_726_500_000, 0).UTC()
+	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS agent_profiles (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, enabled INTEGER NOT NULL, deleted_at TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS agent_profile_revisions (profile_id TEXT PRIMARY KEY, revision BIGINT NOT NULL)`,
+		`INSERT INTO agent_profiles (id, workspace_id, enabled) VALUES ('profile-exact', 'ws1', 1)`,
+	} {
+		if _, err := repo.DB().ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed exact profile: %v", err)
+		}
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`INSERT INTO agent_profile_revisions (profile_id, revision) VALUES (?, ?)`, "profile-exact", revision.UnixNano()); err != nil {
+		t.Fatalf("seed exact profile revision: %v", err)
+	}
 	const generation int64 = 1
 	if _, err := repo.AssignExactProfileAssignment(ctx, &models.ExactProfileAssignment{
 		TaskID:          "task1",

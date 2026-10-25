@@ -35,9 +35,10 @@ launch to another active session.
   token. Assignment shall reject a profile changed during admission. Every
   governed launch or resume shall reject a disabled, deleted, moved, or changed
   profile instead of selecting a fallback profile.
-- **AC-TASKS-EXACT-PROFILE-LAUNCH-001.3:** Session creation, deferred workflow
-  moves, prompts, and resumes shall carry the assignment generation and change
-  token through the selected session. A stale generation, mismatched profile,
+- **AC-TASKS-EXACT-PROFILE-LAUNCH-001.3:** Session creation, prompts, and
+  resumes shall carry the assignment generation and change token through the
+  selected session. Deferred workflow moves shall carry the generation and
+  revalidate the profile when launching. A stale generation, mismatched profile,
   or conflicting model request shall stop before inference begins. Legacy
   assignments without a verifiable change token shall fail closed.
 - **AC-TASKS-EXACT-PROFILE-LAUNCH-001.4:** A governed launch shall record a

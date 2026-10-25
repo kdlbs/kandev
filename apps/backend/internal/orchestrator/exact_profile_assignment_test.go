@@ -30,6 +30,54 @@ func TestExactProfileAssignerRejectsChangedProfileRevision(t *testing.T) {
 	}
 }
 
+func TestAssignExactTaskProfileRequiresTaskPromptScope(t *testing.T) {
+	denied := errors.New("task prompt denied")
+	repo := &exactAssignmentWriteProbeRepo{}
+	service := &Service{repo: repo, agentManager: &mockAgentManager{},
+		taskAccessCheck: func(context.Context, string) error { return nil },
+		taskPromptCheck: func(context.Context, string) error { return denied }}
+	if _, err := service.AssignExactTaskProfile(context.Background(), "task-1", "profile-1", 1); !errors.Is(err, denied) {
+		t.Fatalf("assignment error = %v, want task prompt denial", err)
+	}
+	if repo.wrote {
+		t.Fatal("denied assignment reached repository writer")
+	}
+}
+
+func TestExactProfileReceiptWriteErrorIsReturned(t *testing.T) {
+	writeErr := errors.New("receipt unavailable")
+	service := &Service{repo: &exactReceiptErrorRepo{err: writeErr}}
+	err := service.recordExactProfileLaunchReceipt(context.Background(), "task-1", "session-1",
+		&ExactProfileLaunchDecision{AgentProfileID: "profile-1", Generation: 1, Revision: 2, Model: "model-1"},
+		"model-1", nil)
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("receipt error = %v, want storage failure", err)
+	}
+}
+
+type exactReceiptErrorRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r *exactReceiptErrorRepo) RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error) {
+	return false, r.err
+}
+
+type exactAssignmentWriteProbeRepo struct {
+	sessionExecutorStore
+	wrote bool
+}
+
+func (r *exactAssignmentWriteProbeRepo) GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error) {
+	return nil, nil
+}
+
+func (r *exactAssignmentWriteProbeRepo) AssignExactProfileAssignmentIfProfileCurrent(context.Context, *models.ExactProfileAssignment) (bool, error) {
+	r.wrote = true
+	return true, nil
+}
+
 type exactAssignmentRepo struct {
 	assignment *models.ExactProfileAssignment
 }

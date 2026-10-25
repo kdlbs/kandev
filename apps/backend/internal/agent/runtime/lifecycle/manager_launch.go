@@ -68,6 +68,11 @@ func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 	}
+	if req.ExactProfile && (profileInfo == nil || profileInfo.ProfileID != profileID ||
+		!profileInfo.Enabled || profileInfo.Revision < 1 || profileInfo.Revision != req.ExactProfileRevision ||
+		(profileInfo.WorkspaceID != req.WorkspaceID && req.WorkspaceID != "")) {
+		return "", nil, fmt.Errorf("exact profile changed before launch")
+	}
 	// Legacy model-only routes still use overlays until their persisted config
 	// is migrated. A concrete execution profile is authoritative and must not
 	// be mixed with fields from another provider.

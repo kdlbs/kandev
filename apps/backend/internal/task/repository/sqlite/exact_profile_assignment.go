@@ -269,12 +269,16 @@ func (r *Repository) BindExactProfileSessionIfAssignmentCurrent(
 		WHERE id = ? AND task_id = ? AND state = ? AND agent_profile_id = ?
 		  AND EXISTS (
 			SELECT 1
-			FROM task_exact_profile_assignments
-			WHERE task_id = ? AND agent_profile_id = ? AND generation = ?
-			  AND profile_revision_token = ? AND active = ?
+			FROM task_exact_profile_assignments a
+			JOIN agent_profiles p ON p.id = a.agent_profile_id
+			JOIN agent_profile_revisions r ON r.profile_id = p.id
+			WHERE a.task_id = ? AND a.agent_profile_id = ? AND a.generation = ?
+			  AND a.profile_revision_token = ? AND a.active = ?
+			  AND p.workspace_id = a.workspace_id AND p.enabled = ? AND p.deleted_at IS NULL
+			  AND r.revision = a.profile_revision_token
 		  )
 	`), generation, revision, r.exactProfileAssignmentNow(), sessionID, taskID, string(expectedState), agentProfileID,
-		taskID, agentProfileID, generation, revision, dialect.BoolToInt(true))
+		taskID, agentProfileID, generation, revision, dialect.BoolToInt(true), dialect.BoolToInt(true))
 	if err != nil {
 		return false, fmt.Errorf("bind exact profile session: %w", err)
 	}

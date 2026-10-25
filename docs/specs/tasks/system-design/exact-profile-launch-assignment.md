@@ -30,9 +30,10 @@ concurrent edit cannot silently qualify a stale snapshot. Existing assignments
 without a token are not inferred from timestamps; they fail validation until
 reassigned.
 
-Every launch path resolves the active assignment again. Session bindings and
-deferred moves carry the assignment generation and revision token. Prompt and
-resume admission compare both with the selected session and reject mismatches
+Every launch path resolves the active assignment again. Session bindings carry
+the assignment generation and revision token; deferred moves carry the
+generation and revalidate the profile at launch. Prompt and resume admission
+compare both with the selected session and reject mismatches
 or a conflicting model before dispatch. A durable receipt records the applied
 or failed-closed outcome for a governed launch.
 

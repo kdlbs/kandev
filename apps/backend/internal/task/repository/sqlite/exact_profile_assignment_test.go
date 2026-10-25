@@ -154,8 +154,20 @@ func TestAssignExactProfileAssignmentRequiresCurrentProfileToken(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("current token result = %t, %v", changed, err)
 	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-token", TaskID: assignment.TaskID,
+		AgentProfileID: assignment.AgentProfileID, State: models.TaskSessionStateCreated}); err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := repo.BindExactProfileSessionIfAssignmentCurrent(ctx, "session-token", assignment.TaskID,
+		models.TaskSessionStateCreated, assignment.AgentProfileID, 1, 2); err != nil || !bound {
+		t.Fatalf("current profile binding = %t, %v", bound, err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE agent_profile_revisions SET revision = 3 WHERE profile_id = 'profile-token'`); err != nil {
 		t.Fatal(err)
+	}
+	if bound, err := repo.BindExactProfileSessionIfAssignmentCurrent(ctx, "session-token", assignment.TaskID,
+		models.TaskSessionStateCreated, assignment.AgentProfileID, 1, 2); err != nil || bound {
+		t.Fatalf("stale profile binding = %t, %v", bound, err)
 	}
 	assignment.Generation = 2
 	if _, err := repo.AssignExactProfileAssignmentIfProfileCurrent(ctx, assignment); !errors.Is(err, models.ErrExactProfileAssignmentInvalidInput) {

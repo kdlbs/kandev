@@ -7,7 +7,6 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
-	"go.uber.org/zap"
 )
 
 // ErrExactProfileAssignmentInvalid is returned before launch selection can
@@ -122,7 +121,7 @@ func (s *Service) AssignExactTaskProfile(
 	if !ok || s.agentManager == nil {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
-	if err := s.authorizeTask(ctx, taskID); err != nil {
+	if err := s.authorizeTaskPrompt(ctx, taskID); err != nil {
 		return nil, err
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
@@ -178,15 +177,15 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 
 func (s *Service) recordExactProfileLaunchReceipt(
 	ctx context.Context, taskID, sessionID string, exact *ExactProfileLaunchDecision, model string, launchErr error,
-) {
+) error {
 	if exact == nil {
-		return
+		return nil
 	}
 	receipts, ok := s.repo.(interface {
 		RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error)
 	})
 	if !ok {
-		return
+		return fmt.Errorf("exact profile receipt repository unavailable")
 	}
 	receipt := &models.ExactProfileLaunchReceipt{
 		TaskID: taskID, SessionID: sessionID, AgentProfileID: exact.AgentProfileID,
@@ -198,8 +197,9 @@ func (s *Service) recordExactProfileLaunchReceipt(
 		receipt.FailureReason = launchErr.Error()
 	}
 	if _, err := receipts.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil {
-		s.logger.Warn("failed to record exact-profile launch receipt", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return fmt.Errorf("record exact-profile launch receipt: %w", err)
 	}
+	return nil
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {
