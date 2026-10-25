@@ -142,6 +142,8 @@ the session instance is healthy, core writes the credential files and configurat
 selected on the profile through agentctl processes, with contents in the process environment and
 never in the command line, and runs the setup scripts of selected environment-variable methods.
 Upload is best-effort and does not fail the launch, as for the other remote executors.
+With `git_user_name` and `git_user_email` both set, the step then sets them with
+`git config --global` (values in the environment, `HOME` the resolved remote home), at launch and reattach.
 Do not put session secrets into reusable image configuration.
 
 The first version requires a Kandev runtime API URL reachable from the remote network.
