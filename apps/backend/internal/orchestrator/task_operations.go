@@ -798,7 +798,7 @@ func (s *Service) startCreatedSession(
 	exactProfile := false
 	var exactAssignment *ExactProfileLaunchDecision
 	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
-		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(ctx), taskID, sessionID, err)
+		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(ctx), taskID, sessionID, exact, err)
 	} else if exact != nil {
 		exactAssignment = exact
 		agentProfileID = exact.AgentProfileID
@@ -3620,7 +3620,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	resumeCtx := cancellableResumeContext(attempt)
 	exactAssignment, err := s.resolveExactProfileAssignment(resumeCtx, taskID)
 	if err != nil {
-		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(resumeCtx), taskID, sessionID, err)
+		return nil, s.recordExactProfileResolutionDenial(context.WithoutCancel(resumeCtx), taskID, sessionID, exactAssignment, err)
 	}
 	receiptAttempted := false
 	defer func() {

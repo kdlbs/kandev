@@ -169,21 +169,22 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 	if assignment == nil || !assignment.Active {
 		return nil, nil
 	}
+	observed := &ExactProfileLaunchDecision{
+		AgentProfileID: assignment.AgentProfileID,
+		Generation:     assignment.Generation,
+		Revision:       assignment.ProfileRevision,
+	}
 	if assignment.WorkspaceID != workspaceID || a.Profiles == nil {
-		return nil, ErrExactProfileAssignmentInvalid
+		return observed, ErrExactProfileAssignmentInvalid
 	}
 	profile, err := a.Profiles.ResolveAgentProfile(ctx, assignment.AgentProfileID)
 	if err != nil || profile == nil || profile.ProfileID != assignment.AgentProfileID ||
 		!profile.Enabled || profile.WorkspaceID != workspaceID || profile.Revision < 1 ||
 		profile.Revision != assignment.ProfileRevision || strings.TrimSpace(profile.Model) == "" {
-		return nil, ErrExactProfileAssignmentInvalid
+		return observed, ErrExactProfileAssignmentInvalid
 	}
-	return &ExactProfileLaunchDecision{
-		AgentProfileID: assignment.AgentProfileID,
-		Generation:     assignment.Generation,
-		Revision:       assignment.ProfileRevision,
-		Model:          profile.Model,
-	}, nil
+	observed.Model = profile.Model
+	return observed, nil
 }
 
 func (s *Service) recordExactProfileLaunchReceipt(
@@ -214,25 +215,12 @@ func (s *Service) recordExactProfileLaunchReceipt(
 }
 
 func (s *Service) recordExactProfileResolutionDenial(
-	ctx context.Context, taskID, sessionID string, resolutionErr error,
+	ctx context.Context, taskID, sessionID string, observed *ExactProfileLaunchDecision, resolutionErr error,
 ) error {
-	assignments, ok := s.repo.(exactProfileAssignmentStore)
-	if !ok {
+	if observed == nil {
 		return resolutionErr
 	}
-	stored, err := assignments.GetExactProfileAssignment(ctx, taskID)
-	if err != nil {
-		return errors.Join(resolutionErr, fmt.Errorf("load denied exact profile assignment: %w", err))
-	}
-	if stored == nil || !stored.Active {
-		return resolutionErr
-	}
-	denied := &ExactProfileLaunchDecision{
-		AgentProfileID: stored.AgentProfileID,
-		Generation:     stored.Generation,
-		Revision:       stored.ProfileRevision,
-	}
-	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, denied, "", resolutionErr))
+	return errors.Join(resolutionErr, s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, observed, "", resolutionErr))
 }
 
 func exactProfileModel(exact *ExactProfileLaunchDecision) string {
