@@ -18,6 +18,8 @@ var ErrExactProfileAssignmentInvalid = errors.New("exact profile assignment is n
 // outside the profile bound to its session.
 var ErrExactProfileModelMismatch = errors.New("requested model conflicts with exact profile assignment")
 
+const exactProfileLaunchFailureReason = "launch_failed"
+
 type exactProfileAssignmentStore interface {
 	GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error)
 }
@@ -125,8 +127,11 @@ func (s *Service) AssignExactTaskProfile(
 		return nil, err
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil {
+	if err != nil {
 		return nil, fmt.Errorf("load task for exact profile assignment: %w", err)
+	}
+	if task == nil {
+		return nil, ErrExactProfileAssignmentInvalid
 	}
 	profile, err := s.agentManager.ResolveAgentProfile(ctx, agentProfileID)
 	if err != nil || profile == nil || !profile.Enabled || profile.WorkspaceID != task.WorkspaceID || profile.Revision < 1 {
@@ -194,7 +199,7 @@ func (s *Service) recordExactProfileLaunchReceipt(
 	}
 	if launchErr != nil {
 		receipt.Outcome = models.ExactProfileLaunchOutcomeFailedClosed
-		receipt.FailureReason = launchErr.Error()
+		receipt.FailureReason = exactProfileLaunchFailureReason
 	}
 	if _, err := receipts.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil {
 		return fmt.Errorf("record exact-profile launch receipt: %w", err)

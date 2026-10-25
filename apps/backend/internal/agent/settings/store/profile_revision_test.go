@@ -23,6 +23,52 @@ func TestProfileRevisionCoversEveryWriterAndABA(t *testing.T) {
 	})
 }
 
+func TestProfileRevisionIgnoresOperationalProfileUpdates(t *testing.T) {
+	t.Run("sqlite", func(t *testing.T) {
+		repo := openSQLiteProfileOrderRaceRepo(t)
+		assertProfileRevisionIgnoresOperationalProfileUpdates(t, repo)
+	})
+	t.Run("postgres", func(t *testing.T) {
+		db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+		repo, err := newSQLiteRepositoryWithDB(db, db, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertProfileRevisionIgnoresOperationalProfileUpdates(t, repo)
+	})
+}
+
+func assertProfileRevisionIgnoresOperationalProfileUpdates(t *testing.T, repo *sqliteRepository) {
+	t.Helper()
+	ctx := context.Background()
+	agent := &models.Agent{Name: "operational-revision-agent"}
+	if err := repo.CreateAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	profile := &models.AgentProfile{AgentID: agent.ID, Name: "operational-revision-profile", Model: "model-a"}
+	if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+		t.Fatal(err)
+	}
+	initial := readProfileRevision(t, repo, profile.ID)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = ?, working_run_id = ?, updated_at = ?, sort_order = ?,
+			last_run_finished_at = ?, consecutive_failures = ?
+		WHERE id = ?`), "working", "run-1", "2026-10-25T00:00:00Z", 4,
+		"2026-10-25T00:00:00Z", 1, profile.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := readProfileRevision(t, repo, profile.ID); got != initial {
+		t.Fatalf("revision after operational update = %d, want unchanged %d", got, initial)
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE agent_profiles SET model = ? WHERE id = ?`), "model-b", profile.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := readProfileRevision(t, repo, profile.ID); got <= initial {
+		t.Fatalf("revision after profile configuration update = %d, want > %d", got, initial)
+	}
+}
+
 func assertProfileRevisionCoversEveryWriterAndABA(t *testing.T, repo *sqliteRepository) {
 	t.Helper()
 	ctx := context.Background()

@@ -22,13 +22,17 @@ uses its profile resolution without changing those contracts.
 ## Assignment admission and change token
 
 The agent settings store maintains a monotonic profile revision token in the
-same database as profiles. Inserts, updates, and deletes advance it, including
-writes that bypass the settings API. The task assignment captures this token
-only after validating the profile's workspace and enabled state. Its repository
-write rechecks the profile and token in the assignment transaction, so a
-concurrent edit cannot silently qualify a stale snapshot. Existing assignments
-without a token are not inferred from timestamps; they fail validation until
-reassigned.
+same database as profiles. Inserts and deletes advance it. Updates advance it
+when profile identity, execution configuration, or assignment-relevant policy
+changes, including writes that bypass the settings API. Operational state such
+as run status, run identifiers, completion time, failure counters, display
+ordering, and timestamps does not invalidate an assignment. The task assignment
+captures this token only after validating the profile's workspace and enabled
+state. Its
+repository write rechecks the profile and token in the assignment transaction,
+so a concurrent edit cannot silently qualify a stale snapshot. Existing
+assignments without a token are not inferred from timestamps; they fail
+validation until reassigned.
 
 Every launch path resolves the active assignment again. Session bindings carry
 the assignment generation and revision token; deferred moves carry the

@@ -1055,9 +1055,6 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 	return nil
 }
 
-// ensureTaskWorkspaceFoldersSchema upgrades databases created before durable
-// folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
-// on SQLite and Postgres.
 // ensureTaskExactProfileSchema upgrades databases created before the
 // task-owned exact-profile assignment and launch-receipt tables existed.
 // Both statements are replay-safe on SQLite and Postgres.
@@ -1067,7 +1064,6 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 			task_id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL,
 			agent_profile_id TEXT NOT NULL,
-			profile_revision TIMESTAMP NOT NULL,
 			profile_revision_token BIGINT NOT NULL DEFAULT 0,
 			generation BIGINT NOT NULL,
 			source_workflow_id TEXT NOT NULL DEFAULT '',
@@ -1085,7 +1081,6 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 			session_id TEXT NOT NULL,
 			agent_profile_id TEXT NOT NULL,
 			generation BIGINT NOT NULL,
-			profile_revision_nanos BIGINT NOT NULL,
 			profile_revision_token BIGINT NOT NULL DEFAULT 0,
 			model TEXT NOT NULL DEFAULT '',
 			outcome TEXT NOT NULL,
@@ -1112,6 +1107,9 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 	return nil
 }
 
+// ensureTaskWorkspaceFoldersSchema upgrades databases created before durable
+// folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
+// on SQLite and Postgres.
 func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		CREATE TABLE IF NOT EXISTS task_workspace_folders (

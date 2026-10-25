@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -44,6 +45,21 @@ func TestAssignExactTaskProfileRequiresTaskPromptScope(t *testing.T) {
 	}
 }
 
+func TestAssignExactTaskProfileRejectsMissingTask(t *testing.T) {
+	repo := &exactAssignmentWriteProbeRepo{}
+	service := &Service{repo: repo, agentManager: &mockAgentManager{},
+		taskAccessCheck: func(context.Context, string) error { return nil },
+		taskPromptCheck: func(context.Context, string) error { return nil }}
+
+	_, err := service.AssignExactTaskProfile(context.Background(), "missing-task", "profile-1", 1)
+	if !errors.Is(err, ErrExactProfileAssignmentInvalid) {
+		t.Fatalf("assignment error = %v, want invalid exact profile assignment", err)
+	}
+	if repo.wrote {
+		t.Fatal("missing task reached repository writer")
+	}
+}
+
 func TestExactProfileReceiptWriteErrorIsReturned(t *testing.T) {
 	writeErr := errors.New("receipt unavailable")
 	service := &Service{repo: &exactReceiptErrorRepo{err: writeErr}}
@@ -53,6 +69,37 @@ func TestExactProfileReceiptWriteErrorIsReturned(t *testing.T) {
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("receipt error = %v, want storage failure", err)
 	}
+}
+
+func TestExactProfileLaunchReceiptStoresOnlyBoundedFailureCategory(t *testing.T) {
+	repo := &exactReceiptCaptureRepo{}
+	service := &Service{repo: repo}
+	launchErr := errors.New("provider response from /private/worktree with credential detail")
+
+	if err := service.recordExactProfileLaunchReceipt(context.Background(), "task-1", "session-1",
+		&ExactProfileLaunchDecision{AgentProfileID: "profile-1", Generation: 1, Revision: 2, Model: "model-1"},
+		"model-1", launchErr); err != nil {
+		t.Fatalf("record receipt: %v", err)
+	}
+	if repo.receipt == nil {
+		t.Fatal("receipt was not recorded")
+	}
+	if repo.receipt.FailureReason != "launch_failed" {
+		t.Fatalf("failure reason = %q, want bounded category %q", repo.receipt.FailureReason, "launch_failed")
+	}
+	if strings.Contains(repo.receipt.FailureReason, "private/worktree") || strings.Contains(repo.receipt.FailureReason, "credential") {
+		t.Fatalf("receipt retained raw launch error: %q", repo.receipt.FailureReason)
+	}
+}
+
+type exactReceiptCaptureRepo struct {
+	sessionExecutorStore
+	receipt *models.ExactProfileLaunchReceipt
+}
+
+func (r *exactReceiptCaptureRepo) RecordExactProfileLaunchReceipt(_ context.Context, receipt *models.ExactProfileLaunchReceipt) (bool, error) {
+	r.receipt = receipt
+	return true, nil
 }
 
 type exactReceiptErrorRepo struct {
@@ -67,6 +114,10 @@ func (r *exactReceiptErrorRepo) RecordExactProfileLaunchReceipt(context.Context,
 type exactAssignmentWriteProbeRepo struct {
 	sessionExecutorStore
 	wrote bool
+}
+
+func (*exactAssignmentWriteProbeRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return nil, nil
 }
 
 func (r *exactAssignmentWriteProbeRepo) GetExactProfileAssignment(context.Context, string) (*models.ExactProfileAssignment, error) {

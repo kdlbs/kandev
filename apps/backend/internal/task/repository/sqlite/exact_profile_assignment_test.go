@@ -116,6 +116,42 @@ func TestAssignExactProfileAssignmentActivatesAtomically(t *testing.T) {
 	}
 }
 
+func TestAssignExactProfileAssignmentRejectsMissingProfile(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`CREATE TABLE agent_profiles (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, enabled INTEGER NOT NULL, deleted_at TIMESTAMP)`,
+		`CREATE TABLE agent_profile_revisions (profile_id TEXT PRIMARY KEY, revision BIGINT NOT NULL)`,
+	} {
+		if _, err := repo.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changed, err := repo.AssignExactProfileAssignmentIfProfileCurrent(ctx, assignment); changed || !errors.Is(err, models.ErrExactProfileAssignmentInvalidInput) {
+		t.Fatalf("missing profile assignment = (%t, %v), want invalid input", changed, err)
+	}
+}
+
+func TestAssignExactProfileAssignmentReplacementRejectsForeignWorkspace(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+	if changed, err := repo.AssignExactProfileAssignment(ctx, assignment); err != nil || !changed {
+		t.Fatalf("initial assignment = (%t, %v)", changed, err)
+	}
+
+	next := *assignment
+	next.Generation = 2
+	next.WorkspaceID = "workspace-foreign"
+	next.AgentProfileID = "profile-foreign"
+	if changed, err := repo.AssignExactProfileAssignment(ctx, &next); changed || !errors.Is(err, models.ErrExactProfileAssignmentGeneration) {
+		t.Fatalf("foreign replacement = (%t, %v), want generation rejection", changed, err)
+	}
+	stored, err := repo.GetExactProfileAssignment(ctx, assignment.TaskID)
+	if err != nil || stored == nil || stored.WorkspaceID != assignment.WorkspaceID || stored.Generation != 1 {
+		t.Fatalf("stored assignment = %#v, %v; want original workspace and generation", stored, err)
+	}
+}
+
 func TestAssignExactProfileAssignmentRequiresCurrentProfileToken(t *testing.T) {
 	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "exact-profile-token.db"))
 	if err != nil {

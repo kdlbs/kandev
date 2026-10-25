@@ -43,13 +43,13 @@ func (r *Repository) UpsertExactProfileAssignment(ctx context.Context, assignmen
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_exact_profile_assignments (
-			task_id, workspace_id, agent_profile_id, profile_revision, profile_revision_token, generation,
+			task_id, workspace_id, agent_profile_id, profile_revision_token, generation,
 			source_workflow_id, source_workflow_step_id, source_task_state, active, created_at, updated_at
 		)
-		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		WHERE ? = 1 AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?)
 		ON CONFLICT(task_id) DO NOTHING
-	`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, now, assignment.ProfileRevision,
+	`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision,
 		assignment.Generation, assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
 		dialect.BoolToInt(false), assignment.CreatedAt, assignment.UpdatedAt, assignment.Generation,
 		assignment.TaskID, assignment.WorkspaceID)
@@ -152,11 +152,11 @@ func (r *Repository) assignExactProfileAssignment(ctx context.Context, assignmen
 		}
 		result, execErr := tx.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO task_exact_profile_assignments (
-				task_id, workspace_id, agent_profile_id, profile_revision, profile_revision_token, generation,
+				task_id, workspace_id, agent_profile_id, profile_revision_token, generation,
 				source_workflow_id, source_workflow_step_id, source_task_state, active, created_at, updated_at
-			) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 			WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?)
-		`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, now, assignment.ProfileRevision,
+		`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision,
 			assignment.Generation, assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
 			dialect.BoolToInt(true), assignment.CreatedAt, assignment.UpdatedAt, assignment.TaskID, assignment.WorkspaceID)
 		if execErr != nil {
@@ -186,9 +186,11 @@ func (r *Repository) assignExactProfileAssignment(ctx context.Context, assignmen
 			SET workspace_id = ?, agent_profile_id = ?, profile_revision_token = ?, generation = ?,
 				source_workflow_id = ?, source_workflow_step_id = ?, source_task_state = ?, active = ?, updated_at = ?
 			WHERE task_id = ? AND generation = ?
+				AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?)
 		`), assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision, assignment.Generation,
 			assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
-			dialect.BoolToInt(true), assignment.UpdatedAt, assignment.TaskID, current.Generation)
+			dialect.BoolToInt(true), assignment.UpdatedAt, assignment.TaskID, current.Generation,
+			assignment.TaskID, assignment.WorkspaceID)
 		if execErr != nil {
 			return false, fmt.Errorf("replace exact profile assignment: %w", execErr)
 		}
@@ -218,10 +220,16 @@ func (r *Repository) qualifyExactProfileSnapshotTx(ctx context.Context, tx *sqlx
 	var workspaceID string
 	var enabled bool
 	if err := tx.QueryRowContext(ctx, tx.Rebind(profileQuery), assignment.AgentProfileID).Scan(&workspaceID, &enabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrExactProfileAssignmentInvalidInput
+		}
 		return fmt.Errorf("qualify exact profile row: %w", err)
 	}
 	var revision int64
 	if err := tx.QueryRowContext(ctx, tx.Rebind(revisionQuery), assignment.AgentProfileID).Scan(&revision); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrExactProfileAssignmentInvalidInput
+		}
 		return fmt.Errorf("qualify exact profile revision: %w", err)
 	}
 	if workspaceID != assignment.WorkspaceID || !enabled || revision < 1 || revision != assignment.ProfileRevision {
@@ -355,13 +363,13 @@ func (r *Repository) RecordExactProfileLaunchReceipt(ctx context.Context, receip
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_exact_profile_launch_receipts (
-			task_id, session_id, agent_profile_id, generation, profile_revision_nanos, profile_revision_token,
+			task_id, session_id, agent_profile_id, generation, profile_revision_token,
 			model, outcome, failure_reason, inference_started, substitution_done, created_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(task_id, session_id) DO NOTHING
 	`), receipt.TaskID, receipt.SessionID, receipt.AgentProfileID, receipt.Generation,
-		0, receipt.ProfileRevision, receipt.Model, receipt.Outcome, receipt.FailureReason,
+		receipt.ProfileRevision, receipt.Model, receipt.Outcome, receipt.FailureReason,
 		dialect.BoolToInt(receipt.InferenceStarted), dialect.BoolToInt(receipt.SubstitutionDone),
 		receipt.CreatedAt)
 	if err != nil {
