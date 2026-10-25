@@ -2,6 +2,7 @@ package scope
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -17,10 +18,11 @@ type principalLookup struct {
 
 type fixedOfficeCEOResolver struct {
 	profileID string
+	err       error
 }
 
 func (r fixedOfficeCEOResolver) ResolveCEOAgentProfileID(context.Context, string) (string, error) {
-	return r.profileID, nil
+	return r.profileID, r.err
 }
 
 func (l principalLookup) GetTask(context.Context, string) (*models.Task, error) {
@@ -109,6 +111,13 @@ func TestScopePrincipalBindsOfficeTreeReadToCEOProfile(t *testing.T) {
 	require.True(t, principal.WorkspaceTaskTreeRead)
 	require.False(t, principal.TaskVisibilityGrant)
 	session.AgentProfileID = "worker"
+	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
+	require.NoError(t, err)
+	principal, ok = PrincipalFromContext(ctx)
+	require.True(t, ok)
+	require.False(t, principal.WorkspaceTaskTreeRead)
+	session.AgentProfileID = "ceo"
+	resolver.officeCEO = fixedOfficeCEOResolver{profileID: "ceo", err: errors.New("lookup unavailable")}
 	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
 	require.NoError(t, err)
 	principal, ok = PrincipalFromContext(ctx)

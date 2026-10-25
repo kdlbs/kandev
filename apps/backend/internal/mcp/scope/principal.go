@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -84,7 +86,12 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	}
 	workspaceTaskTreeRead := false
 	if surface == mcpprofile.SurfaceOfficeTask && session != nil && session.AgentProfileID != "" && r.officeCEO != nil {
-		if ceoProfileID, err := r.officeCEO.ResolveCEOAgentProfileID(ctx, taskID); err == nil {
+		if ceoProfileID, err := r.officeCEO.ResolveCEOAgentProfileID(ctx, taskID); err != nil {
+			if r.logger != nil {
+				r.logger.Warn("failed to resolve Office CEO profile for MCP task-tree scope",
+					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			}
+		} else {
 			workspaceTaskTreeRead = ceoProfileID != "" && session.AgentProfileID == ceoProfileID
 		}
 	}
