@@ -520,3 +520,46 @@ tests/settings/mobile-agent-profile-layout.spec.ts --grep 'optional feeder
 guidance|wraps the saved fallback' --retries=0 --repeat-each=3`. Log:
 `/tmp/question-images-checks/kandev-run.e2e.BoMTuxXi.log`. Changed-file ESLint,
 specification lint, documentation catalog, and work-order coverage passed.
+
+### Recovery disclosure and independent browser fixtures
+
+Workflow [40210898134](https://github.com/kdlbs/kandev/actions/runs/40210898134)
+finished with 4,243 first-attempt passes, two flaky cases, one failed case, and
+40 skips. The complete 118-report audit found no other failures. The mobile
+guidance and fallback-layout corrections passed. These failures require
+test-only corrections:
+
+- Session recovery renders the same disclosure in its action message and startup
+  card. After reload, the broad locator matched both. The assertion now scopes to
+  the startup recovery card, which the scenario already verifies and captures.
+- The multi-file read case could not find its newly committed file in the shared
+  seed workspace. Its original CI snapshot showed only the baseline file. The
+  case now uses an owned repository and publishes both fixture files to its local
+  origin. It deletes its task, repository, profile, and directory afterward.
+  Both individual links and opening the second file remain required assertions.
+- The Sentry case opened Workflow immediately after dismissing its project
+  selector. The original attempt reached that tap, then found no workflow option.
+  It now waits for each prior listbox to unmount and focus to return to its trigger
+  before opening the next selector. Held-write, draft, caret, and persistence
+  assertions remain unchanged.
+
+The original desktop cases passed six constrained local checks. The original
+mobile Sentry create case passed three checks. Logs:
+`/tmp/question-images-checks/kandev-run.e2e.urgrOmbY.log` and
+`/tmp/question-images-checks/kandev-run.e2e.WZDOwONU.log`. These local passes do not
+invalidate the original-attempt CI evidence. No production behavior, public
+contract, copy, or screenshot changes are required for these fixture corrections.
+
+The corrected desktop recovery and file-link cases passed all six runs with
+retries disabled under two CPUs and one worker (`--project chromium
+tests/task/chat-read-multi-file.spec.ts
+tests/session/session-resume-settings-recovery.spec.ts --grep 'splits a
+comma|one-attempt settings omission' --retries=0 --repeat-each=3`). Log:
+`/tmp/question-images-checks/kandev-run.e2e.1T1Ik6Tb.log`.
+
+The complete mobile Sentry ownership spec passed six checks with retries disabled
+under the same limits (`--project mobile-chrome
+tests/integrations/mobile-sentry-watch-dialog-ownership.spec.ts --retries=0
+--repeat-each=3`). Log: `/tmp/question-images-checks/kandev-run.e2e.k8yN4UhW.log`.
+Changed-file ESLint, specification lint, documentation catalog, and work-order
+coverage passed. All 12 corrected repeated browser checks passed.
