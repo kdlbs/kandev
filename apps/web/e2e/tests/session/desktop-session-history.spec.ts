@@ -106,18 +106,40 @@ test.describe("desktop: session history", () => {
       })
       .toBeTruthy();
     await expect(helperTab).toHaveCount(0);
-    await session.addPanelButton().click();
-    const reopen = session.sessionReopenItem(helper.session_id);
-    await expect(reopen).toBeVisible();
-    await reopen.click();
-    await expect(helperTab).toBeVisible();
-    await expect(session.chat.getByText("retained helper evidence")).toBeVisible();
-    await expect(session.chat.getByTestId("archived-session-new-agent-button")).toBeVisible();
-    await expect(session.recoveryResumeButton()).not.toBeVisible();
-    await prCapture.screenshot("archived-helper-transcript-desktop", {
-      caption: "Archived helper conversation remains readable after cleanup and history reopen",
-    });
-    await session.chat.getByTestId("archived-session-new-agent-button").click();
-    await expect(session.newSessionDialog()).toBeVisible();
+    await apiClient.saveUserSettings({ agent_tab_close_behavior: "hide_panel" });
+    try {
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.addPanelButton().click();
+      const reopen = session.sessionReopenItem(helper.session_id);
+      await expect(reopen).toBeVisible();
+      await reopen.click();
+      await expect(helperTab).toBeVisible();
+      await expect(session.chat.getByText("retained helper evidence")).toBeVisible();
+      await expect(session.chat.getByTestId("archived-session-new-agent-button")).toBeVisible();
+      await expect(session.recoveryResumeButton()).not.toBeVisible();
+      await expect(session.sessionTabCloseButton(helper.session_id)).toHaveAccessibleName(
+        "Hide panel",
+      );
+      await session.sessionTabCloseButton(helper.session_id).click();
+      await expect(session.alertDialog()).not.toBeVisible();
+      await expect(helperTab).toHaveCount(0);
+      expect(
+        (await apiClient.listTaskSessions(task.id)).sessions.find(
+          (item) => item.id === helper.session_id,
+        )?.archived_at,
+      ).toBeTruthy();
+      await session.addPanelButton().click();
+      await session.sessionReopenItem(helper.session_id).click();
+      await expect(helperTab).toBeVisible();
+      await expect(session.chat.getByText("retained helper evidence")).toBeVisible();
+      await prCapture.screenshot("archived-helper-transcript-desktop", {
+        caption: "Archived helper remains readable after hide-panel close and history reopen",
+      });
+      await session.chat.getByTestId("archived-session-new-agent-button").click();
+      await expect(session.newSessionDialog()).toBeVisible();
+    } finally {
+      await apiClient.saveUserSettings({ agent_tab_close_behavior: "delete_session" });
+    }
   });
 });
