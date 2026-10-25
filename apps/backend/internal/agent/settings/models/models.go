@@ -57,6 +57,7 @@ type TUIConfigJSON struct {
 
 type AgentProfile struct {
 	ID               string `json:"id" db:"id"`
+	Revision         int64  `json:"-" db:"-"`
 	AgentID          string `json:"agent_id" db:"agent_id"`
 	Name             string `json:"name" db:"name"`
 	AgentDisplayName string `json:"agent_display_name" db:"agent_display_name"`

@@ -1891,6 +1891,9 @@ type CredentialsManager interface {
 type AgentProfileInfo struct {
 	ProfileID     string
 	ProfileName   string
+	WorkspaceID   string
+	Enabled       bool
+	Revision      int64
 	AgentID       string
 	AgentName     string // e.g., "auggie", "claude", "codex"
 	Model         string // applied through ACP model selection at session start

@@ -340,6 +340,9 @@ func (r *sqliteRepository) initSchema() error {
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
 	}
+	if err := r.initProfileRevisions(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -1713,7 +1716,8 @@ const agentProfileSelectColumns = `
 		COALESCE(cursor_plugins_mcp_enabled, 1),
 		COALESCE(mcp_selection_mode, 'inherit'),
 		COALESCE(mcp_selected_servers, '[]'),
-		COALESCE(execution_agent_profile_id, '')
+		COALESCE(execution_agent_profile_id, ''),
+		(SELECT revision FROM agent_profile_revisions WHERE profile_id = agent_profiles.id)
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1949,6 +1953,7 @@ func scanAgentProfile(scanner interface {
 		&profile.MCPSelectionMode,
 		&mcpSelectedServersJSON,
 		&profile.ExecutionAgentProfileID,
+		&profile.Revision,
 	); err != nil {
 		return nil, err
 	}
