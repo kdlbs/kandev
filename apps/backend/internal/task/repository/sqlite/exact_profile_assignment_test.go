@@ -360,6 +360,51 @@ func TestExactProfileWritesUpgradeFromLegacyRevisionColumns(t *testing.T) {
 	}
 }
 
+func TestExactProfileWritesUpgradeFromTokenOnlyRevisionColumns(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	ctx := context.Background()
+	for _, stmt := range []string{
+		`DROP TABLE task_exact_profile_launch_receipts`,
+		`DROP TABLE task_exact_profile_assignments`,
+		`CREATE TABLE task_exact_profile_assignments (
+			task_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, agent_profile_id TEXT NOT NULL,
+			profile_revision_token BIGINT NOT NULL DEFAULT 0, generation BIGINT NOT NULL,
+			source_workflow_id TEXT NOT NULL DEFAULT '', source_workflow_step_id TEXT NOT NULL DEFAULT '',
+			source_task_state TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE task_exact_profile_launch_receipts (
+			task_id TEXT NOT NULL, session_id TEXT NOT NULL, agent_profile_id TEXT NOT NULL,
+			generation BIGINT NOT NULL, profile_revision_token BIGINT NOT NULL DEFAULT 0,
+			model TEXT NOT NULL DEFAULT '', outcome TEXT NOT NULL,
+			failure_reason TEXT NOT NULL DEFAULT '', inference_started INTEGER NOT NULL DEFAULT 0,
+			substitution_done INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_id, session_id),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+	} {
+		if _, err := repo.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("prepare token-only schema: %v", err)
+		}
+	}
+	if err := repo.ensureTaskExactProfileSchema(); err != nil {
+		t.Fatalf("upgrade token-only schema: %v", err)
+	}
+
+	if changed, err := repo.UpsertExactProfileAssignment(ctx, assignment); err != nil || !changed {
+		t.Fatalf("upsert against token-only schema = (%t, %v), want (true, nil)", changed, err)
+	}
+	receipt := &models.ExactProfileLaunchReceipt{
+		TaskID: assignment.TaskID, SessionID: "token-only-session", AgentProfileID: assignment.AgentProfileID,
+		Generation: assignment.Generation, ProfileRevision: assignment.ProfileRevision,
+		Outcome: models.ExactProfileLaunchOutcomeApplied,
+	}
+	if changed, err := repo.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil || !changed {
+		t.Fatalf("receipt against token-only schema = (%t, %v), want (true, nil)", changed, err)
+	}
+}
+
 func newExactProfileAssignmentRepo(t *testing.T) (*Repository, *models.ExactProfileAssignment) {
 	t.Helper()
 	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "exact.db"))

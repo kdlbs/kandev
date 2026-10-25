@@ -1106,6 +1106,14 @@ func (r *Repository) ensureTaskExactProfileSchema() error {
 		`ALTER TABLE task_exact_profile_launch_receipts ADD COLUMN profile_revision_token BIGINT NOT NULL DEFAULT 0`); err != nil {
 		return err
 	}
+	if err := r.migrate.Apply("task_exact_profile_assignments.legacy_profile_revision",
+		`ALTER TABLE task_exact_profile_assignments ADD COLUMN profile_revision TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("task_exact_profile_launch_receipts.legacy_profile_revision_nanos",
+		`ALTER TABLE task_exact_profile_launch_receipts ADD COLUMN profile_revision_nanos BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
 	return nil
 }
 
