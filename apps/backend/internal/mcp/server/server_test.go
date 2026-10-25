@@ -505,6 +505,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "stop_task_kandev")
 	assert.Contains(t, tools, "get_message_queue_census_kandev")
 	assert.Contains(t, tools, "dispose_message_queue_entries_kandev")
+	assert.Contains(t, tools, "recover_session_queue_kandev")
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 	assert.Contains(t, tools, "get_task_change_requests_kandev")
 	assert.Contains(t, tools, "update_task_change_request_automation_kandev")
@@ -619,7 +620,7 @@ func TestServerSurfaceAutomationHasFixedCoordinatorCatalog(t *testing.T) {
 		"update_task_kandev", "move_task_kandev", "archive_task_kandev",
 		"add_task_dependency_kandev", "remove_task_dependency_kandev", "message_task_kandev",
 		"stop_task_kandev", "spawn_session_kandev", "list_pending_questions_kandev",
-		"get_message_queue_census_kandev", "dispose_message_queue_entries_kandev",
+		"get_message_queue_census_kandev", "dispose_message_queue_entries_kandev", "recover_session_queue_kandev",
 		"answer_question_kandev", "list_pending_agent_permissions_kandev", "resolve_agent_permission_kandev",
 	}
 	assert.ElementsMatch(t, want, getRegisteredToolNames(s))

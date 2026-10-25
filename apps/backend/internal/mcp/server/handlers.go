@@ -679,6 +679,29 @@ func (s *Server) disposeMessageQueueEntriesHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) recoverSessionQueueHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" || s.sessionID == "" {
+			return mcp.NewToolResultError("session recovery identity is unavailable in this session"), nil
+		}
+		targetSessionID, err := req.RequireString("target_session_id")
+		if err != nil {
+			return mcp.NewToolResultError("target_session_id is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID:        s.taskID,
+			"caller_session_id": s.sessionID,
+			"target_session_id": targetSessionID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPRecoverSessionQueue, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultStructured(result, string(data)), nil
+	}
+}
+
 // spawnSessionHandler spawns an additional agent session on an existing task.
 // task_id defaults to the server's own task; sender identity is injected so
 // the spawned session can identify and reply to its spawner.

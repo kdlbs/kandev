@@ -424,7 +424,19 @@ func (r *sqliteRepository) taskManagementFenceIsStaleTx(
 // guardSessionTx verifies that the owning task session still exists. The
 // session lock acquired before this call already rejects active transfers.
 func (r *sqliteRepository) guardSessionTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
-	return r.guardSessionOwnerTx(ctx, tx, sessionID, taskID)
+	if err := r.guardSessionOwnerTx(ctx, tx, sessionID, taskID); err != nil {
+		return err
+	}
+	var recovered bool
+	if err := tx.GetContext(ctx, &recovered, r.db.Rebind(`
+		SELECT EXISTS (SELECT 1 FROM queue_recovery_receipts WHERE source_session_id = ?)
+	`), sessionID); err != nil {
+		return fmt.Errorf("guard recovered queue source: %w", err)
+	}
+	if recovered {
+		return ErrQueueRecoveryConflict
+	}
+	return nil
 }
 
 func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx, sessionID, taskID string) error {
@@ -675,6 +687,28 @@ func (r *sqliteRepository) initSchema() error {
 	-- serializes writes at the DB level anyway; Postgres enforces the row lock.
 	CREATE TABLE IF NOT EXISTS queue_session_locks (
 		session_id TEXT PRIMARY KEY
+	);
+	CREATE TABLE IF NOT EXISTS queue_recovery_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		source_session_id TEXT NOT NULL UNIQUE,
+		destination_session_id TEXT NOT NULL,
+		entry_count INTEGER NOT NULL,
+		snapshot_sha256 TEXT NOT NULL,
+		snapshot_json TEXT NOT NULL,
+		snapshot_redacted INTEGER NOT NULL DEFAULT 0,
+		redacted_at TIMESTAMP,
+		occurred_at TIMESTAMP NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS queue_recovery_cleanup_events (
+		receipt_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		source_session_id TEXT NOT NULL,
+		destination_session_id TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		occurred_at TIMESTAMP NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS queue_session_state (
@@ -2156,6 +2190,9 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
 	}
+	if err := redactRecoveryReceiptsTx(ctx, tx, db, taskID, "", "task_purged"); err != nil {
+		return 0, err
+	}
 	return int(removed), nil
 }
 
@@ -2692,6 +2729,9 @@ func (r *sqliteRepository) DisposeExact(ctx context.Context, sessionID string, c
 		visible = append(visible, stored.message)
 	}
 	result.AfterCount = visibleQueueCount(visible)
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -3613,6 +3653,9 @@ func (r *sqliteRepository) AcknowledgeReserved(ctx context.Context, msg *QueuedM
 	if affected != 1 {
 		return ErrLifecycleReservationChanged
 	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, msg.SessionID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -3656,6 +3699,9 @@ func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entry
 	}
 	if affected != 1 {
 		return ErrEntryNotFound
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -3719,6 +3765,9 @@ func (r *sqliteRepository) AcknowledgeByIDForSession(
 	}
 	if affected == 0 {
 		return ErrEntryNotFound
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, identity.SessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -4307,6 +4356,9 @@ func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *S
 		if err := r.deleteExactSendNowClaimTx(ctx, tx, sessionID, claim.ClaimID); err != nil {
 			return err
 		}
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -5624,6 +5676,9 @@ func (r *sqliteRepository) deleteByID(ctx context.Context, identity *QueueSessio
 	if err != nil {
 		return nil, err
 	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -5743,6 +5798,9 @@ func (r *sqliteRepository) deleteAllBySession(ctx context.Context, identity *Que
 		return nil, err
 	}
 	if err := r.deletePendingQueueDispatchesBySessionTx(ctx, tx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := redactRecoveryReceiptsIfEmptyTx(ctx, tx, r.db, sessionID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

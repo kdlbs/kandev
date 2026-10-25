@@ -1496,6 +1496,17 @@ func (s *Server) registerKanbanTools() {
 		s.wrapHandler("dispose_message_queue_entries_kandev", s.disposeMessageQueueEntriesHandler()),
 	)
 	s.mcpServer.AddTool(
+		mcp.NewTool("recover_session_queue_kandev",
+			mcp.WithDescription("Recover the exact queued FIFO from a terminal non-primary session on this task into the calling current primary session. Returns original bodies, hashes, provenance and a replayable receipt. Recovery rejects unresolved dispatch, Send Now and lifecycle claims."),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("target_session_id", mcp.Required(), mcp.Description("Terminal non-primary source session on the calling task")),
+		),
+		s.wrapHandler("recover_session_queue_kandev", s.recoverSessionQueueHandler()),
+	)
+	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
 			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
 			mcp.WithReadOnlyHintAnnotation(false),

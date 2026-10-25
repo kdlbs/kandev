@@ -934,7 +934,7 @@ func TestStopTask_BackendErrorReturnsToolError(t *testing.T) {
 	assert.Contains(t, text.Text, "stop refused")
 }
 
-func TestMessageQueueCensusToolsBindCurrentTaskAndSession(t *testing.T) {
+func TestMessageQueueToolsBindCurrentTaskAndSession(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{
 		"task_id": "task-current", "session_id": "test-session",
 		"entries": []interface{}{}, "before_count": 0.0,
@@ -957,6 +957,15 @@ func TestMessageQueueCensusToolsBindCurrentTaskAndSession(t *testing.T) {
 	assert.Equal(t, "task-current", payload["task_id"])
 	assert.Equal(t, "test-session", payload["session_id"])
 	assert.Equal(t, entries, payload["entries"])
+
+	result = callTool(t, s, "recover_session_queue_kandev", map[string]interface{}{"target_session_id": "old-session"})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPRecoverSessionQueue, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, map[string]interface{}{
+		"task_id": "task-current", "caller_session_id": "test-session", "target_session_id": "old-session",
+	}, payload)
 }
 
 func TestMessageQueueCensusToolSchemasExposeNoScopeOrMessageBodyControls(t *testing.T) {
