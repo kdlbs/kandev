@@ -340,6 +340,9 @@ func (m *Manager) proveRecoveredRemoteInstance(ctx context.Context, entry *remot
 		ri.InstanceID != entry.record.AgentExecutionID || ri.TaskID != entry.record.TaskID {
 		return errors.New("runtime returned a different persisted remote execution identity")
 	}
+	if err := m.verifyRetainedSessionToken(ctx, entry.record, ri); err != nil {
+		return err
+	}
 	if entry.snapshot.IsPassthrough && ri.RuntimeName == agentruntime.RuntimeSSH {
 		return m.captureRemotePassthroughEvidence(ctx, ri)
 	}

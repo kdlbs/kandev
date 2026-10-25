@@ -1506,8 +1506,12 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		defer m.unregisterPluginExecutorCallbacks(execReq.InstanceID)
 	}
 
-	execInstance, err := rt.CreateInstance(launchCtx, execReq)
+	execInstance, err := m.createInstanceWithSessionMCP(launchCtx, rt, execReq)
 	if err != nil {
+		var refusal *LaunchRefusal
+		if errors.As(err, &refusal) {
+			return nil, nil, nil, refusal
+		}
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil

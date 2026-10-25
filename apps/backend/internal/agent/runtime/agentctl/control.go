@@ -123,7 +123,21 @@ type CreateInstanceRequest struct {
 	DeliveryIncarnationID string `json:"delivery_incarnation_id,omitempty"`
 	// DeliveryHarnessGeneration fences events to one native harness conversation.
 	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
+	// SessionMCPToken authenticates the instance MCP endpoint. agentctl keeps
+	// it in memory only.
+	SessionMCPToken string `json:"session_mcp_token,omitempty"`
+	// BrokerUpstreamURL is the backend credential broker URL the instance
+	// relays to. Set only for executors that share the backend's host.
+	BrokerUpstreamURL string `json:"credential_broker_upstream_url,omitempty"`
 }
+
+// String redacts the session token.
+func (r CreateInstanceRequest) String() string {
+	return fmt.Sprintf("CreateInstanceRequest{ID:%s}", r.ID)
+}
+
+// GoString redacts the session token under %#v.
+func (r CreateInstanceRequest) GoString() string { return r.String() }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.
 type CreateInstanceResponse struct {
@@ -347,6 +361,9 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 			return nil, fmt.Errorf("failed to decode error response: %w", err)
 		}
+		if resp.StatusCode == http.StatusConflict && isCreateConflictCode(errResp.Error) {
+			return nil, &CreateConflictError{Code: errResp.Error}
+		}
 		return nil, fmt.Errorf("failed to create instance: %s (status %d)", errResp.Error, resp.StatusCode)
 	}
 
@@ -363,10 +380,15 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 }
 
 // DeleteInstance stops and removes an agent instance.
+// A context from WithExpectedTokenFingerprint adds the token precondition.
 func (c *ControlClient) DeleteInstance(ctx context.Context, instanceID string) error {
+	tokenFingerprint := ExpectedTokenFingerprintFrom(ctx)
 	req, err := http.NewRequestWithContext(ctx, "DELETE", c.baseURL+"/api/v1/instances/"+instanceID, nil)
 	if err != nil {
 		return err
+	}
+	if tokenFingerprint != "" {
+		req.Header.Set(expectedTokenFingerprintHeader, tokenFingerprint)
 	}
 
 	resp, err := c.httpClient.Do(req)

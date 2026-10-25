@@ -1,10 +1,10 @@
 package config
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"sync/atomic"
+
+	"github.com/kandev/kandev/internal/common/sessionmcp"
 )
 
 // SessionMCPToken holds the per-instance MCP bearer token in memory only. The
@@ -74,25 +74,8 @@ func (t *SessionMCPToken) Fingerprint() string {
 func (t *SessionMCPToken) String() string   { return "[redacted]" }
 func (t *SessionMCPToken) GoString() string { return "[redacted]" }
 
-// TokenFingerprint is base64url(SHA-256("kandev-mcp-fp-v1:" + token)), unpadded,
-// or "" for an empty token.
-func TokenFingerprint(token string) string {
-	if token == "" {
-		return ""
-	}
-	return fingerprint("kandev-mcp-fp-v1:" + token)
-}
+// TokenFingerprint fingerprints a session token; see sessionmcp.Fingerprint.
+func TokenFingerprint(token string) string { return sessionmcp.Fingerprint(token) }
 
-// BrokerUpstreamFingerprint is the same construction over the upstream broker
-// URL, "" when none.
-func BrokerUpstreamFingerprint(upstream string) string {
-	if upstream == "" {
-		return ""
-	}
-	return fingerprint("kandev-broker-fp-v1:" + upstream)
-}
-
-func fingerprint(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
+// BrokerUpstreamFingerprint fingerprints the upstream broker URL.
+func BrokerUpstreamFingerprint(upstream string) string { return sessionmcp.BrokerFingerprint(upstream) }

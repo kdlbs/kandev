@@ -348,6 +348,7 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	MetadataKeyMCPTokenNonce:             true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -460,6 +461,7 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	MetadataKeyMCPTokenNonce:             true,
 	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
@@ -716,6 +718,15 @@ type ExecutorCreateRequest struct {
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders          []string // Normalized provider capabilities attached to the task
 	McpProfile            *mcpprofile.Context
+	// SessionMCPToken authenticates the instance MCP endpoint. It is minted by
+	// the manager per create attempt and never stored, logged or put in env.
+	SessionMCPToken string
+	// SessionMCPNonce is the nonce the token was derived from; it is persisted
+	// in the execution metadata so a restarted backend can re-derive the token.
+	SessionMCPNonce string
+	// BrokerUpstreamURL is the credential broker URL relayed by an instance
+	// that shares the backend's host; empty for remote executors.
+	BrokerUpstreamURL     string
 	AuthToken             string // Previously handshaken agentctl token for reconnects
 	BootstrapNonce        string // Stored nonce for re-handshake after container restart
 	AgentctlStartupConfig commonconfig.AgentctlStartupConfig
@@ -772,6 +783,10 @@ type ExecutorInstance struct {
 	// manager calls it when a candidate cannot be authenticated or tracked;
 	// successful tracking transfers ownership to the runtime backend.
 	DiscardRecovery func() `json:"-"`
+
+	// tokenControl reaches the control server that owns this instance, for the
+	// adoption token check's delete and revoke. Nil when the runtime exposes none.
+	tokenControl mcpTokenControl
 
 	// Runtime-specific identifiers (only one set is populated)
 	ContainerID          string // Docker

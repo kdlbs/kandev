@@ -655,6 +655,8 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		McpServers:                 req.McpServers,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
+		SessionMCPToken:            req.SessionMCPToken,
+		BrokerUpstreamURL:          req.BrokerUpstreamURL,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),
 		SessionID:                  req.SessionID,
 		TaskID:                     req.TaskID,

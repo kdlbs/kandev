@@ -295,11 +295,11 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	})
 }
 
-// expectedTokenFingerprintHeader carries the delete precondition: the token
-// fingerprint the caller believes the instance holds.
 func messageBody(msg string) gin.H { return gin.H{"message": msg} }
 
 const (
+	// expectedTokenFingerprintHeader carries the delete precondition: the token
+	// fingerprint the caller believes the instance holds.
 	expectedTokenFingerprintHeader = "X-Expected-Token-Fingerprint"
 	fingerprintDiffersMessage      = "instance fingerprint differs; nothing deleted"
 )
