@@ -2,8 +2,13 @@ package scope
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+// ErrGuardUnavailable marks a principal that could not be resolved because the
+// caller task's guard was unreadable. The condition is transient and retryable.
+var ErrGuardUnavailable = errors.New("sandbox task guard is unavailable")
 
 // GuardSource reports whether a task holds a sandbox task guard in a
 // workspace. An error means the answer is unknown.
@@ -25,7 +30,7 @@ func (r *Resolver) resolveGuard(ctx context.Context, p *Principal) error {
 	}
 	guarded, err := r.guards.TaskGuarded(ctx, p.WorkspaceID, p.CallerTaskID)
 	if err != nil {
-		return fmt.Errorf("resolve MCP principal task %s guard: %w", p.CallerTaskID, err)
+		return fmt.Errorf("resolve MCP principal task %s guard: %w: %w", p.CallerTaskID, ErrGuardUnavailable, err)
 	}
 	p.Guarded = guarded
 	return nil

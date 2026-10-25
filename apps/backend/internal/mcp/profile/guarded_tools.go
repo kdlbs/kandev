@@ -13,7 +13,8 @@ const (
 	// ClassChildWrite tools write to the caller's task or a floored child.
 	ClassChildWrite GuardedToolClass = "child_write"
 	// ClassInternal is the server-originated audit action; it is never offered
-	// in a catalogue and skips scope checks.
+	// in a catalogue. A guarded session reaches it only on a trusted internal
+	// call, and it skips scope checks.
 	ClassInternal GuardedToolClass = "internal"
 	// ClassDenied is never available to a guarded session. Unlisted tools are
 	// treated as denied.
@@ -33,7 +34,6 @@ const mcpActionPrefix = "mcp."
 var (
 	attrCreate  = []string{"source_task_id", "source_session_id"}
 	attrSender  = []string{"sender_task_id", "sender_session_id"}
-	attrCaller  = []string{"caller_task_id", "caller_session_id"}
 	attrCallerT = []string{"caller_task_id"}
 )
 
@@ -62,19 +62,19 @@ func buildGuardedTools() map[string]GuardedTool {
 		"report_change_request_auto_fix_outcome", "report_pr_auto_fix_outcome", "create_canvas", "set_canvas_state")
 	add(ClassSelf, attrCallerT, "write_task_document")
 	add(ClassChildWrite, nil,
-		"update_task", "add_task_dependency", "remove_task_dependency", "add_branch_to_task",
+		"update_task", "add_task_dependency", "remove_task_dependency",
 		"update_repository_base_branch", "update_task_change_request_automation", "update_task_pr_automation",
 		"update_task_mr_automation")
 	add(ClassChildWrite, attrCreate, "create_task")
 	add(ClassChildWrite, attrSender, "spawn_session", "message_task")
 	add(ClassChildWrite, []string{"sender_task_id"}, "stop_task")
 	add(ClassChildWrite, []string{"sender_session_id"}, "move_task")
-	add(ClassChildWrite, attrCaller, "add_workspace_sources")
 	add(ClassChildWrite, attrCallerT, "link_task_pr", "unlink_task_pr", "replace_task_pr", "manage_task_change_request")
 	add(ClassInternal, nil, "audit_task_transfer_attempt")
 	add(ClassDenied, nil,
 		"transfer_task", "archive_task", "delete_task", "resolve_agent_permission", "answer_question",
-		"list_plugin_tools", "invoke_plugin_tool", "publish_canvas")
+		"list_plugin_tools", "invoke_plugin_tool", "publish_canvas",
+		"add_branch_to_task", "add_workspace_sources")
 	return m
 }
 

@@ -155,7 +155,8 @@ func (m *Manager) guardedSession() bool {
 // guardedKandevApproval decides a permission request of a guarded session that
 // resolves to the injected Kandev server: only tools the classification table
 // lists as read or self are approved, matched by the whole bare name after the
-// `_kandev` suffix, never by prefix. resolved reports that the request targeted
+// `_kandev` suffix, never by prefix. Every other tool of that server takes the
+// normal prompt without standing approvals. resolved reports that the request targeted
 // that server, so neither the blanket flag nor the generic injected-server
 // approval applies to it.
 func (m *Manager) guardedKandevApproval(req *adapter.PermissionRequest) (resolved bool, response *adapter.PermissionResponse) {
@@ -164,11 +165,9 @@ func (m *Manager) guardedKandevApproval(req *adapter.PermissionRequest) (resolve
 		return false, nil
 	}
 	name, hasSuffix := strings.CutSuffix(tool, "_"+injectedKandevMCPServerName)
-	if !hasSuffix {
-		return true, nil
-	}
 	entry, listed := profile.GuardedToolByName(name)
-	if !listed || (entry.Class != profile.ClassRead && entry.Class != profile.ClassSelf) {
+	if !hasSuffix || !listed || (entry.Class != profile.ClassRead && entry.Class != profile.ClassSelf) {
+		dropStandingApprovals(req)
 		return true, nil
 	}
 	m.logger.Info("auto-approving guarded Kandev MCP permission",
@@ -177,4 +176,12 @@ func (m *Manager) guardedKandevApproval(req *adapter.PermissionRequest) (resolve
 		zap.String("class", string(entry.Class)),
 		zap.String("option_kind", string(option.Kind)))
 	return true, &adapter.PermissionResponse{OptionID: option.OptionID}
+}
+
+// dropStandingApprovals removes allow_always options from a prompt a person
+// will answer, so approving one guarded Kandev call never approves later ones.
+func dropStandingApprovals(req *adapter.PermissionRequest) {
+	req.Options = slices.DeleteFunc(req.Options, func(option adapter.PermissionOption) bool {
+		return normalizePermissionOptionKind(option.Kind) == streams.PermissionOptionKindAllowAlways
+	})
 }

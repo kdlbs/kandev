@@ -40,19 +40,27 @@ func TestGuardedToolByActionStripsOnlyTheMCPPrefix(t *testing.T) {
 
 func TestGuardedToolAttributionColumns(t *testing.T) {
 	cases := map[string][]string{
-		"create_task":           {"source_task_id", "source_session_id"},
-		"spawn_session":         {"sender_task_id", "sender_session_id"},
-		"message_task":          {"sender_task_id", "sender_session_id"},
-		"stop_task":             {"sender_task_id"},
-		"move_task":             {"sender_session_id"},
-		"add_workspace_sources": {"caller_task_id", "caller_session_id"},
-		"list_related_tasks":    {"caller_task_id"},
-		"update_task":           nil,
+		"create_task":        {"source_task_id", "source_session_id"},
+		"spawn_session":      {"sender_task_id", "sender_session_id"},
+		"message_task":       {"sender_task_id", "sender_session_id"},
+		"stop_task":          {"sender_task_id"},
+		"move_task":          {"sender_session_id"},
+		"list_related_tasks": {"caller_task_id"},
+		"update_task":        nil,
 	}
 	for name, attr := range cases {
 		got, _ := GuardedToolByName(name)
 		if len(got.Attribution) != len(attr) {
 			t.Errorf("%s: got %v want %v", name, got.Attribution, attr)
+		}
+	}
+}
+
+func TestGuardedToolDeniesRepositoryAndPathAttachment(t *testing.T) {
+	for _, name := range []string{"add_branch_to_task", "add_workspace_sources"} {
+		got, ok := GuardedToolByName(name)
+		if !ok || got.Class != ClassDenied {
+			t.Errorf("%s: got %+v ok=%v, want class denied", name, got, ok)
 		}
 	}
 }

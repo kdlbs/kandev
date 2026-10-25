@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -264,11 +265,15 @@ func TestGuardedGuard_CreateTaskNormalisesWorkspaceAndParent(t *testing.T) {
 	}
 }
 
-func TestGuardedGuard_CreateTaskRefusesCallersWithoutChildren(t *testing.T) {
+func TestGuardedGuard_CreateTaskFromSubtaskPinsParentToCaller(t *testing.T) {
 	f := newGuardedFixture(t)
 	p := f.principal
 	p.CallerTaskID, p.CallerSessionID = fxFloored, "sess-floored"
-	guarded, _ := f.call(t, p, ws.ActionMCPCreateTask, map[string]any{"title": "x"})
+	guarded, replacement := f.call(t, p, ws.ActionMCPCreateTask, map[string]any{"title": "x"})
+	require.Nil(t, guarded)
+	require.JSONEq(t, `"`+fxFloored+`"`, string(replacementFields(t, replacement)["parent_id"]))
+
+	guarded, _ = f.call(t, p, ws.ActionMCPCreateTask, map[string]any{"title": "x", "parent_id": fxCaller})
 	assertWSError(t, guarded, ws.ErrorCodeForbidden)
 	require.Equal(t, reasonGuardedScope, errorReason(t, guarded))
 }
@@ -282,9 +287,15 @@ func TestGuardedGuard_MessageToParentRefused(t *testing.T) {
 	require.Equal(t, reasonGuardedScope, errorReason(t, guarded))
 }
 
-func TestGuardedGuard_InternalAuditActionPassesThrough(t *testing.T) {
+func TestGuardedGuard_InternalActionRequiresTrustedInternalCall(t *testing.T) {
 	f := newGuardedFixture(t)
-	guarded, replacement := f.call(t, f.principal, ws.ActionMCPAuditTaskTransferAttempt, json.RawMessage(`[1]`))
+	guarded, _ := f.call(t, f.principal, ws.ActionMCPAuditTaskTransferAttempt, json.RawMessage(`[1]`))
+	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+
+	msg := &ws.Message{ID: "m1", Type: ws.MessageTypeRequest, Action: ws.ActionMCPAuditTaskTransferAttempt, Payload: json.RawMessage(`[1]`)}
+	ctx := mcporigin.WithTrustedInternalCall(mcpscope.WithPrincipal(context.Background(), f.principal))
+	guarded, replacement, err := f.h.authorizeGuardedRequest(ctx, msg)
+	require.NoError(t, err)
 	require.Nil(t, guarded)
 	require.JSONEq(t, `[1]`, string(replacement.Payload))
 }

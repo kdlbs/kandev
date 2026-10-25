@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -76,6 +77,11 @@ func (h *Handlers) authorizeGuardedRequest(ctx context.Context, msg *ws.Message)
 		return response, nil, err
 	}
 	if tool.Class == mcpprofile.ClassInternal {
+		if !mcporigin.IsTrustedInternalCall(ctx) {
+			response, err := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction,
+				"tool is not available to a guarded session", nil)
+			return response, nil, err
+		}
 		return nil, msg, nil
 	}
 	refusal, replacement := h.checkGuardedCall(ctx, principal, tool, msg)
@@ -128,7 +134,7 @@ func (h *Handlers) checkGuardedScope(
 		return lookupRefusal()
 	}
 	if action == "mcp.create_task" {
-		if refusal := h.normalizeGuardedCreateTask(ctx, principal, payload); refusal != nil {
+		if refusal := h.normalizeGuardedCreateTask(principal, payload); refusal != nil {
 			return refusal
 		}
 	}
@@ -143,10 +149,8 @@ func (h *Handlers) checkGuardedScope(
 }
 
 // normalizeGuardedCreateTask pins the workspace and the parent of a
-// create_task call to the caller's, and refuses callers that cannot have a
-// child task.
+// create_task call to the caller's. Child admission is owned by task creation.
 func (h *Handlers) normalizeGuardedCreateTask(
-	ctx context.Context,
 	principal mcpscope.Principal,
 	payload *guardedPayload,
 ) *guardedRefError {
@@ -164,14 +168,6 @@ func (h *Handlers) normalizeGuardedCreateTask(
 	}
 	payload.set("parent_id", principal.CallerTaskID)
 	payload.remove("parent_is_self")
-	caller, err := h.taskSvc.GetTask(ctx, principal.CallerTaskID)
-	if err != nil || caller == nil {
-		return refusalForLookup(err)
-	}
-	if caller.IsEphemeral || caller.ParentID != "" {
-		return &guardedRefError{code: ws.ErrorCodeForbidden, reason: reasonGuardedScope,
-			message: "child tasks are unavailable for this task"}
-	}
 	return nil
 }
 

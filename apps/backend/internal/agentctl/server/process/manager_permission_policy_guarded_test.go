@@ -100,3 +100,44 @@ func TestGuardedKandevApproval_ExplicitExpectations(t *testing.T) {
 		}
 	}
 }
+
+func optionKinds(req *adapter.PermissionRequest) []streams.PermissionOptionKind {
+	var kinds []streams.PermissionOptionKind
+	for _, option := range req.Options {
+		kinds = append(kinds, option.Kind)
+	}
+	return kinds
+}
+
+func promptRequest(tool string) *adapter.PermissionRequest {
+	req := allowRequest(tool)
+	req.Options = append(req.Options,
+		adapter.PermissionOption{OptionID: "always", Kind: streams.PermissionOptionKindAllowAlways},
+		adapter.PermissionOption{OptionID: "reject", Kind: streams.PermissionOptionKindRejectOnce})
+	return req
+}
+
+func TestGuardedKandevPromptOffersNoStandingApproval(t *testing.T) {
+	m := guardedManager(t, true, true)
+	req := promptRequest("mcp__kandev__create_task_kandev")
+	if opt, response := m.nonCoordinatorAutoApproval(req); opt != nil || response != nil {
+		t.Fatal("mutating Kandev tool was auto-approved")
+	}
+	for _, kind := range optionKinds(req) {
+		if kind == streams.PermissionOptionKindAllowAlways {
+			t.Fatalf("prompt still offers a standing approval: %v", optionKinds(req))
+		}
+	}
+	if len(req.Options) != 2 {
+		t.Fatalf("options = %v, want allow_once and reject_once", optionKinds(req))
+	}
+}
+
+func TestUnguardedKandevPromptKeepsStandingApproval(t *testing.T) {
+	m := guardedManager(t, false, false)
+	req := promptRequest("mcp__kandev__create_task_kandev")
+	m.nonCoordinatorAutoApproval(req)
+	if len(req.Options) != 3 {
+		t.Fatalf("unguarded options changed: %v", optionKinds(req))
+	}
+}

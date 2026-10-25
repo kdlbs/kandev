@@ -52,7 +52,7 @@ func TestScopePrincipalResolvesTaskGuard(t *testing.T) {
 func TestScopePrincipalGuardReadFailureDeniesDispatch(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorkspaceID: "workspace-1"}
 	ctx, err := guardResolver(task, &guardStub{err: errors.New("db down")}).ScopePrincipal(context.Background(), "task-1", "session-1")
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrGuardUnavailable)
 	require.Nil(t, ctx)
 }
 

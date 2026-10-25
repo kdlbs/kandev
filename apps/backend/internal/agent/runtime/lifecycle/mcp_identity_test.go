@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -250,5 +252,50 @@ func TestSetMCPIdentityScoperReachesStreamManager(t *testing.T) {
 	_, scoper, _ := m.streamManager.mcpDispatchState()
 	if scoper == nil {
 		t.Error("SetMCPIdentityScoper did not reach the stream manager")
+	}
+}
+
+func TestMCPHandlerForReportsGuardUnavailableAsRetryable(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	sm.setMCPPrincipalScoper(func(context.Context, string, string) (context.Context, error) {
+		return nil, fmt.Errorf("resolve principal: %w", mcpscope.ErrGuardUnavailable)
+	})
+
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
+	resp, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{}))
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	var payload ws.ErrorPayload
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal error payload: %v", err)
+	}
+	if payload.Code != ws.ErrorCodeUnavailable {
+		t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeUnavailable)
+	}
+	if payload.Details["reason"] != "sandbox_guard_unavailable" {
+		t.Errorf("reason = %v, want sandbox_guard_unavailable", payload.Details["reason"])
+	}
+	if inner.calls != 0 {
+		t.Errorf("inner handler ran %d times, want 0", inner.calls)
+	}
+}
+
+func TestMCPHandlerForKeepsInternalErrorForOtherPrincipalFailures(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	sm.setMCPPrincipalScoper(func(context.Context, string, string) (context.Context, error) {
+		return nil, errors.New("task not found")
+	})
+
+	handler := sm.mcpHandlerFor(&AgentExecution{ID: "exec-1", TaskID: "task-a", SessionID: "session-a"})
+	resp, _ := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{}))
+	var payload ws.ErrorPayload
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal error payload: %v", err)
+	}
+	if payload.Code != ws.ErrorCodeInternalError {
+		t.Errorf("code = %q, want %q", payload.Code, ws.ErrorCodeInternalError)
 	}
 }
