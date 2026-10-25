@@ -430,7 +430,7 @@ func normalizedGitHubHost(host string) (string, error) {
 	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Path != "" && parsed.Path != "/" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", fmt.Errorf("repository has invalid GitHub host")
 	}
-	if parsed.Scheme != managedHTTPScheme && parsed.Scheme != "https" || parsed.Port() != "" {
+	if parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Port() != "" {
 		return "", fmt.Errorf("repository has invalid GitHub host")
 	}
 	normalizedHost := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))

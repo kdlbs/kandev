@@ -254,7 +254,7 @@ func remoteRepositoryLocator(repository *models.Repository) string {
 		return locator
 	}
 	parsed, err := url.Parse(locator)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != managedHTTPScheme && parsed.Scheme != "ssh" && parsed.Scheme != "git") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "ssh" && parsed.Scheme != "git") {
 		return ""
 	}
 	return locator
