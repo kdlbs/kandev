@@ -251,9 +251,13 @@ test.describe("mobile PR CI automation options", () => {
 
     // Keep the repair active while repeated provider feedback is checked for deduplication.
     await apiClient.updateTaskCIAutomationOptions(taskId, {
-      auto_fix_prompt_override: "{{pr.feedback}}\ne2e:delay(60000)",
+      auto_fix_prompt_override:
+        '{{pr.feedback}}\ne2e:message("Conflict repair active")\ne2e:delay(60000)',
     });
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+    await expect(
+      session.activeChat().getByText("Conflict repair active", { exact: true }),
+    ).toBeVisible();
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: taskId,
       workspace_id: seedData.workspaceId,
@@ -327,6 +331,8 @@ test.describe("mobile PR CI automation options", () => {
       })
       .toBe(1);
     await expect.poll(() => listAutoFixMessages(apiClient, sessionId)).toHaveLength(1);
+    await apiClient.updateTaskCIAutomationOptions(taskId, { auto_fix_enabled: false });
+    await apiClient.stopSession({ session_id: sessionId, force: true });
   });
 
   test("drawer keeps two linked PRs' automation switches independent", async ({

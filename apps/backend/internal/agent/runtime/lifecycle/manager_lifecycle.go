@@ -1006,7 +1006,7 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 	if sessionID == "" || expectedExecutionID == "" {
 		return nil
 	}
-	_, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		execution, exists := m.executionStore.GetBySessionID(sessionID)
 		if !exists || execution == nil || execution.ID != expectedExecutionID {
 			return nil, nil

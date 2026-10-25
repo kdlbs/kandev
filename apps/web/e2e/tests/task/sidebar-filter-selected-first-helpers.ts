@@ -10,6 +10,7 @@ import { repositorySlug } from "../../../lib/repository-slug";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import { KanbanPage } from "../../pages/kanban-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 export async function seedSelectedFilters(api: ApiClient, seed: SeedData, tmpDir: string) {
   for (const suffix of ["A", "B", "C", "D", "Remote"]) {
@@ -184,6 +185,7 @@ export async function verifySelectedFilters(
   );
   expect(context.map((row) => row.heading)).toEqual(["Alpha filter", "Beta filter"]);
   expect(context.map((row) => row.value?.split(" ").at(-1))).toEqual(seeded.stepIds);
+  await waitForFiniteAnimations(picker);
   const box = await picker.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);

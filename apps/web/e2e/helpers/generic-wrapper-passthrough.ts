@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, type SeedData } from "../fixtures/test-base";
+import { expect, test, type SeedData } from "../fixtures/test-base";
 import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import { createGenericWrapper, readProfileProbeEvidence } from "./profile-capability-discovery";
@@ -26,6 +26,7 @@ export async function checkWrappedPassthrough(
     env_vars: [{ key: "MOCK_AGENT_PROFILE_EVIDENCE_FILE", value: evidencePath }],
   });
   let taskId: string | undefined;
+  let sessionId: string | undefined;
   try {
     const task = await api.createTaskWithAgent(
       seed.workspaceId,
@@ -40,6 +41,7 @@ export async function checkWrappedPassthrough(
     );
     taskId = task.id;
     if (!task.session_id) throw new Error("session was not created");
+    sessionId = task.session_id;
     await page.goto(`/t/${task.id}`);
     const session = new SessionPage(page);
     await session.waitForPassthroughLoad();
@@ -89,6 +91,31 @@ export async function checkWrappedPassthrough(
         { timeout: 20_000 },
       )
       .toBe(true);
+  } catch (error) {
+    // Preserve the failing state before deleting its task and profile.
+    await Promise.allSettled([
+      (async () => {
+        await test.info().attach("wrapped-terminal-page", {
+          body: await page.screenshot(),
+          contentType: "image/png",
+        });
+      })(),
+      (async () => {
+        await test.info().attach("wrapped-terminal-session", {
+          body: JSON.stringify({
+            sessions: taskId ? await api.listTaskSessions(taskId) : null,
+            messages: sessionId ? await api.listSessionMessages(sessionId) : null,
+            receipts: readProfileProbeEvidence(evidencePath),
+          }),
+          contentType: "application/json",
+        });
+      })(),
+      test.info().attach("wrapped-terminal-backend-log", {
+        path: backend.logPath,
+        contentType: "text/plain",
+      }),
+    ]);
+    throw error;
   } finally {
     if (taskId) await api.deleteTask(taskId);
     await api.deleteAgentProfile(profile.id, true);

@@ -128,6 +128,24 @@ when the user must select one of the offered options. If omitted, the user can
 also provide a free-text answer. Native Codex questions use the same setting
 that Codex provides for an "Other" answer.
 
+The tool returns answers keyed by question ID. An option selection includes
+`selected_option` (the option ID) and `selected_label` (the exact displayed label):
+
+```json
+{
+  "flow": {
+    "selected_option": "q1_opt1",
+    "selected_label": "A"
+  }
+}
+```
+
+Read the label to understand the user's choice. Keep the ID when you need to
+distinguish options with identical labels. If the ID cannot identify exactly
+one offered option with a nonempty label, `selected_label` is omitted.
+Free-text-only answers return `custom_text` without a selected label.
+Selections can also retain accompanying `custom_text`.
+
 ## Reading the thread
 
 `get_task_conversation_kandev(task_id)` returns the message history for any task you know the ID of. Use it to:

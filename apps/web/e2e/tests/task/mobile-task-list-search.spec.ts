@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { selectTaskListFilter } from "./task-list-archive-helpers";
+
+test.use({ trace: "retain-on-failure" });
 
 const listPath = /\/api\/v1\/workspaces\/[^/]+\/tasks$/;
 
@@ -81,8 +84,13 @@ test.describe("Mobile task list search", () => {
     await expect(testPage.getByTestId("tasks-list-sort")).not.toBeVisible();
     await testPage.getByTestId("mobile-topbar-page-context").tap();
     const menu = testPage.getByRole("dialog", { name: "View options" });
+    await waitForFiniteAnimations(menu);
     await menu.getByTestId("mobile-tasks-list-sort").tap();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Title Z-A" }).tap();
+    const listbox = testPage.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await waitForFiniteAnimations(listbox);
+    await listbox.getByRole("option", { name: "Title Z-A" }).tap();
+    await expect(listbox).not.toBeVisible();
 
     await expect(testPage).toHaveURL((url) => url.searchParams.get("sort") === "title_desc");
     await expect
@@ -90,7 +98,10 @@ test.describe("Mobile task list search", () => {
       .toEqual(["Zulu mobile sort", "Alpha mobile sort"]);
 
     await menu.getByTestId("mobile-tasks-list-group").tap();
-    await testPage.getByRole("listbox").getByRole("option", { name: "Workflow step" }).tap();
+    await expect(listbox).toBeVisible();
+    await waitForFiniteAnimations(listbox);
+    await listbox.getByRole("option", { name: "Workflow step" }).tap();
+    await expect(listbox).not.toBeVisible();
     await expect(testPage).toHaveURL((url) => url.searchParams.get("group") === "workflow_step");
 
     await expect(

@@ -29,7 +29,9 @@ func (c *Client) WithSandboxOwner(parent context.Context, launch *sandbox.Launch
 	defer func() {
 		cancel()
 		if !received {
-			<-done
+			if err := <-done; err != nil {
+				_ = err // the caller already returned; only the drain matters
+			}
 		}
 	}()
 	handshake, stop := context.WithTimeout(ctx, 10*time.Second)

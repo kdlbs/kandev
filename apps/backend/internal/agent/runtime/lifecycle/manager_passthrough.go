@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/passthroughconfig"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -93,7 +94,7 @@ func (m *Manager) preparePassthroughRunningWithContext(ctx context.Context, sess
 	var publishOnce sync.Once
 	return func() {
 		publishOnce.Do(func() {
-			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, payload)
+			_ = m.eventPublisher.publishAgentEventPayload(ctx, events.AgentRunning, payload)
 		})
 	}, nil
 }
@@ -103,10 +104,16 @@ func (m *Manager) preparePassthroughRunningWithContext(ctx context.Context, sess
 // publishes the AgentRunning event immediately.
 //
 // Callers that hold the per-session cancellation guard (e.g. handleAgentReady) must use
-// PreparePassthroughRunning directly and defer the returned publisher until after the guard
-// is released, to avoid re-entering the mutex through the synchronous event subscriber.
+// PreparePassthroughRunning and publish after releasing it, or use the contextual
+// method with explicit subscriber ownership for synchronous guarded publication.
 func (m *Manager) MarkPassthroughRunning(sessionID string) error {
-	publish, err := m.PreparePassthroughRunning(sessionID)
+	return m.MarkPassthroughRunningWithContext(context.Background(), sessionID)
+}
+
+// MarkPassthroughRunningWithContext preserves the caller context through synchronous
+// publication. A guarded caller must explicitly convey ownership to subscribers.
+func (m *Manager) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	publish, err := m.preparePassthroughRunningWithContext(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -267,12 +274,13 @@ func (m *Manager) startPassthroughShell(ctx context.Context, execution *AgentExe
 // resolvedPassthrough holds the agent config, passthrough config, runtime config, and profile
 // info resolved from an execution. Used as the basis for building passthrough commands.
 type resolvedPassthrough struct {
-	agentID     string
-	agentConfig agents.Agent
-	agent       agents.PassthroughAgent
-	pt          agents.PassthroughConfig
-	rt          *agents.RuntimeConfig
-	profile     *AgentProfileInfo
+	agentID      string
+	agentConfig  agents.Agent
+	agent        agents.PassthroughAgent
+	pt           agents.PassthroughConfig
+	rt           *agents.RuntimeConfig
+	profile      *AgentProfileInfo
+	mcpOperation *preparedMCPOperation
 }
 
 // resolvePassthroughAgent loads the agent config and profile for a passthrough execution.
@@ -424,7 +432,13 @@ func (m *Manager) applyPassthroughMCP(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 ) ([]string, error) {
-	return m.applyPassthroughMCPWithPreparation(ctx, execution, pt, agentConfig, profileInfo, nil)
+	prepared, err := m.applyPassthroughMCPWithPreparation(ctx, execution, pt, agentConfig, profileInfo, nil)
+	return prepared.args, err
+}
+
+type preparedPassthroughMCP struct {
+	args      []string
+	operation *preparedMCPOperation
 }
 
 func (m *Manager) applyPassthroughMCPWithPreparation(
@@ -434,44 +448,50 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	agentConfig agents.Agent,
 	profileInfo *AgentProfileInfo,
 	progress *prepareProgressRecorder,
-) ([]string, error) {
+) (preparedPassthroughMCP, error) {
 	if pt.MCPStrategy == nil {
-		return nil, nil
+		return preparedPassthroughMCP{}, nil
 	}
+	operation, err := m.prepareExecutionMCP(ctx, execution, agentConfig)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	filterPassthroughMCPServers(operation, pt.MCPStrategy)
 	if isSSHPassthrough(execution) {
-		return m.applySSHPassthroughMCP(ctx, execution, pt, agentConfig, profileInfo)
+		return m.applySSHPassthroughMCP(ctx, execution, pt, agentConfig, profileInfo, operation)
 	}
 	if isCursorMCPAuthStrategy(pt.MCPStrategy) {
 		if err := m.prepareCursorMCPAuthWithProgress(execution, profileInfo, execution.ExecutorType, pt.MCPStrategy, progress); err != nil {
-			return nil, err
+			return preparedPassthroughMCP{}, err
 		}
-		if err := m.reconcileAndMaterializeCursorProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy, progress); err != nil {
-			return nil, err
+		if err := m.reconcileAndMaterializeCursorProjectMCPWithPreparation(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy, progress, operation); err != nil {
+			return preparedPassthroughMCP{}, err
 		}
-		return nil, nil
+		return preparedPassthroughMCP{operation: operation}, nil
 	}
 	if err := m.prepareCursorMCPAuth(execution, profileInfo, execution.ExecutorType, pt.MCPStrategy); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	// passthroughMCPServers always returns at least the kandev server (or an
 	// error when the port is unavailable), so the strategy receives a non-empty
 	// list; each strategy guards its own empty-after-filtering case.
-	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy)
+	servers, err := m.passthroughMCPServers(ctx, execution, agentConfig, profileInfo, execution.ExecutorType, pt.MCPStrategy, operation)
 	if err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
 	if err != nil {
-		return nil, fmt.Errorf("build passthrough MCP config: %w", err)
+		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
 	if err := validateSandboxMCPArtifacts(execution, len(servers), artifacts); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	if err := m.writePassthroughMCPFiles(ctx, execution, artifacts.Files); err != nil {
-		return nil, err
+		return preparedPassthroughMCP{}, err
 	}
 	setPassthroughMCPEnv(execution, artifacts.Env)
-	return artifacts.Args, nil
+	operation.servers = servers
+	return preparedPassthroughMCP{args: artifacts.Args, operation: operation}, nil
 }
 
 // passthroughMCPServers returns kandev's own HTTP MCP server followed by the
@@ -483,6 +503,7 @@ func (m *Manager) passthroughMCPServers(
 	profileInfo *AgentProfileInfo,
 	executorType string,
 	strategy mcpconfig.PassthroughMCPStrategy,
+	operations ...*preparedMCPOperation,
 ) ([]agentctltypes.McpServer, error) {
 	port := passthroughMCPConfigPort(execution)
 	if port <= 0 {
@@ -496,11 +517,18 @@ func (m *Manager) passthroughMCPServers(
 	if endpoint != "" {
 		servers = append(servers, agentctltypes.McpServer{Name: kandevMCPServerName, Type: string(mcpconfig.ServerTypeHTTP), URL: endpoint})
 	}
-
-	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
-	if err != nil {
-		return nil, err
+	var operation *preparedMCPOperation
+	if len(operations) > 0 {
+		operation = operations[0]
 	}
+	if operation == nil {
+		var err error
+		operation, err = m.prepareExecutionMCP(ctx, execution, agentConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	profileServers := operation.servers
 	for _, srv := range profileServers {
 		if srv.Name == kandevMCPServerName {
 			continue
@@ -836,18 +864,19 @@ type passthroughCommand struct {
 // passthroughAgentCommand validates passthrough support and builds the command for a passthrough session.
 // Returns the PassthroughAgent, PassthroughConfig, RuntimeConfig pointer, command, and any error.
 func (m *Manager) passthroughAgentCommand(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, passthroughCommand, error) {
-	return m.passthroughAgentCommandWithPreparation(ctx, execution, profileInfo, nil)
+	agent, pt, rt, cmd, _, err := m.passthroughAgentCommandWithPreparation(ctx, execution, profileInfo, nil)
+	return agent, pt, rt, cmd, err
 }
 
-func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo, progress *prepareProgressRecorder) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, passthroughCommand, error) {
+func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, execution *AgentExecution, profileInfo *AgentProfileInfo, progress *prepareProgressRecorder) (agents.PassthroughAgent, agents.PassthroughConfig, *agents.RuntimeConfig, passthroughCommand, *preparedMCPOperation, error) {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, fmt.Errorf("failed to get agent config: %w", err)
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, fmt.Errorf("failed to get agent config: %w", err)
 	}
 
 	ptAgent, ok := agentConfig.(agents.PassthroughAgent)
 	if !ok {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, fmt.Errorf("agent %s does not support passthrough mode", agentConfig.ID())
 	}
 
 	pt := ptAgent.PassthroughConfig()
@@ -856,15 +885,15 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 	promptForCmd := promptForPassthroughCommand(pt, taskDescription)
 	flags, prefix, err := m.resolveProfileLaunchTokens(profileInfo)
 	if err != nil {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, err
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
 	}
 	mcpArgs, err := m.applyPassthroughMCPWithPreparation(ctx, execution, pt, agentConfig, profileInfo, progress)
 	if err != nil {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, err
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
 	}
 	baseCommand, err := m.openCodePassthroughCommand(ctx, agentConfig, execution.RuntimeName)
 	if err != nil {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, err
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
 	}
 
 	cmd := ptAgent.BuildPassthroughCommand(agents.PassthroughOptions{
@@ -873,14 +902,14 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 		SessionID:        execution.ACPSessionID,
 		Prompt:           promptForCmd,
 		PermissionValues: profilePermissionValues(profileInfo),
-		MCPArgs:          mcpArgs,
+		MCPArgs:          mcpArgs.args,
 		CLIFlagTokens:    flags,
 		BaseCommand:      baseCommand,
 	})
 	if cmd.IsEmpty() {
-		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
-	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: launchwrapper.Profile(prefix)}, nil
+	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: launchwrapper.Profile(prefix)}, mcpArgs.operation, nil
 }
 
 // buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
@@ -911,7 +940,7 @@ func buildInteractiveStartRequest(sessionID string, execution *AgentExecution, p
 
 // startInteractiveProcess launches the interactive PTY process for a passthrough session.
 // Returns the process info on success.
-func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd passthroughCommand, stripEnv []string) (*process.InteractiveProcessInfo, error) {
+func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentExecution, pt agents.PassthroughConfig, env map[string]string, cmd passthroughCommand, stripEnv []string, operation *preparedMCPOperation) (*process.InteractiveProcessInfo, error) {
 	interactiveRunner := m.passthroughRunnerForExecution(execution)
 	if interactiveRunner == nil {
 		return nil, fmt.Errorf("interactive runner not available for passthrough mode")
@@ -925,7 +954,7 @@ func (m *Manager) startInteractiveProcess(ctx context.Context, execution *AgentE
 	startReq := buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, stripEnv, true)
 	startReq.InitialPromptChunks = passthroughInitialPromptChunks(execution, pt)
 
-	processInfo, err := m.startSandboxInteractive(ctx, execution, interactiveRunner, startReq)
+	processInfo, err := m.startPassthroughWithMCP(ctx, execution, interactiveRunner, startReq, operation)
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to start passthrough session: "+err.Error())
 		return nil, fmt.Errorf("failed to start passthrough session: %w", err)
@@ -948,13 +977,15 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
-	if isSSHPassthrough(execution) {
-		execution.passthroughLifecycleMu.Lock()
-		processID := execution.PassthroughProcessID
-		execution.passthroughLifecycleMu.Unlock()
-		if processID != "" && m.passthroughRunnerForExecution(execution).IsProcessReadyOrPending(processID) {
-			return nil
-		}
+	current, exists := m.executionStore.Get(execution.ID)
+	if !exists || current != execution {
+		return models.ErrExecutionRotated
+	}
+	execution.passthroughLifecycleMu.Lock()
+	processID := execution.PassthroughProcessID
+	execution.passthroughLifecycleMu.Unlock()
+	if processID != "" && m.passthroughRunnerForExecution(execution).IsProcessReadyOrPending(processID) {
+		return nil
 	}
 	progress := execution.prepareProgressRecorder
 	if progress == nil {
@@ -965,7 +996,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 			}))
 		}
 	}
-	_, pt, rt, cmd, err := m.passthroughAgentCommandWithPreparation(ctx, execution, profileInfo, progress)
+	_, pt, rt, cmd, operation, err := m.passthroughAgentCommandWithPreparation(ctx, execution, profileInfo, progress)
 	if err != nil {
 		m.publishExecutionPrepareCompleted(execution, progress, err)
 		return err
@@ -984,7 +1015,7 @@ func (m *Manager) startPassthroughSession(ctx context.Context, execution *AgentE
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
-	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv)
+	processInfo, err := m.startInteractiveProcess(ctx, execution, pt, env, cmd, rt.StripEnv, operation)
 	if err != nil {
 		return err
 	}
@@ -1085,6 +1116,7 @@ func (m *Manager) freshPassthroughCommandForResolved(ctx context.Context, execut
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, passthroughCommand{}, err
 	}
+	resolved.mcpOperation = mcpArgs.operation
 	baseCommand, err := m.openCodePassthroughCommand(ctx, resolved.agentConfig, execution.RuntimeName)
 	if err != nil {
 		return agents.PassthroughConfig{}, nil, passthroughCommand{}, err
@@ -1094,7 +1126,7 @@ func (m *Manager) freshPassthroughCommandForResolved(ctx context.Context, execut
 		Runtime:          execution.RuntimeName,
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		PermissionValues: profilePermissionValues(resolved.profile),
-		MCPArgs:          mcpArgs,
+		MCPArgs:          mcpArgs.args,
 		CLIFlagTokens:    flags,
 		BaseCommand:      baseCommand,
 	})
@@ -1118,6 +1150,7 @@ func (m *Manager) resumePassthroughCommandWithPreparation(ctx context.Context, e
 	if err != nil {
 		return passthroughCommand{}, err
 	}
+	resolved.mcpOperation = mcpArgs.operation
 	baseCommand, err := m.openCodePassthroughCommand(ctx, resolved.agentConfig, execution.RuntimeName)
 	if err != nil {
 		return passthroughCommand{}, err
@@ -1127,7 +1160,7 @@ func (m *Manager) resumePassthroughCommandWithPreparation(ctx context.Context, e
 		Model:            effectivePassthroughModel(execution, resolved.profile),
 		Resume:           useResume,
 		PermissionValues: profilePermissionValues(resolved.profile),
-		MCPArgs:          mcpArgs,
+		MCPArgs:          mcpArgs.args,
 		CLIFlagTokens:    flags,
 		BaseCommand:      baseCommand,
 	})
@@ -1209,12 +1242,17 @@ func (m *Manager) passthroughProcessMatches(execution *AgentExecution, processID
 // delayed exit recovery. expectedProcessID is set by exit recovery so an old
 // callback cannot replace a process installed by a workflow reset.
 func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expectedProcessID string) error {
-	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
-		return err
-	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	return m.resumePassthroughExecution(ctx, execution, expectedProcessID)
+}
+
+func (m *Manager) resumePassthroughExecution(ctx context.Context, execution *AgentExecution, expectedProcessID string) error {
+	sessionID := execution.SessionID
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
+		return err
 	}
 
 	execution.remoteInstanceLifecycleMu.Lock()
@@ -1223,6 +1261,13 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	defer execution.passthroughLifecycleMu.Unlock()
 	if expectedProcessID != "" && execution.PassthroughProcessID != expectedProcessID {
 		return errPassthroughProcessReplaced
+	}
+	current, exists := m.executionStore.Get(execution.ID)
+	if !exists || current != execution {
+		return models.ErrExecutionRotated
+	}
+	if m.hasLiveLocalPassthroughLocked(execution) {
+		return nil
 	}
 
 	if isSSHPassthrough(execution) {
@@ -1242,6 +1287,12 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		}
 	}
 
+	return m.launchResumedPassthroughProcess(ctx, execution)
+}
+
+// launchResumedPassthroughProcess requires both process lifecycle locks.
+func (m *Manager) launchResumedPassthroughProcess(ctx context.Context, execution *AgentExecution) error {
+	sessionID := execution.SessionID
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)
 	if err != nil {
 		return err
@@ -1252,11 +1303,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		return fmt.Errorf("interactive runner not available")
 	}
 
-	// Skip the resume flag if a previous resume already fast-failed for this
-	// execution: re-attaching `-c` / `--resume` would just reproduce the same
-	// "No conversation found to continue" exit on every WS reconnect after
-	// backend restart. Once the sticky flag is set, every subsequent launch
-	// for this execution starts fresh.
+	// A previously rejected provider resume must start fresh on reconnect.
 	useResume := !execution.passthroughResumeFailed
 	progress := m.newCursorPassthroughPreparationRecorder(execution, resolved)
 	cmd, err := m.resumePassthroughCommandWithPreparation(ctx, execution, resolved, useResume, progress)
@@ -1291,7 +1338,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
-	processInfo, err := m.startSandboxInteractive(ctx, execution, interactiveRunner, startReq)
+	processInfo, err := m.startPassthroughWithMCP(ctx, execution, interactiveRunner, startReq, resolved.mcpOperation)
 	if err != nil {
 		return fmt.Errorf("failed to start passthrough session: %w", err)
 	}
@@ -1312,22 +1359,7 @@ func (m *Manager) resumePassthroughSession(ctx context.Context, sessionID, expec
 		zap.String("execution_id", execution.ID),
 		zap.String("process_id", processInfo.ID))
 
-	// Start shell session for workspace shell access (right panel terminal).
-	// This needs to be done after resume since the shell process was killed on backend restart.
-	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
-
-	// Connect to workspace stream for shell/git/file features.
-	// Only connect if not already connected (process restart reuses the same agentctl).
-	client, releaseClient := execution.AcquireAgentCtlClient()
-	hasAgentStream := client != nil && client.HasAgentStream()
-	releaseClient()
-	if m.streamManager != nil && client != nil && execution.GetWorkspaceStream() == nil {
-		m.streamManager.ConnectWorkspaceStream(execution, nil)
-	}
-	// Re-open the MCP proxy stream too (drains kandev MCP tool calls).
-	if m.streamManager != nil && client != nil && !hasAgentStream {
-		m.streamManager.ConnectMCPStream(execution)
-	}
+	m.connectPassthroughServices(ctx, execution)
 
 	return nil
 }
@@ -1541,7 +1573,12 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	}
 
 	ctx := context.Background()
-	pt, rt, cmd, err := m.freshPassthroughCommand(ctx, execution)
+	resolved, err := m.resolvePassthroughAgent(ctx, execution)
+	if err != nil {
+		m.notifyFallbackInfrastructureFailure(runner, sessionID, "resolve fresh command", err)
+		return
+	}
+	pt, rt, cmd, err := m.freshPassthroughCommandForResolved(ctx, execution, resolved, nil)
 	if err != nil {
 		m.notifyFallbackInfrastructureFailure(runner, sessionID, "build fresh command", err)
 		return
@@ -1555,7 +1592,7 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 	startReq := buildInteractiveStartRequest(sessionID, execution, pt, env, cmd, rt.StripEnv, true)
 	startReq.InitialPromptChunks = passthroughInitialPromptChunks(execution, pt)
 
-	processInfo, err := m.startSandboxInteractive(ctx, execution, runner, startReq)
+	processInfo, err := m.startPassthroughWithMCP(ctx, execution, runner, startReq, resolved.mcpOperation)
 	if err != nil {
 		m.notifyFallbackInfrastructureFailure(runner, sessionID, "start fresh process", err)
 		return
@@ -1590,10 +1627,8 @@ func (m *Manager) attemptResumeFallbackForProcess(execution *AgentExecution, run
 }
 
 func (m *Manager) connectPassthroughServices(ctx context.Context, execution *AgentExecution) {
-	// Mirror ResumePassthroughSession's post-launch bootstrap so right-panel
-	// shell/git/file features come back too — without this the main terminal
-	// works but the user's shell session and workspace stream stay torn down.
-	m.startPassthroughShell(ctx, execution, "failed to start shell after passthrough resume fallback")
+	// Restore shell, workspace and MCP streams after passthrough startup or reuse.
+	m.startPassthroughShell(ctx, execution, "failed to start shell for resumed passthrough session")
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	hasAgentStream := client != nil && client.HasAgentStream()
 	releaseClient()

@@ -61,8 +61,10 @@ func (e *PermissionOperationError) PermissionCode() string { return e.Code }
 
 // AgentInfo contains information about the connected agent.
 type AgentInfo struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name                  string `json:"name"`
+	Version               string `json:"version"`
+	SupportsSessionResume bool   `json:"supports_session_resume,omitempty"`
+	SupportsSessionLoad   bool   `json:"supports_session_load,omitempty"`
 }
 
 // InitializeResponse from agentctl
@@ -120,6 +122,7 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 	if !result.Success {
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
+	c.setSessionCapabilities(result.AgentInfo)
 	return result.AgentInfo, nil
 }
 
@@ -141,54 +144,69 @@ func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedSta
 
 // NewSessionResponse from agentctl
 type NewSessionResponse struct {
-	Success    bool                       `json:"success"`
-	SessionID  string                     `json:"session_id,omitempty"`
-	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-	Error      string                     `json:"error,omitempty"`
+	Success             bool                       `json:"success"`
+	SessionID           string                     `json:"session_id,omitempty"`
+	ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+	AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+	Error               string                     `json:"error,omitempty"`
 }
 
 // createSessionRequest sends a session creation request and parses the response.
 // Used by both NewSession and ResetSession which share the same payload/response format.
-func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (string, error) {
+func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (NewSessionResponse, error) {
 	payload := struct {
-		Cwd        string            `json:"cwd"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{Cwd: cwd, McpServers: mcpServers}
+		Cwd           string                       `json:"cwd"`
+		McpServers    []types.McpServer            `json:"mcp_servers,omitempty"`
+		MCPResolution []streams.MCPResolutionEntry `json:"mcp_resolution,omitempty"`
+	}{Cwd: cwd, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
 	if err != nil {
-		return "", fmt.Errorf("%s request failed: %w", action, err)
+		return NewSessionResponse{}, fmt.Errorf("%s request failed: %w", action, err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return "", fmt.Errorf("%s failed: unable to parse error", action)
+			return NewSessionResponse{}, fmt.Errorf("%s failed: unable to parse error", action)
 		}
-		return "", fmt.Errorf("%s failed: %s", action, errPayload.Message)
+		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, errPayload.Message)
 	}
 
 	var result NewSessionResponse
 	if err := resp.ParsePayload(&result); err != nil {
-		return "", fmt.Errorf("failed to parse %s response: %w", action, err)
+		return NewSessionResponse{}, fmt.Errorf("failed to parse %s response: %w", action, err)
 	}
 	if !result.Success {
-		return "", fmt.Errorf("%s failed: %s", action, result.Error)
+		return NewSessionResponse{}, fmt.Errorf("%s failed: %s", action, result.Error)
 	}
 	c.setLastSessionModelState(result.ModelState)
-	return result.SessionID, nil
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result, nil
 }
 
 // NewSession creates a new ACP session via the agent WebSocket stream.
 func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers)
+	result, err := c.NewSessionWithResult(ctx, cwd, mcpServers)
+	return result.SessionID, err
 }
 
 // ResetSession creates a new session on the same connection, resetting context without
 // restarting the subprocess. Returns the new session ID or an error if not supported.
 func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers)
+	result, err := c.ResetSessionWithResult(ctx, cwd, mcpServers)
+	return result.SessionID, err
+}
+
+// NewSessionWithResult returns the identity from this exact request.
+func (c *Client) NewSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
+	return c.createSessionRequest(ctx, "agent.session.new", cwd, servers)
+}
+
+// ResetSessionWithResult returns the identity from this exact reset.
+func (c *Client) ResetSessionWithResult(ctx context.Context, cwd string, servers []types.McpServer) (NewSessionResponse, error) {
+	return c.createSessionRequest(ctx, "agent.session.reset", cwd, servers)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
@@ -206,14 +224,20 @@ func (c *Client) LoadSessionWithPolicy(
 	mcpServers []types.McpServer,
 	policy streams.SessionSettingsPolicy,
 ) error {
+	_, err := c.LoadSessionWithResult(ctx, sessionID, mcpServers, policy)
+	return err
+}
+
+func (c *Client) LoadSessionWithResult(ctx context.Context, sessionID string, mcpServers []types.McpServer, policy streams.SessionSettingsPolicy) (string, error) {
 	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
-		return fmt.Errorf("unsupported session settings policy %q", policy)
+		return "", fmt.Errorf("unsupported session settings policy %q", policy)
 	}
 	payload := struct {
 		SessionID             string                        `json:"session_id"`
 		McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+		MCPResolution         []streams.MCPResolutionEntry  `json:"mcp_resolution,omitempty"`
 		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
-	}{SessionID: sessionID, McpServers: mcpServers}
+	}{SessionID: sessionID, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
 	if policy != streams.SessionSettingsPolicyStrict {
 		payload.SessionSettingsPolicy = policy
 	}
@@ -221,37 +245,84 @@ func (c *Client) LoadSessionWithPolicy(
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
 	if err != nil {
-		return fmt.Errorf("load session request failed: %w", err)
+		return "", fmt.Errorf("load session request failed: %w", err)
 	}
 
 	if resp.Type == ws.MessageTypeError {
 		var errPayload ws.ErrorPayload
 		if err := resp.ParsePayload(&errPayload); err != nil {
-			return fmt.Errorf("load session failed: unable to parse error")
+			return "", fmt.Errorf("load session failed: unable to parse error")
 		}
 		if errPayload.Code == "SESSION_RESTORE_REQUIRED" || errPayload.Code == "SESSION_RESTORE_BLOCKED" {
-			return &SessionRestoreOperationError{
+			return "", &SessionRestoreOperationError{
 				Code:    errPayload.Code,
 				Message: errPayload.Message,
 				Details: errPayload.Details,
 			}
 		}
-		return fmt.Errorf("load session failed: %s", errPayload.Message)
+		return "", fmt.Errorf("load session failed: %s", errPayload.Message)
 	}
 
 	var result struct {
-		Success    bool                       `json:"success"`
-		ModelState *streams.SessionModelState `json:"model_state,omitempty"`
-		Error      string                     `json:"error,omitempty"`
+		Success             bool                       `json:"success"`
+		ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+		AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+		Error               string                     `json:"error,omitempty"`
 	}
 	if err := resp.ParsePayload(&result); err != nil {
-		return fmt.Errorf("failed to parse load session response: %w", err)
+		return "", fmt.Errorf("failed to parse load session response: %w", err)
 	}
 	if !result.Success {
-		return fmt.Errorf("load session failed: %s", result.Error)
+		return "", fmt.Errorf("load session failed: %s", result.Error)
 	}
 	c.setLastSessionModelState(result.ModelState)
-	return nil
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result.AttachmentAttemptID, nil
+}
+
+// ResumeSession reconnects an existing ACP session without replaying its
+// transcript. The agentctl server only permits this when ACP initialize
+// advertised sessionCapabilities.resume.
+func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []types.McpServer) error {
+	_, err := c.ResumeSessionWithResult(ctx, sessionID, cwd, mcpServers)
+	return err
+}
+
+func (c *Client) ResumeSessionWithResult(ctx context.Context, sessionID, cwd string, mcpServers []types.McpServer) (string, error) {
+	payload := struct {
+		SessionID     string                       `json:"session_id"`
+		Cwd           string                       `json:"cwd"`
+		McpServers    []types.McpServer            `json:"mcp_servers,omitempty"`
+		MCPResolution []streams.MCPResolutionEntry `json:"mcp_resolution,omitempty"`
+	}{SessionID: sessionID, Cwd: cwd, McpServers: mcpServers, MCPResolution: streams.MCPResolutionFromContext(ctx)}
+
+	c.setLastSessionModelState(nil)
+	resp, err := c.sendStreamRequest(ctx, "agent.session.resume", payload)
+	if err != nil {
+		return "", fmt.Errorf("resume session request failed: %w", err)
+	}
+	if resp.Type == ws.MessageTypeError {
+		var errPayload ws.ErrorPayload
+		if err := resp.ParsePayload(&errPayload); err != nil {
+			return "", fmt.Errorf("resume session failed: unable to parse error")
+		}
+		return "", fmt.Errorf("resume session failed: %s", errPayload.Message)
+	}
+	var result struct {
+		Success             bool                       `json:"success"`
+		ModelState          *streams.SessionModelState `json:"model_state,omitempty"`
+		AttachmentAttemptID string                     `json:"attachment_attempt_id,omitempty"`
+		Error               string                     `json:"error,omitempty"`
+	}
+	if err := resp.ParsePayload(&result); err != nil {
+		return "", fmt.Errorf("failed to parse resume session response: %w", err)
+	}
+	if !result.Success {
+		return "", fmt.Errorf("resume session failed: %s", result.Error)
+	}
+	c.setLastSessionModelState(result.ModelState)
+	c.setLastAttachmentAttemptID(result.AttachmentAttemptID)
+	return result.AttachmentAttemptID, nil
 }
 
 // ForkSession asks the current provider session to fork through a completed

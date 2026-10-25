@@ -96,7 +96,7 @@ func (m *Manager) captureRemoteDeliveryEvidence(
 		instance.DeliveryStatus = status
 		return nil
 	}
-	if !journal.SupportsDeliveryVersion(status.Version) || status.Reason != "storage_not_durable" {
+	if !journal.SupportsDeliveryVersion(status.Version) || status.Reason != durableDeliveryStorageNotDurable {
 		return fmt.Errorf("remote retained delivery is unavailable: %s", status.Reason)
 	}
 	return m.acceptLegacyRemoteDelivery(ctx, instance, association)

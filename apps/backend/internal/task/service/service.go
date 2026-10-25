@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
@@ -45,6 +46,12 @@ type CanvasCleanup interface {
 // for isolated task-service users.
 type WorkspaceSecretDeleter interface {
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+// MCPSelectionWriter persists task-scope MCP additions after the task row has
+// been created and validated by the task service.
+type MCPSelectionWriter interface {
+	Replace(context.Context, mcpconfig.SelectionScope, string, string, []string) error
 }
 
 type transactionalWorkspaceCascade interface {
@@ -596,6 +603,7 @@ type Service struct {
 	comparisonTargetPusher         AgentComparisonTargetPusher
 	backgroundWorkActionDispatcher BackgroundWorkActionDispatcher
 	runtimeOverridesMu             sync.Mutex
+	mcpSelectionWriter             MCPSelectionWriter
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -807,6 +815,12 @@ func (s *Service) SetAutoArchiveCoordinator(coordinator AutoArchiveCoordinator) 
 // when deleting a workflow.
 func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArchiveCoordinator) {
 	s.workflowTaskArchiveCoordinator = coordinator
+}
+
+// SetMCPSelectionWriter wires task-scope MCP persistence. It is optional so
+// focused task-service users can keep the existing task contract.
+func (s *Service) SetMCPSelectionWriter(writer MCPSelectionWriter) {
+	s.mcpSelectionWriter = writer
 }
 
 // NewService creates a new task service

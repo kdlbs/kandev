@@ -17,7 +17,7 @@ func (h *Handlers) httpPreviewSavedProfileCommand(c *gin.Context) {
 		} else if errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			status = http.StatusBadRequest
 		}
-		c.JSON(status, gin.H{"error": "profile command preview unavailable"})
+		c.JSON(status, gin.H{errorResponseKey: "profile command preview unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, preview)

@@ -65,8 +65,8 @@ func (r executionSnapshotRecorder) publish(ctx context.Context, captured *models
 		return err
 	}
 	payload := map[string]any{
-		"task_id": captured.TaskID, "session_id": captured.SessionID,
-		"workspace_id": task.WorkspaceID, "queue_incarnation_id": session.QueueIncarnationID,
+		taskIDPayloadKey: captured.TaskID, sessionIDPayloadKey: captured.SessionID,
+		workspaceIDPayloadKey: task.WorkspaceID, queueIncarnationPayloadKey: session.QueueIncarnationID,
 		"execution_snapshot": captured, "execution_observation": session.ExecutionObservation,
 	}
 	return r.eventBus.Publish(ctx, events.TaskSessionExecutionChanged,

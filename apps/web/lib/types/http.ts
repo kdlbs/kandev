@@ -23,6 +23,7 @@ import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 import type { ExecutionSnapshot } from "./execution";
 
 export type { TaskStatusSummary } from "./task-status-summary";
+export type * from "./http-mcp";
 
 export type { ExecutorProvider, ExecutorProviderCapabilities, ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";

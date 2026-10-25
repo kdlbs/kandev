@@ -34,6 +34,12 @@ or rewrite the preserved checkout.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.8:** Unauthorized and unrelated-task callers shall receive no repository path, worktree path, branch, or cross-workspace existence information.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9:** A same-idempotency-key retry after a committed repair shall return the stored receipt, including from a fresh or additional-session launch that reaches the same repair path automatically.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.10:** The stored receipt shall carry non-secret evidence captured both before the repair and after the repair transaction commits, so that a divergence between the two is itself an auditable result. Every borrower shall honor the environment owner’s receipt before launching.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.11:** After a repair completes with matching before-and-after evidence, a later branch rename or switch shall not alone prevent Resume or additional-session launch. The same owned checkout and repository slot must remain provable. The currently recorded branch must match the checkout even when it still names the repair-time branch. Completed-repair admission shall prove checkout identity without scanning file content or the staged index. Later commits and local file changes shall remain intact. Original repair evidence shall remain unchanged. This behavior shall also apply to completed repairs recorded before an upgrade.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.12:** Later branch changes shall not make an incomplete, negative, or internally inconsistent repair result usable. Every required repository slot shall pass admission independently. A safe changed-branch slot shall not conceal another slot with uncertain ownership or incomplete repair. Workspace admission shall neither resolve an uncertain prompt outcome nor resend the interrupted prompt.
+
+The branch-continuity extension is tracked in the
+[attested branch continuity package](../../../plans/attested-worktree-branch-continuity/plan.md).
+Its work order records implementation and validation status.
 
 ## Migrated source detail
 

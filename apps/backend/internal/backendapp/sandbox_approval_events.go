@@ -59,7 +59,7 @@ func (n sandboxApprovalNotifier) publish(ctx context.Context, orgID, attemptID s
 	if workspace.OrgID != orgID {
 		return sandbox.ErrAuthority
 	}
-	payload := map[string]any{"task_id": task.ID, "session_id": session.ID, "workspace_id": task.WorkspaceID, "queue_incarnation_id": session.QueueIncarnationID}
+	payload := map[string]any{taskIDPayloadKey: task.ID, sessionIDPayloadKey: session.ID, workspaceIDPayloadKey: task.WorkspaceID, queueIncarnationPayloadKey: session.QueueIncarnationID}
 	return n.eventBus.Publish(ctx, events.TaskSessionSandboxApprovalsChanged,
 		bus.NewEvent(events.TaskSessionSandboxApprovalsChanged, "sandbox", payload))
 }

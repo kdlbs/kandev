@@ -9,6 +9,7 @@ import (
 )
 
 const managedMCPHTTPTransport = "http"
+const managedMCPSSETransport = "sse"
 
 // MCPServersForSession constrains managed conversations to the local Kandev
 // broker. Caller-supplied MCP servers are never forwarded for these turns.
@@ -68,6 +69,8 @@ func (m *Manager) adapterMCPServers() ([]adapter.McpServerConfig, error) {
 			servers[i] = adapter.McpServerConfig{
 				Name: server.Name, URL: server.URL, Type: server.Type, Command: server.Command,
 				Args: server.Args, Env: server.Env, Headers: server.Headers,
+				DefinitionID: server.DefinitionID, DefinitionRevision: server.DefinitionRevision,
+				Origins: append([]types.McpServerOrigin(nil), server.Origins...),
 			}
 		}
 		return servers, nil

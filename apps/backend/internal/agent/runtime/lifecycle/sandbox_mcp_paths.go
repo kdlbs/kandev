@@ -21,6 +21,7 @@ func sandboxMCPPaths(execution *AgentExecution) mcpconfig.PassthroughPaths {
 	return paths
 }
 
+//nolint:unused // referenced by the linux-only sandbox MCP file writer
 func sandboxMCPFileRoot(execution *AgentExecution, path string) (string, string) {
 	execution.sandboxMu.Lock()
 	defer execution.sandboxMu.Unlock()

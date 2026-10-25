@@ -55,7 +55,7 @@ func TestSSHPassthroughResetReplacesChangedWorkspaceMCP(t *testing.T) {
 			mgr.mcpProvider = &fakeMcpConfigProvider{config: profile}
 			_, _, _, cmd, err := mgr.passthroughAgentCommand(context.Background(), execution, nil)
 			require.NoError(t, err)
-			info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, cmd, nil)
+			info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, cmd, nil, nil)
 			require.NoError(t, err)
 			execution.PassthroughProcessID = info.ID
 			execution.Status = v1.AgentStatusReady
@@ -124,7 +124,7 @@ func TestSSHPassthroughResetPreflightPreservesLiveMCP(t *testing.T) {
 				Generation: 1, Files: []passthroughconfig.File{file},
 			}))
 			release()
-			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 			require.NoError(t, err)
 			execution.PassthroughProcessID = info.ID
 			execution.PassthroughStartedAt = info.StartedAt

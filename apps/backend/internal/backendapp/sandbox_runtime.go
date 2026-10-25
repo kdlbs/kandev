@@ -83,7 +83,7 @@ func (f sandboxRuntimeFactory) validateExecutor(ctx context.Context, id string) 
 
 func (f sandboxRuntimeFactory) protectedPorts(transport *runtime.AgentCtlClient) ([]uint16, error) {
 	endpoint, err := url.Parse(transport.BaseURL())
-	if err != nil || endpoint.Scheme != "http" || endpoint.User != nil {
+	if err != nil || endpoint.Scheme != httpScheme || endpoint.User != nil {
 		return nil, policy.ErrIneligible
 	}
 	host := endpoint.Hostname()
@@ -141,3 +141,5 @@ func sandboxRestartScopeMatches(execution *runtime.AgentExecution, previous *pol
 	selection, snapshot := execution.SandboxSelection, previous.Snapshot
 	return snapshot.TaskID == selection.TaskID && snapshot.WorkspaceID == selection.WorkspaceID && snapshot.AgentProfileID == selection.AgentProfileID && snapshot.Resolved.ExecutorID == selection.ExecutorID && snapshot.WorkDir == execution.WorkspacePath
 }
+
+const httpScheme = "http"

@@ -212,11 +212,9 @@ func TestAutomaticScheduler_CancellationDiscardsDeferredWatcher(t *testing.T) {
 }
 
 func TestAutomaticScheduler_CloseDiscardsDeferredJobRequeuedBeforeShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s := newAutomaticScheduler(ctx, 1, func(context.Context, automaticJob) automaticJobResult {
-		return automaticJobResult{}
-	}, func() {})
+	// Keep the owned job queued so close, rather than worker completion, owns disposal.
+	s := &automaticScheduler{}
+	s.cond = sync.NewCond(&s.mu)
 
 	var discarded atomic.Int32
 	if !s.enqueueOwned(queuedAutomaticJob{

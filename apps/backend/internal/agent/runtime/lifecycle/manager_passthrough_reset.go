@@ -42,12 +42,12 @@ func (m *Manager) replacePassthroughProcess(ctx context.Context, execution *Agen
 		zap.String("session_id", execution.SessionID),
 		zap.String("old_process_id", execution.PassthroughProcessID))
 
-	startReq, err := m.preparePassthroughReset(ctx, execution, interactiveRunner)
+	startReq, operation, err := m.preparePassthroughReset(ctx, execution, interactiveRunner)
 	if err != nil {
 		return "", err
 	}
 
-	processInfo, err := m.startSandboxInteractive(ctx, execution, interactiveRunner, startReq)
+	processInfo, err := m.startPassthroughWithMCP(ctx, execution, interactiveRunner, startReq, operation)
 	if err != nil {
 		m.updateExecutionError(execution.ID, "failed to restart passthrough session: "+err.Error())
 		return "", fmt.Errorf("failed to restart passthrough session: %w", err)
@@ -73,21 +73,21 @@ func (m *Manager) replacePassthroughProcess(ctx context.Context, execution *Agen
 	return processInfo.ID, nil
 }
 
-func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentExecution, runner executionPassthroughRunner) (process.InteractiveStartRequest, error) {
+func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentExecution, runner executionPassthroughRunner) (process.InteractiveStartRequest, *preparedMCPOperation, error) {
 	// Resolve profile credentials before stopping the current CLI. Remote MCP
 	// preparation follows a confirmed stop so it can retire the old file claims.
 	resolved, err := m.resolvePassthroughAgent(ctx, execution)
 	if err != nil {
-		return process.InteractiveStartRequest{}, err
+		return process.InteractiveStartRequest{}, nil, err
 	}
 	var env map[string]string
 	if isSSHPassthrough(execution) || execution.SandboxSelection != nil {
 		env, err = m.buildPassthroughEnv(ctx, execution, resolved.rt.RequiredEnv)
 		if err != nil {
-			return process.InteractiveStartRequest{}, err
+			return process.InteractiveStartRequest{}, nil, err
 		}
 		if err := m.stopPassthroughForReset(ctx, execution, runner); err != nil {
-			return process.InteractiveStartRequest{}, err
+			return process.InteractiveStartRequest{}, nil, err
 		}
 	}
 	progress := m.newCursorPassthroughPreparationRecorder(execution, resolved)
@@ -99,7 +99,7 @@ func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentE
 		if progress != nil {
 			m.publishExecutionPrepareCompleted(execution, progress, err)
 		}
-		return process.InteractiveStartRequest{}, err
+		return process.InteractiveStartRequest{}, nil, err
 	}
 	if progress != nil {
 		m.publishExecutionPrepareCompleted(execution, progress, nil)
@@ -109,13 +109,13 @@ func (m *Manager) preparePassthroughReset(ctx context.Context, execution *AgentE
 	} else {
 		env, err = m.buildPassthroughEnv(ctx, execution, rt.RequiredEnv)
 		if err != nil {
-			return process.InteractiveStartRequest{}, err
+			return process.InteractiveStartRequest{}, nil, err
 		}
 		if err := m.stopPassthroughForReset(ctx, execution, runner); err != nil {
-			return process.InteractiveStartRequest{}, err
+			return process.InteractiveStartRequest{}, nil, err
 		}
 	}
-	return buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, rt.StripEnv, true), nil
+	return buildInteractiveStartRequest(execution.SessionID, execution, pt, env, cmd, rt.StripEnv, true), resolved.mcpOperation, nil
 }
 
 func (m *Manager) stopPassthroughForReset(ctx context.Context, execution *AgentExecution, runner executionPassthroughRunner) error {

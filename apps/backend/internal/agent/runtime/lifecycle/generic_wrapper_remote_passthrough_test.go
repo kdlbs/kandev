@@ -25,7 +25,7 @@ func TestGenericWrapperRemotePassthroughRefusesBeforeStarting(t *testing.T) {
 			if wrapped {
 				cmd.wrapper = launchwrapper.Profile([]string{"required-wrapper"})
 			}
-			info, startErr := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, cmd, nil)
+			info, startErr := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, cmd, nil, nil)
 			marker := filepath.Join(root, "launch-marker")
 			if wrapped {
 				require.ErrorContains(t, startErr, "remote terminal transport does not support launch wrappers")

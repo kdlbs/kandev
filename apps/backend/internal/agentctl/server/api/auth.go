@@ -29,6 +29,9 @@ const (
 // OWNERSHIP-002.2).
 const credentialInvalidatedContextKey = "credentialInvalidated"
 
+// Only successful control authentication marks Authorization as consumed.
+// Disabled authentication and exempt routes retain application credentials.
+const controlAuthorizationConsumedContextKey = "controlAuthorizationConsumed"
 const authenticatedControlContextKey = "authenticatedControl"
 
 // afterInstanceAuthAccepted is invoked, if non-nil, immediately after
@@ -68,6 +71,7 @@ func bearerTokenAuth(expectedToken string, exemptPaths ...string) gin.HandlerFun
 			return
 		}
 
+		c.Set(controlAuthorizationConsumedContextKey, true)
 		c.Next()
 	}
 }
@@ -122,6 +126,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 				afterInstanceAuthAccepted()
 			}
 			c.Set(credentialInvalidatedContextKey, invalidated)
+			c.Set(controlAuthorizationConsumedContextKey, true)
 			c.Set(authenticatedControlContextKey, true)
 			c.Next()
 			return
@@ -131,6 +136,7 @@ func (s *Server) instanceAuth(staticToken string, exemptPaths ...string) gin.Han
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{errKey: errInvalidAuthToken})
 			return
 		}
+		c.Set(controlAuthorizationConsumedContextKey, true)
 		c.Set(authenticatedControlContextKey, true)
 		c.Next()
 	}

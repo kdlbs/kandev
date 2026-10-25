@@ -80,6 +80,14 @@ type Client struct {
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
 
+	// Session capabilities are populated by the ACP initialize response and
+	// used by idle-session MCP reconfiguration to choose resume versus load.
+	supportsSessionResume bool
+	supportsSessionLoad   bool
+
+	// lastAttachmentAttemptID is returned by session/load and session/resume
+	// after the backend starts its evidence timeline.
+	lastAttachmentAttemptID string
 	// durableDelivery records the agentctl transport capability returned during
 	// initialize. It is separate from ACP capabilities because it describes the
 	// retained agentctl-to-backend journal rather than the native harness.
@@ -125,6 +133,46 @@ func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return cloneSessionModelState(c.lastSessionModelState)
+}
+
+// SupportsSessionResume reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionResume() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionResume
+}
+
+// SupportsSessionLoad reports the capability negotiated by initialize.
+func (c *Client) SupportsSessionLoad() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.supportsSessionLoad
+}
+
+// GetLastAttachmentAttemptID returns the most recent backend-owned MCP
+// attachment attempt returned by an agentctl session operation.
+func (c *Client) GetLastAttachmentAttemptID() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastAttachmentAttemptID
+}
+
+func (c *Client) setSessionCapabilities(info *AgentInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if info == nil {
+		c.supportsSessionResume = false
+		c.supportsSessionLoad = false
+		return
+	}
+	c.supportsSessionResume = info.SupportsSessionResume
+	c.supportsSessionLoad = info.SupportsSessionLoad
+}
+
+func (c *Client) setLastAttachmentAttemptID(attemptID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastAttachmentAttemptID = attemptID
 }
 
 func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionModelState {

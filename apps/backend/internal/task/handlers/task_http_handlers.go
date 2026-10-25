@@ -1026,6 +1026,7 @@ type httpCreateTaskRequest struct {
 	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position               int                       `json:"position,omitempty"`
 	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
 	StartAgent             bool                      `json:"start_agent,omitempty"`
 	PrepareSession         bool                      `json:"prepare_session,omitempty"`
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
@@ -1262,6 +1263,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Repositories:                          convertTaskRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
 		Metadata:                              metadata,
+		MCPServerIDs:                          body.MCPServerIDs,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,

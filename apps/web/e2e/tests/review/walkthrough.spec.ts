@@ -1,3 +1,9 @@
+import {
+  exerciseWalkthroughFeedback,
+  checkFeedbackReload,
+  checkFeedbackViewport,
+} from "./walkthrough-feedback";
+import { watchWs } from "../../helpers/causal-waits";
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import { activeTaskSessionId, waitForSessionAgentctlReady } from "../../helpers/session-store";
@@ -270,7 +276,7 @@ test.describe("Code walkthrough", () => {
     await expectStep(2, "WALKTHROUGH_CHANGE_A");
     const nextNavigation = await card.getByTestId("walkthrough-navigation").boundingBox();
     if (!nextNavigation) throw new Error("walkthrough navigation missing after step change");
-    expect(Math.abs(nextNavigation.y - initialNavigation.y)).toBeLessThan(1);
+    expect(nextNavigation.y).toBeLessThan(initialNavigation.y);
     const viewport = testPage.viewportSize();
     if (viewport) {
       expect(nextNavigation.y + nextNavigation.height).toBeLessThanOrEqual(viewport.height);
@@ -358,6 +364,18 @@ test.describe("Code walkthrough", () => {
     if (!after) throw new Error("walkthrough card missing after drag");
     expect(Math.abs(after.x - before.x)).toBeGreaterThan(40);
     expect(Math.abs(after.y - before.y)).toBeGreaterThan(30);
+    await testPage.mouse.move(after.x + 100, after.y + 12);
+    await testPage.mouse.down();
+    await testPage.mouse.move(after.x + 100, testPage.viewportSize()!.height - 20, { steps: 6 });
+    await testPage.mouse.up();
+    await card.getByTestId("walkthrough-comment-trigger").click();
+    await expect
+      .poll(async () => {
+        const bounds = (await card.boundingBox())!;
+        return bounds.y + bounds.height;
+      })
+      .toBeLessThanOrEqual(testPage.viewportSize()!.height - 16);
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
   });
 
   test("step file label is shown and opens the file", async ({ testPage, apiClient, seedData }) => {
@@ -372,24 +390,21 @@ test.describe("Code walkthrough", () => {
     });
   });
 
-  test("ask box offers Add (queue) and Run (ask now)", async ({
+  test("keeps step feedback, drafts, counts, and submitted history", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
+    const ws = watchWs(testPage);
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
     const card = await openWalkthrough(testPage);
-
-    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
-    await card.getByRole("textbox").fill("Why does this line exist?");
-    await expect(card.getByRole("button", { name: "Add" })).toBeEnabled();
-    await expect(card.getByRole("button", { name: "Run" })).toBeEnabled();
+    await exerciseWalkthroughFeedback(testPage, card, ws);
+    await checkFeedbackReload(testPage, card);
+    await checkFeedbackViewport(testPage, card);
     await prCapture.screenshot("desktop-walkthrough-feedback-controls", {
-      caption: "Desktop walkthrough keeps Add and Run without an inert Cancel action",
+      caption: "Step comments and counts with an on-demand composer",
     });
-    await card.getByRole("button", { name: "Run" }).click();
-    await expect(card.getByRole("textbox")).toHaveValue("");
   });
 
   test("closing minimizes the card but keeps the launcher; reopen restores it", async ({
@@ -570,6 +585,10 @@ test.describe("Code walkthrough", () => {
         const card = await openWalkthrough(testPage);
         await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 1 / 2");
         await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_FIRST");
+        await card.getByTestId("walkthrough-comment-trigger").click();
+        await card.getByRole("textbox").fill("Feedback for the original revision");
+        await card.getByRole("button", { name: "Add", exact: true }).click();
+        await expect(card.getByTestId("walkthrough-comment")).toHaveCount(1);
 
         await apiClient.addUserMessage(
           task.id,
@@ -580,6 +599,8 @@ test.describe("Code walkthrough", () => {
         await expect(testPage.getByTestId("walkthrough-launcher")).toHaveCount(1);
         await expect(card.getByTestId("walkthrough-step-body")).toContainText("REEMIT_SECOND");
         await expect(card.getByTestId("walkthrough-step-body")).not.toContainText("REEMIT_FIRST");
+        await expect(card.getByTestId("walkthrough-comment")).toHaveCount(0);
+        await expect(card.getByTestId("walkthrough-comment-trigger")).toContainText("(0)");
         await waitForSessionState(apiClient, {
           taskId: task.id,
           sessionId: primarySession.id,

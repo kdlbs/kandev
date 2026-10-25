@@ -713,6 +713,10 @@ func (m *Manager) applySessionModeAfterReset(
 ) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
+	return m.applySessionModeAfterResetWithClient(ctx, execution, client, newSessionID, mode)
+}
+
+func (m *Manager) applySessionModeAfterResetWithClient(ctx context.Context, execution *AgentExecution, client *agentctlclient.Client, newSessionID, mode string) error {
 	if mode == "" {
 		return nil
 	}
@@ -1053,14 +1057,18 @@ func (m *Manager) restoreSessionRuntimeConfig(
 		return fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
 	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	releaseClient()
+	defer releaseClient()
+	return m.restoreSessionRuntimeConfigWithClient(ctx, execution, client, sessionID, config)
+}
+
+func (m *Manager) restoreSessionRuntimeConfigWithClient(ctx context.Context, execution *AgentExecution, client *agentctlclient.Client, sessionID string, config models.SessionRuntimeConfig) error {
 	if client == nil {
 		return fmt.Errorf("cannot restore session runtime configuration without an agentctl client")
 	}
-	if err := m.reapplySessionModelAfterReset(ctx, execution, sessionID, config.Model); err != nil {
+	if err := m.reapplySessionModelAfterResetWithClient(ctx, execution, client, sessionID, config.Model); err != nil {
 		return fmt.Errorf("restore session runtime model: %w", err)
 	}
-	if err := m.applySessionModeAfterReset(ctx, execution, sessionID, config.Mode); err != nil {
+	if err := m.applySessionModeAfterResetWithClient(ctx, execution, client, sessionID, config.Mode); err != nil {
 		return fmt.Errorf("restore session runtime mode: %w", err)
 	}
 	options := sanitizeRuntimeConfigOptionsWithCatalog(config.ConfigOptions, execution.GetModelState())
@@ -1071,12 +1079,7 @@ func (m *Manager) restoreSessionRuntimeConfig(
 	sort.Strings(optionIDs)
 	for _, id := range optionIDs {
 		value := options[id]
-		client, releaseClient := execution.AcquireAgentCtlClient()
-		if client == nil {
-			return fmt.Errorf("restore session runtime option %q: agentctl client is unavailable", id)
-		}
 		err := client.SetConfigOption(ctx, id, value)
-		releaseClient()
 		if err != nil {
 			return fmt.Errorf("restore session runtime option %q: %w", id, err)
 		}
@@ -1147,7 +1150,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return nil
 	}
 
-	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	operation, err := m.prepareExecutionMCP(ctx, execution, agentConfig)
 	if err != nil {
 		releaseClient()
 		execution.failContextReset(false, err.Error())
@@ -1160,11 +1163,18 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return nil
 	}
 
+	ctx = operation.context(ctx)
+	mcpServers := operation.servers
+
+	setup, revision, captured := capturedMCPSetup(ctx)
+
 	// Try session-level reset (only ACP adapters support this). The provider
 	// request has its own bound so an unanswered response cannot hold the
 	// execution lifecycle lock indefinitely.
+	mcpStartupGeneration := execution.startupAttemptSnapshot()
 	resetCtx, cancelReset := context.WithTimeout(ctx, resetAgentContextRequestTimeout)
-	newSessionID, err := client.ResetSession(resetCtx, execution.WorkspacePath, mcpServers)
+	resetResult, err := client.ResetSessionWithResult(resetCtx, execution.WorkspacePath, mcpServers)
+	newSessionID := resetResult.SessionID
 	resetErr := resetCtx.Err()
 	cancelReset()
 	releaseClient()
@@ -1195,6 +1205,11 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		err := errors.New("agent session reset returned an empty session ID")
 		execution.failContextReset(true, err.Error())
 		return err
+	}
+	if captured {
+		execution.withStartupAttempt(mcpStartupGeneration, func(string) {
+			m.recordAcceptedMCPSetupOperation(ctx, execution, setup, revision, resetResult.AttachmentAttemptID)
+		})
 	}
 
 	// Success — update execution state without restarting process
@@ -1263,6 +1278,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	for _, event := range execution.finishContextReset(newSessionID) {
 		m.handleAgentEventAfterContextReset(execution, event)
 	}
+	m.RequestSessionMCPReconfiguration(context.WithoutCancel(reconcileCtx), execution.SessionID)
 	return nil
 }
 
@@ -1679,8 +1695,13 @@ func (m *Manager) restartAgentProcess(
 		return fmt.Errorf("agentctl not ready after restart: %w", err)
 	}
 
+	operation, err := m.prepareExecutionMCP(ctx, execution, preparation.agentConfig)
+	if err != nil {
+		return fmt.Errorf("failed to resolve MCP config for restart: %w", err)
+	}
+
 	// 5. Reconfigure and start new agent subprocess
-	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
+	if _, err := m.configureAndStartAgentWithMCP(ctx, execution, preparation.agentConfig, operation); err != nil {
 		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
 		return fmt.Errorf("failed to restart agent: %w", err)
 	}
@@ -1698,12 +1719,7 @@ func (m *Manager) restartAgentProcess(
 			zap.Error(err))
 	}
 
-	mcpServers, err := m.resolveMcpServers(ctx, execution, preparation.agentConfig)
-	if err != nil {
-		return fmt.Errorf("failed to resolve MCP config for restart: %w", err)
-	}
-
-	if err := m.initializeACPSessionForRestart(ctx, execution, preparation.agentConfig, mcpServers); err != nil {
+	if err := m.initializeACPSessionForRestart(operation.context(ctx), execution, preparation.agentConfig, operation.servers); err != nil {
 		m.updateExecutionError(executionID, "failed to initialize ACP session after restart: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
 	}
@@ -1721,6 +1737,7 @@ func (m *Manager) restartAgentProcess(
 		return fmt.Errorf("failed to mark restarted agent ready: %w", err)
 	}
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
+	m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), execution.SessionID)
 
 	m.logger.Info("agent process restarted with fresh context",
 		zap.String("execution_id", executionID),
@@ -1831,6 +1848,8 @@ func (m *Manager) initializeACPSessionForRestart(
 	agentConfig agents.Agent,
 	mcpServers []agentctltypes.McpServer,
 ) error {
+	setup, revision, captured := capturedMCPSetup(ctx)
+	mcpStartupGeneration := execution.startupAttemptSnapshot()
 	// Connect WebSocket streams
 	if m.streamManager != nil {
 		updatesReady := make(chan struct{})
@@ -1846,8 +1865,8 @@ func (m *Manager) initializeACPSessionForRestart(
 
 	// Initialize ACP session (always session/new since ACPSessionID was cleared)
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
 	if client == nil {
+		releaseClient()
 		return fmt.Errorf("agentctl client is unavailable")
 	}
 	result, err := m.sessionManager.InitializeSession(
@@ -1859,11 +1878,17 @@ func (m *Manager) initializeACPSessionForRestart(
 		execution.WorkspacePath,
 		mcpServers,
 	)
+	releaseClient()
 	if err != nil {
 		return fmt.Errorf("ACP session initialization failed: %w", err)
 	}
 
 	execution.ACPSessionID = result.SessionID
+	if captured {
+		execution.withStartupAttempt(mcpStartupGeneration, func(string) {
+			m.recordAcceptedMCPSetupOperation(ctx, execution, setup, revision, result.AttachmentAttemptID)
+		})
+	}
 
 	if m.sessionManager.eventPublisher != nil {
 		m.sessionManager.eventPublisher.PublishACPSessionCreatedWithAttempt(
@@ -2596,6 +2621,9 @@ func (m *Manager) markReadyEventForExecution(
 		go m.eventPublisher.publishAgentEventPayload(context.Background(), eventType, payload)
 	} else {
 		m.eventPublisher.publishAgentEventPayload(ctx, eventType, payload)
+	}
+	if eventType == events.AgentReady || eventType == events.AgentBootReady {
+		m.RequestSessionMCPReconfiguration(context.WithoutCancel(ctx), updated.SessionID)
 	}
 	return nil
 }

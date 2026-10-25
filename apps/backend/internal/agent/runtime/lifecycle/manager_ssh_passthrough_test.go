@@ -85,7 +85,7 @@ func sshPassthroughTestControllerWithHandler(t *testing.T, execution *AgentExecu
 func TestSSHPassthroughBootstrapUsesRemoteMCP(t *testing.T) {
 	mgr, execution, profile := newClaudePassthroughMCPTestManager(t)
 	_, remoteRoot := sshPassthroughTestController(t, execution)
-	_, _, _, cmd, err := mgr.passthroughAgentCommandWithPreparation(context.Background(), execution, profile, nil)
+	_, _, _, cmd, _, err := mgr.passthroughAgentCommandWithPreparation(context.Background(), execution, profile, nil)
 	require.NoError(t, err)
 	var configPath string
 	for index, arg := range cmd.Args() {
@@ -111,7 +111,7 @@ func TestSSHPassthroughNeverStartsHostCLI(t *testing.T) {
 			if matchingHostPath {
 				require.NoError(t, os.MkdirAll(execution.WorkspacePath, 0o700))
 			}
-			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf remote > remote-marker; cat")}, nil)
+			info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf remote > remote-marker; cat")}, nil, nil)
 			if info != nil {
 				t.Cleanup(func() {
 					if _, exists := hostRunner.Get(info.ID, false); exists {
@@ -131,7 +131,7 @@ func TestSSHPassthroughRecoveryUsesPTYEvidence(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
 	execution.setMetadataValue(MetadataKeySSHAgentctlInstanceID, execution.ID)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	instance := &ExecutorInstance{InstanceID: execution.ID, TaskID: execution.TaskID, SessionID: execution.SessionID, RuntimeName: agentruntime.RuntimeSSH, Client: execution.agentctl, Metadata: execution.MetadataSnapshot()}
 	entry := &remoteRecoveryRetry{record: &models.ExecutorRunning{TaskID: execution.TaskID, SessionID: execution.SessionID, AgentExecutionID: execution.ID, Runtime: agentruntime.RuntimeSSH}, snapshot: &RemoteRecoverySnapshot{IsPassthrough: true}}
@@ -155,7 +155,7 @@ func TestSSHPassthroughEnvironmentUsesSSHPolicy(t *testing.T) {
 func TestSSHPassthroughUnknownControllerDoesNotClearOwnership(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	sshPassthroughTestController(t, execution)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	execution.agentctl = agentctl.NewClient("127.0.0.1", 1, newTestRegistryLogger())
@@ -178,7 +178,7 @@ func TestSSHPassthroughRecoversLostStartResponse(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	})
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err, "inspect the start operation before admitting another CLI")
 	require.Equal(t, controller.Passthrough().Snapshot().ProcessID, info.ID)
 }
@@ -198,7 +198,7 @@ func TestSSHPassthroughRecoversLostInputResponse(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	})
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "while IFS= read -r line; do printf '%s\\n' \"$line\" >> accepted; done")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "while IFS= read -r line; do printf '%s\\n' \"$line\" >> accepted; done")}, nil, nil)
 	require.NoError(t, err)
 	runner := mgr.passthroughRunnerForExecution(execution)
 	require.NoError(t, runner.WriteStdin(info.ID, "once\r"), "inspect the remote receipt without writing the input again")
@@ -221,7 +221,7 @@ func TestSSHPassthroughUncertainInitialPromptKeepsCompletionBarrier(t *testing.T
 	})
 	execution.setMetadataValue("task_description", "initial-one")
 	pt := agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; cat")}, nil, nil)
 	require.NoError(t, err)
 	data, err := json.Marshal(remotePassthroughRecordFor(execution))
 	require.NoError(t, err)
@@ -276,7 +276,7 @@ func TestSSHPassthroughFailedResetPreservesPriorProcessState(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	})
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	execution.PassthroughStartedAt = info.StartedAt
@@ -292,7 +292,7 @@ func TestSSHPassthroughFailedResetPreservesPriorProcessState(t *testing.T) {
 func TestSSHPassthroughPersistsAcceptedEventCursor(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	require.NoError(t, mgr.passthroughRunnerForExecution(execution).WriteStdin(info.ID, "cursor-private-data\r"))
@@ -336,7 +336,7 @@ func TestSSHPassthroughResumeReconcilesWrittenInitialPrompt(t *testing.T) {
 	t.Cleanup(func() { _ = mgr.Stop() })
 	execution.setMetadataValue("task_description", "initial-once")
 	pt := agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; while IFS= read -r line; do printf '%s\n' \"$line\" >> accepted; done")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; while IFS= read -r line; do printf '%s\n' \"$line\" >> accepted; done")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	execution.passthroughInitialPromptProcessID = info.ID
@@ -354,7 +354,7 @@ func TestSSHPassthroughResumeReconcilesWrittenInitialPrompt(t *testing.T) {
 func TestSSHMockPassthroughProvidesRemoteMCPConfig(t *testing.T) {
 	mgr, execution, profile := newPassthroughMCPTestManager(t, "mock-agent")
 	_, root := sshPassthroughTestController(t, execution)
-	_, _, _, command, err := mgr.passthroughAgentCommandWithPreparation(context.Background(), execution, profile, nil)
+	_, _, _, command, _, err := mgr.passthroughAgentCommandWithPreparation(context.Background(), execution, profile, nil)
 	require.NoError(t, err)
 	var configPath string
 	for index, arg := range command.Args() {
@@ -372,7 +372,7 @@ func TestSSHMockPassthroughProvidesRemoteMCPConfig(t *testing.T) {
 func TestSSHPassthroughMissingCLIHasActionableFailure(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	sshPassthroughTestController(t, execution)
-	_, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/missing-cli-private-value")}, nil)
+	_, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("/missing-cli-private-value")}, nil, nil)
 	require.Error(t, err)
 	failure := bootstrapFailureFor(execution, err)
 	require.Contains(t, failure.SafeDetail(), "installed and executable")
@@ -382,7 +382,7 @@ func TestSSHPassthroughMissingCLIHasActionableFailure(t *testing.T) {
 func TestSSHPassthroughReplayGapRequiresAuthenticatedSnapshot(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}, nil, passthroughCommand{Command: agents.NewCommand("/bin/sh", "-c", "printf ready; cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	snapshot := controller.Passthrough().Snapshot()
@@ -473,7 +473,7 @@ func TestSSHPassthroughFallbackPersistsInitialPromptBeforeStart(t *testing.T) {
 	}))
 	mgr.profileResolver = &mockPassthroughProfileResolver{agentName: agentID, cliPassthrough: true}
 	execution.AgentID = agentID
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	_, _, detach, err := controller.Passthrough().SubscribeTerminal(controller.Passthrough().Snapshot().PassthroughTarget)
@@ -506,7 +506,7 @@ func TestSSHPassthroughStaleCleanupDoesNotReenterClientLease(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
 	mgr.executorRegistry.Register(&MockExecutor{name: executor.NameSSH})
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	require.NoError(t, mgr.cleanupStaleExecution(context.Background(), execution))
@@ -520,7 +520,7 @@ func TestSSHPassthroughDelayedStartupIdleCannotCompleteInitialTurn(t *testing.T)
 	controller, _ := sshPassthroughTestController(t, execution)
 	execution.setMetadataValue("task_description", "initial work")
 	pt := agents.PassthroughConfig{IdleTimeout: 20 * time.Millisecond}
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "printf ready; cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, pt, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "printf ready; cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	execution.passthroughInitialPromptProcessID = info.ID
@@ -566,7 +566,7 @@ func TestSSHPassthroughObserverReleasesTargetWhenClientIsAbsent(t *testing.T) {
 func TestSSHPassthroughReplayGapProjectsVerifiedExit(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	controller, _ := sshPassthroughTestController(t, execution)
-	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil)
+	info, err := mgr.startInteractiveProcess(context.Background(), execution, agents.PassthroughConfig{}, nil, passthroughCommand{Command: agents.NewCommand("sh", "-c", "cat")}, nil, nil)
 	require.NoError(t, err)
 	execution.PassthroughProcessID = info.ID
 	source := controller.Passthrough().Snapshot()

@@ -33,6 +33,7 @@ import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
 import { TaskCreateAdvancedSettings } from "@/components/task-create-dialog-advanced-settings";
 import { SandboxSelectionForm } from "@/components/settings/sandbox-selection-settings";
 import { TaskEditDialogDependencies } from "@/components/task-edit-dialog-dependencies";
+import { MCPSessionSelector } from "@/components/task/mcp-session-selector";
 import type {
   DialogFormBodyProps,
   TaskCreateDialogProps,
@@ -191,6 +192,18 @@ function SessionModeBody(props: DialogFormBodyProps) {
         AgentSelectorComponent={AgentSelector}
         ExecutorProfileSelectorComponent={ExecutorProfileSelector}
       />
+      <MCPSessionSelector
+        workspaceId={props.workspaceId}
+        definitions={props.mcpDefinitions}
+        definitionsLoading={props.mcpDefinitionsLoading}
+        selectedIds={props.fs.mcpServerIds}
+        onSelectedIdsChange={(ids) => {
+          props.fs.setMcpServerIds(ids);
+          props.fs.setMcpServerIdsDirty(true);
+        }}
+        inherited={props.mcpInheritedSelections}
+        disabled={props.isCreatingSession}
+      />
     </>
   );
 }
@@ -214,6 +227,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
       />
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
+        isEditMode={props.isEditMode}
         isTaskStarted={isTaskStarted}
         blockedBy={props.fs.blockedBy}
         onBlockedByChange={props.fs.setBlockedBy}
@@ -231,6 +245,14 @@ function DialogFormBody(props: DialogFormBodyProps) {
         onWorkflowAgentOverrideChange={props.onWorkflowAgentOverrideChange}
         onResetWorkflowAgentOverrides={props.onResetWorkflowAgentOverrides}
         onRetryWorkflowAgentOverrides={props.onRetryWorkflowAgentOverrides}
+        mcpDefinitions={props.mcpDefinitions}
+        mcpDefinitionsLoading={props.mcpDefinitionsLoading}
+        mcpSelectionIds={props.fs.mcpServerIds}
+        onMcpSelectionIdsChange={(ids) => {
+          props.fs.setMcpServerIds(ids);
+          props.fs.setMcpServerIdsDirty(true);
+        }}
+        mcpInheritedSelections={props.mcpInheritedSelections}
       />
       {props.isEditMode && props.editSandbox.visible && (
         <SandboxSelectionForm

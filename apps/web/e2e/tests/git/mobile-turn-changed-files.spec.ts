@@ -12,6 +12,8 @@ import {
 } from "./turn-changed-files-helpers";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("mobile historical turn changed files", () => {
   test.describe.configure({ timeout: 120_000 });
 

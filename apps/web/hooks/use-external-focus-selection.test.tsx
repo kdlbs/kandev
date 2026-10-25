@@ -45,6 +45,26 @@ it("restores selection after a focus trap selects the returning input", async ()
   ]);
 });
 
+it.each(["keydown", "beforeinput"])(
+  "restores the caret before %s when focus restoration is still pending",
+  async (type) => {
+    const input = leaveWindow();
+    fireEvent.focus(input);
+    input.select();
+
+    fireEvent(input, new Event(type, { bubbles: true }));
+
+    expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
+      2,
+      7,
+      "backward",
+    ]);
+    input.setSelectionRange(3, 3);
+    await act(async () => vi.runAllTimersAsync());
+    expect([input.selectionStart, input.selectionEnd]).toEqual([3, 3]);
+  },
+);
+
 it("lets an explicit pointer action replace the previous selection", async () => {
   const input = leaveWindow();
   fireEvent.pointerDown(input);

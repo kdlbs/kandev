@@ -468,7 +468,19 @@ test.describe("Workflow agent profile switching", () => {
 
     // User message → dispatchPromptAsync → on_turn_start → move_to_next → Step1 (profileB)
     await session.sendMessage("hello");
-    await expect(session.chat.getByText("hello")).toBeVisible({ timeout: 10_000 });
+    // The on-turn-start action can activate profileB before this assertion.
+    // Check the submitted prompt on its original session across that handoff.
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) => message.author_type === "user" && message.content === "hello",
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
 
     // Profile switch produces (or reuses) a session with profileB on this task.
     await expect

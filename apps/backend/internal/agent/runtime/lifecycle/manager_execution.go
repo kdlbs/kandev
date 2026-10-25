@@ -260,6 +260,22 @@ func (m *Manager) doCoalescedExecution(
 	key string,
 	operation func(context.Context) (interface{}, error),
 ) (interface{}, error) {
+	for {
+		value, err := m.submitExecutionOperation(ctx, key, operation)
+		if _, serialized := value.(*serializedExecutionResult); !serialized || err != nil {
+			return value, err
+		}
+	}
+}
+
+func (m *Manager) submitExecutionOperation(
+	ctx context.Context,
+	key string,
+	operation func(context.Context) (interface{}, error),
+) (interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
 		sharedCtx, cancel := m.coalescedExecutionContext(ctx)
 		defer cancel()
@@ -1160,6 +1176,8 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			WorkspaceID:                    info.WorkspaceID,
+			RepositoryIDs:                  repositoryIDsFromWorkspace(info.WorkspaceRepositories),
 			DurableJournalHostRoot:         m.dataDir,
 			DurableJournalOwnerID:          journalOwnerID,
 			DeliveryIncarnationID:          info.DeliveryIncarnationID,

@@ -98,7 +98,7 @@ test.describe("Chat prompt-mention hover", () => {
     const x = bounds.x + bounds.width / 2;
     const y = bounds.y + bounds.height / 2;
     await testPage.clock.install();
-    await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now()));
+    await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now() + 1_000));
     try {
       // Real pointer and keyboard events with the older hover callback held pending.
       await testPage.mouse.move(x, y);

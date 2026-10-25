@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-MCP-SESSION-OBSERVABILITY-001
 created: 2026-07-30
-updated: 2026-09-09
+updated: 2026-10-06
 owners:
   - Kandev
 ---
@@ -32,6 +32,7 @@ Implementation plans:
 
 - [Session MCP attachment observability](../../../plans/mcp-session-observability/plan.md)
 - [MCP server explorer](../../../plans/mcp-server-explorer/plan.md)
+- [MCP status clarity](../../../plans/mcp-status-clarity/plan.md)
 
 ## Why
 
@@ -205,6 +206,12 @@ status metadata that Kandev owns.
 The MCP toolbar icon remains one compact neutral control. The tooltip and
 explorer use status colors for individual servers.
 
+The same explorer can host task-session customization defined by the
+[agent MCP design](../../agents/system-design/workspace-mcp-configuration.md#composer-selection-ownership-and-refresh).
+A selection-application clock, next-start, or failure marker is distinct from
+server connection health. Connection evidence retains its own colors and
+authority; saving desired configuration never fabricates Active evidence.
+
 On precise-pointer desktop:
 
 - hover or keyboard focus shows the current server names and status colors.
@@ -281,6 +288,75 @@ An endpoint test reports reachability separately from attachment evidence. A
 successful test does not turn an unverified agent attachment into Active, and a
 failed test is labelled as a test failure rather than proof of what happened
 earlier inside the agent.
+
+## Plain-language status presentation
+
+AC-001.13 through AC-001.16 refine the existing evidence model without changing
+its wire statuses, persistence, authority, or per-session ownership. They use
+the existing application state supplied by the agent MCP selection controller.
+
+One shared presentation function in `mcp-explorer-view-model.ts` derives a
+localized status label and explanatory reason from an `MCPAttachmentServer`.
+The hover, server list accessible description, and server detail use it. The
+internal `filtered` value becomes the visible label `Not available`; `active`
+retains `Active` with a tools-loaded explanation; `delivered` retains `Delivered`
+with `Configuration sent. Connection not verified.` No new health claim is
+derived from catalog membership, selection, endpoint tests, or tool-call errors.
+
+Known `http_unsupported` and `sse_unsupported` codes describe the unsupported
+transport in plain language. Map existing command-resolution, executor-policy,
+and duplicate-name codes from the actual producers. Do not assume new codes or
+reuse a duplicate-transport reason as evidence of a failed server. Unknown codes
+use a localized `This server was not included in this agent's setup` fallback;
+the safe machine code can remain in optional diagnostics. Arbitrary configuration,
+credential values, or raw errors do not become explanatory copy.
+
+A reason is relevant only to the matching evidence state. In particular, a
+`kandev` row can be Active through SSE while retaining an earlier HTTP-filter
+reason in its safe projection. It must show the Active explanation, never an
+unsupported-transport warning. Existing freshness and attempt guards remain
+authoritative; this presentation change does not rewrite historical evidence.
+
+The hover groups `Saved changes` above `Current agent`. Pending copy says
+`Saved, not applied yet` and identifies idle timing only to the extent the
+current application state supports it. The header never suggests that the
+listed current rows already reflect the new saved choices. Next-start and failed
+states have their own explanation. Applied state omits the saved-change notice.
+Do not display revision counters or infer change counts from attachment rows.
+Exact actions require the Agents-owned
+[accepted comparison](../../agents/system-design/workspace-mcp-pending-changes.md).
+Without it, preserve the generic notice. Clicking the plug opens Customize when a change needs
+attention, as before; the read-only hover gains no nested interactive controls.
+
+The desktop dialog and phone drawer repeat the notice with the current-agent
+section. Keep the explorer's existing full-height phone composition, fixed
+header and view selector, one body scroll owner, safe-area padding, Back behavior,
+and 44px phone targets. Use the same presentation model on both viewports.
+The closest shipped exemplar is the existing MCP server explorer itself.
+
+Regression coverage belongs to the shared view-model and explorer tests plus
+`mcp-status.spec.ts` and `mobile-mcp-status.spec.ts`. Include mixed Active and
+Filtered evidence, pending/deferred/failed/applied selections, unknown reasons,
+long names, and an Active row with an obsolete filter reason. Fixtures may seed
+safe attachment reports for presentation tests, but those controlled reports
+must not be advertised as a live provider connection. Real sandbox scenarios
+remain API-created records and expose actual mock-agent capability limitations.
+
+AC-001.17 refines the application notice rather than adding connection health
+claims. Use a restrained icon and semantic accent: check/green for accepted
+configuration, clock/amber for saved waiting changes, next-start icon/blue for
+deferred application, and alert/red for an application failure. Primary wording
+is `Setup up to date`, `Changes saved, waiting to apply`, `Saved for the next
+agent start`, or `Changes could not be applied`. The icon and words remain
+understandable without color in either theme. Applied is a compact summary in
+Customize, not a persistent attention banner or a green claim for every server.
+
+The waiting description identifies the idle application gate without claiming
+the user is currently in an active turn. A failed description says the prior
+setup remains in use and offers the existing retry path. Next-start copy states
+that the agent keeps its current setup until that start. Do not infer readiness
+of an executable, available tools, or endpoint health from an applied revision.
+Keep any timing guarantee bounded by the existing agent application contract.
 
 ## Developer probe
 

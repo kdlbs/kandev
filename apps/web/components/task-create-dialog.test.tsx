@@ -338,6 +338,10 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "Task title",
     autopilot: false,
     setAutopilot: () => undefined,

@@ -199,7 +199,7 @@ export const SETTINGS_CRUMB_ROUTES: readonly SettingsCrumbRoute[] = [
   {
     // Tabs of the workspace page. Their own segment names them; they need the
     // row only so the workspace-name crumb appears.
-    pattern: /^\/settings\/workspaces\/([^/]+)\/(?:repositories|workflows|secrets)$/,
+    pattern: /^\/settings\/workspaces\/([^/]+)\/(?:repositories|workflows|secrets|mcp-servers)$/,
     params: ["workspaceId"],
     crumbs: [WORKSPACE_CRUMB],
     title: SEGMENT_TITLE,

@@ -178,6 +178,27 @@ function useTaskRowMoveMenu(
   };
 }
 
+function useRenameAfterMenuClose(
+  onRenameTask: ContextMenuProps["onRenameTask"],
+  onCloseAutoFocus: (event: Event) => void,
+) {
+  const pending = useRef<(() => void) | null>(null);
+  return {
+    request: onRenameTask
+      ? (taskId: string, title: string) => {
+          pending.current = () => onRenameTask(taskId, title);
+        }
+      : undefined,
+    close: (event: Event) => {
+      const rename = pending.current;
+      if (!rename) return onCloseAutoFocus(event);
+      pending.current = null;
+      event.preventDefault();
+      queueMicrotask(rename);
+    },
+  };
+}
+
 // This component coordinates the context menu and drag cancellation. Archive
 // state lives in its focused adapter so unavailable actions stay unavailable.
 export function TaskItemWithContextMenu(props: ContextMenuProps) {
@@ -203,6 +224,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
     isArchiving: menuProps.isArchiving,
     closeMenu,
   });
+  const rename = useRenameAfterMenuClose(props.onRenameTask, archive.handleMenuCloseAutoFocus);
   const changeWorkflowTriggerRef = archive.archiveAnchorRef;
   const archiveConfirmation = archive.archiveOpen ? archive.archiveConfirmation : undefined;
   const inlineArchiveConfirmation = isMobile || isFinePointer ? undefined : archiveConfirmation;
@@ -227,7 +249,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent
-          onCloseAutoFocus={archive.handleMenuCloseAutoFocus}
+          onCloseAutoFocus={rename.close}
           className="w-48"
           onInteractOutside={keepWorkflowMoveOpen}
           onMouseDown={stopMenuEvent}
@@ -237,6 +259,7 @@ export function TaskItemWithContextMenu(props: ContextMenuProps) {
         >
           <TaskContextMenuItems
             {...contextMenuProps}
+            onRenameTask={rename.request}
             nativeUnlinkEntries={nativeUnlinkEntries}
             onArchiveTask={archive.requestArchive}
             onChangeWorkflow={createChangeWorkflowOpenHandler(

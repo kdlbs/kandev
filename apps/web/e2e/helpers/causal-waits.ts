@@ -117,8 +117,9 @@ export async function waitForHttp(
  * The echoed `action` is not enough to identify *your* round trip: several
  * `task.plan.get` requests can be in flight from different components, and a
  * reply to one sent before you started waiting would satisfy an action-only
- * match. {@link WsWatcher.waitForResponse} therefore correlates by `id`,
- * which is also what makes its arm-before-you-act guarantee real.
+ * match. {@link WsWatcher.waitForResponse} therefore correlates by `id` and
+ * can filter originating request payloads when several subjects share an
+ * action.
  */
 export type WsFrame = {
   id?: string;
@@ -137,6 +138,8 @@ export type WaitForWsOptions = {
 
 export type WaitForWsResponseOptions = {
   timeout?: number;
+  /** Track only requests whose payload matches this subject. */
+  requestWhere?: (payload: Record<string, unknown>) => boolean;
   /** Ignore correlated responses until their data matches the expected change. */
   where?: (payload: unknown) => boolean;
   /** Start the response timeout after this operation completes. */
@@ -152,7 +155,8 @@ export type WsWatcher = {
   /**
    * Resolve when a WS request the client sends with this `action` *after
    * arming* gets its reply, correlated by frame `id`. Rejects if the backend
-   * answers with an `error` frame.
+   * answers with an `error` frame. `requestWhere`, when provided, filters request
+   * payloads before their IDs are tracked.
    */
   waitForResponse(action: string, options?: WaitForWsResponseOptions): Promise<WsFrame>;
 };
@@ -260,7 +264,7 @@ function waitForResponse(
   action: string,
   options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, where } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, requestWhere, where } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
@@ -270,7 +274,9 @@ function waitForResponse(
       timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
-      if (frame.action === action && frame.id) requestIds.add(frame.id);
+      if (frame.action !== action || !frame.id) return;
+      if (requestWhere && !requestWhere(frame.payload)) return;
+      requestIds.add(frame.id);
     });
     wait.listen(channels.received, (frame) => {
       if (!frame.id || !requestIds.has(frame.id)) return;

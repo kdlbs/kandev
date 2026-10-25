@@ -62,6 +62,7 @@ func TestExecutionSnapshotCoreRecorderWithoutPlugins(t *testing.T) {
 	require.Len(t, published, 1, "rejected capture must not publish")
 }
 
+//nolint:unused // referenced by the linux-only sandbox runtime test
 func verifyPreparedExecutionSnapshot(t *testing.T, tasks *taskrepo.Repository, policies *sandbox.Service, execution *lifecycle.AgentExecution, launch *contract.Launch) {
 	t.Helper()
 	require.NoError(t, tasks.CreateTaskSession(t.Context(), &models.TaskSession{ID: execution.SessionID, TaskID: execution.TaskID, State: models.TaskSessionStateStarting, ExecutorID: "local"}))

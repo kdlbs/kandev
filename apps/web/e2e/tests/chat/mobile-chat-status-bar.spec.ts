@@ -19,6 +19,7 @@ const test = base.extend({
 });
 
 test.describe.configure({ retries: 0 });
+test.use({ trace: "retain-on-failure" });
 
 let originalAutoScrollControl = true;
 test.beforeEach(async ({ apiClient }) => {

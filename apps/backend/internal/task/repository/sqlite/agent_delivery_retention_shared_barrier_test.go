@@ -681,19 +681,33 @@ func holdRetentionSharedCollectorWithOptions(t *testing.T, repo *Repository, opt
 
 func holdRetentionSharedCollectorContext(t *testing.T, ctx context.Context, repo *Repository, options models.AgentDeliveryRetentionBatchOptions, wantRetired int) (func(), <-chan error) {
 	t.Helper()
+	// Lock proofs deliberately park the transaction; the public work budget is
+	// verified separately without charging this test-controlled pause to it.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	reached, resume := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	release := func() { once.Do(func() { close(resume) }) }
 	repo.agentDeliveryRetentionFailpoint = func(point string) error {
 		if point == "before_payload" {
 			close(reached)
-			<-resume
+			select {
+			case <-resume:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 		return nil
 	}
 	done := make(chan error, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		release()
+		<-finished
+	})
 	go func() {
-		result, err := repo.RunAgentDeliveryRetentionBatch(ctx, options)
+		defer close(finished)
+		result, err := repo.runAgentDeliveryRetentionBatch(ctx, normalizeAgentDeliveryRetentionOptions(options))
 		if err == nil && result.EventRowsRetired != wantRetired {
 			err = fmt.Errorf("collector retired %d events, want %d", result.EventRowsRetired, wantRetired)
 		}

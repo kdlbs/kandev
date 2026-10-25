@@ -254,6 +254,9 @@ type SaveEditedTaskFieldsArgs = {
   updatePayload: Parameters<typeof updateTask>[1];
   trimmedDescription: string;
   runnerChanged: boolean;
+  mcpServerIds: string[];
+  mcpServerIdsDirty: boolean;
+  saveTaskMCPSelections?: (definitionIds: string[]) => Promise<unknown>;
 } & Omit<EditDependencySaveArgs, "updatedTask">;
 
 // A runner switch that already committed is never rolled back; tag a
@@ -264,16 +267,40 @@ async function saveEditedTaskFields({
   updatePayload,
   trimmedDescription,
   runnerChanged,
+  mcpServerIds,
+  mcpServerIdsDirty,
+  saveTaskMCPSelections,
   ...dependencySaveArgs
 }: SaveEditedTaskFieldsArgs) {
   try {
     const updatedTask = await updateTask(editingTask.id, updatePayload);
+    await saveMCPSelectionIfNeeded({
+      isStartedEdit: dependencySaveArgs.isStartedEdit,
+      dirty: mcpServerIdsDirty,
+      definitionIds: mcpServerIds,
+      save: saveTaskMCPSelections,
+    });
     await saveEditedTaskDependencies({ ...dependencySaveArgs, updatedTask });
     return { updatedTask, trimmedDescription };
   } catch (error) {
     if (runnerChanged) throw new TaskUpdateAfterRunnerSwitchError(error);
     throw error;
   }
+}
+
+async function saveMCPSelectionIfNeeded({
+  isStartedEdit,
+  dirty,
+  definitionIds,
+  save,
+}: {
+  isStartedEdit: boolean;
+  dirty: boolean;
+  definitionIds: string[];
+  save?: (definitionIds: string[]) => Promise<unknown>;
+}) {
+  if (isStartedEdit || !dirty || !save) return;
+  await save(definitionIds);
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -317,6 +344,8 @@ export function useTaskSubmitHandlers({
   setRemoteRepos,
   setAgentProfileId,
   setExecutorId,
+  setMcpServerIds,
+  setMcpServerIdsDirty,
   setSelectedWorkflowId,
   setFetchedSteps,
   setInitialWorkspaceLayout,
@@ -331,6 +360,9 @@ export function useTaskSubmitHandlers({
   workflowAgentOverridesBlockedReason,
   initialWorkspaceLayout,
   blockedBy,
+  mcpServerIds = [],
+  saveTaskMCPSelections,
+  mcpServerIdsDirty,
   editDependencies,
   editSandbox,
   transformDescriptionBeforeSubmit,
@@ -453,6 +485,8 @@ export function useTaskSubmitHandlers({
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
+    setMcpServerIds([]);
+    setMcpServerIdsDirty(false);
     setInitialWorkspaceLayout("repository");
     // State setters are stable; only workflowId can change
   }, [
@@ -466,6 +500,8 @@ export function useTaskSubmitHandlers({
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
+    setMcpServerIds,
+    setMcpServerIdsDirty,
     setInitialWorkspaceLayout,
   ]);
 
@@ -510,6 +546,7 @@ export function useTaskSubmitHandlers({
         prompt: trimmedDescription,
         agentProfileId,
         executorId,
+        mcpServerIds,
         attachments: toMessageAttachments(attachments),
       });
       onOpenChange(false);
@@ -525,6 +562,7 @@ export function useTaskSubmitHandlers({
         executorProfileId: executorProfileId || undefined,
         prompt: trimmedDescription,
         attachments: toMessageAttachments(attachments),
+        mcpServerIds,
       });
       const response = await launchSession(request);
       if (response.session_id) {
@@ -558,6 +596,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingSession,
     applyAgentProfileRecentUse,
+    mcpServerIds,
   ]);
 
   const performTaskUpdate = useCallback(async () => {
@@ -592,6 +631,9 @@ export function useTaskSubmitHandlers({
       updatePayload,
       trimmedDescription,
       runnerChanged,
+      mcpServerIds,
+      mcpServerIdsDirty,
+      saveTaskMCPSelections,
       editDependencies,
       editSandbox,
       isStartedEdit,
@@ -606,6 +648,9 @@ export function useTaskSubmitHandlers({
     getRepositoriesPayload,
     isStartedEdit,
     repositoriesDirty,
+    mcpServerIds,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     editDependencies,
     editSandbox,
     isEditMode,
@@ -673,6 +718,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     applyAgentProfileRecentUse,
@@ -708,6 +755,8 @@ export function useTaskSubmitHandlers({
     onSuccess,
     onOpenChange,
     refreshStaleBranchPolicies,
+    mcpServerIdsDirty,
+    saveTaskMCPSelections,
     toast,
     setIsCreatingTask,
     editDependencies,
@@ -752,6 +801,7 @@ export function useTaskSubmitHandlers({
           workflowAgentOverrides,
           initialWorkspaceLayout,
           blockedBy,
+          mcpServerIds,
         });
         submittedPayload = payload;
         return payload;
@@ -824,6 +874,7 @@ export function useTaskSubmitHandlers({
       isEditMode,
       workflowAgentOverrides,
       workflowAgentOverridesBlockedReason,
+      mcpServerIds,
     ],
   );
 
@@ -1063,6 +1114,7 @@ export function useTaskSubmitHandlers({
           workflowAgentOverrides,
           initialWorkspaceLayout,
           blockedBy,
+          mcpServerIds,
         });
         submittedPayload = p;
         return p;
@@ -1114,6 +1166,7 @@ export function useTaskSubmitHandlers({
     blockedBy,
     workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
+    mcpServerIds,
     initialWorkspaceLayout,
   ]);
 

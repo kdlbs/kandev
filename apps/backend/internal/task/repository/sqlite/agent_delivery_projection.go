@@ -52,10 +52,22 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
 		return nil, err
 	}
+	return projectCanonicalDeliveryWithRetry(ctx, func() ([]bool, error) {
+		return r.projectCanonicalDeliveryAttempt(ctx, streamID, events, effects)
+	})
+}
+
+func projectCanonicalDeliveryWithRetry(ctx context.Context, attempt func() ([]bool, error)) ([]bool, error) {
 	// The attempt releases session/stream locks before retrying task-row contention.
 	delay := 10 * time.Millisecond
 	for {
-		result, err := r.projectCanonicalDeliveryAttempt(ctx, streamID, events, effects)
+		result, err := attempt()
+		if err == nil {
+			return result, nil
+		}
+		if contextErr := ctx.Err(); contextErr != nil {
+			return result, errors.Join(err, contextErr)
+		}
 		var pgErr *pgconn.PgError
 		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
 			return result, err

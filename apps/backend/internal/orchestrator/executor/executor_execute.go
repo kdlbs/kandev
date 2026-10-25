@@ -713,8 +713,8 @@ func (e *Executor) markSessionRunningAfterProcessStart(ctx context.Context, task
 	case models.TaskSessionStateRunning:
 		return true
 	case models.TaskSessionStateStarting:
-		changed, finalState, transitionErr := e.transitionSessionState(
-			ctx, taskID, sessionID, models.TaskSessionStateRunning, "",
+		changed, finalState, transitionErr := e.transitionSessionStateWithHook(
+			ctx, taskID, sessionID, &session.State, models.TaskSessionStateRunning, "", nil,
 		)
 		if transitionErr != nil {
 			e.logger.Warn("failed to mark session running after agent start",
