@@ -11,6 +11,8 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -1076,6 +1078,28 @@ func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {
 	assert.Contains(t, entry.Content, "EXPANDED PROMPT REFERENCES")
 	assert.Contains(t, entry.Content, "### @improve-harness")
 	assert.Contains(t, entry.Content, "Review this session for durable harness improvements.")
+}
+
+func TestHandleMessageTask_GuardedCallerGetsNoPromptExpansion(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	h.SetPromptReferenceResolver(panicPromptReferenceResolver{})
+
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		WorkspaceID: sender.WorkspaceID, CallerTaskID: sender.ID, CallerSessionID: "sess-sender",
+		Surface: mcpprofile.SurfaceKanbanTask, Guarded: true,
+	})
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "Please run @secret-prompt", sender.ID))
+	resp, err := h.handleMessageTask(ctx, msg)
+	require.NoError(t, err)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "Please run @secret-prompt")
+	assert.NotContains(t, status.Entries[0].Content, "EXPANDED PROMPT REFERENCES")
 }
 
 func TestHandleMessageTask_PromptResolverError_FallsBackToOriginal(t *testing.T) {

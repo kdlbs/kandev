@@ -2610,6 +2610,9 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
+	if p.services.Sandbox != nil {
+		mcpHandlers.SetGuardSource(p.services.Sandbox)
+	}
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetPromptWriter(p.services.Prompts, func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled })

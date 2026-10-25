@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 )
 
 type guardedFixture struct {
+	guards    *fakeGuardSource
 	repo      *sqliterepo.Repository
 	h         *Handlers
 	principal mcpscope.Principal
@@ -30,6 +32,16 @@ const (
 	fxFloorOth = "task-floor-other"
 	fxSession  = "sess-caller"
 )
+
+// fakeGuardSource reports the listed tasks as guarded; err makes every lookup fail.
+type fakeGuardSource struct {
+	guarded map[string]bool
+	err     error
+}
+
+func (f *fakeGuardSource) TaskGuarded(_ context.Context, _, taskID string) (bool, error) {
+	return f.guarded[taskID], f.err
+}
 
 func newGuardedFixture(t *testing.T) *guardedFixture {
 	t.Helper()
@@ -54,9 +66,11 @@ func newGuardedFixture(t *testing.T) *guardedFixture {
 	requireSession(t, repo, fxSession, fxCaller)
 	requireSession(t, repo, "sess-floored", fxFloored)
 	requireSession(t, repo, "sess-foreign", fxForeign)
+	guards := &fakeGuardSource{guarded: map[string]bool{fxFloored: true, fxFloorOth: true}}
 	return &guardedFixture{
-		repo: repo,
-		h:    &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()},
+		guards: guards,
+		repo:   repo,
+		h:      &Handlers{taskSvc: svc, guardSource: guards, logger: testLogger(t).WithFields()},
 		principal: mcpscope.Principal{
 			WorkspaceID: wsID, CallerTaskID: fxCaller, CallerSessionID: fxSession,
 			Surface: mcpprofile.SurfaceKanbanTask, Guarded: true,
@@ -134,16 +148,50 @@ func TestGuardedGuard_UnknownAndDeniedActions(t *testing.T) {
 
 func TestGuardedGuard_ChildWriteScope(t *testing.T) {
 	f := newGuardedFixture(t)
-	allowed := []string{fxCaller, fxFloored, fxPlain, fxFloorOth}
+	allowed := []string{fxCaller, fxFloored, fxFloorOth}
 	for _, id := range allowed {
 		guarded, _ := f.call(t, f.principal, ws.ActionMCPUpdateTask, map[string]any{"task_id": id})
 		require.Nil(t, guarded, id)
 	}
-	for _, id := range []string{fxForeign, "missing"} {
+	for _, id := range []string{fxForeign, "missing", fxPlain} {
 		guarded, _ := f.call(t, f.principal, ws.ActionMCPUpdateTask, map[string]any{"task_id": id})
 		assertWSError(t, guarded, ws.ErrorCodeForbidden)
 		require.Equal(t, reasonGuardedScope, errorReason(t, guarded), id)
 	}
+}
+
+func TestGuardedGuard_UnguardedDirectChildIsRefused(t *testing.T) {
+	f := newGuardedFixture(t)
+	requireSession(t, f.repo, "sess-plain", fxPlain)
+	cases := map[string]map[string]any{
+		ws.ActionMCPMessageTask:  {"task_id": fxPlain},
+		ws.ActionMCPSpawnSession: {"task_id": fxPlain},
+		ws.ActionMCPUpdateTask:   {"task_id": fxPlain},
+		ws.ActionMCPStopTask:     {"task_id": fxPlain},
+	}
+	for action, payload := range cases {
+		guarded, replacement := f.call(t, f.principal, action, payload)
+		assertWSError(t, guarded, ws.ErrorCodeForbidden)
+		require.Equal(t, reasonGuardedScope, errorReason(t, guarded), action)
+		require.Nil(t, replacement, action)
+	}
+	guarded, _ := f.call(t, f.principal, ws.ActionMCPMessageTask, map[string]any{"session_id": "sess-plain"})
+	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+	guarded, _ = f.call(t, f.principal, ws.ActionMCPAddTaskDependency, map[string]any{"task_id": fxCaller, "depends_on_task_id": fxPlain})
+	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+}
+
+func TestGuardedGuard_ChildGuardLookupFailureIsUnavailable(t *testing.T) {
+	f := newGuardedFixture(t)
+	f.guards.err = errors.New("guard store down")
+	guarded, replacement := f.call(t, f.principal, ws.ActionMCPUpdateTask, map[string]any{"task_id": fxFloored})
+	assertWSError(t, guarded, ws.ErrorCodeUnavailable)
+	require.Equal(t, reasonLookupFailed, errorReason(t, guarded))
+	require.Nil(t, replacement)
+
+	f.h.guardSource = nil
+	guarded, _ = f.call(t, f.principal, ws.ActionMCPUpdateTask, map[string]any{"task_id": fxFloored})
+	assertWSError(t, guarded, ws.ErrorCodeUnavailable)
 }
 
 func TestGuardedGuard_SessionAndOtherReferenceFields(t *testing.T) {

@@ -343,7 +343,8 @@ func (h *Handlers) checkGuardedRefs(
 }
 
 // checkDirectChild accepts a direct child of the caller in the caller's
-// workspace. Every other task, missing or foreign, is refused alike.
+// workspace that itself holds a task guard. Every other task, missing,
+// foreign or unguarded, is refused alike.
 func (h *Handlers) checkDirectChild(
 	ctx context.Context,
 	principal mcpscope.Principal,
@@ -354,6 +355,16 @@ func (h *Handlers) checkDirectChild(
 		return refusalForLookup(err)
 	}
 	if task.WorkspaceID != principal.WorkspaceID || task.ParentID != principal.CallerTaskID {
+		return scopeRefusal()
+	}
+	if h.guardSource == nil {
+		return lookupRefusal()
+	}
+	guarded, err := h.guardSource.TaskGuarded(ctx, principal.WorkspaceID, taskID)
+	if err != nil {
+		return lookupRefusal()
+	}
+	if !guarded {
 		return scopeRefusal()
 	}
 	return nil
