@@ -361,9 +361,9 @@ a second destination for a recorded entry. Runtime continuation and source
 cleanup require separate ownership checks.
 
 Reject an obsolete entry against the current transition/entry identity before
-replacing this record. A newer entry cannot overtake an unfinished route without
-reconciliation. Keep the committed record until a newer valid entry replaces it;
-task deletion removes it and task duplication strips it. A deleted or terminal
+replacing this record. A newer accepted entry may replace an unfinished or
+committed route; this allocation gate does not reconcile the prior runtime.
+Task deletion removes the route and duplication strips it. A deleted or terminal
 recorded destination cannot satisfy reuse. The same accepted entry must not
 allocate another destination when its recorded allocation is missing, failed,
 terminal, or has uncertain ownership; it fails visibly. Only a distinct accepted
