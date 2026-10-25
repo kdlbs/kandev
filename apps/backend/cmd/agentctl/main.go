@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -197,6 +198,7 @@ func githubUtilityExitCode(err error) int {
 // run starts the agentctl server.
 // All instances are managed through the instance management API.
 func run(cfg *config.Config, log *logger.Logger) {
+	defer subproc.RemoveManagedGitHooksDir()
 	// Start the ACP debug-log janitor (no-op unless KANDEV_DEBUG_AGENT_MESSAGES
 	// is set). It periodically flushes the per-session debug writers and prunes
 	// old/oversized files so an always-on debug session can't fill the disk.

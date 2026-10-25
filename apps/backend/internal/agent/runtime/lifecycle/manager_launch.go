@@ -685,17 +685,33 @@ func gitHooksForSpecs(req *LaunchRequest, specs []RepoLaunchSpec) map[string]boo
 	if req.ExecutorType == string(models.ExecutorTypePluginRemote) {
 		return nil
 	}
-	out := make(map[string]bool, len(specs)+1)
+	// A key is on only when every repository deriving it opted in: a key
+	// shared with a repository that did not opt in stays off.
+	owners := make(map[string]int, len(specs)+1)
+	optedIn := make(map[string]int, len(specs)+1)
 	for index, spec := range specs {
-		if !spec.RunGitHooks {
-			continue
-		}
+		keys := make([]string, 0, 2)
 		if len(specs) == 1 {
-			out[""] = true
+			keys = append(keys, "")
 		}
 		if key, ok := workspaceEntryKey(req, index, spec); ok {
-			out[key] = true
+			keys = append(keys, key)
 		}
+		for _, key := range keys {
+			owners[key]++
+			if spec.RunGitHooks {
+				optedIn[key]++
+			}
+		}
+	}
+	out := make(map[string]bool, len(optedIn))
+	for key, count := range optedIn {
+		if count != owners[key] {
+			zap.L().Warn("git hooks opt-in not applied: workspace entry key is shared with a repository that did not opt in",
+				zap.String("key", key))
+			continue
+		}
+		out[key] = true
 	}
 	if len(out) == 0 {
 		return nil

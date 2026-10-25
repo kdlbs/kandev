@@ -57,6 +57,30 @@ func TestCollectGitHooks(t *testing.T) {
 			map[string]bool{"": true},
 		},
 		{
+			"two repositories deriving one key: an opted-in one does not enable the other",
+			&LaunchRequest{ExecutorType: local, Repositories: []RepoLaunchSpec{
+				{RepositoryID: "a", RepoName: "svc", BaseBranch: "main", RunGitHooks: true},
+				{RepositoryID: "b", RepoName: "svc", BaseBranch: "dev", RunGitHooks: false},
+			}},
+			nil,
+		},
+		{
+			"two repositories deriving one key, both opted in",
+			&LaunchRequest{ExecutorType: local, Repositories: []RepoLaunchSpec{
+				{RepositoryID: "a", RepoName: "svc", BaseBranch: "main", RunGitHooks: true},
+				{RepositoryID: "b", RepoName: "svc", BaseBranch: "dev", RunGitHooks: true},
+			}},
+			map[string]bool{"svc": true},
+		},
+		{
+			"shared key is off whichever repository comes first",
+			&LaunchRequest{ExecutorType: local, Repositories: []RepoLaunchSpec{
+				{RepositoryID: "b", RepoName: "svc", BaseBranch: "dev", RunGitHooks: false},
+				{RepositoryID: "a", RepoName: "svc", BaseBranch: "main", RunGitHooks: true},
+			}},
+			nil,
+		},
+		{
 			"plugin remote carries no map",
 			&LaunchRequest{ExecutorType: string(models.ExecutorTypePluginRemote), Repositories: []RepoLaunchSpec{
 				hooksSpec("front", "main", true),

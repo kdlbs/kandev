@@ -32,7 +32,7 @@ test.describe("Repository Run Git hooks", () => {
     }
   });
 
-  test("a failed save keeps the opt-in unsaved and does not persist it", async ({
+  test("a failed save shows the stored value and keeps other unsaved edits", async ({
     testPage,
     apiClient,
     seedData,
@@ -40,6 +40,8 @@ test.describe("Repository Run Git hooks", () => {
     try {
       const toggle = await openRepositoryCard(testPage, seedData.workspaceId);
       const stopFailing = await failRepositoryUpdates(testPage);
+      const setup = testPage.getByPlaceholder(/#!\/bin\/bash/).first();
+      await setup.fill("echo unsaved-edit");
       await toggle.click();
       await expect(toggle).toHaveAttribute("aria-checked", "true");
       await saveButton(testPage).click();
@@ -47,10 +49,12 @@ test.describe("Repository Run Git hooks", () => {
         "data-status",
         "error",
       );
-      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      await expect(setup).toHaveValue("echo unsaved-edit");
       expect((await apiClient.getRepository(seedData.repositoryId)).run_git_hooks).toBe(false);
 
       await stopFailing();
+      await toggle.click();
       await saveSettings(testPage);
       expect((await apiClient.getRepository(seedData.repositoryId)).run_git_hooks).toBe(true);
     } finally {

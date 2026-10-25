@@ -31,6 +31,7 @@ const (
 	propertySmudge  = "smudge"
 	propertyProcess = "process"
 	toolGitCrypt    = "git-crypt"
+	filterNameLFS   = "lfs"
 )
 
 // ManagedGitPolicyCapability is advertised by agentctl builds that apply the
@@ -62,7 +63,7 @@ const (
 var filterFreeSubcommands = setOf(
 	"rev-parse", "config", "symbolic-ref", "for-each-ref", "rev-list", "merge-base", "show-ref",
 	"ls-remote", "remote", "branch", "var", "version", "ls-tree", "fetch", "update-ref",
-	"write-tree", "commit-tree", "cat-file", "credential", "init", "check-ignore", "reflog", "rm", "clean",
+	"write-tree", "commit-tree", "cat-file", "credential", "init", "check-ignore", "reflog", "clean",
 )
 
 var filterReadingSubcommands = setOf(
@@ -292,7 +293,8 @@ func ManagedGitEnv(env []string) []string {
 	}
 	out := make([]string, 0, len(env))
 	for _, entry := range env {
-		if key, _ := environmentAssignmentKey(entry); environmentKeysEqual(key, "GIT_EXTERNAL_DIFF") {
+		key, _ := environmentAssignmentKey(entry)
+		if environmentKeysEqual(key, "GIT_EXTERNAL_DIFF") || environmentKeysEqual(key, "GIT_ALLOW_PROTOCOL") {
 			continue
 		}
 		out = append(out, entry)
@@ -328,7 +330,7 @@ func buildManagedGitVector(ctx context.Context, dir string, env []string, args [
 		if err != nil {
 			return nil, err
 		}
-		driverPairs, lfsAllowlisted, err = driverPolicy(drivers, class, env)
+		driverPairs, lfsAllowlisted, err = driverPolicy(drivers, class, env, hooksEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -390,7 +392,20 @@ type driverEntry struct {
 type driverSet struct {
 	filters map[string]*driverEntry
 	merges  map[string]*driverEntry
+	hooks   map[string]bool // config-defined hook names
+	// lfsAgent reports an lfs.standalonetransferagent value; lfsTransfers
+	// holds lfs.customtransfer names; lfsExtensions reports any
+	// lfs.extension.<name>.clean/smudge command.
+	lfsAgent      bool
+	lfsTransfers  map[string]bool
+	lfsExtensions bool
 }
+
+// driverKeyPattern selects every configuration key that names a program Git or
+// Git LFS would run on behalf of the repository.
+const driverKeyPattern = `^((filter|merge)\..*\.(clean|smudge|process|required|driver|name|recursive)` +
+	`|hook\..*\.(command|event|enabled)` +
+	`|lfs\.(standalonetransferagent|customtransfer\..*\.path|extension\..*\.(clean|smudge)))$`
 
 func enumerateDrivers(ctx context.Context, dir string, env []string, parsed parsedGitArgs, pairs map[string]string) (*driverSet, error) {
 	args := append([]string{}, parsed.selection...)
@@ -402,8 +417,7 @@ func enumerateDrivers(ctx context.Context, dir string, env []string, parsed pars
 			args = append(args, "-c", key+"="+os.DevNull)
 		}
 	}
-	args = append(args, "config", "--null", "--get-regexp",
-		`^(filter|merge)\..*\.(clean|smudge|process|required|driver|name|recursive)$`)
+	args = append(args, "config", "--null", "--get-regexp", driverKeyPattern)
 	output, err := runEnumeration(ctx, dir, env, args)
 	if err != nil {
 		return nil, fmt.Errorf("managed Git could not determine filter and merge drivers: %w", err)
@@ -459,13 +473,22 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 func (b *limitedBuffer) Bytes() []byte { return b.buf.Bytes() }
 
 func parseDriverOutput(output []byte) (*driverSet, error) {
-	set := &driverSet{filters: map[string]*driverEntry{}, merges: map[string]*driverEntry{}}
+	set := &driverSet{
+		filters: map[string]*driverEntry{}, merges: map[string]*driverEntry{},
+		hooks: map[string]bool{}, lfsTransfers: map[string]bool{},
+	}
 	for _, record := range bytes.Split(output, []byte{0}) {
 		if len(record) == 0 {
 			continue
 		}
 		key, value, hasValue := strings.Cut(string(record), "\n")
 		family, rest, _ := strings.Cut(key, ".")
+		if family == filterNameLFS {
+			if err := set.addLFSKey(rest); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		last := strings.LastIndex(rest, ".")
 		if last <= 0 {
 			return nil, fmt.Errorf("managed Git could not parse driver key %q", key)
@@ -476,6 +499,10 @@ func parseDriverOutput(output []byte) (*driverSet, error) {
 		}
 		if len(name) > maxDriverNameLength {
 			return nil, fmt.Errorf("managed Git refuses a driver name longer than %d characters", maxDriverNameLength)
+		}
+		if family == "hook" {
+			set.hooks[name] = true
+			continue
 		}
 		target := set.filters
 		if family == "merge" {
@@ -493,6 +520,34 @@ func parseDriverOutput(output []byte) (*driverSet, error) {
 		}
 	}
 	return set, nil
+}
+
+// addLFSKey records an lfs.* key naming a program: rest is the key without its
+// "lfs." section.
+func (s *driverSet) addLFSKey(rest string) error {
+	if rest == "standalonetransferagent" {
+		s.lfsAgent = true
+		return nil
+	}
+	section, tail, _ := strings.Cut(rest, ".")
+	last := strings.LastIndex(tail, ".")
+	if last <= 0 {
+		return fmt.Errorf("managed Git could not parse lfs key %q", rest)
+	}
+	name := tail[:last]
+	if strings.Contains(name, "=") {
+		return fmt.Errorf("managed Git cannot neutralize lfs entry %q: the name contains '='", name)
+	}
+	if len(name) > maxDriverNameLength {
+		return fmt.Errorf("managed Git refuses an lfs entry name longer than %d characters", maxDriverNameLength)
+	}
+	switch section {
+	case "customtransfer":
+		s.lfsTransfers[name] = true
+	case "extension":
+		s.lfsExtensions = true
+	}
+	return nil
 }
 
 // effective returns the configured command for a property and whether it is set
@@ -528,7 +583,7 @@ func (e *driverEntry) required() (bool, error) {
 
 // driverPolicy returns the neutralizing pairs for the enumerated drivers and
 // whether an allowlisted lfs filter is configured.
-func driverPolicy(set *driverSet, class gitCommandClass, env []string) ([]string, bool, error) {
+func driverPolicy(set *driverSet, class gitCommandClass, env []string, hooksEnabled bool) ([]string, bool, error) {
 	var pairs []string
 	lfs := false
 	for _, name := range sortedKeys(set.filters) {
@@ -537,8 +592,8 @@ func driverPolicy(set *driverSet, class gitCommandClass, env []string) ([]string
 		if err != nil {
 			return nil, false, fmt.Errorf("filter %q: %w", name, err)
 		}
-		if filterAllowlisted(name, entry, env) {
-			lfs = lfs || name == "lfs"
+		if filterAllowlisted(name, entry, env) && (name != filterNameLFS || !set.lfsExtensions) {
+			lfs = lfs || name == filterNameLFS
 			continue
 		}
 		if required && class == classContentWriting {
@@ -552,7 +607,27 @@ func driverPolicy(set *driverSet, class gitCommandClass, env []string) ([]string
 	for _, name := range sortedKeys(set.merges) {
 		pairs = append(pairs, "merge."+name+".driver=")
 	}
+	if !hooksEnabled {
+		for _, name := range sortedNames(set.hooks) {
+			pairs = append(pairs, "hook."+name+".enabled=false")
+		}
+	}
+	if set.lfsAgent {
+		pairs = append(pairs, "lfs.standalonetransferagent=")
+	}
+	for _, name := range sortedNames(set.lfsTransfers) {
+		pairs = append(pairs, "lfs.customtransfer."+name+".path=")
+	}
 	return pairs, lfs, nil
+}
+
+func sortedNames(m map[string]bool) []string {
+	names := make([]string, 0, len(m))
+	for name := range m {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func sortedKeys(m map[string]*driverEntry) []string {
@@ -567,7 +642,7 @@ func sortedKeys(m map[string]*driverEntry) []string {
 // canonicalFilterForms maps a tool to the argument lists its install writes.
 func canonicalFilterForms(name string) (tool string, forms map[string][][]string) {
 	switch {
-	case name == "lfs":
+	case name == filterNameLFS:
 		return "git-lfs", map[string][][]string{
 			propertyClean:   {{propertyClean, "--", "%f"}, {propertyClean, "%f"}},
 			propertySmudge:  {{propertySmudge, "--", "%f"}, {propertySmudge, flagSkip, "--", "%f"}, {propertySmudge, "%f"}, {propertySmudge, flagSkip, "%f"}},

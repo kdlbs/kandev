@@ -99,6 +99,9 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
+	// The policy is applied from the context the command runs with, so the
+	// no-hooks decision must be on that context, not only on construction.
+	ctx = subproc.WithGitHooks(ctx, false)
 	cmd, err := m.scopedSubmoduleUpdateCmd(ctx, dir)
 	if err != nil {
 		m.logger.Warn("failed to discover sparse-checkout submodules", zap.String("dir", dir), zap.Error(err))

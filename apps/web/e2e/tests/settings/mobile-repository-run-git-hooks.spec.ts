@@ -26,7 +26,7 @@ test("Run Git hooks switch is reachable and persists on mobile", async ({
   }
 });
 
-test("Run Git hooks: a failed save keeps the opt-in unsaved on mobile", async ({
+test("Run Git hooks: a failed save shows the stored value and keeps other unsaved edits on mobile", async ({
   testPage,
   apiClient,
   seedData,
@@ -34,16 +34,21 @@ test("Run Git hooks: a failed save keeps the opt-in unsaved on mobile", async ({
   try {
     const toggle = await openRepositoryCard(testPage, seedData.workspaceId);
     const stopFailing = await failRepositoryUpdates(testPage);
+    const setup = testPage.getByPlaceholder(/#!\/bin\/bash/).first();
+    await setup.fill("echo unsaved-edit");
     await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
     await saveButton(testPage).click();
     await expect(testPage.getByTestId("settings-floating-save")).toHaveAttribute(
       "data-status",
       "error",
     );
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await expect(setup).toHaveValue("echo unsaved-edit");
     expect((await apiClient.getRepository(seedData.repositoryId)).run_git_hooks).toBe(false);
 
     await stopFailing();
+    await toggle.click();
     await saveSettings(testPage);
     expect((await apiClient.getRepository(seedData.repositoryId)).run_git_hooks).toBe(true);
   } finally {
