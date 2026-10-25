@@ -44,8 +44,8 @@ type TaskVisibilityReceipt struct {
 
 // GetTaskVisibilityForRequest resolves the target only after a compact-read scope.
 func (s *HandoffService) GetTaskVisibilityForRequest(ctx context.Context, req RelatedReadRequest) (*TaskVisibility, error) {
-	if req.Scope != RelatedReadScopeWorkspaceTaskTree && req.Scope != RelatedReadScopeTaskVisibility {
-		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "workspace task visibility requires coordinator scope")
+	if req.Scope != RelatedReadScopeTaskVisibility {
+		return nil, relatedReadDenied(RelatedReadDenialScopeRequired, "task visibility requires a manual session grant")
 	}
 	caller, err := s.tasks.GetTask(ctx, req.CallerTaskID)
 	if err != nil || caller == nil {

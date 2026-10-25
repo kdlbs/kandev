@@ -296,7 +296,6 @@ plugin's manifest:
 | RPC                                          | Capability                   | Resource          |
 | -------------------------------------------- | ---------------------------- | ----------------- |
 | `ListTasks` / `GetTask`                      | `api_read:tasks`             | tasks             |
-| `GetTaskRelations`                            | `api_read:task_relations`    | task_relations    |
 | `ListWorkspaces`                             | `api_read:workspaces`        | workspaces        |
 | `ListWorkflows`                              | `api_read:workflows`         | workflows         |
 | `ListWorkflowSteps`                          | `api_read:workflows`         | workflows         |

@@ -2,7 +2,6 @@ package scope
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -14,15 +13,6 @@ type principalLookup struct {
 	task      *models.Task
 	workspace *models.Workspace
 	session   *models.TaskSession
-}
-
-type fixedOfficeCEOResolver struct {
-	profileID string
-	err       error
-}
-
-func (r fixedOfficeCEOResolver) ResolveCEOAgentProfileID(context.Context, string) (string, error) {
-	return r.profileID, r.err
 }
 
 func (l principalLookup) GetTask(context.Context, string) (*models.Task, error) {
@@ -95,34 +85,6 @@ func TestScopePrincipalBindsManualVisibilityGrant(t *testing.T) {
 	principal, ok = PrincipalFromContext(ctx)
 	require.True(t, ok)
 	require.False(t, principal.TaskVisibilityGrant)
-}
-
-func TestScopePrincipalBindsOfficeTreeReadToCEOProfile(t *testing.T) {
-	task := &models.Task{ID: "office-task", WorkspaceID: "workspace-a", IsFromOffice: true}
-	session := &models.TaskSession{ID: "office-session", TaskID: task.ID, AgentProfileID: "ceo"}
-	resolver := &Resolver{
-		tasks:     principalLookup{task: task, workspace: &models.Workspace{ID: task.WorkspaceID}, session: session},
-		officeCEO: fixedOfficeCEOResolver{profileID: "ceo"},
-	}
-	ctx, err := resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
-	require.NoError(t, err)
-	principal, ok := PrincipalFromContext(ctx)
-	require.True(t, ok)
-	require.True(t, principal.WorkspaceTaskTreeRead)
-	require.False(t, principal.TaskVisibilityGrant)
-	session.AgentProfileID = "worker"
-	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
-	require.NoError(t, err)
-	principal, ok = PrincipalFromContext(ctx)
-	require.True(t, ok)
-	require.False(t, principal.WorkspaceTaskTreeRead)
-	session.AgentProfileID = "ceo"
-	resolver.officeCEO = fixedOfficeCEOResolver{profileID: "ceo", err: errors.New("lookup unavailable")}
-	ctx, err = resolver.ScopePrincipal(context.Background(), task.ID, session.ID)
-	require.NoError(t, err)
-	principal, ok = PrincipalFromContext(ctx)
-	require.True(t, ok)
-	require.False(t, principal.WorkspaceTaskTreeRead)
 }
 
 // fakeCoordinatorLookup is a test double for CoordinatorLookup.

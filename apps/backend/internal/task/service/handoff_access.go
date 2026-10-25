@@ -21,9 +21,7 @@ var ErrAccessDenied = errors.New("document access denied")
 type RelatedReadScope string
 
 const (
-	RelatedReadScopeRelation          RelatedReadScope = "relation"
-	RelatedReadScopeWorkspaceTaskTree RelatedReadScope = "workspace-task-tree"
-	RelatedReadScopeTaskVisibility    RelatedReadScope = "task-visibility"
+	RelatedReadScopeTaskVisibility RelatedReadScope = "task-visibility"
 )
 
 // RelatedReadRequest separates compact task-tree inspection from the document
@@ -65,6 +63,10 @@ func RelatedReadDenialReasonFor(err error) (RelatedReadDenialReason, bool) {
 		return "", false
 	}
 	return denied.Reason, true
+}
+
+func relatedReadDenied(reason RelatedReadDenialReason, internalReason string) error {
+	return &RelatedReadAccessError{Reason: reason, InternalReason: internalReason}
 }
 
 // taskLookup is the minimal repository surface the access guards depend on.

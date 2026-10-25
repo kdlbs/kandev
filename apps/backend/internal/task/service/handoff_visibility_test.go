@@ -65,7 +65,7 @@ func TestGetTaskVisibilityUsesLiveProjectionAndDoesNotMutateReads(t *testing.T) 
 	tasks.mu.Lock()
 	before := *tasks.tasks["target"]
 	tasks.mu.Unlock()
-	visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree})
+	visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "LIVE-2", visibility.Identity.Identifier)
 	require.Equal(t, "Live title", visibility.Identity.Title)
@@ -89,15 +89,15 @@ func TestGetTaskVisibilityRequiresDeletedTombstoneForAbsentTask(t *testing.T) {
 	}}
 	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
 
-	deleted, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "deleted", Scope: RelatedReadScopeWorkspaceTaskTree})
+	deleted, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "deleted", Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "deleted", deleted.Visibility.Disposition)
-	active, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "active", Scope: RelatedReadScopeWorkspaceTaskTree})
+	active, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "active", Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "unknown", active.Visibility.Disposition)
 
 	for _, target := range []string{"missing"} {
-		_, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeWorkspaceTaskTree})
+		_, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeTaskVisibility})
 		require.ErrorIs(t, err, ErrAccessDenied)
 		reason, ok := RelatedReadDenialReasonFor(err)
 		require.True(t, ok)
@@ -117,7 +117,7 @@ func TestGetTaskVisibilityReturnsUnknownForSameWorkspaceInconsistentEvidence(t *
 	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
 
 	for _, target := range []string{"deleted-receipt", "active-receipt"} {
-		visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeWorkspaceTaskTree})
+		visibility, err := svc.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: target, Scope: RelatedReadScopeTaskVisibility})
 		require.NoError(t, err)
 		require.Equal(t, "unknown", visibility.Visibility.Disposition)
 	}
@@ -142,7 +142,7 @@ func TestGetTaskVisibilityFailsClosedWithoutSnapshotOrOnSnapshotError(t *testing
 	}}
 
 	withoutSnapshot := NewHandoffService(base.fakeCascadeRepo, nil, nil, nil, nil, nil)
-	_, err := withoutSnapshot.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree})
+	_, err := withoutSnapshot.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeTaskVisibility})
 	require.ErrorIs(t, err, ErrAccessDenied)
 	reason, ok := RelatedReadDenialReasonFor(err)
 	require.True(t, ok)
@@ -150,7 +150,7 @@ func TestGetTaskVisibilityFailsClosedWithoutSnapshotOrOnSnapshotError(t *testing
 
 	snapshotErr := errors.New("snapshot read failed")
 	withError := NewHandoffService(&failingVisibilitySnapshotRepo{visibilityReceiptRepo: base, err: snapshotErr}, nil, nil, nil, nil, nil)
-	_, err = withError.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeWorkspaceTaskTree})
+	_, err = withError.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: "caller", TargetTaskID: "target", Scope: RelatedReadScopeTaskVisibility})
 	require.ErrorIs(t, err, snapshotErr)
 }
 
@@ -183,7 +183,7 @@ func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateAndSurvivesConcurrentDelete
 
 	before := visibilityPersistedState(t, writer)
 	service := NewHandoffService(repo, nil, nil, nil, nil, nil)
-	visibility, err := service.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeWorkspaceTaskTree})
+	visibility, err := service.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "Before delete", visibility.Identity.Title)
 	require.Equal(t, "active", visibility.Visibility.Disposition)
@@ -191,14 +191,14 @@ func TestGetTaskVisibilitySQLiteSnapshotDoesNotMutateAndSurvivesConcurrentDelete
 	require.Equal(t, before, visibilityPersistedState(t, writer), "a visibility read must not mutate task, receipt, session, or document rows")
 
 	concurrentService := NewHandoffService(&deleteAfterVisibilitySnapshotRepo{Repository: repo, deleteTargetID: target.ID}, nil, nil, nil, nil, nil)
-	beforeDelete, err := concurrentService.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeWorkspaceTaskTree})
+	beforeDelete, err := concurrentService.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "Before delete", beforeDelete.Identity.Title)
 	require.Equal(t, "active", beforeDelete.Visibility.Disposition)
 	require.Equal(t, "create", beforeDelete.Visibility.Provenance)
 	require.EqualValues(t, 1, beforeDelete.Visibility.Revision)
 
-	afterDelete, err := service.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeWorkspaceTaskTree})
+	afterDelete, err := service.GetTaskVisibilityForRequest(ctx, RelatedReadRequest{CallerTaskID: caller.ID, TargetTaskID: target.ID, Scope: RelatedReadScopeTaskVisibility})
 	require.NoError(t, err)
 	require.Equal(t, "deleted", afterDelete.Visibility.Disposition)
 	require.Equal(t, "delete", afterDelete.Visibility.Provenance)

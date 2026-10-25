@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"go.uber.org/zap"
-
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -15,14 +13,13 @@ import (
 // Automation handlers use the principal as their workspace and self-target
 // boundary in addition to the normal owner identity attached to the context.
 type Principal struct {
-	AutomationID          string
-	WorkspaceID           string
-	CallerTaskID          string
-	CallerSessionID       string
-	Surface               mcpprofile.Surface
-	CoordinatorID         string
-	TaskVisibilityGrant   bool
-	WorkspaceTaskTreeRead bool
+	AutomationID        string
+	WorkspaceID         string
+	CallerTaskID        string
+	CallerSessionID     string
+	Surface             mcpprofile.Surface
+	CoordinatorID       string
+	TaskVisibilityGrant bool
 }
 
 func (p Principal) IsAutomation() bool {
@@ -84,26 +81,14 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 			return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 		}
 	}
-	workspaceTaskTreeRead := false
-	if surface == mcpprofile.SurfaceOfficeTask && session != nil && session.AgentProfileID != "" && r.officeCEO != nil {
-		if ceoProfileID, err := r.officeCEO.ResolveCEOAgentProfileID(ctx, taskID); err != nil {
-			if r.logger != nil {
-				r.logger.Warn("failed to resolve Office CEO profile for MCP task-tree scope",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-			}
-		} else {
-			workspaceTaskTreeRead = ceoProfileID != "" && session.AgentProfileID == ceoProfileID
-		}
-	}
 	return WithPrincipal(ctx, Principal{
-		AutomationID:          automationID,
-		WorkspaceID:           workspaceID,
-		CallerTaskID:          taskID,
-		CallerSessionID:       sessionID,
-		Surface:               surface,
-		CoordinatorID:         coordinatorID,
-		TaskVisibilityGrant:   surface == mcpprofile.SurfaceKanbanTask && models.HasTaskVisibilityGrant(task, session),
-		WorkspaceTaskTreeRead: workspaceTaskTreeRead,
+		AutomationID:        automationID,
+		WorkspaceID:         workspaceID,
+		CallerTaskID:        taskID,
+		CallerSessionID:     sessionID,
+		Surface:             surface,
+		CoordinatorID:       coordinatorID,
+		TaskVisibilityGrant: surface == mcpprofile.SurfaceKanbanTask && models.HasTaskVisibilityGrant(task, session),
 	}), nil
 }
 

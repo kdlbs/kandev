@@ -246,12 +246,6 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 			capabilities = append(capabilities, mcpprofile.CapabilityTaskVisibilityRead)
 		}
 	}
-	if surface == mcpprofile.SurfaceOfficeTask {
-		capabilities, err = e.addCoordinatorTaskTreeReadCapability(ctx, task.ID, session, capabilities)
-		if err != nil {
-			return mcpprofile.Context{}, err
-		}
-	}
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
@@ -273,28 +267,6 @@ func (e *Executor) withCanvasCapability(profile mcpprofile.Context) mcpprofile.C
 		return profile.WithCapability(mcpprofile.CapabilityCanvas)
 	}
 	return profile
-}
-
-func (e *Executor) addCoordinatorTaskTreeReadCapability(
-	ctx context.Context,
-	taskID string,
-	session *models.TaskSession,
-	capabilities []mcpprofile.Capability,
-) ([]mcpprofile.Capability, error) {
-	if session == nil || session.AgentProfileID == "" || e.coordinatorResolver == nil {
-		return capabilities, nil
-	}
-	ceoProfileID, err := e.coordinatorResolver.ResolveCEOAgentProfileID(ctx, taskID)
-	if err != nil {
-		// This lookup attests only an additive capability. On failure, retain
-		// the ordinary Office profile so a worker can still launch or resume.
-		e.logger.Warn("Office coordinator MCP capability unavailable", zap.Error(err))
-		return capabilities, nil
-	}
-	if ceoProfileID == "" || session.AgentProfileID != ceoProfileID {
-		return capabilities, nil
-	}
-	return append(capabilities, mcpprofile.CapabilityWorkspaceTaskTreeRead), nil
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in

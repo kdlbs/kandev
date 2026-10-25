@@ -9,6 +9,7 @@ import (
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -34,13 +35,12 @@ func (h *Handlers) SetHandoffService(svc *service.HandoffService) {
 
 }
 
-type relatedReadPayload struct {
+type taskVisibilityPayload struct {
 	TaskID           string `json:"task_id"`
 	CallerTaskID     string `json:"caller_task_id"`
 	CallerSessionID  string `json:"caller_session_id"`
 	RelatedReadScope string `json:"related_read_scope"`
 	MCPSurface       string `json:"mcp_surface"`
-	Verbose          bool   `json:"verbose"`
 }
 
 // handleGetTaskVisibility dispatches mcp.get_task_visibility. It shares the
@@ -50,7 +50,7 @@ func (h *Handlers) handleGetTaskVisibility(ctx context.Context, msg *ws.Message)
 	if h.handoffSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "handoff service not configured", nil)
 	}
-	var req relatedReadPayload
+	var req taskVisibilityPayload
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -78,14 +78,8 @@ func (h *Handlers) handleGetTaskVisibility(ctx context.Context, msg *ws.Message)
 }
 
 func visibilityScopeAuthorized(principal mcpscope.Principal, readScope service.RelatedReadScope) bool {
-	switch readScope {
-	case service.RelatedReadScopeTaskVisibility:
-		return principal.Surface == mcpprofile.SurfaceKanbanTask && principal.TaskVisibilityGrant
-	case service.RelatedReadScopeWorkspaceTaskTree:
-		return principal.Surface == mcpprofile.SurfaceOfficeTask && principal.WorkspaceTaskTreeRead
-	default:
-		return false
-	}
+	return readScope == service.RelatedReadScopeTaskVisibility &&
+		principal.Surface == mcpprofile.SurfaceKanbanTask && principal.TaskVisibilityGrant
 }
 
 // handleListRelatedTasks dispatches mcp.list_related_tasks.
@@ -94,85 +88,32 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "handoff service not configured", nil)
 	}
 	svc := h.handoffSvc
-	var req relatedReadPayload
+	var req struct {
+		TaskID       string `json:"task_id"`
+		CallerTaskID string `json:"caller_task_id"`
+	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || principal.CallerTaskID != req.CallerTaskID ||
-		principal.CallerSessionID != req.CallerSessionID ||
-		string(principal.Surface) != req.MCPSurface || principal.WorkspaceID == "" ||
-		!relatedReadScopeAuthorized(principal, service.RelatedReadScope(req.RelatedReadScope)) {
-		err := &service.RelatedReadAccessError{
-			Reason:         service.RelatedReadDenialScopeRequired,
-			InternalReason: "caller principal or related read scope mismatch",
-		}
-		h.logRelatedReadDecision(req, req.CallerTaskID, "denied", err)
-		return mapRelatedReadError(msg, err)
-	}
 	caller := req.CallerTaskID
-	related, err := svc.ListRelatedForRequest(ctx, service.RelatedReadRequest{
-		CallerTaskID: caller, CallerWorkspaceID: principal.WorkspaceID,
-		TargetTaskID: req.TaskID,
-		Scope:        service.RelatedReadScope(req.RelatedReadScope),
-		Verbose:      req.Verbose,
-	})
+	if caller == "" {
+		caller = req.TaskID
+	}
+	related, err := svc.ListRelatedForCaller(ctx, caller, req.TaskID)
 	if err != nil {
-		outcome := "error"
-		if errors.Is(err, service.ErrAccessDenied) {
-			outcome = "denied"
-		} else {
+		// Access denied is an expected 403; log only genuine
+		// infrastructure errors, then route everything through
+		// mapHandoffError for the same code mapping the document handlers use.
+		if !errors.Is(err, service.ErrAccessDenied) {
 			h.logger.Error("list related tasks", zap.Error(err))
 		}
-		h.logRelatedReadDecision(req, caller, outcome, err)
-		return mapRelatedReadError(msg, err)
+		return mapHandoffError(msg, err)
 	}
 	h.enrichRelatedTasksWithPRs(ctx, related)
-	h.logRelatedReadDecision(req, caller, "allowed", nil)
 	return ws.NewResponse(msg.ID, msg.Action, related)
-}
-
-func relatedReadScopeAuthorized(principal mcpscope.Principal, readScope service.RelatedReadScope) bool {
-	switch readScope {
-	case "", service.RelatedReadScopeRelation:
-		return true
-	case service.RelatedReadScopeWorkspaceTaskTree:
-		return principal.Surface == mcpprofile.SurfaceOfficeTask && principal.WorkspaceTaskTreeRead
-	default:
-		return false
-	}
-}
-
-func (h *Handlers) logRelatedReadDecision(req relatedReadPayload, callerTaskID, outcome string, err error) {
-	fields := []zap.Field{
-		zap.String("caller_task_id", callerTaskID),
-		zap.String("caller_session_id", req.CallerSessionID),
-		zap.String("target_task_id", req.TaskID),
-		zap.String("mcp_surface", req.MCPSurface),
-		zap.String("related_read_scope", req.RelatedReadScope),
-		zap.Bool("verbose", req.Verbose),
-		zap.String("outcome", outcome),
-	}
-	if typed, ok := service.RelatedReadDenialReasonFor(err); ok {
-		fields = append(fields, zap.String("public_reason", string(typed)))
-		var denied *service.RelatedReadAccessError
-		if errors.As(err, &denied) {
-			fields = append(fields, zap.String("internal_reason", denied.InternalReason))
-		}
-	}
-	h.logger.Info("mcp.related_task_read.authorization", fields...)
-}
-
-func mapRelatedReadError(msg *ws.Message, err error) (*ws.Message, error) {
-	if reason, ok := service.RelatedReadDenialReasonFor(err); ok {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "related task access denied", map[string]interface{}{
-			"reason": string(reason),
-		})
-	}
-	return mapHandoffError(msg, err)
 }
 
 // handleListTaskDocuments dispatches mcp.list_task_documents.

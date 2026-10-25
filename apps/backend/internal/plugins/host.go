@@ -67,10 +67,7 @@ type pluginHost struct {
 
 	// Host data API (ADR 0043) service-layer dependencies, wired by
 	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
-	taskData taskDataSource
-	// taskRelations is read at request time because HandoffService is built
-	// after boot-active plugins have started.
-	taskRelations    func() taskRelationsSource
+	taskData         taskDataSource
 	workflows        workflowLister
 	workflowSteps    workflowStepLister
 	agentProfiles    agentProfileDataSource

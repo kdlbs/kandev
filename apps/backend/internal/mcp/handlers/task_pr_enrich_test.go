@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
-	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -189,10 +187,7 @@ func TestHandleListTasks_IncludesProviderNeutralGitLabMRs(t *testing.T) {
 
 func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
-		WorkspaceID: "ws-rel", CallerTaskID: "task-rel", CallerSessionID: "session-rel",
-		Surface: mcpprofile.SurfaceKanbanTask,
-	})
+	ctx := context.Background()
 	now := time.Now().UTC()
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
@@ -213,10 +208,7 @@ func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 		}},
 	}
 
-	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
-		"task_id": "task-rel", "caller_task_id": "task-rel", "caller_session_id": "session-rel",
-		"mcp_surface": "kanban-task",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{"task_id": "task-rel"})
 	resp, err := h.handleListRelatedTasks(ctx, msg)
 	require.NoError(t, err)
 
@@ -228,45 +220,9 @@ func TestHandleListRelatedTasks_IncludesAssociatedPRs(t *testing.T) {
 	require.NotNil(t, payload.Task.PRs[0].MergedAt, "merged_at should be surfaced")
 }
 
-func TestHandleListRelatedTasks_ReturnsNonLeakingStructuredDenial(t *testing.T) {
-	_, repo := newTestTaskService(t)
-	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
-		WorkspaceID: "ws-a", CallerTaskID: "caller", CallerSessionID: "session-caller",
-		Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true,
-	})
-	now := time.Now().UTC()
-	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-a", Name: "A", CreatedAt: now, UpdatedAt: now}))
-	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-b", Name: "B", CreatedAt: now, UpdatedAt: now}))
-	for _, task := range []*models.Task{
-		{ID: "caller", WorkspaceID: "ws-a", WorkflowID: "wf", Title: "Caller", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
-		{ID: "foreign", WorkspaceID: "ws-b", WorkflowID: "wf", Title: "Foreign secret", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
-	} {
-		require.NoError(t, repo.CreateTask(ctx, task))
-	}
-	h := &Handlers{handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, testLogger(t)), logger: testLogger(t).WithFields()}
-
-	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
-		"task_id": "foreign", "caller_task_id": "caller", "caller_session_id": "session-caller",
-		"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
-	})
-	resp, err := h.handleListRelatedTasks(ctx, msg)
-	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeError, resp.Type)
-	var payload ws.ErrorPayload
-	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, ws.ErrorCodeForbidden, payload.Code)
-	assert.Equal(t, "related task access denied", payload.Message)
-	assert.Equal(t, "target_unavailable", payload.Details["reason"])
-	assert.NotContains(t, string(resp.Payload), "foreign")
-	assert.NotContains(t, string(resp.Payload), "Foreign secret")
-}
-
 func TestHandleListRelatedTasks_IncludesProviderNeutralGitLabMRs(t *testing.T) {
 	svc, repo := newTestTaskService(t)
-	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
-		WorkspaceID: "ws-rel-mr", CallerTaskID: "task-rel-mr", CallerSessionID: "session-rel-mr",
-		Surface: mcpprofile.SurfaceKanbanTask,
-	})
+	ctx := context.Background()
 	now := time.Now().UTC()
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
@@ -286,10 +242,7 @@ func TestHandleListRelatedTasks_IncludesProviderNeutralGitLabMRs(t *testing.T) {
 		}},
 	}
 
-	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
-		"task_id": "task-rel-mr", "caller_task_id": "task-rel-mr", "caller_session_id": "session-rel-mr",
-		"mcp_surface": "kanban-task",
-	})
+	msg := makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{"task_id": "task-rel-mr"})
 	resp, err := h.handleListRelatedTasks(ctx, msg)
 	require.NoError(t, err)
 

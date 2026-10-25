@@ -8,12 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jmoiron/sqlx"
-	"github.com/kandev/kandev/internal/common/logger"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
-	officemodels "github.com/kandev/kandev/internal/office/models"
-	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
@@ -22,107 +18,7 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
-
-func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	ctx := context.Background()
-	log := testLogger(t)
-	sharedDB := sqlx.NewDb(repo.DB(), "sqlite3")
-	officeRepo, err := officesqlite.NewWithDB(sharedDB, sharedDB, log)
-	require.NoError(t, err)
-	docs := service.NewDocumentService(repo, log)
-	handoff := service.NewHandoffService(repo, repo, docs, officeRepo, nil, log)
-	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
-	handlers.SetHandoffService(handoff)
-	dispatcher := ws.NewDispatcher()
-	handlers.RegisterHandlers(dispatcher)
-
-	seedRelatedReadTasks(t, repo)
-	_, err = docs.CreateOrUpdateDocument(ctx, "parent", "spec", "custom", "Spec", "parent body", "agent", "Agent")
-	require.NoError(t, err)
-	_, err = docs.CreateOrUpdateDocument(ctx, "stranger", "secret", "custom", "Secret", "stranger body", "agent", "Agent")
-	require.NoError(t, err)
-	require.NoError(t, officeRepo.CreateTaskBlocker(ctx, &officemodels.TaskBlocker{
-		TaskID: "stranger", BlockerTaskID: "stranger-blocker",
-	}))
-	require.NoError(t, officeRepo.CreateTaskBlocker(ctx, &officemodels.TaskBlocker{
-		TaskID: "stranger-dependent", BlockerTaskID: "stranger",
-	}))
-	require.NoError(t, officeRepo.CreateActivityEntry(ctx, &officemodels.ActivityEntry{
-		ID: "activity-before-read", WorkspaceID: "ws-a", ActorType: officemodels.ActivityActorAgent,
-		ActorID: "agent", Action: officemodels.ActivityAction("sentinel"),
-		TargetType: officemodels.ActivityTargetTask, TargetID: "stranger", Details: `{}`,
-	}))
-
-	before := snapshotRelatedReadTables(t, repo)
-	call := func(payload map[string]any) *ws.Message {
-		payload["mcp_surface"] = "office-task"
-		return dispatchRelatedReadWithContext(t, dispatcher, visibilityOfficeContext(ctx), payload)
-	}
-
-	self := call(map[string]any{
-		"task_id": "child-a", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-	})
-	require.Equal(t, ws.MessageTypeResponse, self.Type)
-	var selfPayload service.RelatedTasks
-	require.NoError(t, json.Unmarshal(self.Payload, &selfPayload))
-	assert.Equal(t, "child-a", selfPayload.Task.ID)
-	assertRelatedTasksOmitDescriptions(t, &selfPayload)
-
-	relation := call(map[string]any{
-		"task_id": "parent", "caller_task_id": "child-a", "caller_session_id": "session-caller", "verbose": true,
-	})
-	require.Equal(t, ws.MessageTypeResponse, relation.Type)
-	var relationPayload service.RelatedTasks
-	require.NoError(t, json.Unmarshal(relation.Payload, &relationPayload))
-	assert.Equal(t, "parent description", relationPayload.Task.Description)
-	assert.Equal(t, []string{"spec"}, relationPayload.Task.DocumentKeys)
-	require.Len(t, relationPayload.Children, 2)
-
-	coordinatorCompact := call(map[string]any{
-		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-		"related_read_scope": "workspace-task-tree",
-	})
-	require.Equal(t, ws.MessageTypeResponse, coordinatorCompact.Type)
-	var compactPayload service.RelatedTasks
-	require.NoError(t, json.Unmarshal(coordinatorCompact.Payload, &compactPayload))
-	assert.Equal(t, "stranger", compactPayload.Task.ID)
-	assertRelatedTasksOmitDescriptions(t, &compactPayload)
-	assert.Empty(t, compactPayload.Task.DocumentKeys)
-	require.Len(t, compactPayload.Blockers, 1)
-	assert.Equal(t, "stranger-blocker", compactPayload.Blockers[0].ID)
-	require.Len(t, compactPayload.BlockedBy, 1)
-	assert.Equal(t, "stranger-dependent", compactPayload.BlockedBy[0].ID)
-
-	ordinary := call(map[string]any{
-		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-	})
-	assertRelatedReadDenied(t, ordinary, "related_task_scope_required")
-
-	coordinatorVerbose := call(map[string]any{
-		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-		"related_read_scope": "workspace-task-tree", "verbose": true,
-	})
-	assertRelatedReadDenied(t, coordinatorVerbose, "verbose_document_scope_required")
-
-	foreign := call(map[string]any{
-		"task_id": "foreign", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-		"related_read_scope": "workspace-task-tree",
-	})
-	unknown := call(map[string]any{
-		"task_id": "missing", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-		"related_read_scope": "workspace-task-tree",
-	})
-	assertRelatedReadDenied(t, foreign, "target_unavailable")
-	assertRelatedReadDenied(t, unknown, "target_unavailable")
-	assert.Equal(t, string(foreign.Payload), string(unknown.Payload), "unknown and foreign targets must be indistinguishable")
-	assert.NotContains(t, string(foreign.Payload), "Foreign secret")
-
-	assert.Equal(t, before, snapshotRelatedReadTables(t, repo))
-}
 
 func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(t *testing.T) {
 	svc, repo := newTestTaskService(t)
@@ -135,9 +31,9 @@ func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(
 	seedRelatedReadTasks(t, repo)
 
 	call := func(taskID string) *ws.Message {
-		response, err := dispatcher.Dispatch(visibilityOfficeContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, err := dispatcher.Dispatch(visibilityManualContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
-			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+			"related_read_scope": "task-visibility", "mcp_surface": "kanban-task",
 		}))
 		require.NoError(t, err)
 		return response
@@ -157,109 +53,6 @@ func TestGetTaskVisibilityDispatcherReturnsCompactReceiptAndHidesForeignTargets(
 	require.Equal(t, ws.MessageTypeError, foreign.Type)
 	require.Equal(t, ws.MessageTypeError, missing.Type)
 	assert.Equal(t, string(foreign.Payload), string(missing.Payload))
-}
-
-func TestListRelatedTasksDispatcherRejectsExplicitTargetWithoutAttestedIdentity(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	log := testLogger(t)
-	handoff := service.NewHandoffService(repo, repo, service.NewDocumentService(repo, log), nil, nil, log)
-	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
-	handlers.SetHandoffService(handoff)
-	dispatcher := ws.NewDispatcher()
-	handlers.RegisterHandlers(dispatcher)
-	seedRelatedReadTasks(t, repo)
-
-	response := dispatchRelatedRead(t, dispatcher, map[string]any{
-		"task_id": "stranger", "verbose": true,
-	})
-
-	assertRelatedReadDenied(t, response, "related_task_scope_required")
-	assert.NotContains(t, string(response.Payload), "stranger")
-	assert.NotContains(t, string(response.Payload), "Unrelated")
-}
-
-func TestListRelatedTasksDispatcherRejectsForgedWorkspaceScope(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	log := testLogger(t)
-	handoff := service.NewHandoffService(repo, repo, nil, nil, nil, log)
-	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
-	handlers.SetHandoffService(handoff)
-	dispatcher := ws.NewDispatcher()
-	handlers.RegisterHandlers(dispatcher)
-	seedRelatedReadTasks(t, repo)
-
-	for _, tc := range []struct {
-		name      string
-		principal mcpscope.Principal
-		payload   map[string]any
-	}{
-		{
-			name: "office worker forges tree scope",
-			principal: mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-				Surface: mcpprofile.SurfaceOfficeTask},
-			payload: map[string]any{"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-				"mcp_surface": "office-task", "related_read_scope": "workspace-task-tree"},
-		},
-		{
-			name: "manual visibility grant does not grant tree scope",
-			principal: mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-				Surface: mcpprofile.SurfaceKanbanTask, TaskVisibilityGrant: true},
-			payload: map[string]any{"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-				"mcp_surface": "kanban-task", "related_read_scope": "workspace-task-tree"},
-		},
-		{
-			name: "caller session differs from principal",
-			principal: mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-				Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true},
-			payload: map[string]any{"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "forged-session",
-				"mcp_surface": "office-task", "related_read_scope": "workspace-task-tree"},
-		},
-		{
-			name: "caller task differs from principal",
-			principal: mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-				Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true},
-			payload: map[string]any{"task_id": "stranger", "caller_task_id": "stranger", "caller_session_id": "session-caller",
-				"mcp_surface": "office-task", "related_read_scope": "workspace-task-tree"},
-		},
-		{
-			name: "surface differs from principal",
-			principal: mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-				Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true},
-			payload: map[string]any{"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
-				"mcp_surface": "kanban-task", "related_read_scope": "workspace-task-tree"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := mcpscope.WithPrincipal(context.Background(), tc.principal)
-			response, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPListRelatedTasks, tc.payload))
-			require.NoError(t, err)
-			assertRelatedReadDenied(t, response, "related_task_scope_required")
-			assert.NotContains(t, string(response.Payload), "stranger")
-		})
-	}
-}
-
-func TestListRelatedTasksAuditMarksInternalFailuresAsErrors(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	core, observed := observer.New(zap.InfoLevel)
-	log, err := logger.NewFromZap(zap.New(core))
-	require.NoError(t, err)
-	handoff := service.NewHandoffService(repo, repo, service.NewDocumentService(repo, log), nil, nil, log)
-	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
-	handlers.SetHandoffService(handoff)
-
-	_, err = repo.DB().ExecContext(context.Background(), "DROP TABLE tasks")
-	require.NoError(t, err)
-	principal := mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "task-a", CallerSessionID: "session-a", Surface: mcpprofile.SurfaceOfficeTask}
-	response, err := handlers.handleListRelatedTasks(mcpscope.WithPrincipal(context.Background(), principal), makeWSMessage(t, ws.ActionMCPListRelatedTasks, map[string]any{
-		"task_id": "task-a", "caller_task_id": "task-a", "caller_session_id": "session-a", "mcp_surface": "office-task",
-	}))
-	require.NoError(t, err)
-	require.Equal(t, ws.MessageTypeError, response.Type)
-
-	entries := observed.FilterMessage("mcp.related_task_read.authorization").All()
-	require.Len(t, entries, 1)
-	assert.Equal(t, "error", entries[0].ContextMap()["outcome"])
 }
 
 func seedRelatedReadTasks(t *testing.T, repo relatedReadSeedRepo) {
@@ -299,81 +92,6 @@ type relatedReadSeedRepo interface {
 	CreateWorkflow(context.Context, *models.Workflow) error
 	CreateTask(context.Context, *models.Task) error
 	CreateTaskSession(context.Context, *models.TaskSession) error
-}
-
-func dispatchRelatedRead(t *testing.T, dispatcher *ws.Dispatcher, payload map[string]any) *ws.Message {
-	return dispatchRelatedReadWithContext(t, dispatcher, context.Background(), payload)
-}
-
-func dispatchRelatedReadWithContext(t *testing.T, dispatcher *ws.Dispatcher, ctx context.Context, payload map[string]any) *ws.Message {
-	t.Helper()
-	resp, err := dispatcher.Dispatch(ctx, makeWSMessage(t, ws.ActionMCPListRelatedTasks, payload))
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	return resp
-}
-
-func assertRelatedReadDenied(t *testing.T, resp *ws.Message, reason string) {
-	t.Helper()
-	require.Equal(t, ws.MessageTypeError, resp.Type)
-	var payload ws.ErrorPayload
-	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, ws.ErrorCodeForbidden, payload.Code)
-	assert.Equal(t, "related task access denied", payload.Message)
-	assert.Equal(t, reason, payload.Details["reason"])
-}
-
-func assertRelatedTasksOmitDescriptions(t *testing.T, related *service.RelatedTasks) {
-	t.Helper()
-	require.NotNil(t, related)
-	for _, task := range []*service.RelatedTask{
-		&related.Task,
-		related.Parent,
-	} {
-		assertRelatedTaskOmitsDescription(t, task)
-	}
-	for _, group := range [][]*service.RelatedTask{
-		related.Children,
-		related.Siblings,
-		related.Blockers,
-		related.BlockedBy,
-	} {
-		for _, task := range group {
-			assertRelatedTaskOmitsDescription(t, task)
-		}
-	}
-}
-
-func assertRelatedTaskOmitsDescription(t *testing.T, task *service.RelatedTask) {
-	t.Helper()
-	if task == nil {
-		return
-	}
-	assert.Empty(t, task.Description)
-}
-
-type relatedReadTableSnapshot struct {
-	tasks             [][]string
-	workflows         [][]string
-	sessions          [][]string
-	documents         [][]string
-	documentRevisions [][]string
-	blockers          [][]string
-	activities        [][]string
-}
-
-func snapshotRelatedReadTables(t *testing.T, repo relatedReadSnapshotRepo) relatedReadTableSnapshot {
-	t.Helper()
-	db := repo.DB()
-	return relatedReadTableSnapshot{
-		tasks:             snapshotSQLRows(t, db, "SELECT * FROM tasks ORDER BY id"),
-		workflows:         snapshotSQLRows(t, db, "SELECT * FROM workflows ORDER BY id"),
-		sessions:          snapshotSQLRows(t, db, "SELECT * FROM task_sessions ORDER BY id"),
-		documents:         snapshotSQLRows(t, db, "SELECT * FROM task_documents ORDER BY task_id, key"),
-		documentRevisions: snapshotSQLRows(t, db, "SELECT * FROM task_document_revisions ORDER BY task_id, document_key, revision_number"),
-		blockers:          snapshotSQLRows(t, db, "SELECT * FROM task_blockers ORDER BY task_id, blocker_task_id"),
-		activities:        snapshotSQLRows(t, db, "SELECT * FROM office_activity_log ORDER BY id"),
-	}
 }
 
 type relatedReadSnapshotRepo interface {
@@ -422,9 +140,9 @@ func TestGetTaskVisibilityDispatcherHidesLiveTaskWithoutReceipt(t *testing.T) {
 	require.NoError(t, err)
 
 	call := func(taskID string) *ws.Message {
-		response, dispatchErr := dispatcher.Dispatch(visibilityOfficeContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, dispatchErr := dispatcher.Dispatch(visibilityManualContext(context.Background()), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
-			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+			"related_read_scope": "task-visibility", "mcp_surface": "kanban-task",
 		}))
 		require.NoError(t, dispatchErr)
 		return response
@@ -450,9 +168,9 @@ func TestPostgresGetTaskVisibilityDispatcherDeniedReadsDoNotMutate(t *testing.T)
 	seedRelatedReadTasks(t, repo)
 	before := snapshotVisibilityNativeTables(t, repo)
 	call := func(taskID string) *ws.Message {
-		response, dispatchErr := dispatcher.Dispatch(visibilityOfficeContext(ctx), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
+		response, dispatchErr := dispatcher.Dispatch(visibilityManualContext(ctx), makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 			"task_id": taskID, "caller_task_id": "child-a", "caller_session_id": "session-caller",
-			"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+			"related_read_scope": "task-visibility", "mcp_surface": "kanban-task",
 		}))
 		require.NoError(t, dispatchErr)
 		return response
@@ -465,11 +183,8 @@ func TestPostgresGetTaskVisibilityDispatcherDeniedReadsDoNotMutate(t *testing.T)
 	require.Equal(t, before, snapshotVisibilityNativeTables(t, repo))
 }
 
-func visibilityOfficeContext(ctx context.Context) context.Context {
-	return mcpscope.WithPrincipal(ctx, mcpscope.Principal{
-		WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller",
-		Surface: mcpprofile.SurfaceOfficeTask, WorkspaceTaskTreeRead: true,
-	})
+func visibilityManualContext(ctx context.Context) context.Context {
+	return mcpscope.WithPrincipal(ctx, mcpscope.Principal{WorkspaceID: "ws-a", CallerTaskID: "child-a", CallerSessionID: "session-caller", Surface: mcpprofile.SurfaceKanbanTask, TaskVisibilityGrant: true})
 }
 
 func TestGetTaskVisibilityDispatcherRequiresTrustedManualPrincipal(t *testing.T) {
@@ -523,7 +238,7 @@ func TestGetTaskVisibilityDispatcherRequiresTrustedManualPrincipal(t *testing.T)
 	})
 	worker, err := dispatcher.Dispatch(workerCtx, makeWSMessage(t, ws.ActionMCPGetTaskVisibility, map[string]any{
 		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "approved-session",
-		"related_read_scope": "workspace-task-tree", "mcp_surface": "office-task",
+		"related_read_scope": "task-visibility", "mcp_surface": "kanban-task",
 	}))
 	require.NoError(t, err)
 	require.Equal(t, string(missing.Payload), string(worker.Payload))
