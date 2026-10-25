@@ -2031,6 +2031,21 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if incarnationID != identity.SessionIncarnationID {
 		return ErrSessionIdentityMismatch
 	}
+	queueTablePresent, err := internaldb.TableExists(tx, "queued_messages")
+	if err != nil {
+		return fmt.Errorf("check deleted session queue: %w", err)
+	}
+	if queueTablePresent {
+		var pending int
+		if err := tx.GetContext(ctx, &pending, db.Rebind(`
+			SELECT COUNT(*) FROM queued_messages WHERE session_id = ?
+		`), identity.SessionID); err != nil {
+			return fmt.Errorf("count deleted session queue: %w", err)
+		}
+		if pending > 0 {
+			return fmt.Errorf("cannot delete session %s: %d queue entries remain; inspect and dispose or recover them first", identity.SessionID, pending)
+		}
+	}
 	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
 		return fmt.Errorf("delete queue session state: %w", err)
 	}

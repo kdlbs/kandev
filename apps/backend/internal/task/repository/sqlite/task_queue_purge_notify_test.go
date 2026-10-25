@@ -177,9 +177,8 @@ func TestDeleteTaskNotifiesQueuePurgeAfterCommit(t *testing.T) {
 	}
 }
 
-func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
-	// Session delete used to leave queued_messages rows behind; CountPendingByTask
-	// then kept the sidebar badge inflated. Cascade purge must clear them.
+func TestDeleteTaskSessionRejectsQueuedMessages(t *testing.T) {
+	// A pending message must remain visible and recoverable after deletion is rejected.
 	repo := newRepoForArchiveTests(t, "task-session-queue-purge")
 	ctx := context.Background()
 
@@ -213,20 +212,20 @@ func TestDeleteTaskSessionPurgesQueuedMessages(t *testing.T) {
 		t.Fatalf("QueueMessage keep: %v", err)
 	}
 
-	if err := deleteTaskSessionForTest(t, repo, ctx, "session-drop"); err != nil {
-		t.Fatalf("DeleteTaskSession: %v", err)
+	if err := deleteTaskSessionForTest(t, repo, ctx, "session-drop"); err == nil {
+		t.Fatal("DeleteTaskSession removed a session with queued messages")
 	}
-	if got := queue.GetStatus(ctx, "session-drop").Count; got != 0 {
-		t.Fatalf("session-drop queue count = %d, want 0", got)
+	if got := queue.GetStatus(ctx, "session-drop").Count; got != 1 {
+		t.Fatalf("session-drop queue count = %d, want 1", got)
 	}
-	if got, err := queue.CountPendingByTask(ctx, "task-session-queue-purge"); err != nil || got != 1 {
-		t.Fatalf("pending after session delete = %d err=%v, want 1 (kept session)", got, err)
+	if got, err := queue.CountPendingByTask(ctx, "task-session-queue-purge"); err != nil || got != 2 {
+		t.Fatalf("pending after rejected session delete = %d err=%v, want 2", got, err)
 	}
-	if override, err := mqRepo.GetAutoMergeOverride(ctx, dropIdentity); !errors.Is(err, messagequeue.ErrSessionIdentityMismatch) || override != nil {
-		t.Fatalf("deleted session override = %+v err=%v, want identity mismatch", override, err)
+	if override, err := mqRepo.GetAutoMergeOverride(ctx, dropIdentity); err != nil || override == nil || override.Enabled {
+		t.Fatalf("retained session override = %+v err=%v, want disabled", override, err)
 	}
-	if move, ok := queue.GetPendingMove(ctx, dropIdentity.SessionID); ok || move != nil {
-		t.Fatalf("deleted session pending move = %+v exists=%t, want absent", move, ok)
+	if move, ok := queue.GetPendingMove(ctx, dropIdentity.SessionID); !ok || move == nil {
+		t.Fatalf("retained session pending move = %+v exists=%t, want present", move, ok)
 	}
 }
 
