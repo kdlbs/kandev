@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { updateTask } from "@/lib/api";
 import type { TaskSession } from "@/lib/types/http";
 import {
   clearTaskSessionAutoProvisioningSuppression,
@@ -11,7 +12,7 @@ import {
   useBulkSessionRemoval,
   type BulkSessionRemovalReason,
   type BulkSessionRemovalScope,
-} from "./session-bulk-removal";
+} from "./use-bulk-session-removal";
 
 export function useTaskBulkRemovalController({
   taskId,
@@ -61,18 +62,19 @@ export function useTaskBulkRemovalController({
     hasError,
     remove: removeById,
     getLatestSnapshot,
-    onRemoveAllConfirmed: () => {
+    onRemoveAllConfirmed: async () => {
       if (!taskId) return;
+      await updateTask(taskId, { metadata: { bulk_session_removal_suppress_ensure: true } });
       suppressedTaskIdRef.current = taskId;
       try {
         suppressTaskSessionAutoProvisioning(taskId);
       } catch {
-        // A best-effort reload fence must never block the confirmed deletion.
+        // The durable task marker still protects other tabs when browser storage fails.
       }
     },
     onInvalidSnapshot: (reason) =>
       reason ? reportIneligible(reason) : toast({ title: t("task:sessionsChangedReviewAgain") }),
-    onComplete: ({ removed, remaining, failed }) => {
+    onComplete: async ({ removed, remaining, failed }) => {
       if (failed) {
         toast({
           title: t("task:bulkRemovalPartial", { removed, remaining }),
@@ -81,9 +83,12 @@ export function useTaskBulkRemovalController({
         const suppressedTaskId = suppressedTaskIdRef.current;
         if (suppressedTaskId) {
           try {
+            await updateTask(suppressedTaskId, {
+              metadata: { bulk_session_removal_suppress_ensure: false },
+            });
             clearTaskSessionAutoProvisioningSuppression(suppressedTaskId);
           } catch {
-            // The deletion result remains authoritative when browser storage is unavailable.
+            toast({ title: t("task:bulkRemovalUnavailable_error"), variant: "error" });
           }
         }
       }

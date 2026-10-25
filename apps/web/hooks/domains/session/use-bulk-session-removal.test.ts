@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
 import {
@@ -6,7 +6,7 @@ import {
   executeBulkSessionRemoval,
   isBulkSessionRemovalSnapshotCurrent,
   useBulkSessionRemoval,
-} from "./session-bulk-removal";
+} from "./use-bulk-session-removal";
 
 const taskSession = (id: string, state: TaskSession["state"], isPrimary = false): TaskSession =>
   ({
@@ -144,6 +144,33 @@ describe("bulk session removal execution", () => {
       await submission;
     });
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps submission blocked until failed-removal cleanup finishes", async () => {
+    let finishCleanup: () => void = () => undefined;
+    const cleanup = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    const remove = vi.fn(async () => false);
+    const onComplete = vi.fn(() => cleanup);
+    const sessions = [taskSession("first", "COMPLETED")];
+    const hook = renderHook(() =>
+      useBulkSessionRemoval({ sessions, isLoading: false, remove, onComplete }),
+    );
+
+    act(() => hook.result.current.request("all", "first"));
+    let submission: ReturnType<typeof hook.result.current.confirm>;
+    act(() => {
+      submission = hook.result.current.confirm();
+    });
+    await waitFor(() => expect(onComplete).toHaveBeenCalledTimes(1));
+    expect(hook.result.current.pending).toBe(true);
+    expect(await hook.result.current.confirm()).toBeNull();
+    await act(async () => {
+      finishCleanup();
+      await submission;
+    });
+    expect(hook.result.current.pending).toBe(false);
   });
 });
 

@@ -110,6 +110,12 @@ func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...Ensu
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
 	}
+	if o.ActivationSource == LaunchActivationSourceSessionOpen &&
+		task.Metadata[models.MetaKeyBulkSessionRemovalSuppressEnsure] == true {
+		return &EnsureSessionResponse{
+			Success: true, TaskID: taskID, Source: "suppressed_bulk_removal", NewlyCreated: false,
+		}, nil
+	}
 
 	agentProfileID, step := s.resolveTaskAgentProfile(ctx, task)
 	autoStart := stepAllowsAutoStart(step)

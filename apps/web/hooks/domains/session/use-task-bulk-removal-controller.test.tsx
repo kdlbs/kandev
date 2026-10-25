@@ -3,15 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
 import { useTaskBulkRemovalController } from "./use-task-bulk-removal-controller";
 
-const { toast, suppress, clear, getState } = vi.hoisted(() => ({
+const { toast, suppress, clear, getState, updateTask } = vi.hoisted(() => ({
   toast: vi.fn(),
   suppress: vi.fn(),
   clear: vi.fn(),
   getState: vi.fn(),
+  updateTask: vi.fn(async (_taskId: string, _payload: unknown) => ({})),
 }));
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/lib/api", () => ({ updateTask }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) => selector(getState()),
   useAppStoreApi: () => ({ getState }),
@@ -92,6 +94,31 @@ describe("useTaskBulkRemovalController eligibility", () => {
 });
 
 describe("useTaskBulkRemovalController", () => {
+  it("does not delete when the durable Remove All fence cannot be written", async () => {
+    updateTask.mockRejectedValueOnce(new Error("task update failed"));
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(suppress).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_error",
+      variant: "error",
+    });
+  });
+
   it("clears the Remove All auto-provisioning fence after a partial failure", async () => {
     const removeById = vi.fn(async (id: string) => id !== "first");
     const { result } = renderHook(() =>
@@ -110,6 +137,10 @@ describe("useTaskBulkRemovalController", () => {
 
     expect(suppress).toHaveBeenCalledWith("task-1");
     expect(clear).toHaveBeenCalledWith("task-1");
+    expect(updateTask.mock.calls.map(([, payload]) => payload)).toEqual([
+      { metadata: { bulk_session_removal_suppress_ensure: true } },
+      { metadata: { bulk_session_removal_suppress_ensure: false } },
+    ]);
     expect(removeById.mock.calls.map(([id]) => id)).toEqual(["second", "first"]);
   });
 

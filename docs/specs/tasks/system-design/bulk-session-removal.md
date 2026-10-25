@@ -63,15 +63,17 @@ prevents re-entry. The backend remains authoritative for authorization,
 runtime quiescence, refusal of active sessions, primary promotion, and task
 workspace retention.
 
-Remove All suppresses automatic session provisioning so the confirmed empty
-state survives navigation and reload. A failed bulk deletion clears that
-suppression. Creating a new session through the task's New Session action
-clears it after the server returns a session ID, restoring ordinary
-single-session deletion behavior for that task. Each task has its own browser
-storage entry so another tab cannot overwrite or restore a different task's
-fence. Storage failures retain the current tab's state. A successful launch
-clears the fence even if task-switch navigation was superseded while the
-request was pending.
+Remove All first records a task metadata marker through the existing task
+update contract, then deletes sessions. Passive `session.ensure` reads that
+marker after finding no existing session and leaves the task empty, including
+when another browser opens it. If the marker write fails, deletion does not
+begin. A failed bulk deletion clears the durable marker; a successful explicit
+new-session launch clears it after a session ID exists, restoring ordinary
+single-session deletion behavior. The per-task browser storage entry remains
+a local fence while session-list events settle. Storage failures retain the
+current tab's state, while the durable marker protects other browsers. A
+successful launch clears the local fence even if task-switch navigation was
+superseded while the request was pending.
 
 ## Desktop presentation
 
@@ -97,18 +99,20 @@ new-session action is usable.
 ## Localization and accessibility
 
 New copy lives in the `task` namespace. Count-bearing strings use i18next
-`_one` / `_other` keys. All six shipped locale catalogs receive matching keys;
+`_one` / `_other` keys. All shipped locale catalogs receive matching keys;
 Traditional Chinese uses the repository's generated synchronization flow.
-Destructive actions use accessible names that include the scope, and disabled
-actions retain a discoverable eligibility reason.
+Destructive actions use accessible names that include the scope and remain
+stable while pending; a separate status reports progress. Disabled actions
+retain a discoverable eligibility reason.
 
 ## Verification
 
 Pure helper and session-action tests cover task isolation, hidden sessions,
 selected-session preservation, zero/loading/active refusal, snapshot changes,
 ordering, duplicate submission, and partial failure. Desktop and phone
-Playwright flows use the API session list before and after reload to prove that
-the persisted conversations are gone. The existing single-session delete and
+Playwright flows use the API session list before and after reload, including a
+second browser context, to prove that the persisted conversations are gone.
+The existing single-session delete and
 task-environment ownership tests remain the regression contract for workspace
 retention.
 

@@ -161,6 +161,7 @@ export async function updateTask(
     /** Human assignee. "" unassigns; omitting the field leaves it alone. */
     assignee_user_id?: string;
     priority?: TaskPriority;
+    metadata?: Record<string, unknown>;
   },
   options?: ApiRequestOptions,
 ) {

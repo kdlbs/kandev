@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
-import { useBulkSessionRemoval } from "../session-bulk-removal";
+import { useBulkSessionRemoval } from "@/hooks/domains/session/use-bulk-session-removal";
 
 export function MobileBulkSessionRemovalConfirmation({
   taskId,

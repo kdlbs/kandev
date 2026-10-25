@@ -721,6 +721,7 @@ test.describe("Session tab management — bulk removal", () => {
   });
 
   test("Remove All permanently deletes every persisted task session", async ({
+    browser,
     testPage,
     apiClient,
     seedData,
@@ -732,6 +733,10 @@ test.describe("Session tab management — bulk removal", () => {
       seedData,
       "Remove all sessions",
     );
+    const otherContext = await browser.newContext({
+      baseURL: new URL(testPage.url()).origin,
+      storageState: await testPage.context().storageState(),
+    });
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.contextMenuItem("Remove All").click();
     const dialog = session.alertDialog();
@@ -745,6 +750,38 @@ test.describe("Session tab management — bulk removal", () => {
     await testPage.reload();
     await session.waitForLoad();
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+    const otherPage = await otherContext.newPage();
+    await otherPage.goto(`/t/${task.id}`);
+    await new SessionPage(otherPage).waitForLoad();
+    await dwell(
+      otherPage,
+      2_000,
+      "negative-assertion",
+      "an independent browser must not provision a replacement after its empty list loads",
+    );
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+    expect((await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure).toBe(
+      true,
+    );
+    const otherSession = new SessionPage(otherPage);
+    await otherSession.openNewSessionDialog();
+    await otherSession.newSessionPromptInput().fill("/e2e:simple-message");
+    await otherSession.newSessionStartButton().click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure,
+        {
+          timeout: 15_000,
+        },
+      )
+      .toBe(false);
+    await otherContext.close();
   });
 });
 

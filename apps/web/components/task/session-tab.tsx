@@ -23,7 +23,7 @@ import {
   SessionContextMenuItems,
   SessionTabDialogs,
 } from "./session-tab-menu";
-import { useTaskBulkRemovalController } from "./use-task-bulk-removal-controller";
+import { useTaskBulkRemovalController } from "@/hooks/domains/session/use-task-bulk-removal-controller";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
   markSessionTabUserActivationIntent,

@@ -125,6 +125,8 @@ type PluginMessageFilter struct {
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
 	MetaKeyAgentProfileID = "agent_profile_id"
+	// A confirmed Remove All keeps passive task opens from recreating a session.
+	MetaKeyBulkSessionRemovalSuppressEnsure = "bulk_session_removal_suppress_ensure"
 	// MetaKeyAutoStartError records why an asynchronous auto-start failed after
 	// its creating call already returned success. Without it the only evidence
 	// is a backend log line and the task sits in CREATED with no session,

@@ -31,6 +31,29 @@ func TestEnsureSession_TaskNotFound(t *testing.T) {
 	}
 }
 
+func TestEnsureSession_PassiveOpenHonorsBulkRemovalAcrossClients(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskWithoutSession(t, repo, "task1", "")
+	if err := repo.MergeTaskMetadata(ctx, "task1", map[string]interface{}{
+		"bulk_session_removal_suppress_ensure": true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	resp, err := svc.EnsureSession(ctx, "task1", EnsureSessionOptions{ActivationSource: LaunchActivationSourceSessionOpen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.SessionID != "" || resp.NewlyCreated || resp.Source != "suppressed_bulk_removal" {
+		t.Fatalf("passive open recreated a removed session: %+v", resp)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task1")
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("sessions after passive open = %v, %v", sessions, err)
+	}
+}
+
 func TestEnsureSession_ReturnsExistingPrimary(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -65,7 +65,7 @@ export function BulkSessionRemoveDialog({
             onClick={onConfirm}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {pending ? t("task:removingSessions", { count }) : action}
+            {action}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

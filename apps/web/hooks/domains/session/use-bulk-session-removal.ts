@@ -145,16 +145,7 @@ function refreshInvalidSnapshot(
   );
 }
 
-export function useBulkSessionRemoval({
-  sessions,
-  isLoading,
-  hasError = false,
-  remove,
-  getLatestSnapshot,
-  onInvalidSnapshot,
-  onRemoveAllConfirmed,
-  onComplete,
-}: {
+type BulkSessionRemovalOptions = {
   sessions: TaskSession[];
   isLoading: boolean;
   hasError?: boolean;
@@ -165,9 +156,24 @@ export function useBulkSessionRemoval({
     hasError?: boolean;
   }>;
   onInvalidSnapshot?: (reason: BulkSessionRemovalReason) => void;
-  onRemoveAllConfirmed?: () => void;
-  onComplete?: (result: { removed: number; remaining: number; failed: boolean }) => void;
-}) {
+  onRemoveAllConfirmed?: () => Promise<void> | void;
+  onComplete?: (result: {
+    removed: number;
+    remaining: number;
+    failed: boolean;
+  }) => Promise<void> | void;
+};
+
+export function useBulkSessionRemoval({
+  sessions,
+  isLoading,
+  hasError = false,
+  remove,
+  getLatestSnapshot,
+  onInvalidSnapshot,
+  onRemoveAllConfirmed,
+  onComplete,
+}: BulkSessionRemovalOptions) {
   const [snapshot, setSnapshot] = useState<BulkSessionRemovalSnapshot | null>(null);
   const [pending, setPending] = useState(false);
   const [removedCount, setRemovedCount] = useState(0);
@@ -216,13 +222,26 @@ export function useBulkSessionRemoval({
       onInvalidSnapshot?.(selectedSessionMissing ? null : refreshed.reason);
       return { stale: true } satisfies BulkSessionRemovalConfirmationResult;
     }
-    if (snapshot.scope === "all") onRemoveAllConfirmed?.();
+    if (snapshot.scope === "all") {
+      try {
+        await onRemoveAllConfirmed?.();
+      } catch {
+        setPending(false);
+        pendingRef.current = false;
+        setSnapshot(null);
+        onInvalidSnapshot?.("error");
+        return { stale: true } satisfies BulkSessionRemovalConfirmationResult;
+      }
+    }
     const result = await executeBulkSessionRemoval(snapshot.targetIds, remove, setRemovedCount);
-    setPending(false);
-    pendingRef.current = false;
-    setSnapshot(null);
-    setWasRefreshed(false);
-    onComplete?.(result);
+    try {
+      await onComplete?.(result);
+    } finally {
+      setPending(false);
+      pendingRef.current = false;
+      setSnapshot(null);
+      setWasRefreshed(false);
+    }
     return { ...result, stale: false } satisfies BulkSessionRemovalConfirmationResult;
   }, [
     getLatestSnapshot,

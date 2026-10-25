@@ -30,7 +30,7 @@ import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
-import { useTaskBulkRemovalController } from "../use-task-bulk-removal-controller";
+import { useTaskBulkRemovalController } from "@/hooks/domains/session/use-task-bulk-removal-controller";
 import { MobileBulkSessionRemovalConfirmation } from "./mobile-bulk-session-removal-confirmation";
 import { MobileBulkSessionMenuItems } from "./mobile-bulk-session-menu-items";
 import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";

@@ -291,7 +291,7 @@ describe("BulkSessionRemoveDialog", () => {
       />,
     );
     expect(screen.getByRole("status").textContent).toContain("1 / 3");
-    expect(screen.getByRole("button", { name: /removing/i }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Remove All" }).hasAttribute("disabled")).toBe(true);
   });
 });
 
