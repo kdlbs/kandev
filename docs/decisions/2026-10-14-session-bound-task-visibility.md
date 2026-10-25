@@ -6,7 +6,7 @@
 
 ## Context
 
-A manual Coordinator conversation needs the lifecycle disposition of tasks that have left its board view. The Office CEO's workspace task-tree capability has a different principal and also permits relation inspection. A task title, agent profile, or caller-supplied MCP scope cannot establish the manual conversation's authority.
+A manual Coordinator conversation needs the lifecycle disposition of tasks that have left its board view. A task title, agent profile, or caller-supplied MCP scope cannot establish the manual conversation's authority.
 
 ## Decision
 
