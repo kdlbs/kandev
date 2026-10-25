@@ -1,8 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
+
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
@@ -38,7 +44,7 @@ func TestGuardedGuard_ReadIsConfinedToCallerWorkspace(t *testing.T) {
 	}
 }
 
-func TestGuardedGuard_ReadRefusesDuplicateAndCaseVariantReferences(t *testing.T) {
+func TestGuardedGuard_ReadRefusesCaseVariantReferences(t *testing.T) {
 	f := newGuardedFixture(t)
 	for _, raw := range []string{
 		`{"task_id":"` + fxCaller + `","Task_Id":"` + fxForeign + `"}`,
@@ -113,4 +119,89 @@ func TestGuardedGuard_UnicodeFoldedKeyIsChecked(t *testing.T) {
 	// U+017F (long s) folds to "s": "ſession_id" is the session_id field.
 	guarded, _ := f.call(t, f.principal, ws.ActionMCPMessageTask, json.RawMessage(`{"ſession_id":"sess-foreign"}`))
 	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+}
+
+func seedWorkflows(t *testing.T, f *guardedFixture) (own, foreign string) {
+	t.Helper()
+	now := time.Now().UTC()
+	for _, wf := range []*models.Workflow{
+		{ID: "wf-own", WorkspaceID: f.principal.WorkspaceID, Name: "own", CreatedAt: now, UpdatedAt: now},
+		{ID: "wf-foreign", WorkspaceID: "ws-other", Name: "foreign", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, f.repo.CreateWorkflow(context.Background(), wf))
+	}
+	return "wf-own", "wf-foreign"
+}
+
+func TestGuardedGuard_ReadIsConfinedToCallerWorkflows(t *testing.T) {
+	f := newGuardedFixture(t)
+	own, foreign := seedWorkflows(t, f)
+	for _, action := range []string{ws.ActionMCPListTasks, ws.ActionMCPListWorkflowSteps} {
+		guarded, replacement := f.call(t, f.principal, action, map[string]any{"workflow_id": own})
+		require.Nil(t, guarded, action)
+		require.NotNil(t, replacement)
+		for _, payload := range []any{
+			map[string]any{"workflow_id": foreign},
+			map[string]any{"workflow_id": 5},
+			json.RawMessage(`{"workflow_id":"` + own + `","workflow_id":"` + foreign + `"}`),
+			json.RawMessage(`{"Workflow_ID":"` + foreign + `"}`),
+			json.RawMessage(`{"workflow_id":"` + own + `","WORKFLOW_ID":"` + own + `"}`),
+		} {
+			guarded, _ = f.call(t, f.principal, action, payload)
+			assertWSError(t, guarded, ws.ErrorCodeForbidden)
+			require.Equal(t, reasonGuardedScope, errorReason(t, guarded), action)
+		}
+	}
+}
+
+func TestGuardedGuard_ReadLookupFailureIsUnavailableForEveryReference(t *testing.T) {
+	for name, payload := range map[string]map[string]any{
+		"session":  {"session_id": "sess-floored"},
+		"workflow": {"workflow_id": "wf-own"},
+	} {
+		f := newGuardedFixture(t)
+		seedWorkflows(t, f)
+		require.NoError(t, f.repo.DB().Close())
+		guarded, replacement := f.call(t, f.principal, ws.ActionMCPGetTaskConversation, payload)
+		assertWSError(t, guarded, ws.ErrorCodeUnavailable)
+		require.Equal(t, reasonLookupFailed, errorReason(t, guarded), name)
+		require.Nil(t, replacement)
+	}
+}
+
+func TestGuardedGuard_EnumeratingReadIsPinnedToCallerWorkspace(t *testing.T) {
+	f := newGuardedFixture(t)
+	for _, payload := range []any{map[string]any{}, json.RawMessage(`null`), map[string]any{"limit": 5}} {
+		guarded, replacement := f.call(t, f.principal, ws.ActionMCPListPendingQuestions, payload)
+		require.Nil(t, guarded)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(replacement.Payload, &fields))
+		require.Equal(t, f.principal.WorkspaceID, fields["workspace_id"])
+	}
+	guarded, _ := f.call(t, f.principal, ws.ActionMCPListPendingQuestions, map[string]any{"workspace_id": "ws-other"})
+	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+}
+
+func TestGuardedGuard_ExecutorProfileListingIsDenied(t *testing.T) {
+	f := newGuardedFixture(t)
+	guarded, _ := f.call(t, f.principal, ws.ActionMCPListExecutorProfiles, map[string]any{"executor_id": "exec-local"})
+	assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
+}
+
+func TestListWorkspacesIsConfinedForGuardedPrincipal(t *testing.T) {
+	f := newGuardedFixture(t)
+	list := func(principal mcpscope.Principal) []dto.WorkspaceDTO {
+		msg := makeWSMessage(t, ws.ActionMCPListWorkspaces, map[string]any{})
+		resp, err := f.h.handleListWorkspaces(mcpscope.WithPrincipal(context.Background(), principal), msg)
+		require.NoError(t, err)
+		var out dto.ListWorkspacesResponse
+		require.NoError(t, json.Unmarshal(resp.Payload, &out))
+		return out.Workspaces
+	}
+	got := list(f.principal)
+	require.Len(t, got, 1)
+	require.Equal(t, f.principal.WorkspaceID, got[0].ID)
+	unguarded := f.principal
+	unguarded.Guarded = false
+	require.Greater(t, len(list(unguarded)), 1)
 }

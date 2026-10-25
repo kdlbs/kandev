@@ -730,7 +730,7 @@ func (h *Handlers) handleListWorkspaces(ctx context.Context, msg *ws.Message) (*
 		h.logger.Error("failed to list workspaces", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list workspaces", nil)
 	}
-	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && principal.IsAutomation() {
+	if principal, ok := mcpscope.PrincipalFromContext(ctx); ok && (principal.IsAutomation() || principal.IsGuarded()) {
 		filtered := make([]*models.Workspace, 0, 1)
 		for _, workspace := range workspaces {
 			if workspace != nil && workspace.ID == principal.WorkspaceID {

@@ -28,6 +28,9 @@ const (
 type GuardedTool struct {
 	Class       GuardedToolClass
 	Attribution []string
+	// PinWorkspace makes the guard set the call's workspace_id to the
+	// caller's, for read tools that enumerate every workspace when it is absent.
+	PinWorkspace bool
 }
 
 const mcpActionPrefix = "mcp."
@@ -51,9 +54,9 @@ func buildGuardedTools() map[string]GuardedTool {
 	}
 	add(ClassRead, nil,
 		"list_workflows", "list_workflow_steps", "list_tasks", "list_repositories", "list_workspaces", "list_agents",
-		"list_executor_profiles", "get_task_conversation", "list_task_sessions", "get_task_plan",
+		"get_task_conversation", "list_task_sessions", "get_task_plan",
 		"list_task_plan_revisions", "get_task_plan_revision", "get_walkthrough", "get_task_change_requests",
-		"get_task_pr_automation", "get_task_mr_automation", "list_pending_questions",
+		"get_task_pr_automation", "get_task_mr_automation",
 		"list_pending_agent_permissions", "list_canvases", "get_canvas", "get_canvas_state", "read_canvas_authoring_skill")
 	add(ClassRead, attrCallerT, "list_related_tasks", "list_task_documents", "get_task_document")
 	add(ClassSelf, nil,
@@ -73,7 +76,8 @@ func buildGuardedTools() map[string]GuardedTool {
 	add(ClassChildWrite, []string{"sender_session_id"}, "move_task")
 	add(ClassChildWrite, attrCallerT, "link_task_pr", "unlink_task_pr", "replace_task_pr", "manage_task_change_request")
 	add(ClassInternal, nil, "audit_task_transfer_attempt")
-	add(ClassDenied, nil,
+	m["list_pending_questions"] = GuardedTool{Class: ClassRead, PinWorkspace: true}
+	add(ClassDenied, nil, "list_executor_profiles",
 		"transfer_task", "archive_task", "delete_task", "resolve_agent_permission", "answer_question",
 		"list_plugin_tools", "invoke_plugin_tool", "publish_canvas",
 		"add_branch_to_task", "add_workspace_sources")

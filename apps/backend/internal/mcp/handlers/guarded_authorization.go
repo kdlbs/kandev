@@ -21,6 +21,7 @@ const (
 	fieldSourceTaskID    = "source_task_id"
 	fieldSenderTaskID    = "sender_task_id"
 	fieldWorkspaceID     = "workspace_id"
+	fieldWorkflowID      = "workflow_id"
 )
 
 const (
@@ -32,7 +33,7 @@ const (
 // handlers decode them. Every key that folds to one of these names is that
 // field.
 var guardedRefFields = []string{
-	keyTaskID, keySessionID, "parent_id", "depends_on_task_id", "blocked_by", fieldWorkspaceID, "parent_is_self",
+	keyTaskID, keySessionID, fieldWorkflowID, "parent_id", "depends_on_task_id", "blocked_by", fieldWorkspaceID, "parent_is_self",
 	fieldSourceTaskID, fieldSourceSessionID, fieldSenderTaskID, senderSessionIDKey, fieldCallerTaskID, fieldCallerSessionID,
 }
 
@@ -107,6 +108,9 @@ func (h *Handlers) checkGuardedCall(
 		if refusal := h.checkGuardedReadScope(ctx, principal, payload); refusal != nil {
 			return refusal, nil
 		}
+		if tool.PinWorkspace {
+			payload.set(fieldWorkspaceID, principal.WorkspaceID)
+		}
 	} else if refusal := h.checkGuardedScope(ctx, principal, tool, msg.Action, payload); refusal != nil {
 		return refusal, nil
 	}
@@ -163,7 +167,7 @@ func (h *Handlers) checkGuardedReadScope(
 	}
 	taskID, _, taskTyped := payload.stringField(keyTaskID)
 	sessionID, _, sessionTyped := payload.stringField(keySessionID)
-	workflowID, _, workflowTyped := payload.stringField("workflow_id")
+	workflowID, _, workflowTyped := payload.stringField(fieldWorkflowID)
 	if !taskTyped || !sessionTyped || !workflowTyped {
 		return scopeRefusal()
 	}
