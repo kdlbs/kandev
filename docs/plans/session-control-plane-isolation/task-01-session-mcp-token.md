@@ -7,6 +7,7 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-001
+  - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-003
 acceptance_criteria:
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-001.1
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-001.2
@@ -23,6 +24,8 @@ acceptance_criteria:
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-001.13
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-001.14
   - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-001.15
+  - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-003.1
+  - AC-EXECUTORS-SESSION-CONTROL-ISOLATION-003.2
 system_design:
   - ../../specs/executors/system-design/session-control-plane-isolation.md
 ---
@@ -37,14 +40,15 @@ Derive, inject, carry and enforce the per-instance token on /mcp, /sse, /message
 
 - Backend HMAC derivation over instance ID plus a persisted per-create nonce; key in the secret store (create-if-absent, hidden from user secret paths); create-request field.
 - agentctl guard outside activity accounting, 503 when unset, header redaction (request logs and the ACP frame debug log), /identity capability and fingerprint.
-- `session_mcp_token` in survival capabilities (first addition to the required set); one verifier on every recovered instance of every executor (local adoption and `processRecoveredRemoteInstance`) with the read timeout, retry and unknown-outcome rules; mismatch deletes the instance with the fingerprint observed on its `/identity` as the `X-Expected-Token-Fingerprint` precondition (header absent = unconditional delete).
-- Nonce carry-forward across every `ExecutorRunning.Metadata` writer (table test), Kubernetes resume that keeps the retained instance, 409 `instance_exists` and `instance_cleaning_up` mapping with the backend retry.
-- Carriers for ACP, Codex (native and passthrough with version gate), Claude, OpenCode, Pi, both Cursor writers and custom TUI strategies; shared file handling on `internal/common/passthroughconfig` (registry-path lock for every writer including `manager_passthrough.go`, per-entry `Cleanup`, one live instance per file, symlink/malformed/tracked-file refusal, local exclude with removal), including the Cursor ownership record `created` field written after `CreateNoFollow`; Codex variable never in `PassthroughArtifacts.Env`.
-- Typed launch failures, unknown-outcome delete-by-ID, public docs for the three codes.
+- `session_mcp_token` in survival capabilities (first addition to the required set); one verifier on every path that adopts an instance (local adoption, `processRecoveredRemoteInstance`, Kubernetes `reattachKubernetesAgentctl`, SSH resume reuse; table test per executor type) with the local and remote timing, retry and unknown-outcome rules; mismatch deletes the instance with the fingerprint observed on its `/identity` as the `X-Expected-Token-Fingerprint` precondition (header absent = unconditional delete).
+- Nonce persisted as `mcp_token_nonce` in both metadata key maps, skipped by the `prior.Metadata` merge, carried by every `ExecutorRunning.Metadata` writer (table test); Kubernetes and SSH resume that keeps the retained instance; 409 `instance_exists` and `instance_cleaning_up` mapping with the backend retry.
+- Carriers for ACP, Codex (native and passthrough with version gate, variable set by agentctl in the Codex process) and Claude/OpenCode passthrough via the private `TempConfigPath` file; Cursor, Pi and custom TUI fail closed (`workspace_file_carrier_deferred`); Codex variable never in `PassthroughArtifacts.Env`.
+- Typed launch failures with `cause` tokens, unknown-outcome delete-by-ID, public docs for the three codes, causes, upgrade order and stuck-resume outcome.
+- Bind decision: file the local-only follow-up card (REQ-003) with the EMBARGO section verbatim and record its ID in the task plan.
 
 ## Exclusions
 
-Broker relay, executor routes.
+Broker relay, executor routes, workspace-file carriers.
 
 ## Acceptance
 
@@ -59,4 +63,4 @@ Broker relay, executor routes.
 
 ## Likely files
 
-internal/agentctl/server/api/server.go, auth.go; server/config/config.go; api/agent.go; lifecycle/cursor_plugin_mcp_reconcile.go; agent/mcpconfig.
+internal/agentctl/server/api/server.go, auth.go; server/config/config.go; api/agent.go; lifecycle/executor_backend.go, persistence.go; agent/mcpconfig.

@@ -5,7 +5,6 @@ requirements:
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-001
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-002
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-003
-  - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-004
 system_design:
   - ../../specs/executors/system-design/session-control-plane-isolation.md
 legacy_specs: []
@@ -15,15 +14,15 @@ legacy_specs: []
 
 ## Overview
 
-Three independent results: a per-instance MCP token, a broker relay on the
-instance listener, and scope plus interlock on executor mutations. REQ-004
-records the bind decision and needs no code.
+Two independent results: a per-instance MCP token and a broker relay on the
+instance listener. REQ-003 records the bind decision; its follow-up card is filed by
+Task 01. Executor route guards and workspace-file carriers are deferred (follow-up
+task `ff57f168-9eff-4d0f-9e75-ddaaca481c2a`).
 
 ## Work orders
 
 - [ ] [Task 01: Session MCP token](task-01-session-mcp-token.md) (wave 1)
 - [ ] [Task 02: Broker relay](task-02-broker-relay.md) (wave 2, after 01)
-- [ ] [Task 03: Executor route guards](task-03-executor-route-guards.md) (wave 1)
 
 ## Verification
 
@@ -32,8 +31,7 @@ records the bind decision and needs no code.
 
 ## Risks
 
-- Every supported agent must carry a header; Task 01 inventories them first.
-- Removing WebSocket mutations requires moving three web call sites to HTTP (task 03).
+- Every supported agent must carry a header; Task 01 inventories them first. Cursor and Pi fail closed until the deferred follow-up lands.
 - Lost derivation key replaces retained instances.
 - The first required-capability addition interrupts every retained local control server once on upgrade.
-- Remote executors' recovery paths each need the shared verifier at the two consuming points (task 01).
+- Each adopting path (local, remote recovery, Kubernetes reattach, SSH resume) needs the shared verifier (task 01).

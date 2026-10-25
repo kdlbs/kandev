@@ -5,14 +5,13 @@ requirements:
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-001
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-002
   - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-003
-  - REQ-EXECUTORS-SESSION-CONTROL-ISOLATION-004
 ---
 
 # Session control-plane isolation design
 
 ## Purpose and boundaries
 
-The backend owns token derivation, nonce persistence and the executor guards. agentctl owns
+The backend owns token derivation, nonce persistence and the adoption verifier. agentctl owns
 enforcement on its instance listener, the broker relay, and the broker URL it composes for the
 processes it starts. The agent only carries what Kandev writes into its MCP configuration.
 
@@ -31,15 +30,14 @@ ownership semantics are unchanged
 | 001.11, 001.13, 002.12 | Identity advertisement, adoption and replacement |
 | 001.15 | Launch failure, rollback and visible outcome |
 | 002.1 to 002.11 | Broker relay |
-| 003.1 to 003.7 | Executor route guards and web transport |
-| 004.1, 004.2 | Bind decision |
+| 003.1, 003.2 | Bind decision |
 
 ## Token derivation, nonce and key
 
 The instance ID stays the create request `ID`: the execution ID for every
-executor type except a Kubernetes resume, which reuses the retained agentctl
+executor type except a Kubernetes or SSH resume that reuses the retained agentctl
 instance and its recorded ID (`MetadataKeyKubernetesAgentctlInstanceID`,
-`executor_kubernetes_environment.go`). It is also the `X-Instance-ID` header that
+`executor_kubernetes_environment.go`; `resumedSSHAgentctlInstanceID`, `executor_ssh.go`). It is also the `X-Instance-ID` header that
 `instanceIDGuard` checks and the key recovery uses to rebuild `StandaloneInstanceID`;
 changing it would be a recovery refactor this capability does not need. Recovery reuses an
 execution ID for a replacement, so the ID alone cannot make tokens distinct: each create
@@ -56,16 +54,19 @@ Each create attempt, including each 409 retry, mints a fresh nonce. A `crypto/ra
 failure, or a stored key that is not 32 bytes, yields `mcp_token_key_unavailable`. A failure of the
 execution-record write that persists the nonce is the existing launch failure and rolls the instance back (AC-001.15).
 
-Carry-forward: the nonce must survive every rewrite of the record. Every writer
-that builds or clones `ExecutorRunning.Metadata` carries `mcp_token_nonce` onto the
-new value: standalone create (`executor_standalone.go`), the Kubernetes recovery
-clone (`executor_kubernetes_recovery.go`), idle parking (`manager_idle_parking.go`),
-and reconnect and remote-status updates (`manager_remote_status.go`). A table test
-runs one record through each writer and asserts the key is unchanged. On a
-Kubernetes resume that keeps the retained instance, the previous record's nonce is
-carried onto the new record and the adoption check below decides whether the token
-still matches; on a mismatch the instance is deleted and recreated under the same
-instance ID with a fresh nonce.
+Carry-forward: `mcp_token_nonce` is added to both `persistentMetadataKeys` and
+`sessionScopedMetadataKeys` (`executor_backend.go`), so `FilterPersistentMetadata` keeps it and
+no unrelated metadata path drops it. The `prior.Metadata` merge in `persistence.go` skips it
+(as it skips the passthrough claims and idle-activity keys): the current execution's value
+owns it and a prior instance's nonce is never resurrected. Every writer that builds or
+clones `ExecutorRunning.Metadata` carries it onto the new value: standalone create
+(`executor_standalone.go`), the Kubernetes recovery clone (`executor_kubernetes_recovery.go`),
+idle parking (`manager_idle_parking.go`), and reconnect and remote-status updates
+(`manager_remote_status.go`). A table test runs one record through each writer and asserts the
+key is unchanged. On a Kubernetes or SSH resume that keeps the retained instance, the previous
+record's nonce is set explicitly on the new request metadata and the adoption check below
+decides whether the token still matches; on a mismatch the instance is deleted and recreated
+with a fresh nonce.
 
 The key is 32 random bytes in `internal/secrets`, whose store interface gains a
 create-if-absent operation (one transaction; the loser of a race rereads the winner's key).
@@ -109,49 +110,54 @@ control-server level (`RequiredSurvivalCapabilities`, `capability_incompatible`,
    because a retained old server would otherwise keep serving MCP unauthenticated; the public
    executors documentation notes it. No new copy.
 2. Per-instance mismatch (lost or restored key, missing nonce, changed backend
-   port, a retained remote agentctl from an older build). One verifier runs on
-   every `ExecutorInstance` that any executor's recovery returns, at the two
-   points that consume them: the local adoption in `manager_lifecycle.go` and
-   `processRecoveredRemoteInstance` (`remote_recovery.go`), which cover standalone,
-   SSH, Sprites, Kubernetes, remote Docker and plugin executors. It reads the
-   instance's `/identity` through the recovered client with a 5 second timeout and
-   up to three attempts, one second apart, for transport errors, timeouts and 5xx.
-   Outcomes, exhaustive:
-   - Body is a JSON object with a `capabilities` array of strings and string
-     `mcp_token_fingerprint` and `broker_upstream_fingerprint` fields: compare. A body
-     missing any of them, or not that shape, is a mismatch with no retry.
-   - 404 (the instance ID guard after a port was reused, or the route is gone): the instance
-     is treated as absent, omitted from the recovered set, nothing deleted.
+   port, a retained remote agentctl from an older build). One verifier runs on every
+   path that adopts an instance this launch did not create: the local adoption in
+   `manager_lifecycle.go`, `processRecoveredRemoteInstance` (`remote_recovery.go`), the
+   Kubernetes `reattachKubernetesAgentctl` and the SSH resume reuse
+   (`newResumedAgentctlClient`). Build enumerates any other reattach site (Sprites, remote Docker,
+   plugin) and a table test covers one per executor type. The verifier reads the instance's
+   `/identity` through the client. Remote and launch-path reads use a 5 second timeout and up to
+   three attempts, one second apart. The local adoption runs concurrently (at most 8 instances)
+   with a 2 second timeout and up to two attempts 500 ms apart, so the pass fits the 30 second
+   recovery deadline (`defaultRecoveryDeadline`); a read that exhausts the deadline is unknown.
+   Retries cover transport errors, timeouts and 5xx. Outcomes, exhaustive:
+   - A JSON object with a `capabilities` array of strings and string
+     `mcp_token_fingerprint` and `broker_upstream_fingerprint` fields: compare. Any other body
+     (including 200 without the capability, from an older retained build) is a mismatch with no
+     retry.
+   - 404 (the instance ID guard after a port was reused): absent, omitted from the recovered
+     set, nothing deleted. Every retention-capable build serves `/identity`.
    - 401, 403, any other 4xx, exhausted attempts, a nil client, a cancelled context, or a
-     failure to read the key while recomputing: unknown outcome, never a mismatch and never a
-     delete (a transient fault must not delete live instances). A key-read failure also logs
-     `mcp_token_key_unavailable` at WARN.
+     key read or decrypt failure: unknown outcome, never a mismatch and never a delete. A key
+     failure logs `mcp_token_key_unavailable` at WARN. Recovery reads the key and never creates
+     it: key not found means a lost key and every retained instance mismatches.
    On a mismatch the verifier deletes the instance with the precondition set to the
-   `mcp_token_fingerprint` it just read from that instance's `/identity` (recovery minted
-   nothing; the observed value pins the delete to the exact instance examined, so a
-   replacement that took the ID meanwhile survives) and leaves it out of the recovered
-   set; the existing handling of a session with no recovered instance (resume on a new
-   instance) then applies. A failed delete is retried three times, one second apart; if it
-   still fails the instance stays unregistered with a WARN and the next recovery pass repeats the
-   verification. Until it is deleted the replacement
-   create gets 409 `instance_exists` and the launch fails through the existing
-   launch-failure path.
-   Unknown outcome: the remote path reports `RecoveryOutcomeUnknown`, keeps the record and
-   retries through the existing remote retry path. The local adoption has no retry loop: the
-   instance stays unregistered with a WARN, the next backend start repeats the verification, and a
-   resume create before then gets 409 `instance_exists` and fails the launch.
-   For a remote executor the expected upstream fingerprint is always empty, because
-   no upstream is sent.
+   `mcp_token_fingerprint` observed on it (none when the body had no usable fingerprint; the
+   delete is then unconditional, pinned by `X-Instance-ID`), so a replacement that took
+   the ID meanwhile survives, and omits it from the recovered set. A launch-path adoption (resume
+   reuse) then falls to the existing recreate path with a fresh nonce; unknown outcome fails the
+   launch through the launch-failure path with `instance_exists` at the start of the text, deleting
+   nothing, and the session stays resumable. A failed delete is retried three times, one second
+   apart; if it still fails the instance stays unregistered with a WARN and the next recovery pass
+   repeats the check. Until deleted, a replacement create gets 409 `instance_exists`.
+   Unknown outcome on recovery: the remote path reports `RecoveryOutcomeUnknown`, keeps the
+   record and retries through the existing remote retry path. The local adoption has no retry
+   loop: the instance stays unregistered with a WARN and the next backend start repeats the check.
+   For a remote executor the expected upstream fingerprint is always empty (no upstream is sent).
    For Kandev-deployed helpers replacement is self-sufficient: SSH and Sprites compare the uploaded binary's SHA-256 on every non-resumed create and
    upload a stale one (`executor_ssh.go` `CreateInstance`, `uploadAgentctl` in
-   `executor_sprites_operations.go`), so the replacement instance runs the current build.
-   Operator-pinned images (Kubernetes, remote Docker) need the operator to update them;
-   until then every launch there fails with `mcp_token_unsupported` (documented, AC-001.15).
+   `executor_sprites_operations.go`). Operator-pinned images (Kubernetes, remote Docker) need the
+   operator to update them; until then every launch there fails with `mcp_token_unsupported`.
+   A new agentctl under an older backend answers MCP routes 503 `mcp_token_unconfigured`; the
+   documentation says to update the backend first.
 
 A fresh create runs the same comparison before the agent starts (AC-001.13), with the same
-5 second timeout and three attempts; an identity still unreadable after them is treated as
-unsupported (delete with the minted fingerprint, `mcp_token_unsupported`), because the launch
-owns the instance and a retry is the launch's own. It is needed because an old agentctl would ignore the unknown field and serve MCP
+5 second timeout and three attempts. For an instance this launch created, a missing capability or an
+identity still unreadable after them is unsupported (delete with the minted fingerprint,
+`mcp_token_unsupported`; an old build ignores the header, so that delete is unconditional). An adopted
+Kubernetes ambiguous-create instance with the capability but a different fingerprint is deleted
+with the observed fingerprint and the create retried with a fresh nonce under the AC-001.9 retry.
+It is needed because an old agentctl would ignore the unknown field and serve MCP
 unauthenticated; the agent has not started yet, so nothing used it.
 
 ## Instance MCP guard
@@ -188,7 +194,7 @@ stub MCP HTTP server, is driven and the test observes the `Authorization` header
 `/message` or `/mcp` request) or, where the agent cannot be driven in a test, the emitted
 `session/new` frame or file plus a cited vendor document or source line stating it forwards
 configured MCP headers; a frame or file alone does not qualify. An agent not in the list, or
-whose evidence shows the header dropped, launches with `mcp_token_carrier_unavailable`: the
+whose evidence shows the header dropped, or whose Kandev entry is written into a workspace file (Cursor, Pi, custom TUI strategies; deferred), launches with `mcp_token_carrier_unavailable`: the
 fail-closed default, so an unverified agent never gets an unauthenticated Kandev entry. An agent
 whose adapter rewrites ACP MCP entries into its own configuration (Muse writes a temporary
 overlay, `muse_acp.go`) is verified through that overlay, and Build adds it as a row under the
@@ -202,10 +208,7 @@ names the log line.
 | ACP HTTP and SSE entries | `McpServer.Headers` `Authorization: Bearer` | `config.injectKandevMcpServerAtHost`, `api.injectKandevMcpServers` |
 | Codex app-server (native) | `http_headers` in the JSON-RPC config | `codexappserver/adapter.go` |
 | Codex passthrough | `-c mcp_servers.kandev.env_http_headers={"Authorization": "KANDEV_MCP_SESSION_TOKEN"}` plus the variable set in that Codex process only, with the `Bearer ` prefix in its value | `agent/mcpconfig/passthrough.go` `CodexStrategy` |
-| Claude / OpenCode passthrough | `headers` in the generated JSON file | `agent/mcpconfig` strategies |
-| Cursor (two writers) | `headers` on the `kandev` entry of `<workspace>/.cursor/mcp.json` | `lifecycle/cursor_plugin_mcp_reconcile.go` `composeEffectiveMCPServers`, and `CursorStrategy` in `agent/mcpconfig` |
-| Pi (ACP and passthrough) | `headers` on the `kandev` entry of `<workspace>/.pi/mcp.json`; typed failure when the Pi MCP adapter does not forward headers | the `ProjectMCPStrategy` field and `MCPStrategy` of the Pi agent (`pi_acp.go`), both set to `mcpconfig.PiStrategy`, for both the ACP and passthrough paths |
-| Custom TUI strategies | the strategy's file format when it supports headers, otherwise typed failure | `agent/mcpconfig` |
+| Claude / OpenCode passthrough | `headers` in the generated JSON file at the per-session private `TempConfigPath` (not in the workspace), removed on instance delete | `agent/mcpconfig` strategies |
 
 Codex passthrough cannot use a file (Codex has no MCP-config-file injection) and a `-c` header
 would expose the token in argv, so the token goes through an environment variable. Passthrough
@@ -224,67 +227,13 @@ ordering). The minimum is the lowest Codex release whose documented configuratio
 `KANDEV_MCP_SESSION_TOKEN` is set in the environment of the command Kandev starts, after the
 profile environment is merged (a profile value of that name is overwritten); the `npx` to
 `codex` exec chain inherits it, which is what "only in the Codex launch command's environment"
-means. It travels as an unexported field of the process start configuration on the
-authenticated control channel, never in `PassthroughArtifacts.Env`, so it never reaches the
+means. agentctl already holds the token from the create request and sets the variable in the Codex process environment itself; nothing new travels on the wire, and the variable is never in `PassthroughArtifacts.Env`, so it never reaches the
 `passthrough_mcp_env` metadata or `MetadataSnapshot()`; a test asserts this. The name contains
 `TOKEN`, so Codex's default exclusion of such names from tool subprocess environments applies;
 that is Codex behavior and is not asserted (AC-001.7).
 
-File carriers (`.cursor/mcp.json`, `.pi/mcp.json`, custom TUI files) share one
-handling, built on the existing `internal/common/passthroughconfig` package
-(`Prepare`/`Cleanup` with per-file owner claims in the workspace registry
-`.kandev/passthrough-claims.json`, `Acquire`, `CreateNoFollow`, `MergeJSONUnderKey`) and
-used by every file writer, in whichever process writes: agentctl for passthrough
-preparation and cleanup (`server/process/passthrough_config.go`), and the backend for the
-Cursor reconciler (`cursor_plugin_mcp_reconcile.go`) and `lifecycle/manager_passthrough.go`.
-Build moves any writer that does not yet use `Prepare`/`Cleanup` onto them.
-
-- One lock key. Every read-modify-write or removal of a carrier file, from any process, is
-  a `Prepare` or `Cleanup` call and so holds `Acquire` on the workspace registry path
-  (`<workspace>/.kandev/passthrough-claims.json`). No writer locks the config file path
-  itself; a writer that does is moved. A per-path in-process mutex sits in front. All writes
-  go through a temporary file and rename. A removal therefore never discards a concurrent
-  replacement write, whichever process issued either.
-- Per-entry removal is a new `Cleanup` contract. Today `Cleanup` deletes a whole file when Kandev
-  created it and its fingerprint still matches, and does nothing for a user-created file. Build
-  extends it: for a claim released by an instance, under the same registry lock, it removes the
-  `kandev` entry whose `Authorization` value matches that instance's token (compared through the
-  fingerprint), leaves every other entry, and deletes the file only when Kandev created it and no
-  entry remains. A replacement instance's entry and user servers survive.
-- One live instance per carrier file. The file holds one `kandev` key. `Prepare` already
-  refuses a second owner whose proposed content differs from the file ("MCP configuration is
-  in use by another session"). That refusal is a launch failure with
-  `mcp_token_carrier_unavailable` and the diagnostic naming the file, for the Cursor and Pi
-  (and custom TUI) file carriers; concurrent sessions sharing one workspace directory
-  therefore cannot both use a file-carrier agent. The same owner re-preparing (agent
-  restart, same token) is idempotent and succeeds. A session that stops removes its claim,
-  freeing the file. This is the stated cost of keeping the token out of argv; the public
-  documentation names it.
-- "Kandev created this file" is durable. Writers that go through `Prepare` use its registry
-  claims. The Cursor reconciler's ownership record (`cursorImportOwnershipRecord`, today
-  only `Version` and `Imported`) gains a `created` boolean; a legacy, missing, or
-  unparseable record reads as false, so such a file is never deleted. The reconciler creates
-  the file with `CreateNoFollow`, which reports whether it created it, and writes the record
-  with `created` set to that result, under the registry lock, afterwards. A crash between
-  the two leaves a created file with no record, which reads as not created: the file stays,
-  holding a token that authorizes nothing once its instance is deleted or reaped
-  (AC-001.8). No new execution-record metadata key is used.
-- A symbolic link at the target, or a file that is not valid JSON, is never
-  followed or rewritten: at launch the launch fails with
-  `mcp_token_carrier_unavailable`; at removal time the file is left untouched with a
-  warning, the instance delete still succeeds, and the token left in it authorizes
-  nothing once the instance is gone (AC-001.8).
-- A target the repository tracks (`git ls-files --error-unmatch`, run in the git repository
-  that contains it) fails the launch with `mcp_token_carrier_unavailable`: an exclude
-  rule has no effect on a tracked file, so the token would reach `git diff` and commits.
-- For an untracked target Kandev adds the path to the repository's local exclude file
-  (`info/exclude`, never a tracked `.gitignore`) of the git repository that contains the
-  file, so the token is not committed. In a linked worktree that file lives in the common git
-  directory, so the entry also hides a same-named untracked file in the main checkout; this
-  is accepted and documented. The entry is removed by the same `Cleanup`, under the same
-  lock, when the last claim on the file is released. A workspace that is not inside a git
-  repository gets no exclude entry; a multi-repository root gets an entry in each repository
-  that contains the file.
+Cause tokens for `mcp_token_carrier_unavailable` (AC-001.15): `agent_not_verified`,
+`workspace_file_carrier_deferred`, `codex_wrapper`, `codex_version`, `codex_probe_failed`.
 
 Managed policy: `canonicalManagedMCPServers` and `injectedKandevMCPConfigured`
 (`agentctl/server/process/managed_tool_policy.go`, `manager_permission_policy.go`)
@@ -301,8 +250,8 @@ contains the token.
 ## Broker relay
 
 agentctl registers `GET` and `POST` `/git-credentials/resolve` and `POST`
-`/git-credentials/reissue` on the instance listener. These paths are exempt from
-`instanceAuth` (control credential) and from the MCP guard: the helper holds
+`/git-credentials/reissue` on the instance listener. The whole `/git-credentials/` prefix is exempt from
+`instanceAuth` (control credential) and from the MCP guard, so an unregistered subpath reaches the router and answers 404: the helper holds
 neither the control credential nor the MCP token, and the lease in the JSON body
 is the capability, validated by the upstream broker. `instanceIDGuard` already
 allows a missing `X-Instance-ID`, and `deliveryProtocolGuard` applies only to
@@ -338,59 +287,6 @@ copied upstream and only `Content-Type` back. For a same-host executor the readi
 curl limit is 20 seconds and `waitAgentctlProcess` (`lifecycle/broker_reachability.go`) waits 25
 seconds, both above the relay's 15; remote executors keep 15.
 
-## Executor route guards
-
-Authorization matrix, applied to the target. For a profile route the target is the profile and the
-parent executor is the one the profile row stores (`profile.ExecutorID`), not the path `:id`;
-if the path `:id` differs from it, or the profile is missing, the answer is 404. The profile is evaluated
-first, then the parent. The parent is evaluated only against the rows "Owned by someone else" (404 for a
-non-manager) and "Owned by the caller"; a shared parent executor passes for every caller, so an owner of
-a profile under a shared executor is authorized (AC-EXECUTORS-OWNERSHIP-001.2 requires both checks only
-when both have owners). Profile create takes its parent from the path `:id`, with the same treatment:
-
-| Target | Caller | Result |
-| --- | --- | --- |
-| Missing | any | 404 (existing not-found response) |
-| Owned by someone else | configuration manager | authorized |
-| Owned by someone else | any other caller | 404 (existing not-found response; no existence or owner disclosure) |
-| Owned by the caller | the caller | authorized |
-| Shared (no owner) | configuration manager | authorized |
-| Shared (no owner) | any other caller | 403 `forbidden` |
-| Create naming the caller as owner | any caller | authorized |
-| Create naming no owner or another owner | configuration manager | authorized |
-| Create naming no owner or another owner | any other caller | 403 `forbidden` |
-
-
-A route middleware in the executor handler packages implements the matrix in AC-003.1. It
-resolves the target from the path (missing target: the handler's own 404), decides authorization
-from the matrix, then lets `httpmw.InterimSettingsInterlock` run, the same order as
-`agent/settings`. `authorizeExecutorOwners` (`task/service/executor_ownership.go`) already
-answers not found for foreign-owned resources but skips shared ones, so the middleware adds the
-shared-resource manager requirement and the create and assignment rows. The service layer is the
-authority when a reassignment races a mutation: the middleware hands the owner it authorized
-against to the service call (request context), and the service compares it with the stored owner
-inside the write transaction (for a profile, the profile's and the parent's, each when present).
-A difference, including an owner who made the resource shared in between (which
-`authorizeExecutorOwners` alone would pass), answers the existing not-found response and changes
-nothing. The comparison is an optimistic-concurrency assertion, not an authorization check: a
-request context carrying no snapshot skips it, so callers outside the REST routes behave as
-today. One is the settings operations dispatcher (`backendapp/settings_domain_operations.go`,
-`executor` and `executor_profile` cases), which reaches `UpdateExecutor` and
-`UpdateExecutorProfile` without the route guard or the interlock; it belongs to the MCP tool
-surface and is named in Out of scope. The interlock refuses every `Authorization: Bearer`
-credential with `forbidden` (`common/httpmw/interim_settings_interlock.go`), so PAT and CLI
-callers are refused, matching agent-settings routes (the interim intent).
-
-The `ws.ActionExecutor*Create|Update|Delete` and `ActionExecutorProfile*Create|Update|Delete`
-registrations are removed. The web sends three of them through the WebSocket client:
-`app/settings/executor/new/page.tsx` (`executor.create`) and `app/settings/executor/[id]/page.tsx`
-(`executor.update`, `executor.delete`); profile pages already use HTTP. Work order 03 moves those
-call sites to `createExecutor`, `updateExecutor` and `deleteExecutor` in
-`lib/api/domains/executor-api.ts`; `lib/api/client.ts` sends the interlock header on mutations
-when a token exists. The `*.created|updated|deleted` events keep updating the stores. The enumeration test (AC-003.5) matches
-registered routes by the path rules in the requirements Definitions, not by
-substring, so the SSH probe and remote-docker build routes are not in its set.
-
 ## Launch ordering, rollback and idempotency
 
 Order: key read or created (`mcp_token_key_unavailable` on failure); nonce
@@ -423,7 +319,7 @@ User-visible outcome of a typed launch failure: the code and one fixed English d
 sentence travel in the session's existing launch-failure error (no new translated copy). The
 public executors documentation names the three codes and the action: update the agentctl that
 serves the executor (operator-pinned Kubernetes and remote Docker images), or repair the secret
-store.
+store (check it and restore the install's database backup). Each `mcp_token_carrier_unavailable` cause is named with its action.
 
 ## Bind decision
 
@@ -432,9 +328,9 @@ store.
 reason the change was proposed for the session channels. The follow-up is a gated
 runtime flag that defaults the bind to loopback for single-user installs, with
 public documentation and a migration note for LAN, container and service users.
-Build files it (not started, with the whole `EMBARGO: LOCAL ONLY` section of the
-originating task description copied verbatim at its start) and records its ID in
-the task plan.
+Build files it as a local Kandev task (`parent_id` self, `start_agent` false, never a public tracker),
+with the whole `EMBARGO: LOCAL ONLY` section of the originating task description copied verbatim at
+its start, and records its ID in the task plan.
 
 ## No kill switch
 
@@ -444,7 +340,8 @@ codes, and the only safe rollback is a revert.
 
 ## Work orders
 
-Three independent work orders (token, relay, executor guards) share one card because they
-close one sandbox-contract layer; each ships and tests alone, except that the relay reuses the
-create-request extension from the token order. Work order 03 includes the web transport change
-(AC-003.4).
+Two independent work orders (token, relay) share one card because they close one
+sandbox-contract layer; each ships and tests alone, except that the relay reuses the
+create-request extension from the token order. The bind decision (REQ-003) is recorded in the
+design and the follow-up card is filed by the token order. Executor route guards and
+workspace-file carriers are deferred (requirements Out of scope).
