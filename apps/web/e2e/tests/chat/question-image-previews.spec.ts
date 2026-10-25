@@ -4,6 +4,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { exerciseChoiceImageQuestion } from "./choice-image-helpers";
 import {
+  exerciseImageCollapse,
   inspectAndAnswerImages,
   openImageQuestions,
   seedQuestionImage,
@@ -158,6 +159,28 @@ test("inspection keeps a draft across the phone breakpoint and theme changes", a
     await expect(inspect).toBeFocused();
     await expect(draft).toHaveValue("Preserve this draft.");
   }
+  await session.clarificationSkip().click();
+  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+});
+
+test("desktop collapse releases previews and preserves the answer draft", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  seedQuestionImage(seedData.repositoryPath);
+  const { session } = await openImageQuestions(testPage, apiClient, seedData);
+  await exerciseImageCollapse(testPage, session, false);
+  if (prCapture.capturing) {
+    await testPage.setViewportSize({ width: 1280, height: 1000 });
+    // Redact the local shell prompt from this question-only capture.
+    await testPage.addStyleTag({ content: ".xterm-screen { visibility: hidden; }" });
+  }
+  await prCapture.screenshot("desktop-question-images-reopened", {
+    caption: "Reopened clarification reloads its image and keeps the answer draft",
+  });
   await session.clarificationSkip().click();
   await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 });

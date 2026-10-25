@@ -361,7 +361,14 @@ Use authenticated `fetch`, `AbortController`, and revocable blob URLs. Scope all
 state by source session, pending ID, question ID, and image ID. Clear it on auth
 change, bundle replacement, or unmount. Ignore stale completions.
 
-Load only images on the active expanded question. Question and choice hooks share
+Load only images on the active expanded question. The clarification host passes
+preview enablement to both question and choice images. Collapse disables previews,
+aborts active and queued reads, and revokes loaded URLs. Resource cleanup also
+clears the loaded-state snapshot so reopening cannot reuse revoked URLs. The form stays mounted
+to preserve answers and drafts. Expansion starts fresh reads. Preview enablement
+is independent of keyboard shortcuts, which pause during image inspection.
+
+Question and choice hooks share
 one scheduler keyed by bundle, question, and owner. Cancel queued work on cleanup
 and remove idle groups. Use at most two concurrent reads
 in a visible group. Do not preload the next question. Historical messages initially
