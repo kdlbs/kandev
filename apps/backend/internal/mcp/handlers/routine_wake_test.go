@@ -18,7 +18,7 @@ import (
 func TestHandleMessageTask_CoalescesOnlyIdenticalScheduledRoutineWakes(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ordinarySender, target, targetSession := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	ctx := context.Background()
 
 	createAutomationSender := func(id, triggerType string) (*models.Task, string) {
@@ -57,7 +57,7 @@ func TestHandleMessageTask_CoalescesOnlyIdenticalScheduledRoutineWakes(t *testin
 		payload["sender_session_id"] = sessionID
 		resp, err := h.handleMessageTask(principalCtx, makeWSMessage(t, ws.ActionMCPMessageTask, payload))
 		require.NoError(t, err)
-		require.Equal(t, ws.MessageTypeResponse, resp.Type)
+		require.Equal(t, ws.MessageTypeResponse, resp.Type, "response: %s", resp.Payload)
 	}
 
 	sendAutomation(scheduledOne, scheduledSessionOne, "identical routine payload")

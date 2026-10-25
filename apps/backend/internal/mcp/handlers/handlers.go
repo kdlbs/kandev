@@ -4098,9 +4098,26 @@ func (h *Handlers) queueTaskMessageForIdentity(
 		(session.QueueIncarnationID != "" && identity.SessionIncarnationID != session.QueueIncarnationID) {
 		return taskMessageDispatchResult{}, messagequeue.ErrSessionIdentityMismatch
 	}
-	queued, err := queue.QueueMessageWithMetadataForSession(
-		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
-	)
+	var queued *messagequeue.QueuedMessage
+	var err error
+	routineWake, _ := metadata[messagequeue.MetadataRoutineWake].(bool)
+	coalesceKey, _ := metadata[messagequeue.MetadataCoalesceKey].(string)
+	if routineWake && coalesceKey != "" {
+		var replaced bool
+		queued, replaced, err = queue.QueueMessageWithCoalesceKeyForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata, coalesceKey, true,
+		)
+		if err == nil && replaced {
+			h.logger.Info("coalesced identical pending routine wake",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("entry_id", queued.ID))
+		}
+	} else {
+		queued, err = queue.QueueMessageWithMetadataForSession(
+			ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
 			status, statusErr := queue.Snapshot(ctx, identity)
