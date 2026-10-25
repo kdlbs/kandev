@@ -24,7 +24,7 @@ describe("DeleteSessionDialog", () => {
     );
 
     const dialog = screen.getByRole("alertdialog");
-    expect(dialog.textContent).toContain("permanently delete the conversation history");
+    expect(dialog.textContent).toContain("removes the session from active views");
     expect(dialog.textContent).toContain("task workspace and its files are kept");
     expect(dialog.textContent).toContain("only session for this task");
     const description = dialog.querySelector('[data-slot="alert-dialog-description"]');
@@ -102,6 +102,35 @@ function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
     </ContextMenu>
   );
 }
+
+it("keeps the primary session and archived history out of cleanup actions", () => {
+  render(
+    <ContextMenu>
+      <ContextMenuTrigger data-testid="protected-tab">Agent</ContextMenuTrigger>
+      <SessionContextMenuItems
+        sessionState="COMPLETED"
+        isPrimary
+        isArchived
+        canShare={false}
+        taskId={null}
+        sessionId="s1"
+        actions={{
+          handleSetPrimary: vi.fn(),
+          handleStop: vi.fn(),
+          handleResume: vi.fn(),
+          handleRestart: vi.fn(),
+        }}
+        onDelete={vi.fn()}
+        onShare={vi.fn()}
+        onHandoffProfile={vi.fn()}
+        onStartRename={vi.fn()}
+      />
+    </ContextMenu>,
+  );
+  fireEvent.contextMenu(screen.getByTestId("protected-tab"));
+  expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
+});
 
 describe("SessionContextMenuItems", () => {
   // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1
@@ -307,7 +336,7 @@ it("keeps restart visible and disables competing actions during cancellation", (
       <ContextMenuTrigger data-testid="pending-restart-tab">Agent</ContextMenuTrigger>
       <SessionContextMenuItems
         sessionState="CANCELLED"
-        isPrimary
+        isPrimary={false}
         canShare={false}
         taskId={null}
         sessionId="s1"

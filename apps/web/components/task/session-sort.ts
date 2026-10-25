@@ -22,6 +22,18 @@ export function sortSessions(sessions: readonly TaskSession[]): TaskSession[] {
   });
 }
 
+export function filterSessionHistory(
+  sessions: readonly TaskSession[],
+  showHistory: boolean,
+): TaskSession[] {
+  if (showHistory) return [...sessions];
+  return sessions.filter(
+    (session) =>
+      session.is_primary ||
+      (!session.archived_at && !["COMPLETED", "FAILED", "CANCELLED"].includes(session.state)),
+  );
+}
+
 export function buildAgentLabelsById(
   agentProfiles: readonly AgentProfileOption[],
 ): Record<string, string> {

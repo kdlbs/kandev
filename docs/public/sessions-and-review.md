@@ -60,10 +60,12 @@ Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, 
 | **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
 | **Restart session** | Stops and resumes the same active session. Keeps its history and workspace without sending a prompt. |
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
-| **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
+| **Delete**         | Removes a non-primary session from active views. A disposable session is deleted; one with transcript or attachment evidence is archived and remains available in session history. The task workspace and files are kept |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
+
+Completed, failed, cancelled, and archived helper sessions are hidden from the ordinary session list. Use **Show session history** to reveal them in the desktop tabs, task preview, session dropdown, or mobile Sessions picker. The primary session remains visible. Promote a replacement before removing the current primary session. If unread queue entries or an unresolved lifecycle action remain, inspect and recover or dispose of that exact work before retrying removal.
 
 Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
 

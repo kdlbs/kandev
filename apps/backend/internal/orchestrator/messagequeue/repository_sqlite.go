@@ -36,6 +36,7 @@ type sqliteRepository struct {
 	tasksTablePresent           bool
 	taskSessionsTablePresent    bool
 	taskSessionsTaskIDPresent   bool
+	taskSessionsArchivedPresent bool
 	queuedMessagesTaskIDPresent bool
 	taskStepTransitionsPresent  bool
 }
@@ -79,6 +80,10 @@ func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
 		r.taskSessionsTaskIDPresent, err = internaldb.ColumnExists(writer, "task_sessions", "task_id")
 		if err != nil {
 			return nil, fmt.Errorf("messagequeue: resolve task session task id column: %w", err)
+		}
+		r.taskSessionsArchivedPresent, err = internaldb.ColumnExists(writer, "task_sessions", "archived_at")
+		if err != nil {
+			return nil, fmt.Errorf("messagequeue: resolve task session archive column: %w", err)
 		}
 	}
 	r.queuedMessagesTaskIDPresent, err = internaldb.ColumnExists(writer, "queued_messages", "task_id")
@@ -444,6 +449,9 @@ func (r *sqliteRepository) guardSessionOwnerTx(ctx context.Context, tx *sqlx.Tx,
 		return nil
 	}
 	query := `SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ?`
+	if r.taskSessionsArchivedPresent {
+		query += ` AND archived_at IS NULL`
+	}
 	args := []interface{}{sessionID}
 	if taskID != "" {
 		query += ` AND task_id = ?`

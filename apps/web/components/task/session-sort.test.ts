@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentLabelsById,
+  filterSessionHistory,
   isSessionActive,
   pickActiveSessionId,
   resolveAgentLabelFor,
@@ -53,6 +54,27 @@ describe("sortSessions", () => {
       makeSession({ id: "new", state: "RUNNING", started_at: "2025-01-05T00:00:00Z" }),
     ];
     expect(sortSessions(sessions).map((s) => s.id)).toEqual(["new", "old"]);
+  });
+});
+
+describe("filterSessionHistory", () => {
+  it("keeps the primary and live helpers while hiding terminal or archived helpers until revealed", () => {
+    const sessions = [
+      makeSession({ id: "primary", state: "COMPLETED", is_primary: true }),
+      makeSession({ id: "live", state: "WAITING_FOR_INPUT" }),
+      makeSession({ id: "finished", state: "COMPLETED" }),
+      makeSession({ id: "archived", state: "FAILED", archived_at: EPOCH }),
+    ];
+    expect(filterSessionHistory(sessions, false).map((session) => session.id)).toEqual([
+      "primary",
+      "live",
+    ]);
+    expect(filterSessionHistory(sessions, true).map((session) => session.id)).toEqual([
+      "primary",
+      "live",
+      "finished",
+      "archived",
+    ]);
   });
 });
 

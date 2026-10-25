@@ -2,42 +2,26 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"strings"
 
-	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
-type recoverSessionQueueRequest struct {
-	TaskID          string `json:"task_id"`
-	CallerSessionID string `json:"caller_session_id"`
-	TargetSessionID string `json:"target_session_id"`
-}
+type recoverSessionQueueRequest = scopedTerminalSessionRequest
 
 type sessionQueueRecoveryCoordinator interface {
 	RecoverTaskSessionQueue(context.Context, messagequeue.QueueRecoveryScope) (*messagequeue.QueueRecoveryResult, error)
 }
 
 func (h *Handlers) handleRecoverSessionQueue(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req recoverSessionQueueRequest
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	req, workspaceID, parseErr := parseScopedTerminalSessionRequest(ctx, msg.Payload)
+	if response, err := terminalSessionScopeError(msg, parseErr, workspaceID, "queue recovery"); response != nil || err != nil {
+		return response, err
 	}
-	req.TaskID = strings.TrimSpace(req.TaskID)
-	req.CallerSessionID = strings.TrimSpace(req.CallerSessionID)
-	req.TargetSessionID = strings.TrimSpace(req.TargetSessionID)
-	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || principal.WorkspaceID == "" || req.TaskID == "" || req.CallerSessionID == "" || req.TargetSessionID == "" ||
-		principal.CallerTaskID != req.TaskID || principal.CallerSessionID != req.CallerSessionID ||
-		req.TargetSessionID == req.CallerSessionID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "queue recovery requires the calling task's current primary session", nil)
-	}
-	return h.recoverAuthorizedSessionQueue(ctx, msg, req, principal.WorkspaceID)
+	return h.recoverAuthorizedSessionQueue(ctx, msg, req, workspaceID)
 }
 
 func (h *Handlers) recoverAuthorizedSessionQueue(

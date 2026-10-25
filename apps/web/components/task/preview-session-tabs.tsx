@@ -4,10 +4,9 @@ import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-autom
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentLogo } from "@/components/agent-logo";
-import { GridSpinner } from "@/components/grid-spinner";
-import { PanelLoadingState } from "@/components/panel-loading-state";
 import { SessionTabs, type SessionTab } from "@/components/session-tabs";
 import { useAppStore } from "@/components/state-provider";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
@@ -22,6 +21,12 @@ import {
 } from "./ensure-session-error";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
+import {
+  PreviewEmptyState,
+  PreviewLoadingState,
+  RunningSpinner,
+} from "./preview-session-empty-states";
+import { SessionHistoryToggle } from "./session-history-toggle";
 import { SessionTabDialogs } from "./session-tab-menu";
 import { TabRenameInput } from "./tab-rename-input";
 import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
@@ -34,6 +39,7 @@ import type { HandoffPreset } from "./new-session-dialog";
 import { limitSessionName, useSessionRenameCommitter } from "./use-session-rename";
 import {
   buildAgentLabelsById,
+  filterSessionHistory,
   isSessionActive,
   pickActiveSessionId,
   resolveAgentLabelFor,
@@ -280,6 +286,16 @@ export function PreviewSessionTabs({
   );
 
   const sortedSessions = useMemo(() => sortSessions(sessions), [sessions]);
+  const showHistory = useDockviewStore(
+    (state) => state.sessionHistoryVisibleByTaskId[taskId] ?? false,
+  );
+  const visibleSessions = useMemo(() => {
+    const visible = filterSessionHistory(sortedSessions, showHistory);
+    const selected = sortedSessions.find((session) => session.id === sessionId);
+    return selected && !visible.some((session) => session.id === selected.id)
+      ? sortSessions([...visible, selected])
+      : visible;
+  }, [sessionId, showHistory, sortedSessions]);
   const agentLabelsById = useMemo(() => buildAgentLabelsById(agentProfiles), [agentProfiles]);
   const profilesById = useMemo(
     () => Object.fromEntries(agentProfiles.map((p) => [p.id, p])),
@@ -292,12 +308,12 @@ export function PreviewSessionTabs({
   );
 
   const activeSessionId = useMemo(
-    () => pickActiveSessionId(sortedSessions, sessionId),
-    [sortedSessions, sessionId],
+    () => pickActiveSessionId(visibleSessions, sessionId),
+    [visibleSessions, sessionId],
   );
   const activeSession = useMemo(
-    () => sortedSessions.find((s) => s.id === activeSessionId) ?? null,
-    [sortedSessions, activeSessionId],
+    () => visibleSessions.find((s) => s.id === activeSessionId) ?? null,
+    [visibleSessions, activeSessionId],
   );
   const taskStatusSummaryDetail = useAppStore(
     (state) =>
@@ -347,7 +363,7 @@ export function PreviewSessionTabs({
   const { viewMode, planTab, hasPlan } = planTabState;
 
   const sessionTabs = useBuildPreviewTabs({
-    sortedSessions,
+    sortedSessions: visibleSessions,
     profilesById,
     agentLabelsById,
     taskId,
@@ -399,13 +415,14 @@ export function PreviewSessionTabs({
       resumption={resumption}
     >
       <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-        <div className="border-b px-2 py-1">
+        <div className="flex items-center gap-1 border-b px-2 py-1">
           <SessionTabs
             tabs={tabs}
             activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
             onTabChange={planTabState.handleTabChange}
-            listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 flex-1 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
           />
+          <SessionHistoryToggle taskId={taskId} showHistory={showHistory} />
         </div>
         <div className="flex-1 min-h-0">
           <PreviewTabBody
@@ -623,28 +640,6 @@ export function PreviewSessionBody({
           detailActive
         />
       </TaskLaunchErrorProvider>
-    </div>
-  );
-}
-
-function RunningSpinner() {
-  return <GridSpinner className="text-muted-foreground shrink-0 text-[12px]" />;
-}
-
-function PreviewLoadingState({ label }: { label: string }) {
-  return <PanelLoadingState testId="preview-loading-state" label={label} />;
-}
-
-function PreviewEmptyState() {
-  const { t } = useTranslation();
-  return (
-    <div className="flex h-full flex-col">
-      <div
-        className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
-        data-testid="preview-empty-state"
-      >
-        {t("task:noAgentsYet2")}
-      </div>
     </div>
   );
 }

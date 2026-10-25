@@ -5808,10 +5808,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session not found: %w", err)
 	}
 
-	// Prevent deleting active sessions
-	switch session.State {
-	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		return fmt.Errorf("cannot delete session in %s state — stop it first", session.State)
+	if session.IsPrimary {
+		return errors.New("cannot delete the current primary session")
+	}
+	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
+		return fmt.Errorf("cannot delete session in %s state; stop it first", session.State)
 	}
 
 	taskID := session.TaskID

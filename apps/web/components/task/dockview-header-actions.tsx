@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
-import { IconPlus, IconTerminal2, IconPlayerPlay } from "@tabler/icons-react";
+import { IconPlus, IconTerminal2, IconPlayerPlay, IconHistory } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -34,6 +34,26 @@ import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibilit
 const HEADER_ACTION_BUTTON_CLASS =
   "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
 const HEADER_ICON_CLASS = "h-3.5 w-3.5";
+
+function SessionHistoryToggle({ taskId }: { taskId: string }) {
+  const { t } = useTranslation();
+  const visible = useDockviewStore((state) => state.sessionHistoryVisibleByTaskId[taskId] ?? false);
+  const setVisible = useDockviewStore((state) => state.setSessionHistoryVisible);
+  const label = visible ? t("task:hideSessionHistory") : t("task:showSessionHistory");
+  return (
+    <Button
+      size="sm"
+      variant={visible ? "secondary" : "ghost"}
+      className={HEADER_ACTION_BUTTON_CLASS}
+      data-testid="dockview-session-history-toggle"
+      aria-label={label}
+      title={label}
+      onClick={() => setVisible(taskId, !visible)}
+    >
+      <IconHistory className={HEADER_ICON_CLASS} />
+    </Button>
+  );
+}
 
 function useLeftHeaderState(
   groupId: string,
@@ -180,6 +200,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
           />
         </DropdownMenuContent>
       </DropdownMenu>
+      {state.isCenterGroup && state.taskId && <SessionHistoryToggle taskId={state.taskId} />}
       {state.taskId && (
         <NewSessionDialog
           open={showNewSessionDialog}

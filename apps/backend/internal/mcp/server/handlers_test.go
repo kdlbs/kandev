@@ -966,6 +966,15 @@ func TestMessageQueueToolsBindCurrentTaskAndSession(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{
 		"task_id": "task-current", "caller_session_id": "test-session", "target_session_id": "old-session",
 	}, payload)
+
+	result = callTool(t, s, "close_task_session_kandev", map[string]interface{}{"target_session_id": "old-session"})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCloseTaskSession, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, map[string]interface{}{
+		"task_id": "task-current", "caller_session_id": "test-session", "target_session_id": "old-session",
+	}, payload)
 }
 
 func TestMessageQueueCensusToolSchemasExposeNoScopeOrMessageBodyControls(t *testing.T) {

@@ -988,6 +988,25 @@ inspect again before deciding. `not_found` means another consumer or normal
 delivery already removed it. Retrying is safe, and a new or changed row is
 never selected by an old claim.
 
+### Recover and close a terminal helper session
+
+From a task's current primary session, use `recover_session_queue_kandev` with
+`target_session_id` to move a terminal non-primary session's unread FIFO into
+the primary queue. The response includes the original ordered message bodies,
+IDs, positions, safe provenance, hashes, and a durable receipt. A retry after a
+lost response returns the same receipt and snapshot without moving messages a
+second time. Recovered reserved rows become pending again. An unresolved
+dispatch, Send Now claim, or lifecycle move blocks recovery until it is resolved.
+
+After the source queue is empty, `close_task_session_kandev` closes that exact
+terminal helper. It rejects the current primary, live execution, pending queue
+work, and cross-task targets. The result contains a cleanup receipt: `deleted`
+for a disposable session or `archived` when transcript or attachment evidence
+must remain. Archived sessions can be viewed through **Show session history**.
+Neither tool accepts a task or workspace override from the caller. Recovery
+snapshots are redacted after the destination queue is dispositioned or the task
+is archived; retain the returned readback if it is needed for an audit.
+
 The tools have no task, session, workspace, body, force, sender-filter, or
 clear-all argument. The local MCP server binds them to the calling task and
 session, and the backend verifies that binding against the task workspace. If

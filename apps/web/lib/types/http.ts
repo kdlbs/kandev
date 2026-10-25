@@ -775,6 +775,7 @@ export type TaskSession = ActiveSubagentCountFields & {
   repository_snapshot?: Record<string, unknown> | null;
   started_at: string;
   completed_at?: string | null;
+  archived_at?: string | null;
   updated_at: string;
   // Workflow fields
   is_primary?: boolean;

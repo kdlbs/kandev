@@ -14,6 +14,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   useSessionActions,
   isSessionStoppable,
@@ -28,57 +29,13 @@ import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
-import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
-import type { AgentProfileOption } from "@/lib/state/slices";
+import type { ForegroundActivity, TaskSessionState } from "@/lib/types/http";
+import { buildSessionRows, type SessionRow } from "./mobile-session-rows";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
 import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
-
-type SessionRow = {
-  id: string;
-  agentName: string | null;
-  agentLabel: string;
-  repositoryLabel: string | null;
-  state: TaskSessionState | null;
-  foregroundActivity: ForegroundActivity | null;
-  /** True when the session is waiting on the operator to notice, not to act —
-   *  a settled session with a positively-sampled background process still
-   *  live (spec: docs/specs/disambiguate-waiting/spec.md). */
-  parkedOnBackgroundWork: boolean;
-  isPrimary: boolean;
-  index: number;
-  startedAt: string;
-};
-
-function buildSessionRows(
-  sessions: TaskSession[],
-  agentProfiles: AgentProfileOption[],
-  primarySessionId: string | null | undefined,
-  repositoryLabelsById: ReadonlyMap<string, string>,
-): SessionRow[] {
-  const sorted = [...sessions].sort(
-    (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-  );
-  return sorted.map((s, idx) => {
-    const profile = agentProfiles.find((p) => p.id === s.agent_profile_id);
-    const labelParts = profile?.label.split(" • ") ?? [];
-    return {
-      id: s.id,
-      agentName: profile?.agent_name ?? null,
-      // User-supplied session name wins over the derived profile label,
-      // matching the desktop session tab title precedence.
-      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || t("task:agent"),
-      repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
-      state: (s.state as TaskSessionState | undefined) ?? null,
-      foregroundActivity: s.foreground_activity ?? null,
-      parkedOnBackgroundWork: !!s.parked_on_background_work,
-      isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
-      index: idx + 1,
-      startedAt: s.started_at,
-    };
-  });
-}
+import { SessionHistoryToggle } from "../session-history-toggle";
 
 // The mobile sessions section reads the per-session substate through the same
 // shared vocabulary as the desktop session switcher and the reopen menu
@@ -149,6 +106,7 @@ type SessionActionsMenuProps = {
   taskId: string;
   state: TaskSessionState | null;
   isPrimary: boolean;
+  isArchived: boolean;
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
@@ -158,12 +116,33 @@ type SessionActionsMenuProps = {
   onHandoffProfile: (profileId: string) => void;
 };
 
+function sessionMenuAvailability(
+  state: TaskSessionState | null,
+  isPrimary: boolean,
+  isArchived: boolean,
+  isRestarting: boolean,
+) {
+  const actionable = isArchived ? null : state;
+  const canStop = !!actionable && isSessionStoppable(actionable);
+  const canResume = !!actionable && isSessionResumable(actionable);
+  const canDelete = !isPrimary && !!actionable && isSessionDeletable(actionable);
+  return {
+    canSetPrimary: !isPrimary && !!actionable,
+    canStop,
+    canRestart: !isArchived && (isRestarting || canStop),
+    canResume,
+    canDelete,
+    hasLifecycleAction: canStop || canResume || canDelete,
+  };
+}
+
 /** Exposes touch-accessible session actions and blocks conflicting lifecycle requests during restart. */
 function SessionActionsMenu({
   triggerRef,
   taskId,
   state,
   isPrimary,
+  isArchived,
   onSetPrimary,
   onStop,
   onResume,
@@ -176,9 +155,7 @@ function SessionActionsMenu({
   const { isMobile } = useResponsiveBreakpoint();
   const pendingDelete = useRef(false);
   const { open, setOpen, triggerProps } = useSessionMenuOpeningGesture();
-  const hasLifecycleAction =
-    !!state &&
-    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
+  const available = sessionMenuAvailability(state, isPrimary, isArchived, isRestarting);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -207,17 +184,17 @@ function SessionActionsMenu({
         <DropdownMenuItem
           className="cursor-pointer"
           onSelect={onSetPrimary}
-          disabled={isPrimary || !state}
+          disabled={!available.canSetPrimary}
         >
           {t("task:setAsPrimary")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {state && isSessionStoppable(state) && (
+        {available.canStop && (
           <DropdownMenuItem className="cursor-pointer" onSelect={onStop} disabled={isRestarting}>
             {t("task:stop")}
           </DropdownMenuItem>
         )}
-        {(isRestarting || (state && isSessionStoppable(state))) && (
+        {available.canRestart && (
           <DropdownMenuItem
             className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
             onSelect={onRestart}
@@ -226,12 +203,12 @@ function SessionActionsMenu({
             {t("task:restartSession")}
           </DropdownMenuItem>
         )}
-        {state && isSessionResumable(state) && (
+        {available.canResume && (
           <DropdownMenuItem className="cursor-pointer" onSelect={onResume} disabled={isRestarting}>
             {t("task:resume")}
           </DropdownMenuItem>
         )}
-        {state && isSessionDeletable(state) && (
+        {available.canDelete && (
           <DropdownMenuItem
             className="cursor-pointer text-destructive focus:text-destructive"
             disabled={isRestarting}
@@ -243,7 +220,7 @@ function SessionActionsMenu({
             {t("task:delete")}
           </DropdownMenuItem>
         )}
-        {hasLifecycleAction && <DropdownMenuSeparator />}
+        {available.hasLifecycleAction && <DropdownMenuSeparator />}
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -307,6 +284,7 @@ function SessionRowTrailingActions({
           taskId={taskId}
           state={row.state}
           isPrimary={row.isPrimary}
+          isArchived={row.isArchived}
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
@@ -462,6 +440,13 @@ const MobileSessionsList = memo(function MobileSessionsList({
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const showHistory = useDockviewStore((state) =>
+    taskId ? (state.sessionHistoryVisibleByTaskId[taskId] ?? false) : false,
+  );
+  const visibleRows = useMemo(
+    () => rows.filter((row) => showHistory || !row.isHistory || row.id === activeSessionId),
+    [activeSessionId, rows, showHistory],
+  );
 
   useEffect(() => {
     if (!open) setConfirmDeleteSessionId(null);
@@ -513,7 +498,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             {t("task:noSessionsYetLaunchOneTo")}
           </div>
         )}
-        {rows.map((row) => (
+        {visibleRows.map((row) => (
           <SessionRowItem
             key={row.id}
             row={row}
@@ -527,6 +512,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
           />
         ))}
       </div>
+      <SessionHistoryToggle taskId={taskId} showHistory={showHistory} mobile />
       {launchOpen && (
         <NewSessionDialog open={launchOpen} onOpenChange={setLaunchOpen} taskId={taskId} />
       )}

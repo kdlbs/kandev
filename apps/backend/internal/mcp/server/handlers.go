@@ -680,21 +680,25 @@ func (s *Server) disposeMessageQueueEntriesHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) recoverSessionQueueHandler() server.ToolHandlerFunc {
+	return s.terminalSessionTargetHandler(ws.ActionMCPRecoverSessionQueue, "session recovery")
+}
+
+func (s *Server) closeTaskSessionHandler() server.ToolHandlerFunc {
+	return s.terminalSessionTargetHandler(ws.ActionMCPCloseTaskSession, "session cleanup")
+}
+
+func (s *Server) terminalSessionTargetHandler(action, operation string) server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		if s.taskID == "" || s.sessionID == "" {
-			return mcp.NewToolResultError("session recovery identity is unavailable in this session"), nil
+			return mcp.NewToolResultError(operation + " identity is unavailable in this session"), nil
 		}
 		targetSessionID, err := req.RequireString("target_session_id")
 		if err != nil {
 			return mcp.NewToolResultError("target_session_id is required"), nil
 		}
-		payload := map[string]interface{}{
-			mcpKeyTaskID:        s.taskID,
-			"caller_session_id": s.sessionID,
-			"target_session_id": targetSessionID,
-		}
+		payload := map[string]interface{}{mcpKeyTaskID: s.taskID, "caller_session_id": s.sessionID, "target_session_id": targetSessionID}
 		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPRecoverSessionQueue, payload, &result); err != nil {
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
