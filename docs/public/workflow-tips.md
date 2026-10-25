@@ -178,7 +178,9 @@ fresh conversation. The source step's **Complete the session** setting closes
 the conversation, while **Park the session** stops the agent and keeps the
 conversation available for reuse or manual follow-up. These settings default
 to reuse on start and park on end. An explicitly selected completion policy is
-preserved.
+preserved. A retry of the same accepted step entry keeps its recorded destination
+instead of creating another conversation; a later visit is a new entry and
+applies the start setting again.
 
 ### Continue a completed conversation
 

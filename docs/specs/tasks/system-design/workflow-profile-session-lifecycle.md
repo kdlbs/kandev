@@ -362,12 +362,12 @@ destination and stamped source cleanup rather than allocating another session.
 Reject an obsolete entry against the current transition/entry identity before
 replacing this record. A newer entry cannot overtake an unfinished route without
 reconciliation. Keep the committed record until a newer valid entry replaces it;
-task deletion removes it and task duplication strips it. A deleted recorded
-destination, like a terminal one, cannot satisfy reuse: the retry logs it and
-allocates the target profile's fresh session, which replaces the record. Any
-other failure to load the destination fails that entry visibly. A user or a
-compensation path can delete the destination without leaving the step, so
-failing every later start in the entry would lock the task until it moves.
+task deletion removes it and task duplication strips it. A deleted or terminal
+recorded destination cannot satisfy reuse. The same accepted entry must not
+allocate another destination when its recorded allocation is missing, failed,
+terminal, or has uncertain ownership; it fails visibly. Only a distinct accepted
+entry may allocate a fresh destination under its start setting. This allocation
+fence does not restart a runtime or replay a prompt.
 Test prepared/committed restart and rollback on both
 databases. Extend existing task metadata transaction helpers; do not assume
 unconditional `SetTaskMetadataKey` provides compare-and-set or write-once safety.
