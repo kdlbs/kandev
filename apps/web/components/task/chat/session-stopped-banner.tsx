@@ -423,7 +423,7 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
   const profileExists = useSessionProfileExists(props.sessionId);
   const { busyAction, guardDetails } = props.actions;
   const completed = props.mode === "completed";
-  const blocked = Boolean(guardDetails && !guardDetails.retryable);
+  const blocked = !props.archivedSession && Boolean(guardDetails && !guardDetails.retryable);
   const managedCloneRecovery =
     Boolean(props.actions.managedCloneRecoveryStamp) ||
     props.actions.workspaceRecoveryMatchesCurrentFailure === true;

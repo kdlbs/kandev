@@ -112,8 +112,12 @@ test.describe("desktop: session history", () => {
     await reopen.click();
     await expect(helperTab).toBeVisible();
     await expect(session.chat.getByText("retained helper evidence")).toBeVisible();
+    await expect(session.chat.getByTestId("archived-session-new-agent-button")).toBeVisible();
+    await expect(session.recoveryResumeButton()).not.toBeVisible();
     await prCapture.screenshot("archived-helper-transcript-desktop", {
       caption: "Archived helper conversation remains readable after cleanup and history reopen",
     });
+    await session.chat.getByTestId("archived-session-new-agent-button").click();
+    await expect(session.newSessionDialog()).toBeVisible();
   });
 });

@@ -59,40 +59,43 @@ describe("SessionStoppedBanner pruned delivery gap", () => {
     expect(screen.queryByTestId("recovery-retry-connection-button")).toBeNull();
   });
 
-  it("keeps archived conversation history read-only while allowing a task-scoped new agent", () => {
-    sessionFixture.archivedAt = "2026-10-25T04:00:00.000Z";
-    const handleRecover = vi.fn();
-    const actions = {
-      busyAction: null,
-      guardDetails: null,
-      recoveryError: null,
-      handleRecover,
-      deliveryHistoryGap: {
-        firstSequence: 5495,
-        lastSequence: 5499,
-        receivedSequence: 5494,
-        projectedSequence: 5494,
-      },
-    } as unknown as SessionRecoveryActions;
-    const onShowDialog = vi.fn();
-    render(
-      <TooltipProvider>
-        <SessionStoppedBanner
-          mode="recoverable"
-          taskId="task"
-          sessionId="session"
-          showDialog={false}
-          onShowDialog={onShowDialog}
-          uncertainDelivery
-          recoveryActions={actions}
-        />
-      </TooltipProvider>,
-    );
+  it.each([null, { kind: "session_recovery_unstoppable", retryable: false }])(
+    "keeps archived history read-only and task-scoped New Agent available with guard %j",
+    (guardDetails) => {
+      sessionFixture.archivedAt = "2026-10-25T04:00:00.000Z";
+      const handleRecover = vi.fn();
+      const actions = {
+        busyAction: null,
+        guardDetails,
+        recoveryError: null,
+        handleRecover,
+        deliveryHistoryGap: {
+          firstSequence: 5495,
+          lastSequence: 5499,
+          receivedSequence: 5494,
+          projectedSequence: 5494,
+        },
+      } as unknown as SessionRecoveryActions;
+      const onShowDialog = vi.fn();
+      render(
+        <TooltipProvider>
+          <SessionStoppedBanner
+            mode="recoverable"
+            taskId="task"
+            sessionId="session"
+            showDialog={false}
+            onShowDialog={onShowDialog}
+            uncertainDelivery
+            recoveryActions={actions}
+          />
+        </TooltipProvider>,
+      );
 
-    expect(screen.queryByTestId("recovery-resume-button")).toBeNull();
-    expect(screen.queryByTestId("recovery-stop-button")).toBeNull();
-    fireEvent.click(screen.getByTestId("archived-session-new-agent-button"));
-    expect(onShowDialog).toHaveBeenCalledWith(true);
-    expect(handleRecover).not.toHaveBeenCalled();
-  });
+      expect(screen.queryByTestId("recovery-resume-button")).toBeNull();
+      expect(screen.queryByTestId("recovery-stop-button")).toBeNull();
+      fireEvent.click(screen.getByTestId("archived-session-new-agent-button"));
+      expect(onShowDialog).toHaveBeenCalledWith(true);
+      expect(handleRecover).not.toHaveBeenCalled();
+    },
+  );
 });
