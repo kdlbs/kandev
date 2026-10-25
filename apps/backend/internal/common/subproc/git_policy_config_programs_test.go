@@ -141,3 +141,23 @@ func TestManagedGitRefUpdatingCommandsRunConfigDefinedHooksOnlyWhenOptedIn(t *te
 		}
 	}
 }
+
+func TestManagedGitWriteTreeRunsConfigDefinedHooksOnlyWhenOptedIn(t *testing.T) {
+	if !gitSupportsConfigHooks(t) {
+		t.Skip("installed Git has no configuration-defined hooks")
+	}
+	for _, optedIn := range []bool{false, true} {
+		repo := newPolicyRepo(t)
+		plainGit(t, repo.dir, "commit", "--allow-empty", "-q", "-m", "base")
+		plainGit(t, repo.dir, "read-tree", "HEAD")
+		plainGit(t, repo.dir, "config", "hook.mark.event", "post-index-change")
+		plainGit(t, repo.dir, "config", "hook.mark.command", "echo config-hook >> '"+repo.marker+"'")
+		ctx := WithGitHooks(context.Background(), optedIn)
+		if out, err := runGit(ctx, t, repo.dir, "write-tree"); err != nil {
+			t.Fatalf("write-tree: %v\n%s", err, out)
+		}
+		if got := strings.Contains(repo.markerText(), "config-hook"); got != optedIn {
+			t.Fatalf("opted-in=%v: write-tree config hook ran=%v\n%s", optedIn, got, repo.markerText())
+		}
+	}
+}
