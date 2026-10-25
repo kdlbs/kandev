@@ -62,3 +62,12 @@ func digest(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
+
+// CodexTokenEnv names the environment variable set, in the Codex process
+// only, to the "Bearer <token>" Authorization value.
+const CodexTokenEnv = "KANDEV_MCP_SESSION_TOKEN"
+
+// CodexTokenArg is the exact `-c` override that makes Codex read the
+// Authorization header of the kandev MCP server from CodexTokenEnv. Its
+// presence in a command line is what marks a process as needing the variable.
+const CodexTokenArg = "mcp_servers.kandev.env_http_headers={\"Authorization\":\"" + CodexTokenEnv + "\"}"

@@ -42,6 +42,8 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
+	// codexProbe overrides the Codex version probe in tests.
+	codexProbe                codexProbeFunc
 	registry                  *registry.Registry
 	eventBus                  bus.EventBus
 	credsMgr                  CredentialsManager

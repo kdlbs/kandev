@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/sessionmcp"
 )
 
 var sampleServers = []types.McpServer{
@@ -449,5 +451,33 @@ func TestStrategiesDescribe(t *testing.T) {
 				t.Errorf("%s: Describe() = %q, want %q", name, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCodexKandevAuthorizationUsesEnvHeaderNotArgv(t *testing.T) {
+	const secret = "Bearer secret-token-value"
+	servers := []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "http://127.0.0.1:1/mcp", Headers: map[string]string{"Authorization": secret, "X-Other": "v"}},
+		{Name: "other", Type: "http", URL: "http://example.invalid/mcp", Headers: map[string]string{"Authorization": "Bearer user-owned"}},
+	}
+	artifacts, err := CodexStrategy{}.BuildPassthroughMCP(servers, PassthroughPaths{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(artifacts.Args, "\n")
+	if strings.Contains(joined, "secret-token-value") {
+		t.Fatalf("token leaked into argv: %s", joined)
+	}
+	if !slices.Contains(artifacts.Args, sessionmcp.CodexTokenArg) {
+		t.Fatalf("env_http_headers override missing: %v", artifacts.Args)
+	}
+	if !strings.Contains(joined, `mcp_servers.kandev.http_headers={"X-Other":"v"}`) {
+		t.Fatalf("remaining headers dropped: %s", joined)
+	}
+	if !strings.Contains(joined, "user-owned") {
+		t.Fatalf("non-kandev server headers must be unchanged: %s", joined)
+	}
+	if len(artifacts.Env) != 0 {
+		t.Fatalf("strategy must not emit the token env: %v", artifacts.Env)
 	}
 }

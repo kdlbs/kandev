@@ -92,8 +92,9 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	s.router.Use(httpmw.RequestLogger(s.logger, "agentctl-instance"))
 	// Exempt paths from auth:
 	// - /health: liveness probe
-	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
-	//   runs in the same trust boundary but does not possess the auth token.
+	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess, which
+	//   does not hold the control credential. They are authenticated by the
+	//   per-instance MCP token guard instead.
 	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new

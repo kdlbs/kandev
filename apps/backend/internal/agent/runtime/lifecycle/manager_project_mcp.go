@@ -55,7 +55,11 @@ func (m *Manager) materializeRuntimeProjectMCPWithPreparation(
 	if len(servers) == 0 {
 		return nil
 	}
-	artifacts, err := rt.ProjectMCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
+	authed, err := m.withSessionMCPAuth(ctx, execution, agentConfig, rt.ProjectMCPStrategy, servers)
+	if err != nil {
+		return err
+	}
+	artifacts, err := rt.ProjectMCPStrategy.BuildPassthroughMCP(authed, m.passthroughMCPPaths(execution))
 	if err != nil {
 		return fmt.Errorf("build project MCP config: %w", err)
 	}

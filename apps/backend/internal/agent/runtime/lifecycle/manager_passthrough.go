@@ -479,7 +479,11 @@ func (m *Manager) applyPassthroughMCPWithPreparation(
 	if err != nil {
 		return preparedPassthroughMCP{}, err
 	}
-	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(servers, m.passthroughMCPPaths(execution))
+	authed, err := m.withSessionMCPAuth(ctx, execution, agentConfig, pt.MCPStrategy, servers)
+	if err != nil {
+		return preparedPassthroughMCP{}, err
+	}
+	artifacts, err := pt.MCPStrategy.BuildPassthroughMCP(authed, m.passthroughMCPPaths(execution))
 	if err != nil {
 		return preparedPassthroughMCP{}, fmt.Errorf("build passthrough MCP config: %w", err)
 	}
@@ -909,7 +913,11 @@ func (m *Manager) passthroughAgentCommandWithPreparation(ctx context.Context, ex
 	if cmd.IsEmpty() {
 		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, fmt.Errorf("passthrough command is empty for agent %s", agentConfig.ID())
 	}
-	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: launchwrapper.Profile(prefix)}, mcpArgs.operation, nil
+	wrapper := launchwrapper.Profile(prefix)
+	if err := m.checkCodexCarrier(ctx, execution, cmd.Args(), wrapper); err != nil {
+		return nil, agents.PassthroughConfig{}, nil, passthroughCommand{}, nil, err
+	}
+	return ptAgent, pt, rt, passthroughCommand{Command: cmd, wrapper: wrapper}, mcpArgs.operation, nil
 }
 
 // buildInteractiveStartRequest builds the InteractiveStartRequest for a passthrough session.
