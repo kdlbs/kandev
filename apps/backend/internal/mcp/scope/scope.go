@@ -53,6 +53,11 @@ type CoordinatorLookup interface {
 	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
 }
 
+// OfficeCEOResolver identifies the profile allowed to inspect the Office task tree.
+type OfficeCEOResolver interface {
+	ResolveCEOAgentProfileID(ctx context.Context, taskID string) (string, error)
+}
+
 // unownedScopeUserID is the owner attached when the stream's own workspace has
 // no owner: workspaces created before auth was enabled, and any created since
 // by an internal (unscoped) caller, since CreateWorkspace only stamps an owner
@@ -84,6 +89,7 @@ type Resolver struct {
 	// (fail closed), set via SetCoordinatorLookup rather than a NewResolver
 	// parameter so existing callers are unaffected.
 	coordinators CoordinatorLookup
+	officeCEO    OfficeCEOResolver
 }
 
 // SetCoordinatorLookup wires the coordinator lookup used by principalSurface.
@@ -91,6 +97,10 @@ type Resolver struct {
 // lookup set refuses every coordinator-origin task.
 func (r *Resolver) SetCoordinatorLookup(lookup CoordinatorLookup) {
 	r.coordinators = lookup
+}
+
+func (r *Resolver) SetOfficeCEOResolver(lookup OfficeCEOResolver) {
+	r.officeCEO = lookup
 }
 
 // NewResolver builds the resolver. enforced must report false while

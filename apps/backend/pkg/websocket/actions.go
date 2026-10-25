@@ -517,6 +517,7 @@ const (
 	ActionMCPGetDiagnosticBundle                   = "mcp.get_diagnostic_bundle"
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
+	ActionMCPGetTaskVisibility        = "mcp.get_task_visibility"
 	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
 	ActionMCPGetTaskDocument          = "mcp.get_task_document"
 	ActionMCPWriteTaskDocument        = "mcp.write_task_document"

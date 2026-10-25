@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-29
+last_updated: 2026-10-14
 requirements:
   - REQ-COORDINATOR-COPILOT-001
   - REQ-COORDINATOR-COPILOT-002
@@ -264,6 +264,13 @@ editing the stored user message.
   running turn.
 
 ## Principal and mode
+
+An explicitly approved, pre-existing manual Coordinator session remains a
+`manual` Kanban task. Its compact lifecycle read is an independent
+session-bound backend grant, described in
+[ADR-2026-10-14-session-bound-task-visibility](../../../decisions/2026-10-14-session-bound-task-visibility.md).
+This exception does not change the `coordinator` origin, mode, proposal tools,
+or policy of managed coordinator conversations below.
 
 - `scope.Resolver` gains `principalSurface`, returning `SurfaceCoordinator` when
   the session's task has origin `coordinator`, and a `CoordinatorLookup`

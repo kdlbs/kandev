@@ -38,7 +38,14 @@ const (
 	CapabilityTaskTitle      Capability = "task-title"
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
-	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityWorkspaceTaskTreeRead permits an attested Office Coordinator
+	// to inspect compact relation trees for unrelated tasks in its workspace.
+	// It never grants document or verbose-description access.
+	CapabilityWorkspaceTaskTreeRead Capability = "workspace-task-tree-read"
+	// CapabilityTaskVisibilityRead exposes only the compact lifecycle lookup
+	// for one backend-granted manual task session.
+	CapabilityTaskVisibilityRead Capability = "task-visibility-read"
+	CapabilityCanvas             Capability = "canvas-authoring"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

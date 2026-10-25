@@ -676,6 +676,7 @@ func startAgentInfrastructure(
 	if services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
 	}
+	mcpScopeResolver.SetOfficeCEOResolver(officeengineadapters.NewCEOAgentAdapter(repos.Office))
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -2288,6 +2289,7 @@ func wireWorkflowEngineForOffice(
 	orchestratorSvc.SetEngineParticipantStore(participants)
 	orchestratorSvc.SetEngineDecisionStore(decisions)
 	orchestratorSvc.SetEngineCEOResolver(ceo)
+	orchestratorSvc.SetCoordinatorProfileResolver(ceo)
 	orchestratorSvc.SetPrimaryAgentResolver(primary)
 	orchestratorSvc.SetEngineTaskCreator(taskCreator)
 	orchestratorSvc.SetEngineWorkflowSwitcher(workflowSwitcher)

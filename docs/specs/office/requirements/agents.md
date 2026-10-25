@@ -27,6 +27,11 @@ Kandev has execution profiles (configuration templates for a concrete CLI, accou
 - **AC-OFFICE-AGENTS-001.6:** **Status**: `idle`, `working`, `paused`, `stopped`, plus transitional `pending_approval`.
 - **AC-OFFICE-AGENTS-001.7:** **Permissions**: JSON object controlling what the instance can do.
 - **AC-OFFICE-AGENTS-001.8:** **Budget**: remaining spend allowance (see [costs](costs.md)).
+- **AC-OFFICE-AGENTS-001.9:** A persisted CEO/Coordinator Office session receives
+  `workspace-task-tree-read` only when its resolved workspace CEO profile
+  matches its persisted AgentProfileID. The capability permits read-only,
+  compact inspection of unrelated same-workspace task trees; document keys and
+  verbose descriptions remain independently relation-scoped.
 
 ## System design
 
