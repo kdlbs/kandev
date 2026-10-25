@@ -636,6 +636,180 @@ test.describe("Session tab management — close behavior", () => {
   });
 });
 
+test.describe("Session tab management — bulk removal", () => {
+  test("active targets refuse bulk removal and explain why", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { task, session, session1Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Active bulk removal refusal",
+    );
+    await apiClient.seedTaskSession(task.id, {
+      state: "RUNNING",
+      agentProfileId: seedData.agentProfileId,
+      repositoryId: seedData.repositoryId,
+      sessionId: `active-bulk-${task.id}`,
+      startedAt: "2026-01-01T00:03:00Z",
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Remove Others").click();
+    await expect(testPage.getByTestId("toast-message")).toContainText(
+      "Stop the active sessions before removing them.",
+    );
+    await expect(session.alertDialog()).toHaveCount(0);
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(3);
+  });
+
+  test("Remove Others includes hidden persisted sessions and cancellation is harmless", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Remove hidden others",
+    );
+    const third = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+      repositoryId: seedData.repositoryId,
+      sessionId: `hidden-bulk-${task.id}`,
+      startedAt: "2026-01-01T00:03:00Z",
+    });
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.sessionTabBySessionId(third.session_id)).toBeVisible();
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Close Others").click();
+    await expect(session.sessionTabBySessionId(session2Id)).not.toBeVisible();
+    await expect(session.sessionTabBySessionId(third.session_id)).not.toBeVisible();
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(3);
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Remove Others").click();
+    const dialog = session.alertDialog();
+    await expect(dialog).toContainText("Remove 2 sessions?");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(3);
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Remove Others").click();
+    await dialog.getByRole("button", { name: "Remove Others" }).click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.map((s) => s.id), {
+        timeout: 15_000,
+      })
+      .toEqual([session1Id]);
+    await expect(session.sessionTabBySessionId(session1Id)).toBeVisible();
+    await testPage.reload();
+    await session.waitForLoad();
+    expect((await apiClient.listTaskSessions(task.id)).sessions.map((s) => s.id)).toEqual([
+      session1Id,
+    ]);
+  });
+
+  test("Remove All permanently deletes every persisted task session", async ({
+    browser,
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { task, session, session1Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Remove all sessions",
+    );
+    const otherContext = await browser.newContext({
+      baseURL: new URL(testPage.url()).origin,
+      storageState: await testPage.context().storageState(),
+    });
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Remove All").click();
+    const dialog = session.alertDialog();
+    await expect(dialog).toContainText("Remove 2 sessions?");
+    await dialog.getByRole("button", { name: "Remove All" }).click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(0);
+    await testPage.reload();
+    await session.waitForLoad();
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+    const otherPage = await otherContext.newPage();
+    await otherPage.goto(`/t/${task.id}`);
+    await new SessionPage(otherPage).waitForLoad();
+    await dwell(
+      otherPage,
+      2_000,
+      "negative-assertion",
+      "an independent browser must not provision a replacement after its empty list loads",
+    );
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(0);
+    expect((await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure).toBe(
+      true,
+    );
+    const otherSession = new SessionPage(otherPage);
+    await otherSession.openNewSessionDialog();
+    await otherSession.newSessionPromptInput().fill("/e2e:simple-message");
+    await otherSession.newSessionStartButton().click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure,
+        {
+          timeout: 15_000,
+        },
+      )
+      .toBe(false);
+    const recreatedSessionId = (await apiClient.listTaskSessions(task.id)).sessions[0].id;
+    await expect
+      .poll(
+        async () => {
+          const current = (await apiClient.listTaskSessions(task.id)).sessions[0];
+          return current?.id === recreatedSessionId && DONE_STATES.includes(current.state);
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+    await expect(session.sessionTabBySessionId(recreatedSessionId)).toBeVisible();
+    await session.sessionTabBySessionId(recreatedSessionId).click({ button: "right" });
+    await session.contextMenuItem("Delete").click();
+    await testPage
+      .getByTestId("session-delete-confirm-popover")
+      .getByTestId("session-delete-confirm")
+      .click();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 15_000,
+      })
+      .toBe(1);
+    expect((await apiClient.getTask(task.id)).metadata?.bulk_session_removal_suppress_ensure).toBe(
+      false,
+    );
+    await otherContext.close();
+  });
+});
+
 test.describe("Session tab management — primary session persistence", () => {
   test("primary star survives a kanban.update broadcast", async ({
     testPage,

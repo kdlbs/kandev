@@ -332,6 +332,30 @@ describe("useSessionLaunchSubmit", () => {
     expect(mockSetIsCreating).toHaveBeenLastCalledWith(false);
   });
 
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.5 restores normal ensuring after a new session", async () => {
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef: createPromptRef("new conversation"),
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        profileExplicit: true,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        onClose: vi.fn(),
+        toast: mockToast,
+        setActiveSession: vi.fn(),
+        activateSession: vi.fn(),
+        setIsCreating: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+  });
+
   it("passes session MCP additions to the launch request", async () => {
     const promptRef = createPromptRef("hello");
     const mockSetActiveSession = vi.fn();

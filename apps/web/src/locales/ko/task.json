@@ -2887,5 +2887,20 @@
   "sessionRestartRequested": "세션 다시 시작을 요청했습니다",
   "sessionRestartFailed": "세션 다시 시작에 실패했습니다",
   "sessionRestartUnavailable": "현재 상태에서는 이 세션을 다시 시작할 수 없습니다.",
-  "sessionRestartConnectionUnavailable": "연결을 사용할 수 없습니다. 다시 연결한 후 다시 시도하세요."
+  "sessionRestartConnectionUnavailable": "연결을 사용할 수 없습니다. 다시 연결한 후 다시 시도하세요.",
+  "removeOthers": "다른 세션 제거",
+  "removeAll": "모든 세션 제거",
+  "sessionsChangedReviewAgain": "세션 목록이 변경되었습니다. 변경된 개수를 확인하고 다시 승인하세요.",
+  "bulkRemovalUnavailable_loading": "세션을 불러오는 중입니다. 잠시 후 다시 시도하세요.",
+  "bulkRemovalUnavailable_error": "세션 목록을 새로 고칠 수 없습니다. 연결을 확인하고 다시 시도하세요.",
+  "bulkRemovalUnavailable_empty": "제거할 세션이 없습니다.",
+  "bulkRemovalUnavailable_active": "활성 세션을 중지한 후 제거하세요.",
+  "bulkRemovalProgress": "제거한 세션: {{removed}} / {{total}}...",
+  "bulkRemovalPartial": "제거한 세션: {{removed}}개. 남은 세션: {{remaining}}개. 다시 시도하려면 메뉴를 여세요.",
+  "removeSessionsTitle_one": "세션 {{count}}개를 제거하시겠습니까?",
+  "removeSessionsTitle_other": "세션 {{count}}개를 제거하시겠습니까?",
+  "removeSessionsDescription_one": "세션 {{count}}개를 제거하시겠습니까? 대화 기록이 영구적으로 삭제됩니다. 작업 공간과 파일은 유지됩니다. 이 작업은 취소할 수 없습니다.",
+  "removeSessionsDescription_other": "세션 {{count}}개를 제거하시겠습니까? 대화 기록이 영구적으로 삭제됩니다. 작업 공간과 파일은 유지됩니다. 이 작업은 취소할 수 없습니다.",
+  "removingSessions_one": "세션 {{count}}개를 제거하는 중...",
+  "removingSessions_other": "세션 {{count}}개를 제거하는 중..."
 }

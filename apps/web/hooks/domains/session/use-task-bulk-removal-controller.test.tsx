@@ -1,0 +1,229 @@
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TaskSession } from "@/lib/types/http";
+import { useTaskBulkRemovalController } from "./use-task-bulk-removal-controller";
+
+const { toast, getState, updateTaskSessionAutoProvisioning } = vi.hoisted(() => ({
+  toast: vi.fn(),
+  getState: vi.fn(),
+  updateTaskSessionAutoProvisioning: vi.fn(async (_taskId: string, _suppressed: boolean) => ({})),
+}));
+
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
+vi.mock("@/lib/api", () => ({ updateTaskSessionAutoProvisioning }));
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) => selector(getState()),
+  useAppStoreApi: () => ({ getState }),
+}));
+
+const sessions = [
+  { id: "first", state: "COMPLETED", task_id: "task-1", is_primary: false },
+  { id: "second", state: "COMPLETED", task_id: "task-1", is_primary: true },
+] as TaskSession[];
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  getState.mockReturnValue({
+    taskSessionsByTask: {
+      itemsByTaskId: { "task-1": sessions },
+      loadingByTaskId: { "task-1": false },
+      loadedByTaskId: { "task-1": true },
+      errorByTaskId: { "task-1": null },
+    },
+  });
+});
+
+describe("useTaskBulkRemovalController eligibility", () => {
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 waits for an authoritative session list", () => {
+    const state = getState();
+    state.taskSessionsByTask.loadedByTaskId["task-1"] = false;
+    const removeById = vi.fn<(id: string) => Promise<boolean>>(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_loading",
+      variant: "error",
+    });
+    expect(removeById).not.toHaveBeenCalled();
+  });
+
+  it("@covers AC-TASKS-BULK-SESSION-REMOVAL-001.3 cancels confirmation if the list becomes incomplete", async () => {
+    const state = getState();
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+    state.taskSessionsByTask.loadedByTaskId["task-1"] = false;
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_loading",
+      variant: "error",
+    });
+  });
+});
+
+describe("useTaskBulkRemovalController", () => {
+  it("does not delete when the durable Remove All fence cannot be written", async () => {
+    updateTaskSessionAutoProvisioning.mockRejectedValueOnce(new Error("task update failed"));
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_error",
+      variant: "error",
+    });
+  });
+
+  it("clears the Remove All auto-provisioning fence after a partial failure", async () => {
+    const removeById = vi.fn(async (id: string) => id !== "first");
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(updateTaskSessionAutoProvisioning.mock.calls).toEqual([
+      ["task-1", true],
+      ["task-1", false],
+    ]);
+    expect(removeById.mock.calls.map(([id]) => id)).toEqual(["second", "first"]);
+  });
+});
+
+describe("useTaskBulkRemovalController refresh", () => {
+  it("reports refresh failures as errors instead of saying sessions are loading", async () => {
+    const state = {
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-1": sessions },
+        loadingByTaskId: { "task-1": false },
+        loadedByTaskId: { "task-1": true },
+        errorByTaskId: { "task-1": null as string | null },
+      },
+    };
+    getState.mockReturnValue(state);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => undefined),
+        removeById: vi.fn(async () => true),
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    state.taskSessionsByTask.errorByTaskId["task-1"] = "offline";
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(toast).toHaveBeenCalledWith({
+      title: "task:bulkRemovalUnavailable_error",
+      variant: "error",
+    });
+  });
+
+  it("offers a fresh count after its forced refresh settles while another read remains active", async () => {
+    const state = getState();
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => {
+          state.taskSessionsByTask.itemsByTaskId["task-1"] = [sessions[0]];
+          state.taskSessionsByTask.loadingByTaskId["task-1"] = true;
+        }),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("all", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(removeById).not.toHaveBeenCalled();
+    expect(result.current.bulkRemoval.snapshot?.targetIds).toEqual(["first"]);
+    expect(result.current.bulkRemoval.wasRefreshed).toBe(true);
+  });
+
+  it("dismisses Remove Others and reports a changed session when its selection disappears", async () => {
+    const state = {
+      taskSessionsByTask: {
+        itemsByTaskId: { "task-1": sessions },
+        loadingByTaskId: { "task-1": false },
+        loadedByTaskId: { "task-1": true },
+        errorByTaskId: { "task-1": null },
+      },
+    };
+    getState.mockReturnValue(state);
+    const removeById = vi.fn(async () => true);
+    const { result } = renderHook(() =>
+      useTaskBulkRemovalController({
+        taskId: "task-1",
+        sessionId: "first",
+        sessions,
+        isLoading: false,
+        loadSessions: vi.fn(async () => {
+          state.taskSessionsByTask.itemsByTaskId["task-1"] = sessions.filter(
+            (session) => session.id !== "first",
+          );
+        }),
+        removeById,
+      }),
+    );
+
+    act(() => result.current.request("others", "first"));
+    await act(async () => result.current.bulkRemoval.confirm());
+
+    expect(result.current.bulkRemoval.snapshot).toBeNull();
+    expect(removeById).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith({ title: "task:sessionsChangedReviewAgain" });
+  });
+});

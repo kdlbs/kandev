@@ -122,8 +122,8 @@ export async function createTask(
     workspace_path?: string;
     initial_workspace_layout?: InitialWorkspaceLayout;
     priority?: TaskPriority;
-    project_id?: string;
     metadata?: Record<string, unknown>;
+    project_id?: string;
     /** Office agent instance to seat as the task's runner at create time. */
     assignee_agent_profile_id?: string;
     /** Office task-handoffs phase 4/5 — workspace policy. */
@@ -180,6 +180,21 @@ export async function updateTaskPortForwarding(
     init: {
       method: "PATCH",
       body: JSON.stringify({ enabled }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export async function updateTaskSessionAutoProvisioning(
+  taskId: string,
+  suppressed: boolean,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<Task>(`/api/v1/tasks/${taskId}/session-auto-provisioning`, {
+    ...options,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify({ suppressed }),
       ...(options?.init ?? {}),
     },
   });

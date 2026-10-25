@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
 
 import {
+  BulkSessionRemoveDialog,
   DeleteSessionDialog,
   DeleteSessionPopover,
   SessionContextMenuItems,
@@ -104,6 +105,49 @@ function SessionRenameMenuHarness({ onCommit }: { onCommit: () => void }) {
 }
 
 describe("SessionContextMenuItems", () => {
+  it("orders Close Others before the destructive bulk actions", () => {
+    render(
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button type="button">Session</button>
+        </ContextMenuTrigger>
+        <SessionContextMenuItems
+          sessionState="COMPLETED"
+          isPrimary={false}
+          canShare={false}
+          taskId={null}
+          sessionId={undefined}
+          actions={{
+            handleSetPrimary: vi.fn(),
+            handleStop: vi.fn(),
+            handleResume: vi.fn(),
+            handleRestart: vi.fn(),
+            handleCloseOthers: vi.fn(),
+            handleRemoveOthers: vi.fn(),
+            handleRemoveAll: vi.fn(),
+          }}
+          onDelete={vi.fn()}
+          onShare={vi.fn()}
+          onHandoffProfile={vi.fn()}
+          onStartRename={vi.fn()}
+        />
+      </ContextMenu>,
+    );
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session" }), {
+      clientX: 100,
+      clientY: 100,
+    });
+    const items = screen.getAllByRole("menuitem");
+    expect(items.slice(-3).map((item) => item.textContent)).toEqual([
+      "Close Others",
+      "Remove Others",
+      "Remove All",
+    ]);
+    expect(items.at(-2)?.className).toContain("text-destructive");
+    expect(items.at(-1)?.className).toContain("text-destructive");
+  });
+
   // @covers AC-UI-TASK-AGENT-TAB-RECONCILIATION-002.1
   it("keeps the inline rename focused after menu focus restoration settles", async () => {
     vi.useFakeTimers();
@@ -137,7 +181,9 @@ describe("SessionContextMenuItems", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.queryByTestId("tab-rename-input")).toBeNull();
   });
+});
 
+describe("SessionContextMenuItems deletion behavior", () => {
   it("keeps the delete menu action open for its local confirmation", () => {
     const onDelete = vi.fn<(event: Event) => void>();
     render(
@@ -212,6 +258,40 @@ describe("SessionContextMenuItems", () => {
     // Only the setAsPrimary/stop-or-resume separator renders; no orphan
     // separator is left behind where Close Others' own separator would go.
     expect(screen.getAllByRole("separator")).toHaveLength(1);
+  });
+});
+
+describe("BulkSessionRemoveDialog", () => {
+  it("shows the exact count and warns that conversation deletion is permanent", () => {
+    render(
+      <BulkSessionRemoveDialog
+        scope="others"
+        count={3}
+        pending={false}
+        removedCount={0}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("Remove 3 sessions?");
+    expect(dialog.textContent).toContain("conversation histories will be permanently deleted");
+    expect(dialog.textContent).toContain("workspace and its files remain");
+  });
+
+  it("reports progress and blocks another confirmation while pending", () => {
+    render(
+      <BulkSessionRemoveDialog
+        scope="all"
+        count={3}
+        pending
+        removedCount={1}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toContain("1 / 3");
+    expect(screen.getByRole("button", { name: "Remove All" }).hasAttribute("disabled")).toBe(true);
   });
 });
 

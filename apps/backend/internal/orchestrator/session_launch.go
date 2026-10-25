@@ -466,6 +466,17 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 			return nil, err
 		}
 	}
+	if response != nil && response.SessionID != "" && req.SessionID == "" &&
+		req.ActivationSource != LaunchActivationSourceSessionOpen {
+		task, readErr := s.repo.GetTask(ctx, req.TaskID)
+		if readErr != nil {
+			s.logger.Warn("failed to read bulk session removal fence after explicit launch", zap.Error(readErr), zap.String("task_id", req.TaskID))
+		} else if task.Metadata[models.MetaKeyBulkSessionRemovalSuppressEnsure] == true {
+			if clearErr := s.repo.SetTaskMetadataKey(ctx, req.TaskID, models.MetaKeyBulkSessionRemovalSuppressEnsure, false); clearErr != nil {
+				s.logger.Warn("failed to clear bulk session removal fence after explicit launch", zap.Error(clearErr), zap.String("task_id", req.TaskID))
+			}
+		}
+	}
 	return response, nil
 }
 

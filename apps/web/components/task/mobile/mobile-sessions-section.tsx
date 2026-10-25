@@ -24,16 +24,17 @@ import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
-import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
-import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
-import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { MobileSessionDeleteConfirmation } from "./mobile-session-delete-confirmation";
+import { useTaskBulkRemovalController } from "@/hooks/domains/session/use-task-bulk-removal-controller";
+import { MobileBulkSessionRemovalConfirmation } from "./mobile-bulk-session-removal-confirmation";
+import { MobileBulkSessionMenuItems } from "./mobile-bulk-session-menu-items";
 import { useSessionMenuOpeningGesture } from "./use-session-menu-opening-gesture";
+import { MobileSessionStateBadge } from "./mobile-session-state-badge";
 
 type SessionRow = {
   id: string;
@@ -80,70 +81,6 @@ function buildSessionRows(
   });
 }
 
-// The mobile sessions section reads the per-session substate through the same
-// shared vocabulary as the desktop session switcher and the reopen menu
-// `getSessionStateIcon` carries background-running
-// as a spinner distinct — by SHAPE and MOTION, not hue alone — from generating
-// (a static dot) and from done (a check), so the three read apart even in a
-// grayscale scan. The label reinforces the distinction in words: while spawned
-// background work runs, the row reads "Working in background" rather than the
-// bare "Running", so background is never confused with generating.
-// A catalog key, not copy: `t()` at module scope would freeze at the boot locale.
-const BACKGROUND_RUNNING_LABEL_KEY = "task:workingInBackground";
-
-function sessionStateLabel(
-  state: TaskSessionState,
-  foregroundActivity: ForegroundActivity | null,
-  pending: PendingInput,
-  parkedOnBackgroundWork: boolean,
-): string {
-  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
-  if (canRequestInput && pending.permission) return t("task:permissionRequested");
-  if (canRequestInput && pending.clarification) {
-    return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
-  }
-  if (canRequestInput && foregroundActivity === "background") {
-    return t(BACKGROUND_RUNNING_LABEL_KEY);
-  }
-  if (canRequestInput && parkedOnBackgroundWork) {
-    return t(BACKGROUND_RUNNING_LABEL_KEY);
-  }
-  return formatTaskSessionStateLabel(state);
-}
-
-function StateBadge({
-  sessionId,
-  state,
-  foregroundActivity,
-  parkedOnBackgroundWork,
-  testId,
-}: {
-  sessionId: string;
-  state: TaskSessionState | null;
-  foregroundActivity: ForegroundActivity | null;
-  parkedOnBackgroundWork: boolean;
-  testId?: string;
-}) {
-  const pending = useSessionPendingInput(sessionId);
-  if (!state) return null;
-  const label = sessionStateLabel(state, foregroundActivity, pending, parkedOnBackgroundWork);
-  return (
-    <span
-      data-testid={testId}
-      title={label}
-      className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
-    >
-      {getSessionStateIcon(state, "h-3 w-3 shrink-0", {
-        foregroundActivity,
-        hasPendingClarification: pending.clarification,
-        hasPendingPermission: pending.permission,
-        parkedOnBackgroundWork,
-      })}
-      {label}
-    </span>
-  );
-}
-
 type SessionActionsMenuProps = {
   triggerRef: RefObject<HTMLButtonElement | null>;
   taskId: string;
@@ -155,6 +92,7 @@ type SessionActionsMenuProps = {
   onRestart: () => void;
   isRestarting: boolean;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onHandoffProfile: (profileId: string) => void;
 };
 
@@ -170,6 +108,7 @@ function SessionActionsMenu({
   onRestart,
   isRestarting,
   onAskDelete,
+  onRemoveScope,
   onHandoffProfile,
 }: SessionActionsMenuProps) {
   const { t } = useTranslation();
@@ -243,6 +182,7 @@ function SessionActionsMenu({
             {t("task:delete")}
           </DropdownMenuItem>
         )}
+        <MobileBulkSessionMenuItems onRemoveScope={onRemoveScope} />
         {hasLifecycleAction && <DropdownMenuSeparator />}
         <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
@@ -273,6 +213,7 @@ function SessionRowTrailingActions({
   totalSessions,
   isConfirming,
   onAskDelete,
+  onRemoveScope,
   onCancelDelete,
   onHandoffProfile,
   actions,
@@ -282,6 +223,7 @@ function SessionRowTrailingActions({
   totalSessions: number;
   isConfirming: boolean;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onCancelDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
   actions: ReturnType<typeof useSessionActions>;
@@ -313,6 +255,7 @@ function SessionRowTrailingActions({
           onRestart={() => void actions.restart()}
           isRestarting={actions.isRestarting}
           onAskDelete={onAskDelete}
+          onRemoveScope={onRemoveScope}
           onHandoffProfile={onHandoffProfile}
         />
       )}
@@ -327,6 +270,7 @@ function SessionRowItem({
   totalSessions,
   isConfirming,
   onAskDelete,
+  onRemoveScope,
   onCancelDelete,
   onSelect,
 }: {
@@ -336,6 +280,7 @@ function SessionRowItem({
   totalSessions: number;
   isConfirming: boolean;
   onAskDelete: () => void;
+  onRemoveScope: (scope: "others" | "all") => void;
   onCancelDelete: () => void;
   onSelect: (sessionId: string) => void;
 }) {
@@ -379,7 +324,7 @@ function SessionRowItem({
         )}
         {row.agentName && <AgentLogo agentName={row.agentName} size={16} className="shrink-0" />}
         <SessionIdentity row={row} />
-        <StateBadge
+        <MobileSessionStateBadge
           sessionId={row.id}
           state={row.state}
           foregroundActivity={row.foregroundActivity}
@@ -392,6 +337,7 @@ function SessionRowItem({
           totalSessions={totalSessions}
           isConfirming={isConfirming}
           onAskDelete={onAskDelete}
+          onRemoveScope={onRemoveScope}
           onCancelDelete={onCancelDelete}
           onHandoffProfile={handleHandoffProfile}
           actions={actions}
@@ -424,7 +370,7 @@ function useSessionRows(taskId: string | null) {
     const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
     return task?.primarySessionId ?? null;
   });
-  const { sessions, isLoading } = useTaskSessions(taskId);
+  const { sessions, isLoading, loadSessions } = useTaskSessions(taskId);
   const repositoryLabelsById = useMemo(() => {
     const sessionRepositoryIds = new Set(
       sessions.flatMap((session) => (session.repository_id ? [session.repository_id] : [])),
@@ -443,7 +389,7 @@ function useSessionRows(taskId: string | null) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
     [sessions, agentProfiles, primarySessionId, repositoryLabelsById, i18n.language],
   );
-  return { rows, isLoading, primarySessionId };
+  return { rows, sessions, isLoading, primarySessionId, loadSessions };
 }
 
 const MobileSessionsList = memo(function MobileSessionsList({
@@ -459,7 +405,16 @@ const MobileSessionsList = memo(function MobileSessionsList({
 }) {
   const { t } = useTranslation();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const { rows, isLoading } = useSessionRows(taskId);
+  const { rows, sessions, isLoading, loadSessions } = useSessionRows(taskId);
+  const bulkActions = useSessionActions({ sessionId: null, taskId });
+  const { bulkRemoval, request: requestBulkRemoval } = useTaskBulkRemovalController({
+    taskId,
+    sessionId: activeSessionId ?? undefined,
+    sessions,
+    isLoading,
+    loadSessions,
+    removeById: (id) => bulkActions.removeById(id, { feedback: "inline" }),
+  });
   const [launchOpen, setLaunchOpen] = useState(false);
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
 
@@ -487,6 +442,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
 
   return (
     <div className="flex flex-col gap-2 px-1">
+      <MobileBulkSessionRemovalConfirmation taskId={taskId} bulkRemoval={bulkRemoval} />
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
           {t("task:sessionCount", { count: rows.length })}
@@ -522,6 +478,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
             totalSessions={rows.length}
             isConfirming={row.id === confirmDeleteSessionId}
             onAskDelete={() => setConfirmDeleteSessionId(row.id)}
+            onRemoveScope={(scope) => requestBulkRemoval(scope, row.id)}
             onCancelDelete={() => setConfirmDeleteSessionId(null)}
             onSelect={handleSelect}
           />

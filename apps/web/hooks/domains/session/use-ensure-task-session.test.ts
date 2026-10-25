@@ -160,6 +160,20 @@ describe("useEnsureTaskSession", () => {
 describe("useEnsureTaskSession repeat and retry behavior", () => {
   beforeEach(resetEnsureTaskSessionMocks);
 
+  it("retries after a different client creates and then removes a session", async () => {
+    const { rerender } = renderHook(() => useEnsureTaskSession(TASK));
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    mockSessionsResult = { ...mockSessionsResult, sessions: [{ id: "remote-session" }] };
+    rerender();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    mockSessionsResult = { ...mockSessionsResult, sessions: [] };
+    rerender();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
+  });
+
   it("no-ops when task id is missing", () => {
     renderHook(() => useEnsureTaskSession(null));
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();

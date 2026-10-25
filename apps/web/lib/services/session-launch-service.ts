@@ -97,7 +97,8 @@ export type EnsureSessionResponse = {
     | "created_start"
     | "skipped_terminal_pr"
     | "queued"
-    | "existing_queued";
+    | "existing_queued"
+    | "suppressed_bulk_removal";
   newly_created: boolean;
   workspace_path?: string;
   activation_disposition?: "queued" | "suppressed";
