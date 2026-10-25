@@ -15,6 +15,9 @@ func TestPiACPRemoteAuthCopiesAuthFileAndOffersAPIKeys(t *testing.T) {
 	if files.Type != remoteAuthMethodTypeFiles {
 		t.Fatalf("Methods[0].Type = %q, want files", files.Type)
 	}
+	if files.Label != "" {
+		t.Errorf("Label = %q, want none so the UI shows its translated default", files.Label)
+	}
 	if files.TargetRelDir != ".pi/agent" {
 		t.Errorf("TargetRelDir = %q, want .pi/agent", files.TargetRelDir)
 	}

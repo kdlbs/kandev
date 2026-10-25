@@ -126,8 +126,8 @@ var piRemoteAuthEnvVars = []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMIN
 
 func (a *PiACP) RemoteAuth() *RemoteAuth {
 	methods := []RemoteAuthMethod{{
-		Type:  remoteAuthMethodTypeFiles,
-		Label: "Copy Pi auth file",
+		// No Label: the card shows its own translated "Copy auth files".
+		Type: remoteAuthMethodTypeFiles,
 		// `/login` stores subscription and API-key credentials per provider as
 		// top-level entries of auth.json, so a copy merges into the remote file.
 		FileConflictPolicy: RemoteAuthFileConflictPolicyMergeJSONObject,
