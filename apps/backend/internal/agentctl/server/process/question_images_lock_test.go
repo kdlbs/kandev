@@ -26,7 +26,7 @@ func TestQuestionImageDecodeDoesNotBlockWorkspaceUpdates(t *testing.T) {
 	unblock := func() { once.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
 	// A unique fixture signature gates the real decode boundary without affecting PNGs.
-	magic := fmt.Sprintf("question-image-decode-%d", questionImageDecodeFixtureID.Add(1))
+	magic := fmt.Sprintf("question-image-decode-%d;", questionImageDecodeFixtureID.Add(1))
 	image.RegisterFormat("png", magic, func(io.Reader) (image.Image, error) {
 		close(started)
 		<-release
