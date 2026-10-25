@@ -1,7 +1,7 @@
 ---
 id: "01-session-bound-lifecycle-visibility"
 title: "Bind compact lifecycle visibility to one manual session"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -65,6 +65,11 @@ it must not borrow another task's database or host Docker access.
 ## Results
 
 The published candidate includes the grant, compact read, receipts, and
-regression tests. Focused SQLite verification passed. Native PostgreSQL and
-final exact-head QA are pending the task-owned fixture. This work order was
-added to satisfy PR documentation traceability after the scope correction.
+regression tests. Focused SQLite verification passed. On source SHA
+`aa74c872d26d086e14c6bdfa0df3b387605cbfd5`, MAIN and independent QA each
+ran 13 PostgreSQL repository cases and one MCP handler case with 14 PASS, zero
+FAIL, and zero SKIP. The PostgreSQL 16.14 task-owned fixture had zero user
+tables and test schemas before and after both runs. Independent Review and
+scoped QA passed that candidate; their reports retain the execution SHAs and
+separately disclose the unrelated full-service sandbox failures and deployed
+activation omission. This work order also satisfies PR documentation coverage.

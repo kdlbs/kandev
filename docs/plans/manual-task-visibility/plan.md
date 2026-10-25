@@ -1,6 +1,6 @@
 ---
 created: 2026-10-25
-status: in_progress
+status: implemented
 requirements:
   - REQ-COORDINATOR-MANUAL-VISIBILITY-001
 system_design:
@@ -21,8 +21,12 @@ in [Task 01](task-01-session-bound-lifecycle-visibility.md).
 
 The task implements the grant, dispatch guard, durable lifecycle receipts, and
 compact projection together because each layer is needed for one safe read.
-The behavioral candidate is implemented. Native PostgreSQL verification and
-independent QA remain open; this record does not mark those gates passed.
+The behavioral candidate is implemented. At source SHA
+`aa74c872d26d086e14c6bdfa0df3b387605cbfd5`, MAIN and independent QA each
+passed all 14 required native PostgreSQL cases against the isolated task-owned
+PostgreSQL 16 fixture. Independent Review and scoped QA passed that candidate.
+Those executions retain their original SHA when a documentation-only delivery
+record changes later.
 
 ## Verification strategy
 
