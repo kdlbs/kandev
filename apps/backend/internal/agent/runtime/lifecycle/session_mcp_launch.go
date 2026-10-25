@@ -66,7 +66,12 @@ func (r *LaunchRefusal) Unwrap() error { return r.Err }
 const (
 	createConflictAttempts = 3
 	createConflictGap      = time.Second
+	createIdentityTimeout  = 5 * time.Second
+	createIdentityAttempts = 3
 )
+
+// createIdentityGap separates identity reads of one create.
+var createIdentityGap = time.Second
 
 // sessionKeyStore returns the signing-key store behind the runtime secret store.
 func (m *Manager) sessionKeyStore() (secrets.SessionKeyStore, bool) {
@@ -153,9 +158,24 @@ func (m *Manager) createOnce(ctx context.Context, rt ExecutorBackend, req *Execu
 	if inst.Client == nil {
 		return inst, false, nil
 	}
-	identity, err := inst.Client.GetInstanceIdentity(ctx)
+	// A runtime that reconnected to a retained process returned an instance
+	// this launch did not create: it is refused, never stopped.
+	retained := getMetadataBool(inst.Metadata, MetadataKeyReuseExistingProcess)
+	if retained && deferredTokenRuntime(inst.RuntimeName) {
+		return nil, false, &LaunchRefusal{Code: CodeMCPTokenUnsupported, Cause: CauseRetainedInstanceDeferred, Err: errRetainedTokenUnverified}
+	}
+	reader := tokenVerifier{
+		Identity: inst.Client.GetInstanceIdentity,
+		Timeout:  createIdentityTimeout,
+		Attempts: createIdentityAttempts,
+		Gap:      createIdentityGap,
+	}
+	identity, err := reader.readIdentity(ctx)
 	switch {
 	case err != nil || !identity.HasCapability(agentctlSessionMCPCapability):
+		if retained {
+			return nil, false, &LaunchRefusal{Code: CodeMCPTokenUnsupported, Err: errRetainedTokenUnverified}
+		}
 		m.rollbackCreate(ctx, rt, inst, minted)
 		return nil, false, &LaunchRefusal{Code: CodeMCPTokenUnsupported, Err: err}
 	case identity.BrokerUpstreamFingerprint != brokerFP:

@@ -10,8 +10,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/sessionmcp"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -179,5 +181,79 @@ func TestLaunchRefusalTextStartsWithCodeAndCarriesCause(t *testing.T) {
 	text := (&LaunchRefusal{Code: CodeMCPTokenCarrierUnavailable, Cause: CauseAgentNotVerified}).Error()
 	if !strings.HasPrefix(text, CodeMCPTokenCarrierUnavailable+": ") || !strings.HasSuffix(text, " cause="+CauseAgentNotVerified) {
 		t.Fatalf("text = %q", text)
+	}
+}
+
+// reusedBackend returns an instance a runtime reconnected to rather than
+// created, so a refusal must leave it running.
+type reusedBackend struct {
+	*createBackend
+	runtime agentruntime.Runtime
+}
+
+func (b *reusedBackend) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	inst, err := b.createBackend.CreateInstance(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	inst.RuntimeName = b.runtime
+	inst.Metadata = map[string]interface{}{MetadataKeyReuseExistingProcess: true}
+	return inst, nil
+}
+
+func TestCreateInstanceWithSessionMCPRefusesReusedDeferredRuntimeWithoutStopping(t *testing.T) {
+	for _, rtName := range []agentruntime.Runtime{agentruntime.RuntimeSSH, agentruntime.RuntimeKubernetes} {
+		b := &reusedBackend{createBackend: newCreateBackend(t, nil), runtime: rtName}
+		req := &ExecutorCreateRequest{InstanceID: "exec-1"}
+		b.setHandler(servesFingerprint([]string{"session_mcp_token"}, func(*http.Request) string { return "retained-token" }))
+		m := newLaunchManager(&keyedStore{key: launchKey()})
+		_, err := m.createInstanceWithSessionMCP(context.Background(), b, req)
+		var refusal *LaunchRefusal
+		if !errors.As(err, &refusal) || refusal.Code != CodeMCPTokenUnsupported || refusal.Cause != CauseRetainedInstanceDeferred {
+			t.Fatalf("%s: err = %v, want %s cause %s", rtName, err, CodeMCPTokenUnsupported, CauseRetainedInstanceDeferred)
+		}
+		if len(b.stopped) != 0 {
+			t.Fatalf("%s: reused instance was stopped: %q", rtName, b.stopped)
+		}
+	}
+}
+
+func TestCreateInstanceWithSessionMCPReusedInstanceWithoutCapabilityIsNotStopped(t *testing.T) {
+	b := &reusedBackend{createBackend: newCreateBackend(t, nil), runtime: agentruntime.RuntimeDocker}
+	req := &ExecutorCreateRequest{InstanceID: "exec-1"}
+	b.setHandler(servesFingerprint(nil, func(*http.Request) string { return "" }))
+	m := newLaunchManager(&keyedStore{key: launchKey()})
+	_, err := m.createInstanceWithSessionMCP(context.Background(), b, req)
+	var refusal *LaunchRefusal
+	if !errors.As(err, &refusal) || refusal.Code != CodeMCPTokenUnsupported {
+		t.Fatalf("err = %v, want %s refusal", err, CodeMCPTokenUnsupported)
+	}
+	if len(b.stopped) != 0 {
+		t.Fatalf("reused instance was stopped: %q", b.stopped)
+	}
+}
+
+func TestCreateInstanceWithSessionMCPRetriesTransientIdentityRead(t *testing.T) {
+	prev := createIdentityGap
+	createIdentityGap = time.Millisecond
+	t.Cleanup(func() { createIdentityGap = prev })
+	b := newCreateBackend(t, nil)
+	req := &ExecutorCreateRequest{InstanceID: "exec-1"}
+	var reads atomic.Int32
+	b.setHandler(func(w http.ResponseWriter, r *http.Request) {
+		if reads.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		servesFingerprint([]string{"session_mcp_token"}, func(*http.Request) string {
+			return sessionmcp.Fingerprint(req.SessionMCPToken)
+		})(w, r)
+	})
+	m := newLaunchManager(&keyedStore{key: launchKey()})
+	if _, err := m.createInstanceWithSessionMCP(context.Background(), b, req); err != nil {
+		t.Fatalf("transient identity failure refused the launch: %v", err)
+	}
+	if len(b.stopped) != 0 {
+		t.Fatalf("instance stopped after a transient read failure: %q", b.stopped)
 	}
 }
