@@ -176,8 +176,9 @@ test.describe("Port Forward Dialog", () => {
     );
     ports.setSession(sessionId);
     // Keep the deliberately held read inside the client's request deadline.
-    await testPage.clock.install();
-    await testPage.clock.pauseAt(await testPage.evaluate(() => Date.now() + 100));
+    const clockStart = new Date();
+    await testPage.clock.install({ time: clockStart });
+    await testPage.clock.pauseAt(new Date(clockStart.getTime() + 60_000));
     try {
       // Hydration belongs to the session control and survives closing its dialog.
       ports.holdNext("port.tunnel.list");

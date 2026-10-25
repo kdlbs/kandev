@@ -393,3 +393,22 @@ and one worker (`--project mobile-chrome tests/task/mobile-changes-panel.spec.ts
 `/tmp/question-images-checks/kandev-run.e2e.0spo4MBM.log`. The nine SPA checks and
 three Changes-panel checks all passed. Changed-file lint, specification lint,
 and the documentation catalog passed.
+
+### Storage cleanup and clock setup
+
+The next CI run exposed two fixture defects. The storage cache-reuse case saved
+settings twice through the UI, then its cleanup assertion matched two valid
+success notifications. It now captures and restores the complete settings through
+the existing API helper. The primary UI save and cache-reuse assertions remain.
+
+The delayed port-hydration case used a pause target only 100 milliseconds after
+the browser's current time. CI delivered the pause command after that target.
+The clock now installs at an explicit time and pauses 60 seconds beyond it,
+before the held request begins. Product deadlines and ordering assertions remain.
+
+Each corrected case passed three runs under two CPUs and one worker with retries
+disabled. Commands used `--project chromium --retries=0 --repeat-each=3`, selecting
+the exact case in `tests/system/storage-maintenance.spec.ts` and
+`tests/session/port-forward-dialog.spec.ts`. Logs:
+`/tmp/question-images-checks/kandev-run.e2e.k2iLii0M.log` and
+`/tmp/question-images-checks/kandev-run.e2e.LvjkqAIm.log`. Changed-file ESLint passed.
