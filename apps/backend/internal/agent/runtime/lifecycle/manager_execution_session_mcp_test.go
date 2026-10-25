@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -81,5 +82,10 @@ func TestWorkspaceOnlyExecutionIsCreatedWithSessionToken(t *testing.T) {
 	}
 	if got := execution.MetadataSnapshot()[MetadataKeyMCPTokenNonce]; got != req.SessionMCPNonce {
 		t.Fatalf("execution nonce metadata = %v, want %q", got, req.SessionMCPNonce)
+	}
+	for key, value := range execution.MetadataSnapshot() {
+		if text, ok := value.(string); ok && strings.Contains(text, req.SessionMCPToken) {
+			t.Fatalf("metadata %q holds the session token", key)
+		}
 	}
 }
