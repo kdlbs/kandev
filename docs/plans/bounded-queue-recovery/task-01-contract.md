@@ -32,4 +32,4 @@ git diff --check
 ```
 
 ## Risks and results
-Contract/reuse package materialized, ownership confirmed, documentation/catalog/spec checks passed. PostgreSQL fixture delivery remains an execution prerequisite for parity, not a missing contract decision. No overlap edits before ownership confirmation.
+Contract/reuse package materialized, ownership confirmed, and documentation/catalog/spec checks passed. A task-owned PostgreSQL 16.15 fixture later verified parity at `56a5f0e4`; exact results are in [the plan](plan.md). Current-session census remains owned by task `ca015838`, and release acceptance is pending.
