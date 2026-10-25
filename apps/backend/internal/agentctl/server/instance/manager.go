@@ -33,6 +33,13 @@ const instanceHTTPShutdownGrace = 250 * time.Millisecond
 // has already walked past and will never stop.
 var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
 
+// ErrInstanceExists and ErrInstanceCleaningUp report a create whose instance
+// ID is live or still being torn down. Neither changes the existing instance.
+var (
+	ErrInstanceExists     = errors.New("instance already exists")
+	ErrInstanceCleaningUp = errors.New("instance is still cleaning up")
+)
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -251,10 +258,10 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 		id = uuid.New().String()
 	}
 	if _, exists := m.instances[id]; exists {
-		return nil, fmt.Errorf("instance with ID %s already exists", id)
+		return nil, fmt.Errorf("instance with ID %s: %w", id, ErrInstanceExists)
 	}
 	if _, exists := m.provisional[id]; exists {
-		return nil, fmt.Errorf("instance with ID %s is still cleaning up", id)
+		return nil, fmt.Errorf("instance with ID %s: %w", id, ErrInstanceCleaningUp)
 	}
 
 	lease, listener, err := m.allocatePortAndListener(id)
@@ -332,9 +339,10 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 		manager:       procMgr,
 		listenerDone:  make(chan struct{}),
 	}
+	inst.sessionMCP = instanceCfg.SessionMCP
 	inst.MarkActivity()
 
-	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
+	handler := newMCPGuard(instanceCfg.SessionMCP, m.logger)(activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr)))
 	return inst, handler, instanceCfg, nil
 }
 
@@ -390,6 +398,8 @@ func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd
 		DeliveryStreamID:           req.DeliveryStreamID,
 		DeliveryIncarnationID:      req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
+		SessionMCPToken:            req.SessionMCPToken,
+		BrokerUpstreamURL:          req.BrokerUpstreamURL,
 	}
 }
 

@@ -296,6 +296,13 @@ type InstanceConfig struct {
 	// McpServers is a list of MCP servers to configure for the agent
 	McpServers []McpServerConfig
 
+	// SessionMCP holds the per-instance MCP bearer token (memory only).
+	SessionMCP *SessionMCPToken `json:"-"`
+
+	// BrokerUpstreamURL is the backend Git credential broker URL the instance
+	// relays to; empty when the instance has no relay.
+	BrokerUpstreamURL string `json:"-"`
+
 	// InjectedKandevMCP records that this instance configuration was created
 	// with the host-owned Kandev MCP server injected into McpServers.
 	InjectedKandevMCP bool `json:"-"`
@@ -677,13 +684,14 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	applyOverrides(cfg, overrides)
+	cfg.SessionMCP = NewSessionMCPToken(overrideSessionToken(overrides))
 
 	// Inject local kandev MCP server for MCP tunneling through the agent stream.
 	// This adds the kandev MCP server as an entry in InstanceConfig.McpServers.
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
+		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost, cfg.SessionMCP.Headers())
 		cfg.InjectedKandevMCP = true
 	}
 
@@ -696,6 +704,13 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	}
 
 	return cfg
+}
+
+func overrideSessionToken(overrides *InstanceOverrides) string {
+	if overrides == nil {
+		return ""
+	}
+	return overrides.SessionMCPToken
 }
 
 // applyOverrides applies non-zero fields from overrides to cfg.
@@ -789,6 +804,7 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.DeliveryHarnessGeneration > 0 {
 		cfg.DeliveryHarnessGeneration = overrides.DeliveryHarnessGeneration
 	}
+	cfg.BrokerUpstreamURL = overrides.BrokerUpstreamURL
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -837,6 +853,8 @@ type InstanceOverrides struct {
 	DeliveryStreamID           string
 	DeliveryIncarnationID      string
 	DeliveryHarnessGeneration  uint64
+	SessionMCPToken            string
+	BrokerUpstreamURL          string
 }
 
 func cloneComparisonTargets(values map[string]models.ComparisonTarget) map[string]models.ComparisonTarget {
@@ -1233,19 +1251,21 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	return injectKandevMcpServerAtHost(servers, port, "localhost")
+	return injectKandevMcpServerAtHost(servers, port, "localhost", nil)
 }
 
-func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string, headers map[string]string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "sse",
-		URL:  MCPServerURL(host, port, "/sse"),
+		Name:    kandevMcpServerName,
+		Type:    "sse",
+		URL:     MCPServerURL(host, port, "/sse"),
+		Headers: headers,
 	}
 	kandevMcpHttp := McpServerConfig{
-		Name: kandevMcpServerName,
-		Type: "http",
-		URL:  MCPServerURL(host, port, "/mcp"),
+		Name:    kandevMcpServerName,
+		Type:    "http",
+		URL:     MCPServerURL(host, port, "/mcp"),
+		Headers: headers,
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

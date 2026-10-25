@@ -6,6 +6,7 @@ import (
 	"runtime"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
@@ -20,12 +21,16 @@ const sandboxSupportedOS = "linux"
 var SurvivalCapabilities = executionCapabilities()
 
 func executionCapabilities() []string {
-	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability}
+	capabilities := []string{"agent-survival.v1", "agent-delivery.v1", launchwrapper.Capability, SessionMCPTokenCapability}
 	if runtime.GOOS == sandboxSupportedOS {
 		capabilities = append(capabilities, sandbox.LaunchCapability)
 	}
 	return capabilities
 }
+
+// SessionMCPTokenCapability is advertised by builds that enforce the
+// per-instance MCP token.
+const SessionMCPTokenCapability = "session_mcp_token"
 
 // handleIdentity reports this launch's opaque identity and capability
 // scope. It is deliberately exempt from bearer-token auth (see
@@ -51,5 +56,9 @@ func (m *ControlServer) handleIdentity(c *gin.Context) {
 }
 
 func (s *Server) handleInstanceIdentity(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"capabilities": SurvivalCapabilities})
+	c.JSON(http.StatusOK, gin.H{
+		"capabilities":                SurvivalCapabilities,
+		"mcp_token_fingerprint":       s.cfg.SessionMCP.Fingerprint(),
+		"broker_upstream_fingerprint": config.BrokerUpstreamFingerprint(s.cfg.BrokerUpstreamURL),
+	})
 }

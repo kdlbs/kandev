@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -140,6 +141,7 @@ func (m *ControlServer) setupRoutes() {
 	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.POST("/instances/:id/mcp-token/revoke", m.handleRevokeMCPToken)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
 	api.POST("/instances/:id/turn-outcome/ack", m.handleAckTurnOutcome)
 	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
@@ -215,6 +217,11 @@ func (m *ControlServer) handleCreateInstance(c *gin.Context) {
 
 	resp, err := m.instMgr.CreateInstance(c.Request.Context(), &req)
 	if err != nil {
+		if code, ok := createConflictCode(err); ok {
+			m.logger.Warn("create instance refused", zap.String("code", code), zap.String("id", req.ID))
+			c.JSON(http.StatusConflict, gin.H{"error": code})
+			return
+		}
 		m.logger.Error("failed to create instance", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to create instance: " + err.Error(),
@@ -248,11 +255,24 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	id := c.Param("id")
 
 	// First check if instance exists
-	if _, found := m.instMgr.GetInstance(id); !found {
+	inst, found := m.instMgr.GetInstance(id)
+	if !found {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "instance not found",
 		})
 		return
+	}
+	// A delete that names the token fingerprint it expects removes only that
+	// instance: a replacement that took the ID meanwhile survives.
+	if values, present := c.Request.Header[expectedTokenFingerprintHeader]; present {
+		if len(values) != 1 || values[0] == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expected token fingerprint"})
+			return
+		}
+		if values[0] != inst.MCPTokenFingerprint() {
+			c.JSON(http.StatusOK, messageBody(fingerprintDiffersMessage))
+			return
+		}
 	}
 
 	// Use a detached context so cleanup isn't canceled when the HTTP client disconnects.
@@ -273,4 +293,36 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "instance stopped successfully",
 	})
+}
+
+// expectedTokenFingerprintHeader carries the delete precondition: the token
+// fingerprint the caller believes the instance holds.
+func messageBody(msg string) gin.H { return gin.H{"message": msg} }
+
+const (
+	expectedTokenFingerprintHeader = "X-Expected-Token-Fingerprint"
+	fingerprintDiffersMessage      = "instance fingerprint differs; nothing deleted"
+)
+
+// createConflictCode maps the manager's duplicate-ID refusals to their 409 codes.
+func createConflictCode(err error) (string, bool) {
+	switch {
+	case errors.Is(err, instance.ErrInstanceExists):
+		return "instance_exists", true
+	case errors.Is(err, instance.ErrInstanceCleaningUp):
+		return "instance_cleaning_up", true
+	}
+	return "", false
+}
+
+// handleRevokeMCPToken clears the instance's in-memory MCP token. It is
+// idempotent.
+func (m *ControlServer) handleRevokeMCPToken(c *gin.Context) {
+	inst, found := m.instMgr.GetInstance(c.Param("id"))
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "instance not found"})
+		return
+	}
+	inst.RevokeMCPToken()
+	c.JSON(http.StatusOK, messageBody("mcp token revoked"))
 }

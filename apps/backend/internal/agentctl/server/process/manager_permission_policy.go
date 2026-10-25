@@ -95,7 +95,7 @@ func (m *Manager) resolveInjectedKandevPermission(req *adapter.PermissionRequest
 
 func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 	for _, server := range cfg.McpServers {
-		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || len(server.Headers) != 0 {
+		if server.Name != injectedKandevMCPServerName || server.Command != "" || len(server.Args) != 0 || len(server.Env) != 0 || !cfg.SessionMCP.MatchesHeaders(server.Headers) {
 			continue
 		}
 		switch server.Type {
